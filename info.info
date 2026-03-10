@@ -1,0 +1,24 @@
+app/
+├── main.py                 # точка входа, создание QApplication, главного окна
+├── models/                 # SQLAlchemy модели
+│   ├── base.py             # Base = declarative_base()
+│   ├── patient.py
+│   ├── appointment.py
+│   └── photo.py
+├── views/                  # виджеты
+│   ├── main_window.py      # главное окно с шапкой и стеком страниц
+│   ├── settings_frame.py   # фрейм настроек
+│   ├── patient_list.py     # таблица пациентов
+│   ├── patient_edit.py     # форма редактирования пациента
+│   ├── appointment_list.py # список приёмов (левая часть)
+│   ├── appointment_edit.py # детали приёма + фото (правая часть)
+│   └── custom_widgets/     # кастомные виджеты: таблица с фильтрацией, header с меню
+├── controllers/            # логика
+│   ├── db_controller.py    # работа с БД (сессии SQLAlchemy)
+│   ├── nav_controller.py   # управление стеком страниц
+│   ├── sync_controller.py  # синхронизация с сервером
+│   └── settings_controller.py # загрузка/сохранение настроек
+├── network/                # клиент для HTTP
+│   └── sync_client.py      # скачивание/отправка БД
+├── utils/                  # утилиты: работа с фото, бекапы
+└── resources/              # иконки, стили

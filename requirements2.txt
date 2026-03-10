@@ -1,0 +1,12 @@
+alembic==1.18.4
+greenlet==3.3.2
+Mako==1.3.10
+MarkupSafe==3.0.3
+PySide6==6.9.3
+PySide6_Addons==6.9.3
+PySide6_Essentials==6.9.3
+python-dotenv==1.2.2
+shiboken6==6.9.3
+SQLAlchemy==2.0.48
+typing_extensions==4.15.0
+yadisk==3.4.0

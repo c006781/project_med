@@ -139,7 +139,8 @@ from datetime import date, datetime, time
 
 # Сторонние библиотеки
 from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, ForeignKey, Text, Time
-from sqlalchemy.ext.declarative import declarative_base
+# from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 from sqlalchemy import event
 

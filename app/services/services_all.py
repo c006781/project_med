@@ -8,7 +8,9 @@ import shutil
 
 from typing import Type, TypeVar, Generic, List
 
-from datetime import time
+import time as time_module
+# from datetime import time
+# import datetime
 
 # Импорты модулей
 def _add_package_name(
@@ -198,7 +200,7 @@ class PatientService:
             )
             repo.add(patient)
             # После add объект получает id (при коммите или flush)
-            # session.flush() можно вызвать, чтобы получить id до коммита, но коммит сделает session_scope
+            session.flush() # чтобы получить id до коммита, но коммит сделает session_scope
             # Возвращаем DTO с id
             return PatientDTO.from_orm(patient)
 
@@ -380,7 +382,12 @@ class PhotoService:
         # Генерируем имя файла (можно добавить timestamp)
         base_name = os.path.basename(source_path)
         name, ext = os.path.splitext(base_name)
-        dest_name = f"{name}_{int(time.time())}{ext}"
+
+        # dest_name = f"{name}_{int(datetime.now().time())}{ext}"
+        # dest_name = f"{name}_{int(datetime.now().time())}{ext}"
+        # dest_name = f"{name}_{int(time.time())}{ext}"
+        dest_name = f"{name}_{int(time_module.time())}{ext}"
+
         dest_path = os.path.join(app_folder, dest_name)
 
         try:

@@ -2,7 +2,7 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import List, Optional
+from typing import List, Optional, Any
 
 
 
@@ -73,6 +73,16 @@ except ImportError:
     except ImportError:
         pass
 
+try:
+    from ...utils.logger.logger import AppLogger
+except ImportError:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 3)
+        from ...utils.logger.logger import AppLogger
+    except ImportError:
+        pass
+
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
@@ -100,6 +110,29 @@ class AppointmentNoteRepository(BaseRepository):
     def delete(self, note: AppointmentNote) -> None:
         self._session.delete(note)
 
+    def get_unique_values(self, column_name: str) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца таблицы appointments_notes.
+        
+        Аргументы:
+            column_name (str): имя столбца модели AppointmentNote (например, 'text', 'created_at').
+        
+        Возвращает:
+            List[Any]: список уникальных значений. Если столбец не найден или произошла ошибка,
+                       возвращается пустой список.
+        """
+        try:
+            column = getattr(AppointmentNote, column_name, None)
+            if column is None:
+                return []
+            # Выполняем запрос: SELECT DISTINCT column_name FROM appointments_notes
+            return self._session.query(column).distinct().scalars().all()
+        except Exception:
+            # В реальном приложении здесь должно быть логирование ошибки
+            return []
+
+
+
 
 class AppointmentRepository(BaseRepository):
     def get_all(self) -> List[Appointment]:
@@ -122,29 +155,23 @@ class AppointmentRepository(BaseRepository):
     def delete(self, appointment: Appointment) -> None:
         self._session.delete(appointment)
 
-
-
-
-class BaseRepositoryPatientRepository(BaseRepository):
-    def get_all(self) -> List[Patient]:
-        return self._session.query(Patient).all()
-
-    def get_by_id(self, patient_id: int) -> Optional[Patient]:
-        return self._session.get(Patient, patient_id)
-
-    def add(self, patient: Patient) -> Patient:
-        self._session.add(patient)
-        # без commit – commit выполняется на уровне session_scope
-        return patient
-
-    def update(self, patient: Patient) -> Patient:
-        # Если объект уже в сессии, изменения отслеживаются автоматически.
-        # Используем merge для случая, если объект пришёл извне.
-        self._session.merge(patient)
-        return patient
-
-    def delete(self, patient: Patient) -> None:
-        self._session.delete(patient)
+    def get_unique_values(self, column_name: str) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца таблицы appointments.
+        
+        Аргументы:
+            column_name (str): имя столбца модели Appointment (например, 'date', 'time', 'patient_id').
+        
+        Возвращает:
+            List[Any]: список уникальных значений.
+        """
+        try:
+            column = getattr(Appointment, column_name, None)
+            if column is None:
+                return []
+            return self._session.query(column).distinct().scalars().all()
+        except Exception:
+            return []
 
 
 
@@ -162,31 +189,100 @@ class PhotoRepository(BaseRepository):
 
     def delete(self, photo: Photo) -> None:
         self._session.delete(photo)
+    
 
+    def get_unique_values(self, column_name: str) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца таблицы photos.
+        
+        Аргументы:
+            column_name (str): имя столбца модели Photo (например, 'file_path', 'description').
+        
+        Возвращает:
+            List[Any]: список уникальных значений.
+        """
+        try:
+            column = getattr(Photo, column_name, None)
+            if column is None:
+                return []
+            return self._session.query(column).distinct().scalars().all()
+        except Exception:
+            return []
 
 
 
 
 class PatientRepository(BaseRepository):
     def get_all(self) -> List[Patient]:
-        return self._session.query(Patient).all()
-
+        
+        try:
+            return self._session.query(Patient).all()
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_all: {e}")
+            raise #e  # пробрасываем исключение выше
+        
     def get_by_id(self, patient_id: int) -> Optional[Patient]:
-        return self._session.get(Patient, patient_id)
+
+        try:
+            return self._session.get(Patient, patient_id)
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_by_id: {e}")
+            raise #e  # пробрасываем исключение выше
+        
 
     def add(self, patient: Patient) -> Patient:
-        self._session.add(patient)
+
+        try:
+            self._session.add(patient)
+            # self._session.flush()
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.add: {e}")
+            raise #e  # пробрасываем исключение выше
+        
         # без commit – commit выполняется на уровне session_scope
         return patient
 
     def update(self, patient: Patient) -> Patient:
         # Если объект уже в сессии, изменения отслеживаются автоматически.
         # Используем merge для случая, если объект пришёл извне.
-        self._session.merge(patient)
+        
+        try:
+            self._session.merge(patient)
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.update: {e}")
+            raise #e  # пробрасываем исключение выше
+        
+
         return patient
 
     def delete(self, patient: Patient) -> None:
-        self._session.delete(patient)
+        
+        try:   
+            self._session.delete(patient)
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.delete: {e}")
+            raise #e  # пробрасываем исключение выше
+        
+
+
+    def get_unique_values(self, column_name: str) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца таблицы patients.
+        
+        Аргументы:
+            column_name (str): имя столбца модели Patient (например, 'last_name', 'birth_date', 'phone').
+        
+        Возвращает:
+            List[Any]: список уникальных значений.
+        """
+        try:
+            column = getattr(Patient, column_name, None)
+            if column is None:
+                return []
+            return self._session.query(column).distinct().scalars().all()
+        except Exception:
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
+            return []
 
 
 

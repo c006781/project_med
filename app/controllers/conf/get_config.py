@@ -182,11 +182,29 @@ def get_config_env():
 
         'database_local_path':  get_getenv(
             key =   'database_local_path',
-            start_value= './clinic.db',
+            start_value = os.path.join(*['.','clinic.db']),
         ),
         'database_remote_path': get_getenv( 
             key =   'database_remote_path',
             start_value= 'Проекты/test/bd/clinic.db',
+        ),
+
+        
+        'LOG_LEVEL': get_getenv(  
+            key =   'LOG_LEVEL',
+            start_value= 'DEBUG', # уровень логирования (DEBUG, INFO, WARNING, ERROR)
+        ),
+        'LOG_FILE': get_getenv( 
+            key =   'LOG_FILE',
+            start_value= os.path.join(*['.','logs','app.log']), # путь к файлу лога (например, logs/app.log)
+        ),
+        'LOG_MAX_BYTES': get_getenv( 
+            key =   'LOG_MAX_BYTES',
+            start_value= str(10 * 1024 * 1024),  # максимальный размер файла до ротации (в байтах)
+        ),
+        'LOG_BACKUP_COUNT': get_getenv( 
+            key =   'LOG_BACKUP_COUNT',
+            start_value= str(5), # количество сохраняемых бэкапов
         ),
 
         # 'password': get_getenv(

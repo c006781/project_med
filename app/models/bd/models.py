@@ -85,44 +85,50 @@ def _add_package_name(
 
 
 
-temp_from = 'app.controllers.conf.get_config'.split('.')
-temp_from = {
-    '.'.join(temp_from[x:]) for x in range(len(temp_from))
-}
-# if not 'get_getenv' in sys.modules.keys():
-if len(
-    set(sys.modules.keys()).intersection(temp_from)
-) == 0:
+# temp_from = 'app.controllers.conf.get_config'.split('.')
+# temp_from = {
+#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
+# }
+# # if not 'get_getenv' in sys.modules.keys():
+# if len(
+#     set(sys.modules.keys()).intersection(temp_from)
+# ) == 0:
+try:
+    from ...controllers.conf.get_config import get_config_env as get_config_env
+except ImportError:
     try:
-        from ...controllers.conf.get_config import get_config_env as get_config_env
-    except ImportError:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
             file_module = __file__,
             levels_up = 3
         )
         from ...controllers.conf.get_config import get_config_env as get_config_env
-del temp_from
-
-temp_from = 'app.models.bd.temp_data_bd'.split('.')
-temp_from = {
-    '.'.join(temp_from[x:]) for x in range(len(temp_from))
-}
-# if not 'get_getenv' in sys.modules.keys():
-if len(
-    set(sys.modules.keys()).intersection(temp_from)
-) == 0:
-    
-    try:
-        from .temp_data_bd import generate_test_data as generate_test_data
     except ImportError:
+        pass
+# del temp_from
+
+# temp_from = 'app.models.bd.temp_data_bd'.split('.')
+# temp_from = {
+#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
+# }
+# # if not 'get_getenv' in sys.modules.keys():
+# if len(
+#     set(sys.modules.keys()).intersection(temp_from)
+# ) == 0:
+
+try:
+    from .temp_data_bd import generate_test_data as generate_test_data
+except ImportError:
+    try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
             file_module = __file__,
             levels_up = 1
         )
         from .temp_data_bd import generate_test_data as generate_test_data
-del temp_from
+    except ImportError:
+        pass
+# del temp_from
 
 
 
@@ -267,7 +273,7 @@ def init_db(
 if __name__ == "__main__":
     # При запуске этого файла напрямую создаём БД с тестовыми данными
     # env_key = get_config_env()
-    db_path = get_config_env()['database_path']
+    db_path = get_config_env()['database_local_path']
     # db_path = "clinic.db"
     
     # Можно проверить, существует ли файл, но create_all всё равно создаст таблицы,

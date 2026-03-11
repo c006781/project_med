@@ -133,3 +133,8 @@ def sawe_env_file(
             dotenv_path =   dotenv_path, 
             override    =   True,
         )
+
+
+
+if __name__ == '__main__':
+    pass

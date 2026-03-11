@@ -141,17 +141,18 @@ def _add_package_name(
         __package__ = None
 
 
-temp_from = 'app.controllers.conf.getenv'.split('.')
-temp_from = {
-    '.'.join(temp_from[x:]) for x in range(len(temp_from))
-}
-# if not 'get_getenv' in sys.modules.keys():
-if len(
-    set(sys.modules.keys()).intersection(temp_from)
-) == 0:
+# temp_from = 'app.controllers.conf.getenv'.split('.')
+# temp_from = {
+#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
+# }
+# # if not 'get_getenv' in sys.modules.keys():
+# if len(
+#     set(sys.modules.keys()).intersection(temp_from)
+# ) == 0:
+try:
+    from .getenv import get_getenv as get_getenv
+except ImportError:
     try:
-        from .getenv import get_getenv as get_getenv
-    except ImportError:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
             file_module = __file__,
@@ -164,7 +165,9 @@ if len(
         )
 
         from .getenv import get_getenv as get_getenv
-del temp_from
+    except ImportError:
+        pass
+# del temp_from
 
 def get_config_env():
     """

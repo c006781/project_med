@@ -53,7 +53,7 @@ def get_getenv (
     thec = os.getenv(key)
 
     if (not thec) and (start_value):
-        sawe_env_file(# внесение новых ключей
+        save_env_file(# внесение новых ключей
             env_key = {
                 key : start_value
             },         
@@ -84,7 +84,7 @@ def crete_env_file(
         with open(dotenv_path, 'w') as f:
             f.write(f"")
 
-def sawe_env_file(
+def save_env_file(
     env_key :  dict ,
     dotenv_path:str=None,
     if_update: bool = False,

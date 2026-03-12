@@ -65,23 +65,23 @@ def _add_package_name(
 
 try:
     from ...models.bd.models import AppointmentNote, Appointment, Patient, Photo
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...models.bd.models import AppointmentNote, Appointment, Patient, Photo
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 try:
     from ...utils.logger.logger import AppLogger
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger.logger import AppLogger
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 # Сторонние библиотеки
 
@@ -93,22 +93,29 @@ class BaseRepository:
     def __init__(self, session: Session):
         self._session = session
 
+        self.logger = AppLogger.get_instance(self.__class__.__name__)
+        
+
 
 
 
 class AppointmentNoteRepository(BaseRepository):
     def get_by_id(self, note_id: int) -> Optional[AppointmentNote]:
+        self.logger.debug(f"get_by_id: note_id = {note_id}")
         return self._session.get(AppointmentNote, note_id)
 
     def add(self, note: AppointmentNote) -> AppointmentNote:
+        self.logger.debug(f"add: note = {note}")
         self._session.add(note)
         return note
 
     def update(self, note: AppointmentNote) -> AppointmentNote:
+        self.logger.debug(f"update: note = {note}")
         self._session.merge(note)
         return note
 
     def delete(self, note: AppointmentNote) -> None:
+        self.logger.debug(f"delete: note = {note}")
         self._session.delete(note)
 
     def get_unique_values(self, column_name: str) -> List[Any]:
@@ -122,6 +129,7 @@ class AppointmentNoteRepository(BaseRepository):
             List[Any]: список уникальных значений. Если столбец не найден или произошла ошибка,
                        возвращается пустой список.
         """
+        self.logger.debug(f"get_unique_values: column_name = {column_name}")
         try:
             column = getattr(AppointmentNote, column_name, None)
             if column is None:
@@ -133,6 +141,7 @@ class AppointmentNoteRepository(BaseRepository):
             return []
         
     def get_all(self) -> List[AppointmentNote]:
+        self.logger.debug(f"get_all")
         """Возвращает все заметки."""
         return self._session.query(AppointmentNote).all()
     
@@ -141,29 +150,36 @@ class AppointmentNoteRepository(BaseRepository):
         Возвращает заметку с точно таким же текстом (чувствительно к регистру).
         Если не найдено, возвращает None.
         """
+        self.logger.debug(f"get_by_text_exact: text = {text}")
         return self._session.query(AppointmentNote).filter(AppointmentNote.text == text).first()
 
 
 
 class AppointmentRepository(BaseRepository):
     def get_all(self) -> List[Appointment]:
+        self.logger.debug(f"get_all")
         return self._session.query(Appointment).all()
 
     def get_by_id(self, appointment_id: int) -> Optional[Appointment]:
+        self.logger.debug(f"get_by_id: appointment_id = {appointment_id}")
         return self._session.get(Appointment, appointment_id)
 
     def get_by_patient(self, patient_id: int) -> List[Appointment]:
+        self.logger.debug(f"get_by_patient: patient_id = {patient_id}")
         return self._session.query(Appointment).filter_by(patient_id=patient_id).all()
 
     def add(self, appointment: Appointment) -> Appointment:
+        self.logger.debug(f"add: appointment = {appointment}")
         self._session.add(appointment)
         return appointment
 
     def update(self, appointment: Appointment) -> Appointment:
+        self.logger.debug(f"update: appointment = {appointment}")
         self._session.merge(appointment)
         return appointment
 
     def delete(self, appointment: Appointment) -> None:
+        self.logger.debug(f"delete: appointment = {appointment}")
         self._session.delete(appointment)
 
     def get_unique_values(self, column_name: str) -> List[Any]:
@@ -176,6 +192,7 @@ class AppointmentRepository(BaseRepository):
         Возвращает:
             List[Any]: список уникальных значений.
         """
+        self.logger.debug(f"get_unique_values: column_name = {column_name}")
         try:
             column = getattr(Appointment, column_name, None)
             if column is None:
@@ -185,10 +202,12 @@ class AppointmentRepository(BaseRepository):
             return []
 
     def get_all(self) -> List[Appointment]:
+        self.logger.debug(f"get_all")
         """Возвращает все записи приёмов."""
         return self._session.query(Appointment).all()
     
     def get_all_with_note(self):
+        self.logger.debug(f"get_all_with_note")
         return self._session.query(Appointment).options(joinedload(Appointment.note)).all()
 
     # остальные методы...
@@ -196,16 +215,20 @@ class AppointmentRepository(BaseRepository):
 
 class PhotoRepository(BaseRepository):
     def get_by_appointment(self, appointment_id: int) -> List[Photo]:
+        self.logger.debug(f"get_by_appointment: appointment_id = {appointment_id}")
         return self._session.query(Photo).filter_by(appointment_id=appointment_id).all()
 
     def get_by_id(self, photo_id: int) -> Optional[Photo]:
+        self.logger.debug(f"get_by_id: photo_id = {photo_id}")
         return self._session.get(Photo, photo_id)
 
     def add(self, photo: Photo) -> Photo:
+        self.logger.debug(f"add: photo = {photo}")
         self._session.add(photo)
         return photo
 
     def delete(self, photo: Photo) -> None:
+        self.logger.debug(f"delete: photo = {photo}")
         self._session.delete(photo)
     
 
@@ -219,6 +242,7 @@ class PhotoRepository(BaseRepository):
         Возвращает:
             List[Any]: список уникальных значений.
         """
+        self.logger.debug(f"get_unique_values: column_name = {column_name}")
         try:
             column = getattr(Photo, column_name, None)
             if column is None:
@@ -229,6 +253,7 @@ class PhotoRepository(BaseRepository):
         
     def get_all(self) -> List[Photo]:
         """Возвращает все фотографии."""
+        self.logger.debug(f"get_all")
         return self._session.query(Photo).all()
 
 
@@ -236,6 +261,7 @@ class PhotoRepository(BaseRepository):
 
 class PatientRepository(BaseRepository):
     def get_all(self) -> List[Patient]:
+        self.logger.debug(f"get_all")
         
         try:
             return self._session.query(Patient).all()
@@ -244,6 +270,7 @@ class PatientRepository(BaseRepository):
             raise #e  # пробрасываем исключение выше
         
     def get_by_id(self, patient_id: int) -> Optional[Patient]:
+        self.logger.debug(f"get_by_id: patient_id = {patient_id}")
 
         try:
             return self._session.get(Patient, patient_id)
@@ -253,6 +280,7 @@ class PatientRepository(BaseRepository):
         
 
     def add(self, patient: Patient) -> Patient:
+        self.logger.debug(f"add: patient = {patient}")
 
         try:
             self._session.add(patient)
@@ -267,6 +295,7 @@ class PatientRepository(BaseRepository):
     def update(self, patient: Patient) -> Patient:
         # Если объект уже в сессии, изменения отслеживаются автоматически.
         # Используем merge для случая, если объект пришёл извне.
+        self.logger.debug(f"update: patient = {patient}")
         
         try:
             self._session.merge(patient)
@@ -278,6 +307,7 @@ class PatientRepository(BaseRepository):
         return patient
 
     def delete(self, patient: Patient) -> None:
+        self.logger.debug(f"delete: patient = {patient}")
         
         try:   
             self._session.delete(patient)
@@ -297,6 +327,7 @@ class PatientRepository(BaseRepository):
         Возвращает:
             List[Any]: список уникальных значений.
         """
+        self.logger.debug(f"get_unique_values: column_name = {column_name}")
         try:
             column = getattr(Patient, column_name, None)
             if column is None:
@@ -308,6 +339,7 @@ class PatientRepository(BaseRepository):
 
     def get_all(self) -> List[Patient]:
         """Возвращает все фотографии."""
+        self.logger.debug(f"get_all")
         return self._session.query(Patient).all()
         
 # 0==0

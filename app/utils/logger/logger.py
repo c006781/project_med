@@ -101,23 +101,23 @@ def _add_package_name(
 
 try:
     from ...controllers.conf.get_config import get_config_env
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...controllers.conf.get_config import get_config_env
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 try:
     from .base_logger import BaseAppLogger
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 0)
         from .base_logger import BaseAppLogger
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 
 # Сторонние библиотеки

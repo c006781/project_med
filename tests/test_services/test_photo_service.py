@@ -66,12 +66,12 @@ from datetime import date
 
 # try:
 #     from ...app.exceptions import AppointmentNotFoundError
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 3)
 #         from ...app.exceptions import AppointmentNotFoundError
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 from app.exceptions import AppointmentNotFoundError

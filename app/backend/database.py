@@ -61,13 +61,13 @@ def _add_package_name(
 
 try:
     from ..models.bd.models import Base as Base
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..models.bd.models import Base as Base
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 
 # Сторонние библиотеки

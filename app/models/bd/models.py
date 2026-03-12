@@ -63,7 +63,7 @@ def _add_package_name(
 # # if not 'app.controllers.conf.get_config' in sys.modules.keys():
 #     try:
 #         from ...controllers.conf.get_config import get_config_env as get_config_env
-#     except ImportError:
+#     except ImportError as e:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(
 #             file_module = __file__,
@@ -75,7 +75,7 @@ def _add_package_name(
 # # if not 'app.models.bd.temp_data_bd' in sys.modules.keys():
 #     try:
 #         from .temp_data_bd import generate_test_data as generate_test_data
-#     except ImportError:
+#     except ImportError as e:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(
 #             file_module = __file__,
@@ -86,13 +86,13 @@ def _add_package_name(
 
 try:
     from ...utils.logger import AppLogger
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger import AppLogger
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 # temp_from = 'app.controllers.conf.get_config'.split('.')
 # temp_from = {
@@ -104,7 +104,7 @@ except ImportError:
 # ) == 0:
 try:
     from ...controllers.conf.get_config import get_config_env as get_config_env
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
@@ -112,8 +112,8 @@ except ImportError:
             levels_up = 3
         )
         from ...controllers.conf.get_config import get_config_env as get_config_env
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 # del temp_from
 
 # temp_from = 'app.models.bd.temp_data_bd'.split('.')
@@ -127,7 +127,7 @@ except ImportError:
 
 try:
     from .temp_data_bd import generate_test_data as generate_test_data
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
@@ -135,8 +135,8 @@ except ImportError:
             levels_up = 1
         )
         from .temp_data_bd import generate_test_data as generate_test_data
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 
 # del temp_from

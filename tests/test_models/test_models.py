@@ -67,12 +67,12 @@ from datetime import date, time
 
 # try:
 #     from ...app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 3)
 #         from ...app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 from app.models.bd.models import Patient, Appointment, AppointmentNote, Photo

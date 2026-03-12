@@ -70,23 +70,23 @@ def _add_package_name(
 
 try:
     from ..network.thread_network import DownloadThread, UploadThread
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..network.thread_network import DownloadThread, UploadThread
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 try:
     from ..controllers.conf.get_config import get_config_env
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..controllers.conf.get_config import get_config_env
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 
 

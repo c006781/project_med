@@ -66,22 +66,22 @@ import sys  # Импорт модуля sys для работы с систем�
 
 # try:
 #     from ...app.services.sync_service import SyncService
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 3)
 #         from ...app.services.sync_service import SyncService
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 # try:
 #     from ...app.network.thread_network import DownloadThread, UploadThread
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 3)
 #         from ...app.network.thread_network import DownloadThread, UploadThread
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 from app.services.sync_service import SyncService

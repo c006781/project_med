@@ -67,66 +67,66 @@ import tempfile
 
 # try:
 #     from ..app.backend.database import Database
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.backend.database import Database
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 
 # try:
 #     from ..app.models.bd.models import Base
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.models.bd.models import Base
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 
 # try:
 #     from ..app.controllers.conf.get_config import get_config_env
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.controllers.conf.get_config import get_config_env
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 
 # try:
 #     from ..app.services import PatientService, AppointmentService, NoteService, PhotoService
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.services import PatientService, AppointmentService, NoteService, PhotoService
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 
 # try:
 #     from ..app.backend.repositories import PatientRepository, AppointmentRepository
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.backend.repositories import PatientRepository, AppointmentRepository
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 # try:
 #     from ..app.backend.repositories import PatientRepository, AppointmentRepository
-# except ImportError:
+# except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
 #         from ..app.backend.repositories import PatientRepository, AppointmentRepository
-#     except ImportError:
+#     except ImportError as e:
 #         pass
 
 # Добавляем корень проекта в sys.path

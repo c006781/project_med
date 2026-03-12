@@ -61,19 +61,19 @@ def _add_package_name(
 
 try:
     from ...utils.logger import AppLogger
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger import AppLogger
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 # if True:
 # # if not 'app.models' in sys.modules.keys():
 #     try:
 #         from .models import Patient, Appointment, AppointmentNote, Photo
-#     except ImportError:
+#     except ImportError as e:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(
 #             file_module = __file__,
@@ -93,15 +93,15 @@ except ImportError:
 try:
     from .models import Patient, Appointment, AppointmentNote, Photo
     # from . import models
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 1)
 
         from .models import Patient, Appointment, AppointmentNote, Photo
         # from . import models
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 # del temp_from
 # 

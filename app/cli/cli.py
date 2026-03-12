@@ -80,6 +80,16 @@ def _add_package_name(
         __package__ = None
 
 try:
+    from ..utils.logger.logger import AppLogger
+except ImportError as e:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 2)
+        from ..utils.logger.logger import AppLogger
+    except ImportError as e:
+        raise # e # pass
+
+try:
     from ..backend.database import Database
 except ImportError as e:
     try:
@@ -214,6 +224,14 @@ from sqlalchemy.orm import sessionmaker
 def get_db() -> Database:
     """Возвращает экземпляр Database, сконфигурированный из .env."""
     config = get_config_env()
+    db_path = config['database_local_path']
+
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
+    )
+
     db_url = f"sqlite:///{config['database_local_path']}"
     return Database(db_url)
 
@@ -248,6 +266,9 @@ def patient():
 @click.option('--fuzzy-threshold', default=60, type=int, help='Порог схожести для нечеткого поиска (0-100)')
 def patient_list(filter, fuzzy_threshold):
     """Вывести список пациентов с возможностью фильтрации."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Вывести список пациентов с возможностью фильтрации. filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
+    )
     service = get_patient_service()
     # print('filter', filter)
     # print('fuzzy_threshold', fuzzy_threshold)
@@ -282,6 +303,9 @@ def patient_list(filter, fuzzy_threshold):
 @click.option('--id', required=True, type=int, help='ID пациента')
 def patient_get(id):
     """Вывести информацию о пациенте по ID."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Создвести информацию о пациенте по ID. id={id}" 
+    )
     service = get_patient_service()
     try:
         p = service.get_patient_by_id(id)
@@ -304,6 +328,9 @@ def patient_get(id):
 @click.option('--email', help='Email')
 def patient_create(first_name, last_name, birth_date, phone, email):
     """Создать нового пациента."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Создать нового пациента (указывайте только изменяемые поля). first_name={first_name}, last_name={last_name}, birth_date={birth_date}, phone={phone}, email={email}" 
+    )
     service = get_patient_service()
     bd = None
     if birth_date:
@@ -337,6 +364,9 @@ def patient_create(first_name, last_name, birth_date, phone, email):
 @click.option('--email', help='Email')
 def patient_update(id, first_name, last_name, birth_date, phone, email):
     """Обновить данные пациента (указывайте только изменяемые поля)."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Обновить данные пациента (указывайте только изменяемые поля). id={id}, ..." 
+    )
     service = get_patient_service()
     try:
         existing = service.get_patient_by_id(id)
@@ -367,6 +397,9 @@ def patient_update(id, first_name, last_name, birth_date, phone, email):
 @click.option('--id', required=True, type=int, help='ID пациента')
 def patient_delete(id):
     """Удалить пациента по ID."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Удалить пациента по ID id={id}" 
+    )
     service = get_patient_service()
     try:
         service.delete_patient(id)
@@ -391,6 +424,9 @@ def appointment():
 @click.option('--fuzzy-threshold', default=60, type=int, help='Порог схожести для нечеткого поиска (0-100)')
 def appointment_list(patient_id, filter, fuzzy_threshold):
     """Вывести список приёмов с возможностью фильтрации."""
+    AppLogger.get_instance( name = 'system' ).debug( 
+        f"Вывести список приёмов с возможностью фильтрации patient_id={patient_id}, filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
+    )
     service = get_appointment_service()
     filters = []
 
@@ -437,6 +473,7 @@ def appointment_list(patient_id, filter, fuzzy_threshold):
 @click.option('--id', required=True, type=int, help='ID приёма')
 def appointment_get(id):
     """Вывести информацию о приёме."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Вывести информацию о приёме id={id}, ..." )
     service = get_appointment_service()
     try:
         a = service.get_appointment(id)
@@ -452,20 +489,58 @@ def appointment_get(id):
     except Exception as e:
         click.echo(f"Ошибка: {e}", err=True)
 
+# @appointment.command('create')
+# @click.option('--patient-id', required=True, type=int, help='ID пациента')
+# @click.option('--date', required=True, help='Дата приёма (ГГГГ-ММ-ДД)')
+# @click.option('--time', 'time_str', help='Время (ЧЧ:ММ)')
+# # @click.option('--note-id', type=int, help='ID существующей заметки')
+# @click.option('--note-text', help='Текст новой заметки (если указан, создаётся новая заметка)')
+# def appointment_create(patient_id, date, time_str, note_id, note_text):
+#     """Создать новый приём."""
+#     service = get_appointment_service()
+#     try:
+#         app_date = date.fromisoformat(date)
+#     except ValueError:
+#         click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
+#         return
+#     app_time = None
+#     if time_str:
+#         try:
+#             h, m = map(int, time_str.split(':'))
+#             app_time = time(h, m)
+#         except:
+#             click.echo("Неверный формат времени. Используйте ЧЧ:ММ.", err=True)
+#             return
+#     dto_in = AppointmentDTO(
+#         id=None,
+#         patient_id=patient_id,
+#         date=app_date,
+#         time=app_time,
+#         note_id=note_id
+#     )
+#     try:
+#         dto_out = service.create_appointment(dto_in, note_text=note_text)
+#         click.echo(f"Приём создан с ID: {dto_out.id}")
+#     except PatientNotFoundError as e:
+#         click.echo(str(e), err=True)
+#     except Exception as e:
+#         click.echo(f"Ошибка: {e}", err=True)
+
 @appointment.command('create')
 @click.option('--patient-id', required=True, type=int, help='ID пациента')
-@click.option('--date', required=True, help='Дата приёма (ГГГГ-ММ-ДД)')
+@click.option('--date', 'date_str', required=True, help='Дата приёма (ГГГГ-ММ-ДД)')  # переименовано
 @click.option('--time', 'time_str', help='Время (ЧЧ:ММ)')
-# @click.option('--note-id', type=int, help='ID существующей заметки')
-@click.option('--note-text', help='Текст новой заметки (если указан, создаётся новая заметка)')
-def appointment_create(patient_id, date, time_str, note_id, note_text):
-    """Создать новый приём."""
+@click.option('--note-text', help='Текст заметки (будет создана или использована существующая)')
+def appointment_create(patient_id, date_str, time_str, note_text):
+    """Создать новый приём. Заметка будет найдена или создана автоматически."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Создать новый приём. Заметка будет найдена или создана автоматически patient_id={patient_id}, ..." )
     service = get_appointment_service()
     try:
-        app_date = date.fromisoformat(date)
+        app_date = date.fromisoformat(date_str)   # используем date_str
     except ValueError:
         click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
         return
+
     app_time = None
     if time_str:
         try:
@@ -474,12 +549,13 @@ def appointment_create(patient_id, date, time_str, note_id, note_text):
         except:
             click.echo("Неверный формат времени. Используйте ЧЧ:ММ.", err=True)
             return
+
     dto_in = AppointmentDTO(
         id=None,
         patient_id=patient_id,
         date=app_date,
         time=app_time,
-        note_id=note_id
+        note_id=None
     )
     try:
         dto_out = service.create_appointment(dto_in, note_text=note_text)
@@ -489,6 +565,7 @@ def appointment_create(patient_id, date, time_str, note_id, note_text):
     except Exception as e:
         click.echo(f"Ошибка: {e}", err=True)
 
+
 @appointment.command('update')
 @click.option('--id', required=True, type=int, help='ID приёма')
 @click.option('--date', help='Новая дата (ГГГГ-ММ-ДД)')
@@ -497,6 +574,7 @@ def appointment_create(patient_id, date, time_str, note_id, note_text):
 @click.option('--note-text', help='Текст новой заметки (если указан, заменяет заметку)')
 def appointment_update(id, date, time_str, note_id, note_text):
     """Обновить приём."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Обновить приём id={id}, ..." )
     service = get_appointment_service()
     try:
         existing = service.get_appointment(id)
@@ -528,6 +606,7 @@ def appointment_update(id, date, time_str, note_id, note_text):
 @click.option('--id', required=True, type=int, help='ID приёма')
 def appointment_delete(id):
     """Удалить приём."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Удалить приём id={id}" )
     service = get_appointment_service()
     try:
         service.delete_appointment(id)
@@ -550,6 +629,8 @@ def note():
 def note_list():
     """Вывести все заметки."""
     # print('1')
+
+    AppLogger.get_instance( name = 'system' ).debug( f"Вывести все заметки" )
     service = get_note_service()
     try:
         # print('2')
@@ -568,6 +649,7 @@ def note_list():
 @click.option('--id', required=True, type=int, help='ID заметки')
 def note_get(id):
     """Показать заметку."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Показать заметку id={id}" )
     service = get_note_service()
     try:
         n = service.get_note(id)
@@ -582,6 +664,7 @@ def note_get(id):
 @click.argument('text')
 def note_create(text):
     """Создать заметку (текст передаётся как аргумент)."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Создать заметку (текст передаётся как аргумент) text={text}" )
     service = get_note_service()
     try:
         dto = service.create_note(text)
@@ -593,6 +676,7 @@ def note_create(text):
 @click.option('--file', type=click.Path(exists=True, readable=True), required=True, help='Файл с текстом заметки')
 def note_create_from_file(file):
     """Создать заметку из текстового файла."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Создать заметку из текстового файла" )
     try:
         with open(file, 'r', encoding='utf-8') as f:
             text = f.read()
@@ -611,6 +695,7 @@ def note_create_from_file(file):
 @click.argument('text')
 def note_update(id, text):
     """Обновить текст заметки."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Обновить текст заметки id={id}, text={text}" )
     service = get_note_service()
     try:
         dto = service.update_note(id, text)
@@ -624,6 +709,7 @@ def note_update(id, text):
 @click.option('--id', required=True, type=int, help='ID заметки')
 def note_delete(id):
     """Удалить заметку."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Удалить заметку id={id}" )
     service = get_note_service()
     try:
         service.delete_note(id)
@@ -646,6 +732,7 @@ def photo():
 @click.option('--appointment-id', required=True, type=int, help='ID приёма')
 def photo_list(appointment_id):
     """Список фото для приёма."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Список фото для приёма appointment_id={appointment_id}" )
     service = get_photo_service()
     try:
         photos = service.get_photos_for_appointment(appointment_id)
@@ -663,6 +750,7 @@ def photo_list(appointment_id):
 @click.option('--description', default='', help='Описание')
 def photo_add(appointment_id, file, description):
     """Добавить фото к приёму."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Добавить фото к приёму appointment_id={appointment_id}, description={description}" )
     service = get_photo_service()
     try:
         dto = service.add_photo_to_appointment(appointment_id, file, description)
@@ -676,6 +764,7 @@ def photo_add(appointment_id, file, description):
 @click.option('--id', required=True, type=int, help='ID фото')
 def photo_delete(id):
     """Удалить фото (файл и запись)."""
+    AppLogger.get_instance( name = 'system' ).debug( f"Удалить фото (файл и запись) id={id}" )
     service = get_photo_service()
     try:
         service.delete_photo(id)
@@ -698,6 +787,11 @@ def init_db(recreate, test_data):
     """Инициализировать базу данных (создать таблицы, опционально тестовые данные)."""
     config = get_config_env()
     db_path = config['database_local_path']
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Инициализировать базу данных (создать таблицы, опционально тестовые данные): {db_path} ({os.path.abspath(db_path)})"
+    )
     try:
         # Создаём движок и таблицы
         engine = create_db(db_path, recreate=recreate)
@@ -709,7 +803,7 @@ def init_db(recreate, test_data):
             # generate_test_data(session)
             # session.close()
             click.echo("Тестовые данные добавлены.")
-        click.echo(f"База данных инициализирована: {db_path}")
+        click.echo(f"База данных инициализирована: {db_path} ({os.path.abspath(db_path)})")
     except Exception as e:
         click.echo(f"Ошибка инициализации БД: {e}", err=True)
 
@@ -823,6 +917,8 @@ def patient_menu():
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
 
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню управления пациентами: choice={choice}" )
+
         ctx = click.get_current_context()
 
         if choice == 1:
@@ -908,6 +1004,8 @@ def appointment_menu():
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
 
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню управления приёмами: choice={choice}" )
+
         ctx = click.get_current_context()
 
         if choice == 1:
@@ -928,12 +1026,19 @@ def appointment_menu():
             # note_id = click.prompt("ID существующей заметки (оставьте пустым, если нет)", default="", type=int)
             note_text = click.prompt("Текст заметки (оставьте пустым, если нет)", default="")
             # note_text = click.prompt("Текст новой заметки (если нужно создать новую)", default="")
+            # ctx.invoke(
+            #     appointment_create,
+            #     patient_id=patient_id,
+            #     date=date_str,
+            #     time=time_str if time_str else None,
+            #     # note_id=note_id if note_id else None,
+            #     note_text=note_text if note_text else None
+            # )
             ctx.invoke(
                 appointment_create,
                 patient_id=patient_id,
-                date=date_str,
-                time=time_str if time_str else None,
-                # note_id=note_id if note_id else None,
+                date_str=date_str if date_str else None,
+                time_str=time_str if time_str else None,   # <-- исправлено имя
                 note_text=note_text if note_text else None
             )
             click.pause()
@@ -992,6 +1097,8 @@ def note_menu():
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
 
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню управления заметками: choice={choice}" )
+
         ctx = click.get_current_context()
 
         if choice == 1:
@@ -1035,6 +1142,8 @@ def photo_menu():
         click.echo("3. Удалить фото")
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
+        
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню управления фотографиями: choice={choice}" )
 
         ctx = click.get_current_context()
 
@@ -1068,6 +1177,8 @@ def db_menu():
         click.echo("2. Статистика")
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
+        
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню управления базой данных: choice={choice}" )
 
         ctx = click.get_current_context()
 
@@ -1095,6 +1206,8 @@ def sync_menu():
         click.echo("2. Загрузить базу данных")
         click.echo("0. Вернуться в главное меню")
         choice = click.prompt("Выберите действие", type=int)
+        
+        AppLogger.get_instance( name = 'system' ).debug( f"Меню синхронизации: choice={choice}" )
 
         ctx = click.get_current_context()
 
@@ -1126,6 +1239,8 @@ def menu():
         click.echo("6. Синхронизация")
         click.echo("0. Выход")
         choice = click.prompt("Ваш выбор", type=int)
+
+        AppLogger.get_instance( name = 'system' ).debug( f"Интерактивный режим с выбором действия по номеру: choice={choice}" )
 
         if choice == 1:
             patient_menu()

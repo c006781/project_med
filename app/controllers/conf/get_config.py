@@ -151,7 +151,7 @@ def _add_package_name(
 # ) == 0:
 try:
     from .getenv import get_getenv as get_getenv
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(
@@ -165,8 +165,8 @@ except ImportError:
         )
 
         from .getenv import get_getenv as get_getenv
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 # del temp_from
 
 def get_config_env():

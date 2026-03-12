@@ -71,68 +71,68 @@ def _add_package_name(
 
 try:
     from ..utils.logger import AppLogger
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..utils.logger import AppLogger
-    except ImportError:
-        pass
+    except ImportError as e:
+        raise # e # pass
 
 try:
     from ..backend.database import Database
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name( file_module = __file__,levels_up = 2)
         from ..backend.database import Database
-    except ImportError:
+    except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from database import")
-        pass
+        raise # e # pass
 
 try:
     from ..models.bd.models import Patient, Appointment, AppointmentNote, Photo
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name( file_module = __file__,levels_up = 2)
         from ..models.bd.models import Patient, Appointment, AppointmentNote, Photo
-    except ImportError:
+    except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from models import")
-        pass
+        raise # e # pass
 
 try:
     from ..backend.repositories.repositories_all import BaseRepository, PatientRepository, AppointmentRepository, PatientRepository, AppointmentNoteRepository, PhotoRepository
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..backend.repositories.repositories_all import BaseRepository, PatientRepository, AppointmentRepository, PatientRepository, AppointmentNoteRepository, PhotoRepository
-    except ImportError:
+    except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from repositories_all import")
-        pass
+        raise # e # pass
 
 try:
     from ..dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
-    except ImportError:
+    except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from dto import")
-        pass
+        raise # e # pass
 
 try:
     from ..exceptions import PatientNotFoundError, PatientValidationError, AppointmentNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, AppException
-except ImportError:
+except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..exceptions import PatientNotFoundError, PatientValidationError, AppointmentNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, AppException
-    except ImportError:
+    except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from exceptions import")
-        pass
+        raise # e # pass
 
 
 
@@ -365,10 +365,76 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         self.logger.debug(f"Возвращает запись по ID ({patient_id})")
         return self.get_by_id(patient_id)
 
-    def delete_patient(self, patient_id: int) -> None:
-        self.logger.debug(f"Удаляет запись по ID ({patient_id})")
-        self.delete(patient_id)
+    # def delete_patient(self, patient_id: int) -> None:
+    #     self.logger.debug(f"Удаляет запись по ID ({patient_id})")
+    #     self.delete(patient_id)
 
+    # def delete_patient(self, patient_id: int) -> None:
+    #     """
+    #     Удаляет пациента. Предварительно удаляет все его приёмы с проверкой
+    #     на неиспользуемые заметки.
+    #     """
+    #     self.logger.debug(f"Удаление пациента id={patient_id}")
+    #     with self._db.session_scope() as session:
+    #         repo = self._get_repo(session)
+    #         patient = repo.get_by_id(patient_id)
+    #         if patient is None:
+    #             raise PatientNotFoundError(patient_id)
+
+    #         # Собираем ID заметок, связанных с приёмами этого пациента
+    #         note_ids = [app.note_id for app in patient.appointments if app.note_id]
+
+    #         # Удаляем все приёмы пациента (они удалятся каскадно, но мы делаем это явно,
+    #         # чтобы иметь возможность проверить заметки после удаления)
+    #         for app in patient.appointments:
+    #             session.delete(app)
+    #         session.flush()  # принудительно выполняем удаление приёмов в БД
+
+    #         # Теперь проверяем каждую заметку: остались ли ещё приёмы, ссылающиеся на неё
+    #         for note_id in note_ids:
+    #             remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+    #             if remaining == 0:
+    #                 # Заметка больше не используется — удаляем её
+    #                 note_repo = AppointmentNoteRepository(session)
+    #                 note = note_repo.get_by_id(note_id)
+    #                 if note:
+    #                     note_repo.delete(note)
+    #                     self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая при удалении пациента")
+
+    #         # Теперь удаляем самого пациента
+    #         repo.delete(patient)
+    #         self.logger.info(f"Удалён пациент id={patient_id}")
+
+    def delete_patient(self, patient_id: int) -> None:
+        """
+        Удаляет пациента. Приёмы удаляются каскадно благодаря настройкам модели.
+        После удаления проверяет, остались ли заметки, и удаляет неиспользуемые.
+        """
+        self.logger.debug(f"Удаление пациента id={patient_id}")
+        with self._db.session_scope() as session:
+            # Получаем пациента со связанными приёмами (чтобы собрать ID заметок)
+            patient = session.get(Patient, patient_id)
+            if patient is None:
+                raise PatientNotFoundError(patient_id)
+
+            # Собираем ID заметок, привязанных к приёмам этого пациента
+            note_ids = [app.note_id for app in patient.appointments if app.note_id]
+
+            # Удаляем пациента — каскадно удалятся все его приёмы и фото
+            session.delete(patient)
+            session.flush()  # принудительно выполняем удаление, чтобы обновить состояние БД
+
+            # Проверяем каждую заметку: остались ли ещё приёмы, ссылающиеся на неё
+            for note_id in note_ids:
+                remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+                if remaining == 0:
+                    # Заметка больше не используется — удаляем её
+                    note = session.get(AppointmentNote, note_id)
+                    if note:
+                        session.delete(note)
+                        self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая при удалении пациента")
+
+            self.logger.info(f"Удалён пациент id={patient_id}")
     def get_patients_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[PatientDTO]:
         self.logger.debug(f"Возвращает записи, отфильтрованные по заданным условиям")
         return self.get_filtered(filters, fuzzy_threshold)    
@@ -411,9 +477,42 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         self.logger.debug(f"Возвращает запись по ID ({appointment_id})")
         return self.get_by_id(appointment_id)
 
+    # def delete_appointment(self, appointment_id: int) -> None:
+    #     self.logger.debug(f"Удаляет запись по ID ({appointment_id})")
+    #     self.delete(appointment_id)
+
     def delete_appointment(self, appointment_id: int) -> None:
-        self.logger.debug(f"Удаляет запись по ID ({appointment_id})")
-        self.delete(appointment_id)
+        """
+        Удаляет приём. Если заметка больше не используется другими приёмами,
+        удаляет и её.
+        """
+        self.logger.debug(f"Удаление приёма id={appointment_id}")
+        with self._db.session_scope() as session:
+            repo = self._get_repo(session)
+            appointment = repo.get_by_id(appointment_id)
+            if appointment is None:
+                raise AppointmentNotFoundError(appointment_id)
+
+            note_id = appointment.note_id  # запоминаем до удаления
+
+            # Удаляем приём
+            repo.delete(appointment)
+            session.flush()  # принудительно выполняем удаление в БД
+
+            # Если была заметка, проверяем, остались ли другие приёмы с ней
+            if note_id is not None:
+                remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+                if remaining == 0:
+                    # Удаляем заметку
+                    try:
+                        note_repo = AppointmentNoteRepository(session)
+                        note = note_repo.get_by_id(note_id)
+                        if note:
+                            note_repo.delete(note)
+                            self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
+                    except Exception as e:
+                        # Логируем ошибку, но не прерываем удаление приёма
+                        self.logger.exception(f"Не удалось удалить заметку id={note_id}: {e}")
 
     def get_appointments_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[AppointmentDTO]:
         return self.get_filtered(filters, fuzzy_threshold)
@@ -639,7 +738,7 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
         """
         Добавляет фото к приёму: копирует файл в хранилище и создаёт запись в БД.
         """
-        self.logger.debug(f"Добавление фото к приёму id={appointment_id}, файл={source_file_path}")
+        self.logger.debug(f"Добавление фото к приёму id={appointment_id}, файл={source_file_path}, коммент='{description}'")
         with self._db.session_scope() as session:
             # Проверим, что приём существует
             app_repo = AppointmentRepository(session)

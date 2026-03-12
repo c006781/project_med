@@ -84,6 +84,15 @@ def _add_package_name(
 #         from .temp_data_bd import generate_test_data as generate_test_data
 
 
+try:
+    from ...utils.logger import AppLogger
+except ImportError:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 3)
+        from ...utils.logger import AppLogger
+    except ImportError:
+        pass
 
 # temp_from = 'app.controllers.conf.get_config'.split('.')
 # temp_from = {
@@ -128,6 +137,8 @@ except ImportError:
         from .temp_data_bd import generate_test_data as generate_test_data
     except ImportError:
         pass
+
+
 # del temp_from
 
 
@@ -160,7 +171,7 @@ class Patient(Base):
 
     # Отношение к приёмам
     appointments = relationship("Appointment", back_populates="patient", cascade="all, delete-orphan")
-
+    
     def __repr__(self):
         return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
 
@@ -220,6 +231,15 @@ class Photo(Base):
 
 
 # Функция для инициализации БД и создания тестовых данных
+@AppLogger.get_instance(
+        name = 'db'
+).log_execution_time(
+    description="Содание БД",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def create_db(
         db_path="clinic.db",
         recreate=False,
@@ -233,28 +253,86 @@ def create_db(
 
     abs_path = os.path.abspath(db_path)
 
+    # AppLogger.get_instance(
+    #         name = 'db'
+    # ).debug(
+    #     abs_path,
+    #     # level = AppLogger._parse_log_level(
+    #     #     # 'INFO'
+    #     #     'DEBUG'
+    #     # )
+    # )
+
     if recreate and os.path.exists(abs_path):
-        print(f"Удаление существующего файла БД: {abs_path}")
+        AppLogger.get_instance(
+            name = 'db'
+        ).debug(
+            f"Удаление существующего файла БД: {abs_path}"
+            # level = AppLogger._parse_log_level(
+            #     # 'INFO'
+            #     'DEBUG'
+            # )
+        )
+        # print(f"Удаление существующего файла БД: {abs_path}")
         os.remove(abs_path)
 
 
-    if os.path.exists(db_path):
-        print(f"Файл БД {db_path} уже существует. Таблицы будут созданы, если их нет.")
+    if os.path.exists(abs_path):
+        AppLogger.get_instance(
+            name = 'db'
+        ).debug(
+            f"Файл БД {abs_path} уже существует. Таблицы будут созданы, если их нет."
+            # level = AppLogger._parse_log_level(
+            #     # 'INFO'
+            #     'DEBUG'
+            # )
+        )
+        # print(f"Файл БД {db_path} уже существует. Таблицы будут созданы, если их нет.")
     else:
-        print(f"Создание нового файла БД: {db_path}")
+
+        AppLogger.get_instance(
+            name = 'db'
+        ).debug(
+            f"Создание нового файла БД: {abs_path}"
+            # level = AppLogger._parse_log_level(
+            #     # 'INFO'
+            #     'DEBUG'
+            # )
+        )
+        # print(f"Создание нового файла БД: {db_path}")
 
     # Создаём движок (будет использовать SQLite)
     # Движок SQLAlchemy: если файл не существует, он будет создан автоматически
     engine = create_engine(f"sqlite:///{db_path}", echo=False)  # echo=True для отладки SQL
+    # engine = create_engine(f"sqlite:///{abs_path}", echo=False)  # echo=True для отладки SQL
 
     # Создаём таблицы, если их нет
     
     Base.metadata.create_all(engine)
 
-    print("Таблицы успешно созданы (или уже существовали).")
+    AppLogger.get_instance(
+        name = 'db'
+    ).debug(
+        f"Таблицы успешно созданы (или уже существовали): {abs_path}"
+        # level = AppLogger._parse_log_level(
+        #     # 'INFO'
+        #     'DEBUG'
+        # )
+    )
+
+    # print("Таблицы успешно созданы (или уже существовали).")
 
     return engine
 
+@AppLogger.get_instance(
+        name = 'db'
+).log_execution_time(
+    description="Содание и заполнение БД",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def init_db(
     db_path="clinic.db"
 ):

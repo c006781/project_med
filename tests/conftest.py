@@ -139,6 +139,7 @@ from app.models.bd.models import Base
 from app.backend.database import Database
 
 # Сторонние библиотеки
+# pip install pytest pytest-cov pytest-mock
 import pytest # pip install pytest
 
 from sqlalchemy import create_engine

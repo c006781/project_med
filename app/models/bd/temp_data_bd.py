@@ -59,6 +59,16 @@ def _add_package_name(
         # Если мы в корне — можно оставить None или пустую строку
         __package__ = None
 
+try:
+    from ...utils.logger import AppLogger
+except ImportError:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 3)
+        from ...utils.logger import AppLogger
+    except ImportError:
+        pass
+
 # if True:
 # # if not 'app.models' in sys.modules.keys():
 #     try:
@@ -103,41 +113,67 @@ from datetime import date, datetime, time
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+@AppLogger.get_instance(
+        name = 'db_test_data'
+).log_execution_time(
+    description="Заполняем БД тестовыми данными",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def populate_test_data(session):
     """
     Заполняет БД тестовыми данными.
     Предполагается, что БД уже создана и таблицы существуют.
     """
+
+    
     # Проверяем, есть ли уже данные (чтобы не дублировать)
     if session.query(Patient).count() > 0:
-        print("База данных уже содержит данные. Пропускаем заполнение.")
+        AppLogger.get_instance(
+            name = 'db_test_data'
+        ).debug(
+            f"База данных уже содержит данные. Пропускаем заполнение."
+        )
+        # print("База данных уже содержит данные. Пропускаем заполнение.")
         return
 
-    print("Заполнение базы тестовыми данными...")
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Заполнение базы тестовыми данными..."
+    )    
+    # print("Заполнение базы тестовыми данными...")
 
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Заполнение ТБ 'Пациенты' тестовыми данными..."
+    ) 
     # Пациенты
     patient1 = Patient(
-        first_name="Иван", 
-        last_name="Петров",
-        birth_date=date(1985, 5, 12), 
-        phone="+7 123 456-78-90",
-        email="ivan@example.com", 
+        first_name  ="Иван", 
+        last_name   ="Петров",
+        birth_date  =date(1985, 5, 12), 
+        phone       ="+7 123 456-78-90",
+        email       ="ivan@example.com", 
         # address="Москва, ул. Ленина, д.1"
     )
     patient2 = Patient(
-        first_name="Мария", 
-        last_name="Сидорова",
-        birth_date=date(1990, 10, 3), 
-        phone="+7 987 654-32-10",
-        email="maria@example.com", 
+        first_name  = "Мария", 
+        last_name   = "Сидорова",
+        birth_date  = date(1990, 10, 3), 
+        phone       = "+7 987 654-32-10",
+        email       = "maria@example.com", 
         # address="Санкт-Петербург, Невский пр., д.2"
     )
     patient3 = Patient(
-        first_name="Петр", 
-        last_name="Иванов",
-        birth_date=date(1978, 2, 20), 
-        phone="+7 555 123-45-67",
-        email="petr@example.com", 
+        first_name  = "Петр", 
+        last_name   = "Иванов",
+        birth_date  = date(1978, 2, 20), 
+        phone       = "+7 555 123-45-67",
+        email       = "petr@example.com", 
         # address="Новосибирск, ул. Советская, д.3"
     )
     session.add_all(
@@ -146,6 +182,13 @@ def populate_test_data(session):
     session.flush()  # теперь у patient1.id есть значение
     # session.commit()
 
+
+
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Заполнение ТБ 'Заметки' тестовыми данными..."
+    ) 
     # Заметки
     note1 = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
     note2 = AppointmentNote(text="Повторный приём. Назначены анализы.")
@@ -157,41 +200,52 @@ def populate_test_data(session):
     session.flush()  # теперь у patient1.id есть значение
     # session.commit()
 
+
+
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Заполнение ТБ 'Приёмы' тестовыми данными..."
+    ) 
     # Приёмы
     app1 = Appointment(
-        patient_id=patient1.id, note_id=note1.id,
-        date=date(2025, 3, 10), 
+        patient_id  = patient1.id, 
+        note_id     = note1.id,
+        date        = date(2025, 3, 10), 
         # time="10:30"
-        time=time(
-            hour=10, 
-            minute=30
+        time        = time(
+            hour    = 10, 
+            minute  = 30
         ),
     )
     app2 = Appointment(
-        patient_id=patient1.id, note_id=note2.id,
-        date=date(2025, 3, 17), 
+        patient_id  = patient1.id, 
+        note_id     = note2.id,
+        date        = date(2025, 3, 17), 
         # time="11:00"
-        time=time(
+        time        = time(
             hour=11, 
             minute=00
         ),
     )
     app3 = Appointment(
-        patient_id=patient2.id, note_id=note3.id,
-        date=date(2025, 3, 12), 
+        patient_id  = patient2.id, 
+        note_id     = note3.id,
+        date        = date(2025, 3, 12), 
         # time="14:15"
-        time=time(
-            hour=14, 
-            minute=15
+        time        = time(
+            hour    = 14, 
+            minute  = 15
         ),
     )
     app4 = Appointment(
-        patient_id=patient3.id, note_id=note4.id,
-        date=date(2025, 3, 15), 
+        patient_id  = patient3.id, 
+        note_id     = note4.id,
+        date        = date(2025, 3, 15), 
         # time="09:00"
-        time=time(
-            hour=9, 
-            minute=00
+        time        = time(
+            hour    = 9, 
+            minute  = 00
         ),
     )
     session.add_all(
@@ -200,18 +254,25 @@ def populate_test_data(session):
     session.flush()  # теперь у patient1.id есть значение
     # session.commit()
 
+
+
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Заполнение ТБ 'Фотографии' тестовыми данными..."
+    ) 
     # Фотографии
     photo1 = Photo(
-        appointment_id=app1.id, 
-        file_path="photos/app1/face.jpg", 
-        description="Лицо"
+        appointment_id  = app1.id, 
+        file_path       = "photos/app1/face.jpg", 
+        description     = "Лицо"
     )
 
     photo2 = Photo(
-        appointment_id=app1.id, 
-        file_path="photos/app1/neck.jpg", 
-        description="Шея"
-        )
+        appointment_id  =   app1.id, 
+        file_path       =   "photos/app1/neck.jpg", 
+        description     =   "Шея"
+    )
     session.add_all(
         [photo1, photo2]
     )
@@ -220,14 +281,35 @@ def populate_test_data(session):
 
     session.commit()
 
-    print("Тестовые данные добавлены.")
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Тестовые данные добавлены и сохранены."
+    ) 
+    # print("Тестовые данные добавлены.")
 
-def generate_test_data(db_path="clinic.db"):
+
+@AppLogger.get_instance(
+        name = 'db_test_data'
+).log_execution_time(
+    description="Заполнение БД",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
+def generate_test_data(db_path:str="clinic.db"):
     """
     Создаёт сессию и вызывает populate_test_data.
     """
     from sqlalchemy import create_engine
     engine = create_engine(f"sqlite:///{db_path}")
+
+    AppLogger.get_instance(
+        name = 'db_test_data'
+    ).debug(
+        f"Создание сессии к БД: {db_path} ({os.path.abspath(db_path)})"
+    ) 
     Session = sessionmaker(bind=engine)
     session = Session()
     try:

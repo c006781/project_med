@@ -1,0 +1,152 @@
+2026-03-11 17:10:51,981	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:10:51,991	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Получено 0 записей
+2026-03-11 17:12:49,661	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:12:49,676	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Получено 0 записей
+2026-03-11 17:13:17,406	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:13:17,415	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Получено 0 записей
+2026-03-11 17:15:07,203	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/cli/cli.py", line 348, in <appointment_list>:	Запрос всех записей Appointment
+2026-03-11 17:15:07,212	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/cli/cli.py", line 348, in <appointment_list>:	Получено 0 записей
+2026-03-11 17:16:09,039	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/cli/cli.py", line 348, in <appointment_list>:	Запрос всех записей Appointment
+2026-03-11 17:16:09,049	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/cli/cli.py", line 348, in <appointment_list>:	Получено 0 записей
+2026-03-11 17:16:47,292	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:16:47,302	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 247, in <debug>:	Получено 0 записей
+2026-03-11 17:16:56,901	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-11 17:16:56,910	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 0 записей
+2026-03-11 17:18:52,483	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 252, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:18:52,492	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 252, in <debug>:	Получено 0 записей
+2026-03-11 17:19:06,087	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 252, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:19:06,096	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 252, in <debug>:	Получено 0 записей
+2026-03-11 17:24:15,475	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 250, in <debug>:	Запрос всех записей Appointment
+2026-03-11 17:24:15,484	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/utils/logger/base_logger.py", line 250, in <debug>:	Получено 0 записей
+2026-03-12 08:27:56,432	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 08:27:56,442	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 0 записей
+2026-03-12 08:49:23,963	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Patient
+2026-03-12 08:49:23,965	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 1 записей
+2026-03-12 08:49:23,971	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 206, in <get_by_id>:	Запрос Patient с id=1
+2026-03-12 08:49:23,973	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 213, in <get_by_id>:	Найдена запись PatientDTO(id=1, first_name='Иван', last_name='Петров', birth_date=None, phone='+71234567890', email='ivan@test.ru')
+2026-03-12 08:49:23,977	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 206, in <get_by_id>:	Запрос Patient с id=9999
+2026-03-12 08:49:23,984	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 306, in <create_patient>:	Создание пациента: PatientDTO(id=None, first_name='Анна', last_name='Смирнова', birth_date=None, phone='', email='')
+2026-03-12 08:49:23,987	INFO	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 321, in <create_patient>:	Создан пациент с id=1
+2026-03-12 08:49:23,991	WARNING	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 303, in <create_patient>:	Попытка создания пациента без имени/фамилии
+2026-03-12 08:49:23,997	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 333, in <update_patient>:	Обновление пациента id=1
+2026-03-12 08:49:23,999	INFO	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 349, in <update_patient>:	Обновлён пациент id=1
+2026-03-12 08:49:24,006	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 235, in <delete>:	Удаление Patient с id=1
+2026-03-12 08:49:24,008	INFO	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 242, in <delete>:	Удалена запись Patient с id=1
+2026-03-12 08:49:24,012	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 206, in <get_by_id>:	Запрос Patient с id=1
+2026-03-12 08:49:24,039	DEBUG	[PhotoService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 570, in <add_photo_to_appointment>:	Добавление фото к приёму id=1, файл=/tmp/pytest-of-admin-rkc/pytest-13/test_add_photo_to_appointment0/test.jpg
+2026-03-12 08:49:24,042	DEBUG	[PhotoService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 611, in <_copy_file_to_storage>:	Файл скопирован: /tmp/pytest-of-admin-rkc/pytest-13/test_add_photo_to_appointment0/test.jpg -> /tmp/pytest-of-admin-rkc/pytest-13/test_add_photo_to_appointment0/photos/app_1/test_1773280164.jpg
+2026-03-12 08:49:24,046	INFO	[PhotoService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 591, in <add_photo_to_appointment>:	Добавлено фото id=1 к приёму 1
+2026-03-12 08:49:24,053	DEBUG	[PhotoService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 570, in <add_photo_to_appointment>:	Добавление фото к приёму id=9999, файл=dummy.jpg
+2026-03-12 08:49:38,772	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 08:49:38,782	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 0 записей
+2026-03-12 08:50:08,140	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 08:50:08,149	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 0 записей после фильтрации
+2026-03-12 08:57:42,560	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 08:57:42,570	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 0 записей после фильтрации
+2026-03-12 09:00:17,009	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 09:00:17,018	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 0 записей после фильтрации
+2026-03-12 09:03:02,094	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 09:03:02,107	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 0 записей после фильтрации
+2026-03-12 09:43:32,272	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Начало]
+2026-03-12 09:43:32,281	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Завершение: 0.0085 сек]
+2026-03-12 09:43:32,281	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 236, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 09:45:31,548	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Начало]
+2026-03-12 09:45:31,557	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Завершение: 0.0084 сек]
+2026-03-12 09:45:31,557	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 236, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 09:47:04,220	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Начало]
+2026-03-12 09:47:04,244	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 259, in <create_db>:	/home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 09:47:04,254	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 235, in <create_db>:	Содание БД [Завершение: 0.0331 сек]
+2026-03-12 09:47:04,254	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 236, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 09:51:37,876	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 09:51:37,896	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 258, in <create_db>:	/home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 09:51:37,897	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 283, in <create_db>:	Файл БД /home/admin-rkc/Git/My_cods/project_med/clinic.db уже существует. Таблицы будут созданы, если их нет.
+2026-03-12 09:51:37,910	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0334 сек]
+2026-03-12 09:51:37,910	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 236, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:00:46,826	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 10:00:46,845	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 283, in <create_db>:	Файл БД /home/admin-rkc/Git/My_cods/project_med/clinic.db уже существует. Таблицы будут созданы, если их нет.
+2026-03-12 10:00:46,858	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 315, in <create_db>:	Таблицы успешно созданы (или уже существовали): /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:00:46,858	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0316 сек]
+2026-03-12 10:00:46,858	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 287, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:00:46,860	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 305, in <generate_test_data>:	Создание сессии к БД: <sqlalchemy.orm.session.Session object at 0x78dce327ba10>
+2026-03-12 10:00:46,860	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняет БД тестовыми данными [Начало]
+2026-03-12 10:04:49,423	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 10:04:49,444	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 283, in <create_db>:	Файл БД /home/admin-rkc/Git/My_cods/project_med/clinic.db уже существует. Таблицы будут созданы, если их нет.
+2026-03-12 10:04:49,466	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 315, in <create_db>:	Таблицы успешно созданы (или уже существовали): /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:04:49,466	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0435 сек]
+2026-03-12 10:04:49,467	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 287, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:04:49,470	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 305, in <generate_test_data>:	Создание сессии к БД: <sqlalchemy.orm.session.Session object at 0x79cda8697cd0>
+2026-03-12 10:04:49,470	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняет БД тестовыми данными [Начало]
+2026-03-12 10:06:48,055	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 10:06:48,076	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 283, in <create_db>:	Файл БД /home/admin-rkc/Git/My_cods/project_med/clinic.db уже существует. Таблицы будут созданы, если их нет.
+2026-03-12 10:06:48,087	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 315, in <create_db>:	Таблицы успешно созданы (или уже существовали): /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:06:48,088	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0319 сек]
+2026-03-12 10:06:48,088	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 287, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:06:48,090	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 305, in <generate_test_data>:	Создание сессии к БД: ./clinic.db
+2026-03-12 10:06:48,090	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняет БД тестовыми данными [Начало]
+2026-03-12 10:06:48,104	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 144, in <populate_test_data>:	Заполнение базы тестовыми данными...
+2026-03-12 10:06:48,106	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 151, in <populate_test_data>:	Заполнение ТБ 'Пациенты' тестовыми данными...
+2026-03-12 10:06:48,110	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 189, in <populate_test_data>:	Заполнение ТБ 'Заметки' тестовыми данными...
+2026-03-12 10:06:48,113	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 207, in <populate_test_data>:	Заполнение ТБ 'Приёмы' тестовыми данными...
+2026-03-12 10:06:48,117	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 261, in <populate_test_data>:	Заполнение ТБ 'Фотографии' тестовыми данными...
+2026-03-12 10:06:48,121	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняет БД тестовыми данными [Завершение: 0.0314 сек]
+2026-03-12 10:06:48,122	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 287, in <generate_test_data>:	Заполнение БД [Завершение: 0.0340 сек]
+2026-03-12 10:08:52,072	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 10:08:52,092	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 283, in <create_db>:	Файл БД /home/admin-rkc/Git/My_cods/project_med/clinic.db уже существует. Таблицы будут созданы, если их нет.
+2026-03-12 10:08:52,102	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 315, in <create_db>:	Таблицы успешно созданы (или уже существовали): /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:08:52,102	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0298 сек]
+2026-03-12 10:08:52,102	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 292, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:08:52,105	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 310, in <generate_test_data>:	Создание сессии к БД: ./clinic.db (/home/admin-rkc/Git/My_cods/project_med/clinic.db)
+2026-03-12 10:08:52,105	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняем БД тестовыми данными [Начало]
+2026-03-12 10:08:52,116	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 136, in <populate_test_data>:	База данных уже содержит данные. Пропускаем заполнение.
+2026-03-12 10:08:52,116	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняем БД тестовыми данными [Завершение: 0.0109 сек]
+2026-03-12 10:08:52,116	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 292, in <generate_test_data>:	Заполнение БД [Завершение: 0.0136 сек]
+2026-03-12 10:09:31,544	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Начало]
+2026-03-12 10:09:31,563	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 269, in <create_db>:	Удаление существующего файла БД: /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:09:31,565	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 295, in <create_db>:	Создание нового файла БД: /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:09:31,589	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 315, in <create_db>:	Таблицы успешно созданы (или уже существовали): /home/admin-rkc/Git/My_cods/project_med/clinic.db
+2026-03-12 10:09:31,589	DEBUG	[db]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/models.py", line 234, in <create_db>:	Содание БД [Завершение: 0.0454 сек]
+2026-03-12 10:09:31,589	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 292, in <generate_test_data>:	Заполнение БД [Начало]
+2026-03-12 10:09:31,591	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 310, in <generate_test_data>:	Создание сессии к БД: ./clinic.db (/home/admin-rkc/Git/My_cods/project_med/clinic.db)
+2026-03-12 10:09:31,592	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняем БД тестовыми данными [Начало]
+2026-03-12 10:09:31,603	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 144, in <populate_test_data>:	Заполнение базы тестовыми данными...
+2026-03-12 10:09:31,605	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 151, in <populate_test_data>:	Заполнение ТБ 'Пациенты' тестовыми данными...
+2026-03-12 10:09:31,610	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 189, in <populate_test_data>:	Заполнение ТБ 'Заметки' тестовыми данными...
+2026-03-12 10:09:31,614	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 207, in <populate_test_data>:	Заполнение ТБ 'Приёмы' тестовыми данными...
+2026-03-12 10:09:31,617	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 261, in <populate_test_data>:	Заполнение ТБ 'Фотографии' тестовыми данными...
+2026-03-12 10:09:31,625	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 286, in <populate_test_data>:	Тестовые данные добавлены и сохранены.
+2026-03-12 10:09:31,626	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 116, in <populate_test_data>:	Заполняем БД тестовыми данными [Завершение: 0.0339 сек]
+2026-03-12 10:09:31,626	DEBUG	[db_test_data]	File "/home/admin-rkc/Git/My_cods/project_med/app/models/bd/temp_data_bd.py", line 292, in <generate_test_data>:	Заполнение БД [Завершение: 0.0364 сек]
+2026-03-12 10:09:46,442	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 10:09:46,453	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 3 записей после фильтрации
+2026-03-12 10:15:21,173	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 10:15:21,183	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 3 записей после фильтрации
+2026-03-12 10:16:10,120	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 206, in <get_by_id>:	Запрос Patient с id=2
+2026-03-12 10:16:10,124	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 213, in <get_by_id>:	Найдена запись PatientDTO(id=2, first_name='Мария', last_name='Сидорова', birth_date=datetime.date(1990, 10, 3), phone='+7 987 654-32-10', email='maria@example.com')
+2026-03-12 10:16:54,359	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 306, in <create_patient>:	Создание пациента: PatientDTO(id=None, first_name='test', last_name='test', birth_date=None, phone=None, email=None)
+2026-03-12 10:16:54,363	INFO	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 321, in <create_patient>:	Создан пациент с id=4
+2026-03-12 10:17:00,865	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 10:17:00,876	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 4 записей после фильтрации
+2026-03-12 10:17:26,742	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами []
+2026-03-12 10:17:26,752	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 4 записей после фильтрации
+2026-03-12 10:18:51,415	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 261, in <get_filtered>:	Запрос отфильтрованных записей Patient с фильтрами [{'column': 'last_name', 'operator': 'ilike', 'value': 'es'}]
+2026-03-12 10:18:51,424	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 270, in <get_filtered>:	Получено 1 записей после фильтрации
+2026-03-12 10:19:12,971	DEBUG	[PatientService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 235, in <delete>:	Удаление Patient с id=0
+2026-03-12 10:19:28,254	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 10:19:28,261	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 4 записей
+2026-03-12 10:28:42,483	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 10:28:42,495	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 4 записей
+2026-03-12 10:30:31,292	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 10:30:31,306	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 4 записей
+2026-03-12 10:32:50,474	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 10:32:50,479	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 4 записей
+2026-03-12 10:32:59,864	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 192, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 10:32:59,880	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 198, in <get_all>:	Получено 4 записей
+2026-03-12 11:05:11,856	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 193, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 11:05:11,870	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 199, in <get_all>:	Получено 4 записей
+2026-03-12 11:08:22,593	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 193, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 11:08:22,610	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 199, in <get_all>:	Получено 4 записей
+2026-03-12 11:08:53,937	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 193, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 11:08:53,954	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 199, in <get_all>:	Получено 4 записей
+2026-03-12 11:09:24,438	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 193, in <get_all>:	Запрос всех записей Appointment
+2026-03-12 11:09:24,448	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 199, in <get_all>:	Получено 4 записей
+2026-03-12 11:09:36,125	DEBUG	[AppointmentService]	File "/home/admin-rkc/Git/My_cods/project_med/app/services/services_all.py", line 403, in <get_appointments_by_patient>:	Запрос приёмов пациента id=1

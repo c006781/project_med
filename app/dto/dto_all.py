@@ -69,6 +69,7 @@ class AppointmentDTO(BaseDTO):
     note_id: Optional[int]
     # Можно добавить поля для отображения в GUI, например, имя пациента
     patient_name: Optional[str] = None  # Это поле заполняется отдельно
+    note_text: Optional[str] = None # поле для текста заметки
 
     @classmethod
     def from_orm(cls, model):
@@ -79,6 +80,7 @@ class AppointmentDTO(BaseDTO):
             time=model.time,
             note_id=model.note_id,
             patient_name=f"{model.patient.last_name} {model.patient.first_name}" if model.patient else None,
+            note_text=model.note.text if model.note else None,
         )
     
 

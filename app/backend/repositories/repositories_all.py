@@ -86,6 +86,7 @@ except ImportError:
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
 class BaseRepository:
     """Все репозитории должны наследовать этот класс."""
@@ -130,7 +131,17 @@ class AppointmentNoteRepository(BaseRepository):
         except Exception:
             # В реальном приложении здесь должно быть логирование ошибки
             return []
-
+        
+    def get_all(self) -> List[AppointmentNote]:
+        """Возвращает все заметки."""
+        return self._session.query(AppointmentNote).all()
+    
+    def get_by_text_exact(self, text: str):
+        """
+        Возвращает заметку с точно таким же текстом (чувствительно к регистру).
+        Если не найдено, возвращает None.
+        """
+        return self._session.query(AppointmentNote).filter(AppointmentNote.text == text).first()
 
 
 
@@ -173,7 +184,14 @@ class AppointmentRepository(BaseRepository):
         except Exception:
             return []
 
+    def get_all(self) -> List[Appointment]:
+        """Возвращает все записи приёмов."""
+        return self._session.query(Appointment).all()
+    
+    def get_all_with_note(self):
+        return self._session.query(Appointment).options(joinedload(Appointment.note)).all()
 
+    # остальные методы...
 
 
 class PhotoRepository(BaseRepository):
@@ -208,6 +226,10 @@ class PhotoRepository(BaseRepository):
             return self._session.query(column).distinct().scalars().all()
         except Exception:
             return []
+        
+    def get_all(self) -> List[Photo]:
+        """Возвращает все фотографии."""
+        return self._session.query(Photo).all()
 
 
 
@@ -280,11 +302,12 @@ class PatientRepository(BaseRepository):
             if column is None:
                 return []
             return self._session.query(column).distinct().scalars().all()
-        except Exception:
+        except Exception as e:
             AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
             return []
 
-
-
+    def get_all(self) -> List[Patient]:
+        """Возвращает все фотографии."""
+        return self._session.query(Patient).all()
         
 # 0==0

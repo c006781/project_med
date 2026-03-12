@@ -13,6 +13,7 @@ from .models import (
     Appointment, 
     AppointmentNote, 
     Photo,
+    create_db,
 )
 
 # Импортируем функцию генерации тестовых данных из temp_data_bd
@@ -27,6 +28,7 @@ __all__ = [
     'AppointmentNote',
     'Photo',
     'generate_test_data',
+    'create_db',
 ]
 
 # Примечание: Функции create_db, init_db определены в models.py, но они скорее служебные.

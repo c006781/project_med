@@ -207,19 +207,54 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     # Вспомогательные методы для формирования указателя на место вызова
     # --------------------------------------------------------------------------
+    # def _get_caller_info(
+    #         self, 
+    #         levels_up: int = 2
+    #     ) -> str:
+    #     """Возвращает строку с информацией о caller'е на указанное количество уровней выше."""
+    #     stack = inspect.stack()
+    #     if len(stack) <= levels_up:
+    #         frame_info = stack[-1]
+    #     else:
+    #         frame_info = stack[levels_up]
+
+    #     filename = frame_info.filename
+    #     lineno = frame_info.lineno
+    #     funcname = frame_info.function
+    #     return f'File "{filename}", line {lineno}, in <{funcname}>'
+    
     def _get_caller_info(self, levels_up: int = 2) -> str:
-        """Возвращает строку с информацией о caller'е на указанное количество уровней выше."""
+        """
+        Возвращает строку с информацией о caller'е.
+        - Если levels_up > 0: поднимается на указанное количество уровней (стандартное поведение).
+        - Если levels_up == 0: автоматически ищет первый фрейм вне модулей логирования.
+        """
+        import inspect
         stack = inspect.stack()
-        if len(stack) <= levels_up:
-            frame_info = stack[-1]
+
+        if levels_up > 0:
+            # Явно заданная глубина
+            if len(stack) <= levels_up:
+                frame_info = stack[-1]
+            else:
+                frame_info = stack[levels_up]
         else:
-            frame_info = stack[levels_up]
+            # Автоматический поиск: пропускаем фреймы, относящиеся к логгеру
+            # Пропускаем текущий фрейм (индекс 0) и ищем первый, чей файл не содержит 'logger'
+            for frame_info in stack[1:]:
+                filename = frame_info.filename
+                # Если имя файла не содержит подстрок 'logger' или 'base_logger', считаем это внешним вызовом
+                if 'logger' not in filename and 'base_logger' not in filename:
+                    break
+            else:
+                # Если не нашли (вдруг весь стек состоит из логгера), берём последний
+                frame_info = stack[-1]
 
         filename = frame_info.filename
         lineno = frame_info.lineno
         funcname = frame_info.function
         return f'File "{filename}", line {lineno}, in <{funcname}>'
-
+    
     def _format_message(self, caller_info: str, message: str) -> str:
         """Форматирует итоговое сообщение, добавляя имя логгера и указатель."""
         return f"[{self.name}]\t{caller_info}:\t{message}"
@@ -231,7 +266,7 @@ class BaseAppLogger:
     def _formatted(
             self,
             message,
-            levels_up=2,
+            levels_up: int = 0,
     ):
         caller = self._get_caller_info(
             levels_up=levels_up

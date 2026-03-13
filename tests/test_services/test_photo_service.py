@@ -108,6 +108,8 @@ def test_add_photo_to_appointment(photo_service, db_session, sample_patient, tmp
     with open(stored_path, "rb") as f:
         assert f.read() == b"fake image content"
 
-def test_add_photo_to_nonexistent_appointment(photo_service):
+def test_add_photo_to_nonexistent_appointment(photo_service, tmp_path):
+    img_path = tmp_path / "test.jpg"
+    img_path.write_bytes(b"fake image content")
     with pytest.raises(AppointmentNotFoundError):
-        photo_service.add_photo_to_appointment(9999, "dummy.jpg")
+        photo_service.add_photo_to_appointment(9999, str(img_path))

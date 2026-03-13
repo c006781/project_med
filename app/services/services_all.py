@@ -5,6 +5,7 @@ import sys  # Импорт модуля sys для работы с систем�
 
 
 import shutil
+import uuid
 
 from typing import Type, TypeVar, Generic, List, Optional, Dict, Any, Tuple
 
@@ -328,26 +329,43 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     #         self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
     #         return dtos
         
+    # def get_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60,
+    #                  session: Optional[Session] = None) -> List[DTOType]:
+    #     """
+    #     Возвращает записи, отфильтрованные по заданным условиям.
+    #     filters: список словарей с ключами column, operator, value.
+    #     fuzzy_threshold: порог схожести для нечеткого поиска.
+    #     """
+
+    #     self.logger.debug(f"Запрос отфильтрованных записей {self._model_class.__name__}")
+    #     with self._session_scope(session) as sess:
+    #         query = sess.query(self._model_class)
+    #         query = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+    #         post_filters = getattr(query, '_post_filters', [])
+    #         items = query.all()
+    #         if post_filters:
+    #             items = apply_post_filters(items, post_filters, self._model_class)
+    #         dtos = [self._dto_class.from_orm(item) for item in items]
+    #         self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
+    #         return dtos
     def get_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60,
-                     session: Optional[Session] = None) -> List[DTOType]:
+                 session: Optional[Session] = None) -> List[DTOType]:
         """
         Возвращает записи, отфильтрованные по заданным условиям.
         filters: список словарей с ключами column, operator, value.
         fuzzy_threshold: порог схожести для нечеткого поиска.
         """
-
-        self.logger.debug(f"Запрос отфильтрованных записей {self._model_class.__name__}")
+        self.logger.debug(f"Запрос отфильтрованных записей {self._model_class.__name__} с фильтрами {filters}")
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class)
-            query = apply_filters(query, self._model_class, filters, fuzzy_threshold)
-            post_filters = getattr(query, '_post_filters', [])
+            # apply_filters теперь возвращает кортеж
+            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
             items = query.all()
             if post_filters:
                 items = apply_post_filters(items, post_filters, self._model_class)
             dtos = [self._dto_class.from_orm(item) for item in items]
             self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
             return dtos
-
 
 
     @contextmanager
@@ -653,6 +671,218 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.get_filtered(filters, fuzzy_threshold, session=session)
 
 
+
+# class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
+#     def __init__(
+#             self, 
+#             db: Database, 
+#             logger_name: Optional[str] = None, 
+#         ):
+#         if logger_name is None:
+#             logger_name = self.__class__.__name__
+            
+#         # Вызов конструктора базового класса с указанием классов модели, DTO и репозитория
+#         super().__init__(
+#             db          =db,
+#             repo_class  = AppointmentNoteRepository,
+#             model_class = AppointmentNote,
+#             dto_class   = AppointmentNoteDTO,
+#             logger_name = logger_name
+#         )
+
+#     def _not_found_exception(self, entity_id: int) -> Exception:
+#         return AppointmentNoteNotFoundError(entity_id)
+
+#     def get_note(self, note_id: int) -> AppointmentNoteDTO:
+#         self.logger.debug(f"Возвращает запись по ID ({note_id})")
+#         return self.get_by_id(note_id)
+
+#     def create_note(self, text: str) -> AppointmentNoteDTO:
+#         self.logger.debug("Создание заметки")
+#         with self._db.session_scope() as session:
+#             note = self._model_class(text=text)
+#             session.add(note)
+#             session.flush()
+#             dto_out = self._dto_class.from_orm(note)
+#             self.logger.info(f"Создана заметка id={dto_out.id}")
+#             return dto_out
+
+#     def update_note(self, note_id: int, text: str) -> AppointmentNoteDTO:
+#         self.logger.debug(f"Обновление заметки id={note_id}")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             note = repo.get_by_id(note_id)
+#             if note is None:
+#                 raise AppointmentNoteNotFoundError(note_id)
+#             note.text = text
+#             updated_dto = self._dto_class.from_orm(note)
+#             self.logger.info(f"Обновлена заметка id={updated_dto.id}")
+#             return updated_dto
+
+#     def delete_note(self, note_id: int) -> None:
+#         self.logger.debug(f"Удаляет запись по ID ({note_id})")
+#         self.delete(note_id)
+
+#     def get_or_create_note(self, text: str) -> Optional[AppointmentNoteDTO]:
+#         """
+#         Возвращает существующую заметку по точному совпадению текста,
+#         либо создаёт новую, если такой ещё нет.
+#         Если text пустой или None, возвращает None.
+#         """
+#         if not text:  # пустой текст не обрабатываем
+#             return None
+
+#         self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             note = repo.get_by_text_exact(text)
+#             if note:
+#                 self.logger.debug(f"Найдена существующая заметка id={note.id}")
+#                 return self._dto_class.from_orm(note)
+
+#             # Создаём новую заметку
+#             note = self._model_class(text=text)
+#             session.add(note)
+#             session.flush()  # чтобы получить id
+#             self.logger.info(f"Создана новая заметка id={note.id}")
+#             return self._dto_class.from_orm(note)
+#     def get_or_create_note_in_session(self, session, text: str) -> Optional[AppointmentNoteDTO]:
+#         """
+#         Возвращает существующую заметку по точному совпадению текста,
+#         либо создаёт новую, используя переданную сессию.
+#         Если text пустой или None, возвращает None.
+#         """
+#         if not text:
+#             return None
+
+#         self.logger.debug(f"Поиск или создание заметки в переданной сессии: {text[:50]}...")
+#         repo = AppointmentNoteRepository(session)
+#         note = repo.get_by_text_exact(text)
+#         if note:
+#             self.logger.debug(f"Найдена существующая заметка id={note.id}")
+#             return self._dto_class.from_orm(note)
+
+#         # Создаём новую заметку
+#         note = self._model_class(text=text)
+#         session.add(note)
+#         session.flush()  # чтобы получить id
+#         self.logger.info(f"Создана новая заметка id={note.id}")
+#         return self._dto_class.from_orm(note)
+    
+class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
+    """
+    Сервис для работы с заметками приёмов.
+    Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
+    """
+
+    def __init__(self, db: Database, logger_name: Optional[str] = None):
+        if logger_name is None:
+            logger_name = self.__class__.__name__
+        super().__init__(
+            db=db,
+            repo_class=AppointmentNoteRepository,
+            model_class=AppointmentNote,
+            dto_class=AppointmentNoteDTO,
+            logger_name=logger_name
+        )
+
+    def _not_found_exception(self, entity_id: int) -> Exception:
+        return AppointmentNoteNotFoundError(entity_id)
+
+    # ----------------------------------------------------------------------
+    # Переопределённые методы базового класса (если нужно добавить логику)
+    # ----------------------------------------------------------------------
+    def get_all(self, session: Optional[Session] = None) -> List[AppointmentNoteDTO]:
+        """
+        Возвращает все заметки.
+        """
+        self.logger.debug("Запрос всех заметок")
+        return super().get_all(session=session)
+
+    def get_by_id(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
+        """
+        Возвращает заметку по ID.
+        """
+        self.logger.debug(f"Запрос заметки id={note_id}")
+        return super().get_by_id(note_id, session=session)
+
+    def delete(self, note_id: int, session: Optional[Session] = None) -> None:
+        """
+        Удаляет заметку по ID.
+        """
+        self.logger.debug(f"Удаление заметки id={note_id}")
+        super().delete(note_id, session=session)
+
+    # ----------------------------------------------------------------------
+    # Специфические методы сервиса
+    # ----------------------------------------------------------------------
+    def get_note(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
+        """
+        Синоним для get_by_id.
+        """
+        return self.get_by_id(note_id, session=session)
+
+    def create_note(self, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
+        """
+        Создаёт новую заметку с указанным текстом.
+        """
+        self.logger.debug("Создание заметки")
+        with self._session_scope(session) as sess:
+            note = self._model_class(text=text)
+            sess.add(note)
+            sess.flush()
+            dto_out = self._dto_class.from_orm(note)
+            self.logger.info(f"Создана заметка id={dto_out.id}")
+            return dto_out
+
+    def update_note(self, note_id: int, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
+        """
+        Обновляет текст существующей заметки.
+        """
+        self.logger.debug(f"Обновление заметки id={note_id}")
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            note = repo.get_by_id(note_id)
+            if note is None:
+                raise AppointmentNoteNotFoundError(note_id)
+            note.text = text
+            updated_dto = self._dto_class.from_orm(note)
+            self.logger.info(f"Обновлена заметка id={updated_dto.id}")
+            return updated_dto
+
+    def delete_note(self, note_id: int, session: Optional[Session] = None) -> None:
+        """
+        Удаляет заметку (синоним delete).
+        """
+        self.logger.debug(f"Удаляет запись по ID ({note_id})")
+        self.delete(note_id, session=session)
+
+    def get_or_create_note(self, text: str, session: Optional[Session] = None) -> Optional[AppointmentNoteDTO]:
+        """
+        Возвращает существующую заметку по точному совпадению текста,
+        либо создаёт новую, если такой ещё нет.
+        Если text пустой или None, возвращает None.
+        """
+        if not text:
+            return None
+
+        self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            note = repo.get_by_text_exact(text)
+            if note:
+                self.logger.debug(f"Найдена существующая заметка id={note.id}")
+                return self._dto_class.from_orm(note)
+
+            # Создаём новую заметку
+            note = self._model_class(text=text)
+            sess.add(note)
+            sess.flush()
+            self.logger.info(f"Создана новая заметка id={note.id}")
+            return self._dto_class.from_orm(note)
+        
+        
+
 class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
     """
     Сервис для работы с приёмами.
@@ -660,7 +890,12 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     для предотвращения N+1 запросов.
     """
 
-    def __init__(self, db: Database, logger_name: Optional[str] = None):
+    def __init__(
+        self,
+        db: Database,
+        note_service: Optional['NoteService'] = None,  # внедряем зависимость
+        logger_name: Optional[str] = None
+    ):
         if logger_name is None:
             logger_name = self.__class__.__name__
           
@@ -673,7 +908,11 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             dto_class   = AppointmentDTO,
             logger_name = logger_name
         )
-        
+
+        self._note_service = note_service
+        # Если не передан, создадим по умолчанию (для совместимости)
+        if self._note_service is None:
+            self._note_service = NoteService(db, logger_name=logger_name + ".NoteService")
 
     def _not_found_exception(self, entity_id: int) -> Exception:
         """Возвращает исключение, если приём не найден."""
@@ -790,10 +1029,28 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     #         dtos = [self._dto_class.from_orm(item) for item in items]
     #         self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
     #         return dtos
+    # def get_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60,
+    #                  session: Optional[Session] = None) -> List[AppointmentDTO]:
+    #     """Возвращает отфильтрованные приёмы с подгруженными связями."""
+    #     from ..utils.filtering import apply_filters, apply_post_filters
+
+    #     self.logger.debug(f"get_filtered (with relations) filters={filters}")
+    #     with self._session_scope(session) as sess:
+    #         query = sess.query(self._model_class).options(
+    #             joinedload(Appointment.patient),
+    #             joinedload(Appointment.note)
+    #         )
+    #         query = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+    #         post_filters = getattr(query, '_post_filters', [])
+    #         items = query.all()
+    #         if post_filters:
+    #             items = apply_post_filters(items, post_filters, self._model_class)
+    #         return [self._dto_class.from_orm(item) for item in items]
+
     def get_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60,
-                     session: Optional[Session] = None) -> List[AppointmentDTO]:
+                    session: Optional[Session] = None) -> List[AppointmentDTO]:
         """Возвращает отфильтрованные приёмы с подгруженными связями."""
-        from ..utils.filtering import apply_filters, apply_post_filters
+        # from ..utils.filtering import apply_filters, apply_post_filters
 
         self.logger.debug(f"get_filtered (with relations) filters={filters}")
         with self._session_scope(session) as sess:
@@ -801,12 +1058,14 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 joinedload(Appointment.patient),
                 joinedload(Appointment.note)
             )
-            query = apply_filters(query, self._model_class, filters, fuzzy_threshold)
-            post_filters = getattr(query, '_post_filters', [])
+            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
             items = query.all()
             if post_filters:
                 items = apply_post_filters(items, post_filters, self._model_class)
             return [self._dto_class.from_orm(item) for item in items]
+
+
+
     # ----------------------------------------------------------------------
     # Методы создания, обновления и удаления (без изменений)
     # ----------------------------------------------------------------------
@@ -876,11 +1135,11 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             # Обработка заметки
             note_id = dto.note_id
             if note_text:
-                note_service = NoteService( # создаём экземпляр (можно без логгера)
-                    self._db,
-                    logger_name=self.logger.name + ".NoteService" # (можно без логгера)
-                    )  
-                note_dto = note_service.get_or_create_note(note_text, session=sess)
+                # note_service = NoteService( # создаём экземпляр (можно без логгера)
+                #     self._db,
+                #     logger_name=self.logger.name + ".NoteService" # (можно без логгера)
+                #     )  
+                note_dto = self._note_service.get_or_create_note(note_text, session=sess)
                 note_id = note_dto.id if note_dto else None
 
             appointment = self._model_class(
@@ -969,8 +1228,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
 
             # Обработка заметки
             if note_text is not None:
-                note_service = NoteService(self._db)
-                note_dto = note_service.get_or_create_note(note_text, session=sess)
+                # note_service = NoteService(self._db)
+                note_dto = self._note_service.get_or_create_note(note_text, session=sess)
                 app.note_id = note_dto.id if note_dto else None
             elif dto.note_id is not None:
                 app.note_id = dto.note_id
@@ -1440,214 +1699,6 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
 #             return updated_dto
 
 
-# class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
-#     def __init__(
-#             self, 
-#             db: Database, 
-#             logger_name: Optional[str] = None, 
-#         ):
-#         if logger_name is None:
-#             logger_name = self.__class__.__name__
-            
-#         # Вызов конструктора базового класса с указанием классов модели, DTO и репозитория
-#         super().__init__(
-#             db          =db,
-#             repo_class  = AppointmentNoteRepository,
-#             model_class = AppointmentNote,
-#             dto_class   = AppointmentNoteDTO,
-#             logger_name = logger_name
-#         )
-
-#     def _not_found_exception(self, entity_id: int) -> Exception:
-#         return AppointmentNoteNotFoundError(entity_id)
-
-#     def get_note(self, note_id: int) -> AppointmentNoteDTO:
-#         self.logger.debug(f"Возвращает запись по ID ({note_id})")
-#         return self.get_by_id(note_id)
-
-#     def create_note(self, text: str) -> AppointmentNoteDTO:
-#         self.logger.debug("Создание заметки")
-#         with self._db.session_scope() as session:
-#             note = self._model_class(text=text)
-#             session.add(note)
-#             session.flush()
-#             dto_out = self._dto_class.from_orm(note)
-#             self.logger.info(f"Создана заметка id={dto_out.id}")
-#             return dto_out
-
-#     def update_note(self, note_id: int, text: str) -> AppointmentNoteDTO:
-#         self.logger.debug(f"Обновление заметки id={note_id}")
-#         with self._db.session_scope() as session:
-#             repo = self._get_repo(session)
-#             note = repo.get_by_id(note_id)
-#             if note is None:
-#                 raise AppointmentNoteNotFoundError(note_id)
-#             note.text = text
-#             updated_dto = self._dto_class.from_orm(note)
-#             self.logger.info(f"Обновлена заметка id={updated_dto.id}")
-#             return updated_dto
-
-#     def delete_note(self, note_id: int) -> None:
-#         self.logger.debug(f"Удаляет запись по ID ({note_id})")
-#         self.delete(note_id)
-
-#     def get_or_create_note(self, text: str) -> Optional[AppointmentNoteDTO]:
-#         """
-#         Возвращает существующую заметку по точному совпадению текста,
-#         либо создаёт новую, если такой ещё нет.
-#         Если text пустой или None, возвращает None.
-#         """
-#         if not text:  # пустой текст не обрабатываем
-#             return None
-
-#         self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
-#         with self._db.session_scope() as session:
-#             repo = self._get_repo(session)
-#             note = repo.get_by_text_exact(text)
-#             if note:
-#                 self.logger.debug(f"Найдена существующая заметка id={note.id}")
-#                 return self._dto_class.from_orm(note)
-
-#             # Создаём новую заметку
-#             note = self._model_class(text=text)
-#             session.add(note)
-#             session.flush()  # чтобы получить id
-#             self.logger.info(f"Создана новая заметка id={note.id}")
-#             return self._dto_class.from_orm(note)
-#     def get_or_create_note_in_session(self, session, text: str) -> Optional[AppointmentNoteDTO]:
-#         """
-#         Возвращает существующую заметку по точному совпадению текста,
-#         либо создаёт новую, используя переданную сессию.
-#         Если text пустой или None, возвращает None.
-#         """
-#         if not text:
-#             return None
-
-#         self.logger.debug(f"Поиск или создание заметки в переданной сессии: {text[:50]}...")
-#         repo = AppointmentNoteRepository(session)
-#         note = repo.get_by_text_exact(text)
-#         if note:
-#             self.logger.debug(f"Найдена существующая заметка id={note.id}")
-#             return self._dto_class.from_orm(note)
-
-#         # Создаём новую заметку
-#         note = self._model_class(text=text)
-#         session.add(note)
-#         session.flush()  # чтобы получить id
-#         self.logger.info(f"Создана новая заметка id={note.id}")
-#         return self._dto_class.from_orm(note)
-    
-class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
-    """
-    Сервис для работы с заметками приёмов.
-    Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
-    """
-
-    def __init__(self, db: Database, logger_name: Optional[str] = None):
-        if logger_name is None:
-            logger_name = self.__class__.__name__
-        super().__init__(
-            db=db,
-            repo_class=AppointmentNoteRepository,
-            model_class=AppointmentNote,
-            dto_class=AppointmentNoteDTO,
-            logger_name=logger_name
-        )
-
-    def _not_found_exception(self, entity_id: int) -> Exception:
-        return AppointmentNoteNotFoundError(entity_id)
-
-    # ----------------------------------------------------------------------
-    # Переопределённые методы базового класса (если нужно добавить логику)
-    # ----------------------------------------------------------------------
-    def get_all(self, session: Optional[Session] = None) -> List[AppointmentNoteDTO]:
-        """
-        Возвращает все заметки.
-        """
-        self.logger.debug("Запрос всех заметок")
-        return super().get_all(session=session)
-
-    def get_by_id(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
-        """
-        Возвращает заметку по ID.
-        """
-        self.logger.debug(f"Запрос заметки id={note_id}")
-        return super().get_by_id(note_id, session=session)
-
-    def delete(self, note_id: int, session: Optional[Session] = None) -> None:
-        """
-        Удаляет заметку по ID.
-        """
-        self.logger.debug(f"Удаление заметки id={note_id}")
-        super().delete(note_id, session=session)
-
-    # ----------------------------------------------------------------------
-    # Специфические методы сервиса
-    # ----------------------------------------------------------------------
-    def get_note(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
-        """
-        Синоним для get_by_id.
-        """
-        return self.get_by_id(note_id, session=session)
-
-    def create_note(self, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
-        """
-        Создаёт новую заметку с указанным текстом.
-        """
-        self.logger.debug("Создание заметки")
-        with self._session_scope(session) as sess:
-            note = self._model_class(text=text)
-            sess.add(note)
-            sess.flush()
-            dto_out = self._dto_class.from_orm(note)
-            self.logger.info(f"Создана заметка id={dto_out.id}")
-            return dto_out
-
-    def update_note(self, note_id: int, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
-        """
-        Обновляет текст существующей заметки.
-        """
-        self.logger.debug(f"Обновление заметки id={note_id}")
-        with self._session_scope(session) as sess:
-            repo = self._get_repo(sess)
-            note = repo.get_by_id(note_id)
-            if note is None:
-                raise AppointmentNoteNotFoundError(note_id)
-            note.text = text
-            updated_dto = self._dto_class.from_orm(note)
-            self.logger.info(f"Обновлена заметка id={updated_dto.id}")
-            return updated_dto
-
-    def delete_note(self, note_id: int, session: Optional[Session] = None) -> None:
-        """
-        Удаляет заметку (синоним delete).
-        """
-        self.logger.debug(f"Удаляет запись по ID ({note_id})")
-        self.delete(note_id, session=session)
-
-    def get_or_create_note(self, text: str, session: Optional[Session] = None) -> Optional[AppointmentNoteDTO]:
-        """
-        Возвращает существующую заметку по точному совпадению текста,
-        либо создаёт новую, если такой ещё нет.
-        Если text пустой или None, возвращает None.
-        """
-        if not text:
-            return None
-
-        self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
-        with self._session_scope(session) as sess:
-            repo = self._get_repo(sess)
-            note = repo.get_by_text_exact(text)
-            if note:
-                self.logger.debug(f"Найдена существующая заметка id={note.id}")
-                return self._dto_class.from_orm(note)
-
-            # Создаём новую заметку
-            note = self._model_class(text=text)
-            sess.add(note)
-            sess.flush()
-            self.logger.info(f"Создана новая заметка id={note.id}")
-            return self._dto_class.from_orm(note)
 
 # class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
 #     def __init__(
@@ -1813,6 +1864,13 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
     #         dto_out = self._dto_class.from_orm(photo)
     #         self.logger.info(f"Добавлено фото id={dto_out.id} к приёму {appointment_id}")
     #         return dto_out
+
+    # ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'}
+
+    # def _is_allowed_file(filename: str) -> bool:
+    #     ext = os.path.splitext(filename)[1].lower()
+    #     return ext in ALLOWED_EXTENSIONS
+
     def add_photo_to_appointment(self, appointment_id: int, source_file_path: str,
                                   description: str = "", session: Optional[Session] = None) -> PhotoDTO:
         """
@@ -1823,6 +1881,16 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
         Если копирование не удалось, запись удаляется, и исключение пробрасывается.
         """
         self.logger.debug(f"Добавление фото к приёму id={appointment_id}, файл={source_file_path}, описание='{description}'")
+        
+        # 1. Проверка существования и типа файла
+        if not os.path.isfile(source_file_path):
+            raise PhotoFileError(source_file_path, "проверка", "файл не существует")
+
+        # if not self._is_allowed_file(source_file_path):
+        #     raise PhotoFileError(source_file_path, "проверка", "неподдерживаемый формат файла")
+
+        # # 2. Проверка свободного места и прав (опционально)
+        # file_size = os.path.getsize(source_file_path)
 
         with self._session_scope(session) as sess:
             # Проверяем существование приёма
@@ -1923,6 +1991,39 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
 
     #         self.logger.info(f"Удалена запись фото id={photo_id}")
 
+    # def delete_photo(self, photo_id: int, session: Optional[Session] = None) -> None:
+    #     """
+    #     Удаляет фото:
+    #     1. Удаляет запись из БД.
+    #     2. После успешного удаления записи пытается удалить файл.
+    #     Если файл не удалился, только логирует ошибку (данные уже консистентны).
+    #     """
+    #     self.logger.debug(f"Удаление фото id={photo_id}")
+    #     file_path_to_delete = None
+
+    #     with self._session_scope(session) as sess:
+    #         repo = self._get_repo(sess)
+    #         photo = repo.get_by_id(photo_id)
+    #         if photo is None:
+    #             raise PhotoNotFoundError(photo_id)
+
+    #         # Запоминаем путь к файлу до удаления записи
+    #         # full_path = os.path.join(self._storage_path, photo.file_path)
+
+    #         file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
+    #         # Удаляем запись
+    #         repo.delete(photo)
+    #         # Коммит произойдёт при выходе из контекста
+
+    #     # После коммита удаляем файл (отдельно, чтобы не блокировать транзакцию)
+    #     if file_path_to_delete and os.path.exists(file_path_to_delete):
+    #         try:
+    #             os.remove(file_path_to_delete)
+    #             self.logger.debug(f"Удалён файл {file_path_to_delete}")
+    #         except Exception as e:
+    #             self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}")
+    #             # Не прерываем операцию, только логируем (запись уже удалена)
+    
     def delete_photo(self, photo_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет фото:
@@ -1931,32 +2032,27 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
         Если файл не удалился, только логирует ошибку (данные уже консистентны).
         """
         self.logger.debug(f"Удаление фото id={photo_id}")
-        file_path_to_delete = None
-
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             photo = repo.get_by_id(photo_id)
             if photo is None:
                 raise PhotoNotFoundError(photo_id)
-
+            
             # Запоминаем путь к файлу до удаления записи
-            # full_path = os.path.join(self._storage_path, photo.file_path)
-
             file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
-            # Удаляем запись
-            repo.delete(photo)
-            # Коммит произойдёт при выходе из контекста
 
-        # После коммита удаляем файл (отдельно, чтобы не блокировать транзакцию)
-        if file_path_to_delete and os.path.exists(file_path_to_delete):
+            # Сначала пытаемся удалить файл
             try:
-                os.remove(file_path_to_delete)
-                self.logger.debug(f"Удалён файл {file_path_to_delete}")
+                if os.path.exists(file_path_to_delete):
+                    os.remove(file_path_to_delete)
+                    self.logger.debug(f"Удалён файл {file_path_to_delete}")
             except Exception as e:
                 self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}")
-                # Не прерываем операцию, только логируем (запись уже удалена)
+                raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
-
+            # Если файл успешно удалён (или не существовал), удаляем запись
+            repo.delete(photo) # Удаляем запись
+            self.logger.info(f"Удалена запись фото id={photo_id}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы (не требуют сессии)
@@ -1967,14 +2063,12 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
     def _generate_target_path(self, source_path: str, appointment_id: int, photo_id: int) -> str:
         """
         Генерирует полный путь для сохранения файла на основе appointment_id и photo_id.
-        Формат: <storage>/app_<appointment_id>/<photo_id>_<original_filename>
+        Формат: <storage>/app_<appointment_id>/<photo_id>_<name(base_name)>_<unique_id>_<ext(base_name)>
         """
         base_name = os.path.basename(source_path)
         name, ext = os.path.splitext(base_name)
-        # Добавляем timestamp для уникальности (на всякий случай)
-        timestamp = int(time_module.time())
-        filename = f"{photo_id}_{name}_{timestamp}{ext}"
-        # Папка для конкретного приёма
+        unique_id = uuid.uuid4().hex[:8]  # первые 8 символов UUID
+        filename = f"{photo_id}_{name}_{unique_id}{ext}"
         app_folder = os.path.join(self._storage_path, f"app_{appointment_id}")
         return os.path.join(app_folder, filename)
 

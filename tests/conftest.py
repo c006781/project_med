@@ -219,8 +219,8 @@ def patient_service(database):
     return PatientService(database)
 
 @pytest.fixture
-def appointment_service(database):
-    return AppointmentService(database)
+def appointment_service(database, note_service):
+    return AppointmentService(database, note_service=note_service)
 
 @pytest.fixture
 def note_service(database):
@@ -268,8 +268,8 @@ def photo_repo(db_session):
     return PhotoRepository(db_session)
 
 @pytest.fixture
-def appointment_service(database):
-    return AppointmentService(database)
+def appointment_service(database, note_service):
+    return AppointmentService(database, note_service=note_service)
 
 @pytest.fixture
 def note_service(database):

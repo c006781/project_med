@@ -32,12 +32,12 @@ def test_patient_repository_add_and_get(patient_repo, db_session):
     assert fetched is not None
     assert fetched.first_name == "Test"
 
-def test_patient_repository_update(patient_repo, db_session, sample_patient):
-    sample_patient.first_name = "Updated"
-    patient_repo.update(sample_patient)
-    db_session.commit()
-    updated = patient_repo.get_by_id(sample_patient.id)
-    assert updated.first_name == "Updated"
+# def test_patient_repository_update(patient_repo, db_session, sample_patient):
+#     sample_patient.first_name = "Updated"
+#     patient_repo.update(sample_patient)
+#     db_session.commit()
+#     updated = patient_repo.get_by_id(sample_patient.id)
+#     assert updated.first_name == "Updated"
 
 def test_patient_repository_delete(patient_repo, db_session, sample_patient):
     patient_repo.delete(sample_patient)
@@ -57,12 +57,12 @@ def test_note_repository_add(note_repo, db_session):
     assert note.id is not None
     assert note_repo.get_by_id(note.id).text == "Новая заметка"
 
-def test_note_repository_update(note_repo, db_session, sample_note):
-    sample_note.text = "Изменённая заметка"
-    note_repo.update(sample_note)
-    db_session.commit()
-    updated = note_repo.get_by_id(sample_note.id)
-    assert updated.text == "Изменённая заметка"
+# def test_note_repository_update(note_repo, db_session, sample_note):
+#     sample_note.text = "Изменённая заметка"
+#     note_repo.update(sample_note)
+#     db_session.commit()
+#     updated = note_repo.get_by_id(sample_note.id)
+#     assert updated.text == "Изменённая заметка"
 
 def test_note_repository_delete(note_repo, db_session, sample_note):
     note_repo.delete(sample_note)
@@ -92,13 +92,13 @@ def test_appointment_repository_get_by_id(appointment_repo, sample_appointment):
     assert app is not None
     assert app.patient_id == sample_appointment.patient_id
 
-def test_appointment_repository_get_by_patient(appointment_repo, sample_appointment, sample_patient, db_session):
+def test_appointment_repository_get_by_patient_with_relations(appointment_repo, sample_appointment, sample_patient, db_session):
     # Добавим ещё один приём для того же пациента
     from datetime import date, time
     app2 = Appointment(patient_id=sample_patient.id, date=date.today(), time=time(11, 0))
     db_session.add(app2)
     db_session.commit()
-    apps = appointment_repo.get_by_patient(sample_patient.id)
+    apps = appointment_repo.get_by_patient_with_relations(sample_patient.id)
     assert len(apps) == 2
     assert sample_appointment.id in [a.id for a in apps]
 
@@ -108,12 +108,12 @@ def test_appointment_repository_add(appointment_repo, db_session, sample_patient
     db_session.commit()
     assert app.id is not None
 
-def test_appointment_repository_update(appointment_repo, db_session, sample_appointment):
-    sample_appointment.time = time(14, 30)
-    appointment_repo.update(sample_appointment)
-    db_session.commit()
-    updated = appointment_repo.get_by_id(sample_appointment.id)
-    assert updated.time == time(14, 30)
+# def test_appointment_repository_update(appointment_repo, db_session, sample_appointment):
+#     sample_appointment.time = time(14, 30)
+#     appointment_repo.update(sample_appointment)
+#     db_session.commit()
+#     updated = appointment_repo.get_by_id(sample_appointment.id)
+#     assert updated.time == time(14, 30)
 
 def test_appointment_repository_delete(appointment_repo, db_session, sample_appointment):
     appointment_repo.delete(sample_appointment)

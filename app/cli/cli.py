@@ -239,8 +239,9 @@ def get_patient_service() -> PatientService:
     return PatientService(get_db())
 
 def get_appointment_service() -> AppointmentService:
-    return AppointmentService(get_db())
-
+    db = get_db()
+    note_service = NoteService(db)
+    return AppointmentService(db, note_service=note_service)
 def get_note_service() -> NoteService:
     return NoteService(get_db())
 
@@ -611,9 +612,15 @@ def appointment_create(patient_id, date_str, time_str, note_text):
 def appointment_update(id, date_str, time_str, note_id, note_text):
     """Обновить приём."""
     AppLogger.get_instance(name='system').debug(f"Обновить приём id={id}, ...")
+
+    date_str = date_str if date_str else None
+    time_str = time_str if time_str else None
+
     service = get_appointment_service()
     try:
+
         existing = service.get_appointment(id)
+
         if date_str:
             try:
                 existing.date = date.fromisoformat(date_str)  # используем date из импорта
@@ -627,6 +634,7 @@ def appointment_update(id, date_str, time_str, note_id, note_text):
             except:
                 click.echo("Неверный формат времени.", err=True)
                 return
+
         dto_in = existing
         if note_id is not None:
             dto_in.note_id = note_id

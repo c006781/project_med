@@ -153,7 +153,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, F
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy import event, Index
+from sqlalchemy import event, Index, func
 
 Base = declarative_base()
 
@@ -199,7 +199,9 @@ class Appointment(Base):
     patient_id = Column(Integer, ForeignKey('patients.id'), nullable=False)
     date = Column(Date, nullable=False)
     # time = Column(Time, nullable=True, default=time.now)  
-    time = Column(Time, nullable=True, default=lambda: datetime.now().time())
+    # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
+    time = Column(Time, nullable=True, default=func.current_time())
+    # time = Column(Time, nullable=True, server_default=func.current_time())
     # notes = Column(Text, nullable=True)      # заметки / рекомендации
     note_id = Column(Integer, ForeignKey('appointments_notes.id'), nullable=True)   # внешний ключ на заметку
 

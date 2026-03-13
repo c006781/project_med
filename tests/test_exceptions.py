@@ -23,7 +23,7 @@ def test_appointment_not_found_error():
 
 def test_photo_file_error():
     exc = PhotoFileError("/path", "копирование", "нет места")
-    assert "Ошибка копирование файла '/path': нет места." in str(exc)
+    assert "Ошибка копирование файла '/path': нет места" in str(exc)
 
 def test_download_error():
     exc = DownloadError("Сеть недоступна")

@@ -74,13 +74,30 @@ class PhotoValidationError(AppException):
         message = f"Ошибка валидации фотографии, поле '{field}': {reason}."
         super().__init__(message, code=4002)
 
+# class PhotoFileError(AppException):
+#     """
+#     Ошибка при работе с файлом фотографии (не найден, не удалось скопировать и т.д.).
+#     """
+#     def __init__(self, path: str, operation: str, reason: str):
+#         message = f"Ошибка {operation} файла '{path}': {reason}."
+#         super().__init__(message, code=4003)
+
 class PhotoFileError(AppException):
-    """
-    Ошибка при работе с файлом фотографии (не найден, не удалось скопировать и т.д.).
-    """
-    def __init__(self, path: str, operation: str, reason: str):
-        message = f"Ошибка {operation} файла '{path}': {reason}."
+    def __init__(self, path: str, operation: str, reason: str, errno: int = None):
+        message = f"Ошибка {operation} файла '{path}': {reason}"
+        if errno:
+            message += f" (код ошибки: {errno})"
         super().__init__(message, code=4003)
+        self.errno = errno
+
+class PhotoStoragePermissionError(PhotoFileError):
+    def __init__(self, path: str, operation: str):
+        super().__init__(path, operation, "недостаточно прав доступа", errno=13)
+
+class PhotoStorageNoSpaceError(PhotoFileError):
+    def __init__(self, path: str, operation: str):
+        super().__init__(path, operation, "недостаточно места на диске", errno=28)
+
 
 
 
@@ -126,7 +143,6 @@ class ConnectionError(DatabaseError):
     def __init__(self, detail: str):
         message = f"Ошибка подключения к БД: {detail}"
         super().__init__(message, code=6002)
-
 
 
 

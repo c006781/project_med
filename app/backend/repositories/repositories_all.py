@@ -2,7 +2,7 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 
 
 
@@ -83,6 +83,16 @@ except ImportError as e:
     except ImportError as e:
         pass #  raise # e # pass
 
+try:
+    from ...utils.filtering import apply_filters
+except ImportError as e:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 3)
+        from ...utils.filtering import apply_filters
+    except ImportError as e:
+        pass #  raise # e # pass
+
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
@@ -95,12 +105,64 @@ class BaseRepository:
         self._session = session
 
         self.logger = AppLogger.get_instance(self.__class__.__name__)
-        
 
+    @property
+    def model_class(self):
+        """Должен быть переопределён в наследниках."""
+        raise NotImplementedError("Подклассы должны определить model_class")
+    
+    def get_unique_values(self, column_name: str) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца.
+        """
+        self.logger.debug(f"get_unique_values: column_name = {column_name}")
+        if self.model_class is None:
+            raise NotImplementedError("model_class не определён в репозитории")
+        try:
+            column = getattr(self.model_class, column_name, None)
+            if column is None:
+                self.logger.warning(f"Столбец '{column_name}' не найден в модели {self.model_class.__name__}")
+                return []
+            stmt = select(column).distinct()
+            return self._session.execute(stmt).scalars().all()
+        except Exception as e:
+            self.logger.exception(f"Ошибка в get_unique_values (столбец '{column_name}'): {e}")
+            raise  # пробрасываем исключение, чтобы не скрывать проблемы 
+
+    def get_page(self, offset: int, limit: int,
+                 filters: Optional[List[Dict[str, Any]]] = None,
+                 order_by: Optional[List] = None) -> List[Any]:
+        """
+        Возвращает страницу записей.
+        :param offset: смещение
+        :param limit: размер страницы
+        :param filters: список фильтров (без fuzzy)
+        :param order_by: список условий сортировки (например, [Patient.last_name.asc()])
+        """
+        query = self._session.query(self.model_class)
+        if filters:
+            # Отфильтровываем fuzzy-операторы, они не поддерживаются на уровне SQL
+            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+            if sql_filters:
+                query = apply_filters(query, self.model_class, sql_filters)
+        if order_by:
+            query = query.order_by(*order_by)
+        return query.offset(offset).limit(limit).all()
+
+    def count(self, filters: Optional[List[Dict[str, Any]]] = None) -> int:
+        """Возвращает общее количество записей с учётом SQL-фильтров."""
+        query = self._session.query(self.model_class)
+        if filters:
+            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+            if sql_filters:
+                query = apply_filters(query, self.model_class, sql_filters)
+        return query.count()
 
 
 
 class AppointmentNoteRepository(BaseRepository):
+    model_class =  AppointmentNote
+
     def get_by_id(self, note_id: int) -> Optional[AppointmentNote]:
         self.logger.debug(f"get_by_id: note_id = {note_id}")
         return self._session.get(AppointmentNote, note_id)
@@ -119,39 +181,42 @@ class AppointmentNoteRepository(BaseRepository):
         self.logger.debug(f"delete: note = {note}")
         self._session.delete(note)
 
-    def get_unique_values(self, column_name: str) -> List[Any]:
-        """
-        Возвращает список уникальных значений для указанного столбца таблицы appointments_notes.
+    # def get_unique_values(self, column_name: str) -> List[Any]:
+    #     """
+    #     Возвращает список уникальных значений для указанного столбца таблицы appointments_notes.
         
-        Аргументы:
-            column_name (str): имя столбца модели AppointmentNote (например, 'text', 'created_at').
+    #     Аргументы:
+    #         column_name (str): имя столбца модели AppointmentNote (например, 'text', 'created_at').
         
-        Возвращает:
-            List[Any]: список уникальных значений. Если столбец не найден или произошла ошибка,
-                       возвращается пустой список.
-        """
-        self.logger.debug(f"get_unique_values: column_name = {column_name}")
-        # try:
-        #     column = getattr(AppointmentNote, column_name, None)
-        #     if column is None:
-        #         return []
-        #     # Выполняем запрос: SELECT DISTINCT column_name FROM appointments_notes
-        #     return self._session.query(column).distinct().scalars().all()
-        # except Exception:
-        #     # В реальном приложении здесь должно быть логирование ошибки
-        #     return []
+    #     Возвращает:
+    #         List[Any]: список уникальных значений. Если столбец не найден или произошла ошибка,
+    #                    возвращается пустой список.
+    #     """
+    #     self.logger.debug(f"get_unique_values: column_name = {column_name}")
+    #     # try:
+    #     #     column = getattr(AppointmentNote, column_name, None)
+    #     #     if column is None:
+    #     #         return []
+    #     #     # Выполняем запрос: SELECT DISTINCT column_name FROM appointments_notes
+    #     #     return self._session.query(column).distinct().scalars().all()
+    #     # except Exception:
+    #     #     # В реальном приложении здесь должно быть логирование ошибки
+    #     #     return []
         
-        try:
-            # column = getattr(Patient, column_name, None)
-            column = getattr(AppointmentNote, column_name, None)   # <-- исправлено
+    #     try:
+    #         # column = getattr(Patient, column_name, None)
+    #         column = getattr(AppointmentNote, column_name, None)   # <-- исправлено
             
-            if column is None:
-                return []
-            stmt = select(column).distinct()
-            return self._session.execute(stmt).scalars().all()
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в AppointmentNoteRepository.get_unique_values (столбец '{column_name}'): {e}")
-            return []
+    #         if column is None:
+    #             return []
+    #         stmt = select(column).distinct()
+    #         return self._session.execute(stmt).scalars().all()
+    #     except AttributeError:
+    #         AppLogger.get_instance('system').exception(f"Ошибка наличия столбца в AppointmentNoteRepository.get_unique_values (столбец '{column_name} ненайден'): {e}")
+    #         return []  # столбец не найден – возвращаем пустой список
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в AppointmentNoteRepository.get_unique_values (столбец '{column_name}'): {e}")
+    #         raise  # пробрасываем дальше
         
     def get_all(self) -> List[AppointmentNote]:
         self.logger.debug(f"get_all")
@@ -169,6 +234,8 @@ class AppointmentNoteRepository(BaseRepository):
 
 
 class AppointmentRepository(BaseRepository):
+    model_class =  Appointment
+
     def get_all(self) -> List[Appointment]:
         self.logger.debug(f"get_all")
         return self._session.query(Appointment).all()
@@ -195,34 +262,37 @@ class AppointmentRepository(BaseRepository):
         self.logger.debug(f"delete: appointment = {appointment}")
         self._session.delete(appointment)
 
-    def get_unique_values(self, column_name: str) -> List[Any]:
-        """
-        Возвращает список уникальных значений для указанного столбца таблицы appointments.
+    # def get_unique_values(self, column_name: str) -> List[Any]:
+    #     """
+    #     Возвращает список уникальных значений для указанного столбца таблицы appointments.
         
-        Аргументы:
-            column_name (str): имя столбца модели Appointment (например, 'date', 'time', 'patient_id').
+    #     Аргументы:
+    #         column_name (str): имя столбца модели Appointment (например, 'date', 'time', 'patient_id').
         
-        Возвращает:
-            List[Any]: список уникальных значений.
-        """
-        self.logger.debug(f"get_unique_values: column_name = {column_name}")
-        # try:
-        #     column = getattr(Appointment, column_name, None)
-        #     if column is None:
-        #         return []
-        #     return self._session.query(column).distinct().scalars().all()
-        # except Exception:
-        #     return []
+    #     Возвращает:
+    #         List[Any]: список уникальных значений.
+    #     """
+    #     self.logger.debug(f"get_unique_values: column_name = {column_name}")
+    #     # try:
+    #     #     column = getattr(Appointment, column_name, None)
+    #     #     if column is None:
+    #     #         return []
+    #     #     return self._session.query(column).distinct().scalars().all()
+    #     # except Exception:
+    #     #     return []
 
-        try:
-            column = getattr(Appointment, column_name, None)
-            if column is None:
-                return []
-            stmt = select(column).distinct()
-            return self._session.execute(stmt).scalars().all()
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в AppointmentRepository.get_unique_values (столбец '{column_name}'): {e}")
-            return []
+    #     try:
+    #         column = getattr(Appointment, column_name, None)
+    #         if column is None:
+    #             return []
+    #         stmt = select(column).distinct()
+    #         return self._session.execute(stmt).scalars().all()
+    #     except AttributeError:
+    #         AppLogger.get_instance('system').exception(f"Ошибка наличия столбца в AppointmentRepository.get_unique_values (столбец '{column_name} ненайден'): {e}")
+    #         return []  # столбец не найден – возвращаем пустой список
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в AppointmentRepository.get_unique_values (столбец '{column_name}'): {e}")
+    #         raise  # пробрасываем дальше
 
     def get_all(self) -> List[Appointment]:
         self.logger.debug(f"get_all")
@@ -255,68 +325,129 @@ class AppointmentRepository(BaseRepository):
         return self._session.query(Appointment).options(
             joinedload(Appointment.patient),
             joinedload(Appointment.note)
-        ).filter(Appointment.id == appointment_id).first()
-    
-    # остальные методы...
+        ).filter(Appointment.id == appointment_id).first()   
 
+    def get_page(self, offset: int, limit: int,
+                 filters: Optional[List[Dict[str, Any]]] = None,
+                 order_by: Optional[List] = None) -> List[Appointment]:
+        """Возвращает страницу приёмов с подгруженными пациентом и заметкой."""
+        query = self._session.query(Appointment).options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.note)
+        )
+        if filters:
+            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+            if sql_filters:
+                query = apply_filters(query, Appointment, sql_filters)
+        if order_by:
+            query = query.order_by(*order_by)
+        return query.offset(offset).limit(limit).all()
+
+    def get_page_by_patient(self, patient_id: int, offset: int, limit: int,
+                            filters: Optional[List[Dict[str, Any]]] = None,
+                            order_by: Optional[List] = None) -> List[Appointment]:
+        """Возвращает страницу приёмов конкретного пациента с подгрузкой связей."""
+        base_filters = [{'column': 'patient_id', 'operator': 'eq', 'value': patient_id}]
+        if filters:
+            all_filters = base_filters + filters
+        else:
+            all_filters = base_filters
+        return self.get_page(offset, limit, filters=all_filters, order_by=order_by)
+    
+    def count_by_patient(self, patient_id: int, filters: Optional[List[Dict[str, Any]]] = None) -> int:
+        """Количество приёмов пациента с учётом дополнительных фильтров."""
+        base_filters = [{'column': 'patient_id', 'operator': 'eq', 'value': patient_id}]
+        if filters:
+            all_filters = base_filters + filters
+        else:
+            all_filters = base_filters
+        return self.count(filters=all_filters)
 
 class PhotoRepository(BaseRepository):
+    model_class =  Photo
+
     def get_by_appointment(self, appointment_id: int) -> List[Photo]:
         self.logger.debug(f"get_by_appointment: appointment_id = {appointment_id}")
-        return self._session.query(Photo).filter_by(appointment_id=appointment_id).all()
+        try:
+            return self._session.query(Photo).filter_by(appointment_id=appointment_id).all()
+        except Exception as e:
+            self.logger.exception(f"Ошибка в get_by_appointment: {e}")
+            raise   
 
     def get_by_id(self, photo_id: int) -> Optional[Photo]:
         self.logger.debug(f"get_by_id: photo_id = {photo_id}")
-        return self._session.get(Photo, photo_id)
+        try:
+            return self._session.get(Photo, photo_id)
+        except Exception as e:
+            self.logger.exception(f"Ошибка в get_by_id: {e}")
+            raise   
 
     def add(self, photo: Photo) -> Photo:
         self.logger.debug(f"add: photo = {photo}")
-        self._session.add(photo)
-        return photo
+        try:
+            self._session.add(photo)
+        except Exception as e:
+            self.logger.exception(f"Ошибка в add: {e}")
+            raise 
+
+        return photo  
 
     def delete(self, photo: Photo) -> None:
         self.logger.debug(f"delete: photo = {photo}")
-        self._session.delete(photo)
-    
-
-    def get_unique_values(self, column_name: str) -> List[Any]:
-        """
-        Возвращает список уникальных значений для указанного столбца таблицы photos.
-        
-        Аргументы:
-            column_name (str): имя столбца модели Photo (например, 'file_path', 'description').
-        
-        Возвращает:
-            List[Any]: список уникальных значений.
-        """
-        self.logger.debug(f"get_unique_values: column_name = {column_name}")
-        # try:
-        #     column = getattr(Photo, column_name, None)
-        #     if column is None:
-        #         return []
-        #     return self._session.query(column).distinct().scalars().all()
-        # except Exception:
-        #     return []
         try:
-            column = getattr(Photo, column_name, None)
-            if column is None:
-                return []
-            stmt = select(column).distinct()
-            return self._session.execute(stmt).scalars().all()
+            self._session.delete(photo)
         except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PhotoRepository.get_unique_values (столбец '{column_name}'): {e}")
-            return []
-
-        
+            self.logger.exception(f"Ошибка в delete: {e}")
+            raise   
+    
     def get_all(self) -> List[Photo]:
         """Возвращает все фотографии."""
         self.logger.debug(f"get_all")
-        return self._session.query(Photo).all()
+        try:
+            return self._session.query(Photo).all()
+        except Exception as e:
+            self.logger.exception(f"Ошибка в delete: {e}")
+            raise    
+          
+    # def get_unique_values(self, column_name: str) -> List[Any]:
+    #     """
+    #     Возвращает список уникальных значений для указанного столбца таблицы photos.
+        
+    #     Аргументы:
+    #         column_name (str): имя столбца модели Photo (например, 'file_path', 'description').
+        
+    #     Возвращает:
+    #         List[Any]: список уникальных значений.
+    #     """
+    #     self.logger.debug(f"get_unique_values: column_name = {column_name}")
+    #     # try:
+    #     #     column = getattr(Photo, column_name, None)
+    #     #     if column is None:
+    #     #         return []
+    #     #     return self._session.query(column).distinct().scalars().all()
+    #     # except Exception:
+    #     #     return []
+    #     try:
+    #         column = getattr(Photo, column_name, None)
+    #         if column is None:
+    #             return []
+    #         stmt = select(column).distinct()
+    #         return self._session.execute(stmt).scalars().all()
+    #     except AttributeError:
+    #         AppLogger.get_instance('system').exception(f"Ошибка наличия столбца в PhotoRepository.get_unique_values (столбец '{column_name} ненайден'): {e}")
+    #         return []  # столбец не найден – возвращаем пустой список
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PhotoRepository.get_unique_values (столбец '{column_name}'): {e}")
+    #         raise  # пробрасываем дальше
+
+        
 
 
 
 
 class PatientRepository(BaseRepository):
+    model_class =  Patient
+    
     def get_all(self) -> List[Patient]:
         self.logger.debug(f"get_all")
         
@@ -374,39 +505,42 @@ class PatientRepository(BaseRepository):
         
 
 
-    def get_unique_values(self, column_name: str) -> List[Any]:
-        """
-        Возвращает список уникальных значений для указанного столбца таблицы patients.
+    # def get_unique_values(self, column_name: str) -> List[Any]:
+    #     """
+    #     Возвращает список уникальных значений для указанного столбца таблицы patients.
         
-        Аргументы:
-            column_name (str): имя столбца модели Patient (например, 'last_name', 'birth_date', 'phone').
+    #     Аргументы:
+    #         column_name (str): имя столбца модели Patient (например, 'last_name', 'birth_date', 'phone').
         
-        Возвращает:
-            List[Any]: список уникальных значений.
-        """
-        self.logger.debug(f"get_unique_values: column_name = {column_name}")
-        # try:
-        #     column = getattr(Patient, column_name, None)
-        #     if column is None:
-        #         return []
-        #     return self._session.query(column).distinct().scalars().all()
-        # except Exception as e:
-        #     AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
-        #     return []
+    #     Возвращает:
+    #         List[Any]: список уникальных значений.
+    #     """
+    #     self.logger.debug(f"get_unique_values: column_name = {column_name}")
+    #     # try:
+    #     #     column = getattr(Patient, column_name, None)
+    #     #     if column is None:
+    #     #         return []
+    #     #     return self._session.query(column).distinct().scalars().all()
+    #     # except Exception as e:
+    #     #     AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
+    #     #     return []
 
-        try:
-            column = getattr(Patient, column_name, None)
-            if column is None:
-                return []
-            stmt = select(column).distinct()
-            return self._session.execute(stmt).scalars().all()
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}'): {e}")
-            return []
+    #     try:
+    #         column = getattr(Patient, column_name, None)
+    #         if column is None:
+    #             return []
+    #         stmt = select(column).distinct()
+    #         return self._session.execute(stmt).scalars().all()
+    #     except AttributeError:
+    #         AppLogger.get_instance('system').exception(f"Ошибка наличия столбца в PatientRepository.get_unique_values (столбец '{column_name} ненайден'): {e}")
+    #         return []  # столбец не найден – возвращаем пустой список
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}'): {e}")
+    #         raise  # пробрасываем дальше
 
 
     def get_all(self) -> List[Patient]:
-        """Возвращает все фотографии."""
+        """Возвращает всех Пациентов."""
         self.logger.debug(f"get_all")
         return self._session.query(Patient).all()
         

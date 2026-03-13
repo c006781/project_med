@@ -449,13 +449,13 @@ def appointment_list(patient_id, filter, fuzzy_threshold):
     try:
         if patient_id and not filters:
 
-            print('get_appointments_by_patient')
+            # print('get_appointments_by_patient')
             apps = service.get_appointments_by_patient(patient_id)
         elif filters:
-            print('get_filtered')
+            # print('get_filtered')
             apps = service.get_filtered(filters, fuzzy_threshold)
         else:
-            print('get_all')
+            # print('get_all')
             apps = service.get_all()
         if not apps:
             click.echo("Приёмы не найдены.")

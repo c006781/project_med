@@ -303,7 +303,10 @@ def generate_test_data(db_path:str="clinic.db"):
     Создаёт сессию и вызывает populate_test_data.
     """
     from sqlalchemy import create_engine
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
 
     AppLogger.get_instance(
         name = 'db_test_data'

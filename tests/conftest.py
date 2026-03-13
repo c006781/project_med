@@ -168,7 +168,11 @@ def engine():
     # Используем in-memory SQLite — быстро и изолированно.
     # Для будущего переезда на серверную БД можно параметризовать через переменные окружения.
     db_url = "sqlite:///:memory:"
-    engine = create_engine(db_url, echo=False)
+    engine = create_engine(
+        db_url, 
+        echo=False,
+        # connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine)  # создаём таблицы
     return engine
 

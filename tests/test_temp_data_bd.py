@@ -24,7 +24,10 @@ def test_generate_test_data(tmp_path):
     create_db(str(db_path), recreate=True)  # создаём таблицы
     generate_test_data(str(db_path))
     from sqlalchemy import create_engine
-    engine = create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        # connect_args={"check_same_thread": False},
+    )
     from app.models.bd.models import Base
     Base.metadata.create_all(engine)  # таблицы уже должны быть созданы, но для проверки
     from sqlalchemy.orm import sessionmaker

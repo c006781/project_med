@@ -307,7 +307,11 @@ def create_db(
 
     # Создаём движок (будет использовать SQLite)
     # Движок SQLAlchemy: если файл не существует, он будет создан автоматически
-    engine = create_engine(f"sqlite:///{db_path}", echo=False)  # echo=True для отладки SQL
+    engine = create_engine(
+        f"sqlite:///{db_path}", 
+        echo=False, # echo=True для отладки SQL
+        connect_args={"check_same_thread": False},
+    )
     # engine = create_engine(f"sqlite:///{abs_path}", echo=False)  # echo=True для отладки SQL
 
     # Создаём таблицы, если их нет

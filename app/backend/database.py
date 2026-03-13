@@ -82,7 +82,12 @@ class Database:
     Создаёт движок, фабрику сессий и предоставляет контекстный менеджер для сессий.
     """
     def __init__(self, db_url: str):
-        self.engine = create_engine(db_url, echo=False, future=True)
+        self.engine = create_engine(
+            db_url, 
+            echo=False, 
+            future=True,
+            connect_args={"check_same_thread": False},
+        )
         self.Session = scoped_session(sessionmaker(bind=self.engine, future=True))
         # Автоматическое создание таблиц (если их нет)
         Base.metadata.create_all(self.engine)

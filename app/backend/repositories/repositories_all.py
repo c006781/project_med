@@ -2,8 +2,8 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import List, Optional, Any, Dict
-
+from typing import List, Optional, Any, Dict, TypeVar, Generic
+from abc import ABC, abstractmethod
 
 
 # Импорты модулей
@@ -99,14 +99,48 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 from sqlalchemy import select
 
-class BaseRepository:
+ModelType = TypeVar('ModelType')
+
+class BaseRepository(Generic[ModelType], ABC):
     """Все репозитории должны наследовать этот класс."""
     def __init__(self, session: Session):
         self._session = session
 
         self.logger = AppLogger.get_instance(self.__class__.__name__)
 
+    def get_by_id(self, entity_id: int) -> Optional[ModelType]:
+        self.logger.debug(f"get_by_id: {entity_id}")
+        return self._session.get(self.model_class, entity_id)
+    
+    # def get_all(self) -> List[ModelType]:
+    #     self.logger.debug(f"get_all")
+    #     return self._session.get(self.model_class).all()
+    
+    def get_all(self) -> List[ModelType]:
+        self.logger.debug(f"get_all")
+        return self._session.query(self.model_class).all()
+
+    def add(self, entity: ModelType) -> ModelType:
+        self.logger.debug(f"add: {entity}")
+        self._session.add(entity)
+        return entity
+
+    def delete(self, entity: ModelType) -> None:
+        self.logger.debug(f"delete: {entity}")
+        self._session.delete(entity)
+
+    # # Метод update – если мы хотим его оставить
+    # def update(self, entity: ModelType) -> ModelType:
+    #     # Предполагаем, что объект уже прикреплён к сессии (получен через get_by_id)
+    #     # Если же объект может быть detached, используем merge:
+    #     # return self._session.merge(entity)
+    #     # Но тогда он должен возвращать обновлённый объект.
+    #     # Для простоты можно оставить без тела, просто зафиксировать, что изменения отслеживаются.
+    #     self.logger.debug(f"update: {entity} (изменения отслеживаются автоматически)")
+    #     return self._session.merge(entity)  
+
     @property
+    @abstractmethod
     def model_class(self):
         """Должен быть переопределён в наследниках."""
         raise NotImplementedError("Подклассы должны определить model_class")
@@ -131,7 +165,7 @@ class BaseRepository:
 
     def get_page(self, offset: int, limit: int,
                  filters: Optional[List[Dict[str, Any]]] = None,
-                 order_by: Optional[List] = None) -> List[Any]:
+                 order_by: Optional[List] = None) -> List[ModelType]:
         """
         Возвращает страницу записей.
         :param offset: смещение
@@ -163,23 +197,23 @@ class BaseRepository:
 class AppointmentNoteRepository(BaseRepository):
     model_class =  AppointmentNote
 
-    def get_by_id(self, note_id: int) -> Optional[AppointmentNote]:
-        self.logger.debug(f"get_by_id: note_id = {note_id}")
-        return self._session.get(AppointmentNote, note_id)
+    # def get_by_id(self, note_id: int) -> Optional[AppointmentNote]:
+    #     self.logger.debug(f"get_by_id: note_id = {note_id}")
+    #     return self._session.get(AppointmentNote, note_id)
 
-    def add(self, note: AppointmentNote) -> AppointmentNote:
-        self.logger.debug(f"add: note = {note}")
-        self._session.add(note)
-        return note
+    # def add(self, note: AppointmentNote) -> AppointmentNote:
+    #     self.logger.debug(f"add: note = {note}")
+    #     self._session.add(note)
+    #     return note
 
-    def update(self, note: AppointmentNote) -> AppointmentNote:
-        self.logger.debug(f"update: note = {note}")
-        self._session.merge(note)
-        return note
+    # def update(self, note: AppointmentNote) -> AppointmentNote:
+    #     self.logger.debug(f"update: note = {note}")
+    #     self._session.merge(note)
+    #     return note
 
-    def delete(self, note: AppointmentNote) -> None:
-        self.logger.debug(f"delete: note = {note}")
-        self._session.delete(note)
+    # def delete(self, note: AppointmentNote) -> None:
+    #     self.logger.debug(f"delete: note = {note}")
+    #     self._session.delete(note)
 
     # def get_unique_values(self, column_name: str) -> List[Any]:
     #     """
@@ -218,10 +252,10 @@ class AppointmentNoteRepository(BaseRepository):
     #         AppLogger.get_instance('system').exception(f"Ошибка в AppointmentNoteRepository.get_unique_values (столбец '{column_name}'): {e}")
     #         raise  # пробрасываем дальше
         
-    def get_all(self) -> List[AppointmentNote]:
-        self.logger.debug(f"get_all")
-        """Возвращает все заметки."""
-        return self._session.query(AppointmentNote).all()
+    # def get_all(self) -> List[AppointmentNote]:
+    #     self.logger.debug(f"get_all")
+    #     """Возвращает все заметки."""
+    #     return self._session.query(AppointmentNote).all()
     
     def get_by_text_exact(self, text: str):
         """
@@ -236,31 +270,31 @@ class AppointmentNoteRepository(BaseRepository):
 class AppointmentRepository(BaseRepository):
     model_class =  Appointment
 
-    def get_all(self) -> List[Appointment]:
-        self.logger.debug(f"get_all")
-        return self._session.query(Appointment).all()
+    # def get_all(self) -> List[Appointment]:
+    #     self.logger.debug(f"get_all")
+    #     return self._session.query(Appointment).all()
 
-    def get_by_id(self, appointment_id: int) -> Optional[Appointment]:
-        self.logger.debug(f"get_by_id: appointment_id = {appointment_id}")
-        return self._session.get(Appointment, appointment_id)
+    # def get_by_id(self, appointment_id: int) -> Optional[Appointment]:
+    #     self.logger.debug(f"get_by_id: appointment_id = {appointment_id}")
+    #     return self._session.get(Appointment, appointment_id)
 
-    def get_by_patient(self, patient_id: int) -> List[Appointment]:
-        self.logger.debug(f"get_by_patient: patient_id = {patient_id}")
-        return self._session.query(Appointment).filter_by(patient_id=patient_id).all()
+    # def get_by_patient(self, patient_id: int) -> List[Appointment]:
+    #     self.logger.debug(f"get_by_patient: patient_id = {patient_id}")
+    #     return self._session.query(Appointment).filter_by(patient_id=patient_id).all()
 
-    def add(self, appointment: Appointment) -> Appointment:
-        self.logger.debug(f"add: appointment = {appointment}")
-        self._session.add(appointment)
-        return appointment
+    # def add(self, appointment: Appointment) -> Appointment:
+    #     self.logger.debug(f"add: appointment = {appointment}")
+    #     self._session.add(appointment)
+    #     return appointment
 
-    def update(self, appointment: Appointment) -> Appointment:
-        self.logger.debug(f"update: appointment = {appointment}")
-        self._session.merge(appointment)
-        return appointment
+    # def update(self, appointment: Appointment) -> Appointment:
+    #     self.logger.debug(f"update: appointment = {appointment}")
+    #     self._session.merge(appointment)
+    #     return appointment
 
-    def delete(self, appointment: Appointment) -> None:
-        self.logger.debug(f"delete: appointment = {appointment}")
-        self._session.delete(appointment)
+    # def delete(self, appointment: Appointment) -> None:
+    #     self.logger.debug(f"delete: appointment = {appointment}")
+    #     self._session.delete(appointment)
 
     # def get_unique_values(self, column_name: str) -> List[Any]:
     #     """
@@ -294,10 +328,10 @@ class AppointmentRepository(BaseRepository):
     #         AppLogger.get_instance('system').exception(f"Ошибка в AppointmentRepository.get_unique_values (столбец '{column_name}'): {e}")
     #         raise  # пробрасываем дальше
 
-    def get_all(self) -> List[Appointment]:
-        self.logger.debug(f"get_all")
-        """Возвращает все записи приёмов."""
-        return self._session.query(Appointment).all()
+    # def get_all(self) -> List[Appointment]:
+    #     self.logger.debug(f"get_all")
+    #     """Возвращает все записи приёмов."""
+    #     return self._session.query(Appointment).all()
     
     def get_all_with_note(self):
         self.logger.debug(f"get_all_with_note")
@@ -374,40 +408,40 @@ class PhotoRepository(BaseRepository):
             self.logger.exception(f"Ошибка в get_by_appointment: {e}")
             raise   
 
-    def get_by_id(self, photo_id: int) -> Optional[Photo]:
-        self.logger.debug(f"get_by_id: photo_id = {photo_id}")
-        try:
-            return self._session.get(Photo, photo_id)
-        except Exception as e:
-            self.logger.exception(f"Ошибка в get_by_id: {e}")
-            raise   
+    # def get_by_id(self, photo_id: int) -> Optional[Photo]:
+    #     self.logger.debug(f"get_by_id: photo_id = {photo_id}")
+    #     try:
+    #         return self._session.get(Photo, photo_id)
+    #     except Exception as e:
+    #         self.logger.exception(f"Ошибка в get_by_id: {e}")
+    #         raise   
 
-    def add(self, photo: Photo) -> Photo:
-        self.logger.debug(f"add: photo = {photo}")
-        try:
-            self._session.add(photo)
-        except Exception as e:
-            self.logger.exception(f"Ошибка в add: {e}")
-            raise 
+    # def add(self, photo: Photo) -> Photo:
+    #     self.logger.debug(f"add: photo = {photo}")
+    #     try:
+    #         self._session.add(photo)
+    #     except Exception as e:
+    #         self.logger.exception(f"Ошибка в add: {e}")
+    #         raise 
 
-        return photo  
+    #     return photo  
 
-    def delete(self, photo: Photo) -> None:
-        self.logger.debug(f"delete: photo = {photo}")
-        try:
-            self._session.delete(photo)
-        except Exception as e:
-            self.logger.exception(f"Ошибка в delete: {e}")
-            raise   
+    # def delete(self, photo: Photo) -> None:
+    #     self.logger.debug(f"delete: photo = {photo}")
+    #     try:
+    #         self._session.delete(photo)
+    #     except Exception as e:
+    #         self.logger.exception(f"Ошибка в delete: {e}")
+    #         raise   
     
-    def get_all(self) -> List[Photo]:
-        """Возвращает все фотографии."""
-        self.logger.debug(f"get_all")
-        try:
-            return self._session.query(Photo).all()
-        except Exception as e:
-            self.logger.exception(f"Ошибка в delete: {e}")
-            raise    
+    # def get_all(self) -> List[Photo]:
+    #     """Возвращает все фотографии."""
+    #     self.logger.debug(f"get_all")
+    #     try:
+    #         return self._session.query(Photo).all()
+    #     except Exception as e:
+    #         self.logger.exception(f"Ошибка в delete: {e}")
+    #         raise    
           
     # def get_unique_values(self, column_name: str) -> List[Any]:
     #     """
@@ -448,60 +482,60 @@ class PhotoRepository(BaseRepository):
 class PatientRepository(BaseRepository):
     model_class =  Patient
     
-    def get_all(self) -> List[Patient]:
-        self.logger.debug(f"get_all")
+    # def get_all(self) -> List[Patient]:
+    #     self.logger.debug(f"get_all")
         
-        try:
-            return self._session.query(Patient).all()
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_all: {e}")
-            raise #e  # пробрасываем исключение выше
+    #     try:
+    #         return self._session.query(Patient).all()
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_all: {e}")
+    #         raise #e  # пробрасываем исключение выше
         
-    def get_by_id(self, patient_id: int) -> Optional[Patient]:
-        self.logger.debug(f"get_by_id: patient_id = {patient_id}")
+    # def get_by_id(self, patient_id: int) -> Optional[Patient]:
+    #     self.logger.debug(f"get_by_id: patient_id = {patient_id}")
 
-        try:
-            return self._session.get(Patient, patient_id)
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_by_id: {e}")
-            raise #e  # пробрасываем исключение выше
-        
-
-    def add(self, patient: Patient) -> Patient:
-        self.logger.debug(f"add: patient = {patient}")
-
-        try:
-            self._session.add(patient)
-            # self._session.flush()
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.add: {e}")
-            raise #e  # пробрасываем исключение выше
-        
-        # без commit – commit выполняется на уровне session_scope
-        return patient
-
-    def update(self, patient: Patient) -> Patient:
-        # Если объект уже в сессии, изменения отслеживаются автоматически.
-        # Используем merge для случая, если объект пришёл извне.
-        self.logger.debug(f"update: patient = {patient}")
-        
-        try:
-            self._session.merge(patient)
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.update: {e}")
-            raise #e  # пробрасываем исключение выше
+    #     try:
+    #         return self._session.get(Patient, patient_id)
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_by_id: {e}")
+    #         raise #e  # пробрасываем исключение выше
         
 
-        return patient
+    # def add(self, patient: Patient) -> Patient:
+    #     self.logger.debug(f"add: patient = {patient}")
 
-    def delete(self, patient: Patient) -> None:
-        self.logger.debug(f"delete: patient = {patient}")
+    #     try:
+    #         self._session.add(patient)
+    #         # self._session.flush()
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.add: {e}")
+    #         raise #e  # пробрасываем исключение выше
         
-        try:   
-            self._session.delete(patient)
-        except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.delete: {e}")
-            raise #e  # пробрасываем исключение выше
+    #     # без commit – commit выполняется на уровне session_scope
+    #     return patient
+
+    # def update(self, patient: Patient) -> Patient:
+    #     # Если объект уже в сессии, изменения отслеживаются автоматически.
+    #     # Используем merge для случая, если объект пришёл извне.
+    #     self.logger.debug(f"update: patient = {patient}")
+        
+    #     try:
+    #         self._session.merge(patient)
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.update: {e}")
+    #         raise #e  # пробрасываем исключение выше
+        
+
+    #     return patient
+
+    # def delete(self, patient: Patient) -> None:
+    #     self.logger.debug(f"delete: patient = {patient}")
+        
+    #     try:   
+    #         self._session.delete(patient)
+    #     except Exception as e:
+    #         AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.delete: {e}")
+    #         raise #e  # пробрасываем исключение выше
         
 
 
@@ -539,9 +573,9 @@ class PatientRepository(BaseRepository):
     #         raise  # пробрасываем дальше
 
 
-    def get_all(self) -> List[Patient]:
-        """Возвращает всех Пациентов."""
-        self.logger.debug(f"get_all")
-        return self._session.query(Patient).all()
+    # def get_all(self) -> List[Patient]:
+    #     """Возвращает всех Пациентов."""
+    #     self.logger.debug(f"get_all")
+    #     return self._session.query(Patient).all()
         
 # 0==0

@@ -202,13 +202,13 @@ except ImportError as e:
 
 try:
     # from ..models.bd.models import init_db  # для инициализации БД
-    from ..models.bd.models import create_db, generate_test_data
+    from ..models.bd.models import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
 except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
         _add_package_name(file_module = __file__,levels_up = 2)
         # from ..models.bd.models import init_db  # для инициализации БД
-        from ..models.bd.models import create_db, generate_test_data
+        from ..models.bd.models import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
     except ImportError as e:
         pass #  raise # e # pass
 
@@ -566,32 +566,67 @@ def appointment_create(patient_id, date_str, time_str, note_text):
         click.echo(f"Ошибка: {e}", err=True)
 
 
+# @appointment.command('update')
+# @click.option('--id', required=True, type=int, help='ID приёма')
+# @click.option('--date', help='Новая дата (ГГГГ-ММ-ДД)')
+# @click.option('--time', 'time_str', help='Новое время (ЧЧ:ММ)')
+# @click.option('--note-id', type=int, help='Новый ID существующей заметки')
+# @click.option('--note-text', help='Текст новой заметки (если указан, заменяет заметку)')
+# def appointment_update(id, date, time_str, note_id, note_text):
+#     """Обновить приём."""
+#     AppLogger.get_instance( name = 'system' ).debug( f"Обновить приём id={id}, ..." )
+#     service = get_appointment_service()
+#     try:
+#         existing = service.get_appointment(id)
+#         if date:
+#             try:
+#                 existing.date = date.fromisoformat(date)
+#             except ValueError:
+#                 click.echo("Неверный формат даты.", err=True)
+#                 return
+#         if time_str:
+#             try:
+#                 h, m = map(int, time_str.split(':'))
+#                 existing.time = time(h, m)
+#             except:
+#                 click.echo("Неверный формат времени.", err=True)
+#                 return
+#         # Передаём note_id или note_text в метод update
+#         dto_in = existing
+#         if note_id is not None:
+#             dto_in.note_id = note_id
+#         updated = service.update_appointment(dto_in, note_text=note_text)
+#         click.echo(f"Приём ID {updated.id} обновлён.")
+#     except AppointmentNotFoundError as e:
+#         click.echo(str(e), err=True)
+#     except Exception as e:
+#         click.echo(f"Ошибка: {e}", err=True)
+
 @appointment.command('update')
 @click.option('--id', required=True, type=int, help='ID приёма')
-@click.option('--date', help='Новая дата (ГГГГ-ММ-ДД)')
+@click.option('--date', 'date_str', help='Новая дата (ГГГГ-ММ-ДД)')  # переименовано
 @click.option('--time', 'time_str', help='Новое время (ЧЧ:ММ)')
 @click.option('--note-id', type=int, help='Новый ID существующей заметки')
 @click.option('--note-text', help='Текст новой заметки (если указан, заменяет заметку)')
-def appointment_update(id, date, time_str, note_id, note_text):
+def appointment_update(id, date_str, time_str, note_id, note_text):
     """Обновить приём."""
-    AppLogger.get_instance( name = 'system' ).debug( f"Обновить приём id={id}, ..." )
+    AppLogger.get_instance(name='system').debug(f"Обновить приём id={id}, ...")
     service = get_appointment_service()
     try:
         existing = service.get_appointment(id)
-        if date:
+        if date_str:
             try:
-                existing.date = date.fromisoformat(date)
+                existing.date = date.fromisoformat(date_str)  # используем date из импорта
             except ValueError:
                 click.echo("Неверный формат даты.", err=True)
                 return
         if time_str:
             try:
                 h, m = map(int, time_str.split(':'))
-                existing.time = time(h, m)
+                existing.time = time(h, m)  # time из импорта
             except:
                 click.echo("Неверный формат времени.", err=True)
                 return
-        # Передаём note_id или note_text в метод update
         dto_in = existing
         if note_id is not None:
             dto_in.note_id = note_id
@@ -925,16 +960,38 @@ def sync_upload():
     except Exception as e:
         click.echo(f"\nОшибка: {e}", err=True)
 
+# @click.command()
+# def stats():
+#     """Показать статистику по базе данных."""
+#     db = get_db()
+#     try:
+#         with db.session_scope() as session:
+#             patient_count = session.query(PatientRepository.model).count()
+#             app_count = session.query(AppointmentRepository.model).count()
+#             note_count = session.query(AppointmentNoteRepository.model).count()
+#             photo_count = session.query(PhotoRepository.model).count()
+#         click.echo(f"Пациентов: {patient_count}")
+#         click.echo(f"Приёмов: {app_count}")
+#         click.echo(f"Заметок: {note_count}")
+#         click.echo(f"Фотографий: {photo_count}")
+#     except Exception as e:
+#         click.echo(f"Ошибка получения статистики: {e}", err=True)
+
 @click.command()
 def stats():
     """Показать статистику по базе данных."""
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Показать статистику по базе данных"
+    )
     db = get_db()
     try:
         with db.session_scope() as session:
-            patient_count = session.query(PatientRepository.model).count()
-            app_count = session.query(AppointmentRepository.model).count()
-            note_count = session.query(AppointmentNoteRepository.model).count()
-            photo_count = session.query(PhotoRepository.model).count()
+            patient_count = session.query(Patient).count()
+            app_count = session.query(Appointment).count()
+            note_count = session.query(AppointmentNote).count()
+            photo_count = session.query(Photo).count()
         click.echo(f"Пациентов: {patient_count}")
         click.echo(f"Приёмов: {app_count}")
         click.echo(f"Заметок: {note_count}")
@@ -949,6 +1006,11 @@ def stats():
 @click.group()
 def cli():
     """Медицинское приложение - управление данными из консоли."""
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Медицинское приложение - управление данными из консоли"
+    )
     pass
 
 cli.add_command(patient)
@@ -1104,21 +1166,69 @@ def appointment_menu():
                 note_text=note_text if note_text else None
             )
             click.pause()
+        # elif choice == 5:
+        #     aid = click.prompt("ID приёма для обновления", type=int)
+        #     date_str = click.prompt("Новая дата (оставьте пустым)", default="")
+        #     time_str = click.prompt("Новое время (оставьте пустым)", default="")
+        #     note_id = click.prompt("Новый ID заметки (оставьте пустым)", default="", type=int)
+        #     note_text = click.prompt("Текст новой заметки (если нужно создать новую)", default="")
+        #     kwargs = {}
+        #     if date_str:
+        #         kwargs['date'] = date_str
+        #     if time_str:
+        #         kwargs['time'] = time_str
+        #     if note_id:
+        #         kwargs['note_id'] = note_id
+        #     if note_text:
+        #         kwargs['note_text'] = note_text
+        #     ctx.invoke(appointment_update, id=aid, **kwargs)
+        #     click.pause()
+
         elif choice == 5:
             aid = click.prompt("ID приёма для обновления", type=int)
-            date_str = click.prompt("Новая дата (оставьте пустым)", default="")
-            time_str = click.prompt("Новое время (оставьте пустым)", default="")
-            note_id = click.prompt("Новый ID заметки (оставьте пустым)", default="", type=int)
-            note_text = click.prompt("Текст новой заметки (если нужно создать новую)", default="")
+            # Получаем текущие данные приёма
+            service = get_appointment_service()
+            try:
+                current_app = service.get_appointment(aid)
+            except Exception as e:
+                click.echo(f"Ошибка: {e}")
+                click.pause()
+                continue
+
+            click.echo("\n--- Текущие данные приёма ---")
+            click.echo(f"Дата: {current_app.date}")
+            click.echo(f"Время: {current_app.time or 'не указано'}")
+            if current_app.note_text:
+                click.echo(f"Заметка: {current_app.note_text}")
+            else:
+                click.echo("Заметка: отсутствует")
+            click.echo("-----------------------------\n")
+
+            # Ввод новых значений (если пусто – оставляем старое)
+            date_str = click.prompt("Новая дата (ГГГГ-ММ-ДД)", default=str(current_app.date))
+            time_str = click.prompt("Новое время (ЧЧ:ММ)", default=str(current_app.time) if current_app.time else "")
+            note_text = click.prompt(
+                "Новый текст заметки (Enter – оставить текущую, новый текст – заменить)",
+                default=""
+            )
+
             kwargs = {}
-            if date_str:
-                kwargs['date'] = date_str
-            if time_str:
-                kwargs['time'] = time_str
-            if note_id:
-                kwargs['note_id'] = note_id
+            # Если дата изменилась – передаём
+            if date_str != str(current_app.date):
+                # kwargs['date'] = date_str
+                kwargs['date_str'] = date_str
+            # Если время изменилось – передаём (учитываем, что может быть пустым)
+            new_time = time_str if time_str else None
+            old_time = str(current_app.time) if current_app.time else ""
+            if new_time != old_time:
+                # kwargs['time'] = time_str if time_str else None  # передаём пустую строку или None
+                kwargs['time_str'] = time_str if time_str else None  # передаём пустую строку или None
+            # Если введён новый текст заметки – передаём note_text
             if note_text:
                 kwargs['note_text'] = note_text
+            # Если не введён, но была заметка – оставляем старую (ничего не передаём)
+            # Если не введён и не было заметки – тоже ничего
+
             ctx.invoke(appointment_update, id=aid, **kwargs)
             click.pause()
         elif choice == 6:

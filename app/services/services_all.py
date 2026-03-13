@@ -6,7 +6,7 @@ import sys  # Импорт модуля sys для работы с систем�
 
 import shutil
 
-from typing import Type, TypeVar, Generic, List, Optional, Dict, Any
+from typing import Type, TypeVar, Generic, List, Optional, Dict, Any, Tuple
 
 import time as time_module
 # from datetime import time
@@ -1057,7 +1057,7 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             return dtos, total
         
 
-        
+
 # class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
 #     """
 #     Сервис для работы с приёмами.

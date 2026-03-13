@@ -71,7 +71,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...models.bd.models import AppointmentNote, Appointment, Patient, Photo
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ...utils.logger.logger import AppLogger
@@ -81,12 +81,13 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger.logger import AppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
+from sqlalchemy import select
 
 class BaseRepository:
     """Все репозитории должны наследовать этот класс."""
@@ -130,14 +131,26 @@ class AppointmentNoteRepository(BaseRepository):
                        возвращается пустой список.
         """
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
+        # try:
+        #     column = getattr(AppointmentNote, column_name, None)
+        #     if column is None:
+        #         return []
+        #     # Выполняем запрос: SELECT DISTINCT column_name FROM appointments_notes
+        #     return self._session.query(column).distinct().scalars().all()
+        # except Exception:
+        #     # В реальном приложении здесь должно быть логирование ошибки
+        #     return []
+        
         try:
-            column = getattr(AppointmentNote, column_name, None)
+            # column = getattr(Patient, column_name, None)
+            column = getattr(AppointmentNote, column_name, None)   # <-- исправлено
+            
             if column is None:
                 return []
-            # Выполняем запрос: SELECT DISTINCT column_name FROM appointments_notes
-            return self._session.query(column).distinct().scalars().all()
-        except Exception:
-            # В реальном приложении здесь должно быть логирование ошибки
+            stmt = select(column).distinct()
+            return self._session.execute(stmt).scalars().all()
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в AppointmentNoteRepository.get_unique_values (столбец '{column_name}'): {e}")
             return []
         
     def get_all(self) -> List[AppointmentNote]:
@@ -193,12 +206,22 @@ class AppointmentRepository(BaseRepository):
             List[Any]: список уникальных значений.
         """
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
+        # try:
+        #     column = getattr(Appointment, column_name, None)
+        #     if column is None:
+        #         return []
+        #     return self._session.query(column).distinct().scalars().all()
+        # except Exception:
+        #     return []
+
         try:
             column = getattr(Appointment, column_name, None)
             if column is None:
                 return []
-            return self._session.query(column).distinct().scalars().all()
-        except Exception:
+            stmt = select(column).distinct()
+            return self._session.execute(stmt).scalars().all()
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в AppointmentRepository.get_unique_values (столбец '{column_name}'): {e}")
             return []
 
     def get_all(self) -> List[Appointment]:
@@ -243,13 +266,23 @@ class PhotoRepository(BaseRepository):
             List[Any]: список уникальных значений.
         """
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
+        # try:
+        #     column = getattr(Photo, column_name, None)
+        #     if column is None:
+        #         return []
+        #     return self._session.query(column).distinct().scalars().all()
+        # except Exception:
+        #     return []
         try:
             column = getattr(Photo, column_name, None)
             if column is None:
                 return []
-            return self._session.query(column).distinct().scalars().all()
-        except Exception:
+            stmt = select(column).distinct()
+            return self._session.execute(stmt).scalars().all()
+        except Exception as e:
+            AppLogger.get_instance('system').exception(f"Ошибка в PhotoRepository.get_unique_values (столбец '{column_name}'): {e}")
             return []
+
         
     def get_all(self) -> List[Photo]:
         """Возвращает все фотографии."""
@@ -328,14 +361,25 @@ class PatientRepository(BaseRepository):
             List[Any]: список уникальных значений.
         """
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
+        # try:
+        #     column = getattr(Patient, column_name, None)
+        #     if column is None:
+        #         return []
+        #     return self._session.query(column).distinct().scalars().all()
+        # except Exception as e:
+        #     AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
+        #     return []
+
         try:
             column = getattr(Patient, column_name, None)
             if column is None:
                 return []
-            return self._session.query(column).distinct().scalars().all()
+            stmt = select(column).distinct()
+            return self._session.execute(stmt).scalars().all()
         except Exception as e:
-            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}: {e}")
+            AppLogger.get_instance('system').exception(f"Ошибка в PatientRepository.get_unique_values (столбец '{column_name}'): {e}")
             return []
+
 
     def get_all(self) -> List[Patient]:
         """Возвращает все фотографии."""

@@ -31,7 +31,7 @@ import time
 import inspect
 from functools import wraps
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, Union
 
 
 class BaseAppLogger:
@@ -53,6 +53,14 @@ class BaseAppLogger:
     # Простой формат лога: время, уровень, сообщение (всё остальное формируем вручную)
     LOG_FORMAT = '%(asctime)s\t%(levelname)s\t%(message)s'
 
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         """
@@ -64,22 +72,49 @@ class BaseAppLogger:
             "Передайте config напрямую в get_instance() или переопределите метод."
         )
 
+    def setLevel(self, level):
+        self.logger.setLevel(level)
+        
     def __init__(
             self,
             name: str,
-            config: Optional[Dict[str, Any]] = None,
-            enable_file_logging: bool = False,
-            use_name_in_filename: bool = False
-    ):
+            config: Optional[Union[str,Dict[str, Any]]] = None,
+            enable_file_logging: Union[str,bool] = False,
+            use_name_in_filename: Union[str,bool] = False
+    ): 
         """
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
 
         :param name: (str) Имя логгера.
-        :param config: (dict) Словарь с настройками. Если не передан, загружается через get_default_config().
-        :param enable_file_logging: (bool) Если True, добавляется файловый обработчик. Иначе только консоль.
-        :param use_name_in_filename: (bool) Если True, имя экземпляра вставляется в имя файла лога.
+        :param config: (str/dict) 
+                str     - Указатель на экземпляр лога откуда берём этот параметр. 
+                dict    - Словарь с настройками. 
+                None    - Если не передан, загружается через get_default_config().   
+        :param enable_file_logging: (str/bool) 
+                str     - Указатель на экземпляр лога откуда берём этот параметр. 
+                True    - добавляется файловый обработчик. 
+                False   - только консоль.
+        :param use_name_in_filename: (str/bool) Если True, имя экземпляра вставляется в имя файла лога.
+                str     - Указатель на экземпляр лога откуда берём этот параметр. 
+                True    - имя экземпляра вставляется в имя файла лога. 
+                False   - имя экземпляра НЕ вставляется в имя файла лога.
         """
         self.name = name
+
+        if isinstance(enable_file_logging, str):
+            enable_file_logging = self._instances[enable_file_logging].enable_file_logging
+
+        if isinstance(use_name_in_filename, str):
+            enable_file_logging = self._instances[use_name_in_filename].use_name_in_filename
+
+        if isinstance(config, str) and config is not None:
+            config = {
+                'LOG_LEVEL' : dict(zip(BaseAppLogger.level_map.values(), BaseAppLogger.level_map.keys()))[self._instances[config].log_level],
+                'LOG_FILE' : self._instances[config].base_log_file,
+                'LOG_MAX_BYTES' : self._instances[config].log_max_bytes,
+                'LOG_BACKUP_COUNT' : self._instances[config].log_backup_count,
+            }
+                
         self.enable_file_logging = enable_file_logging
         self.use_name_in_filename = use_name_in_filename
 
@@ -192,17 +227,12 @@ class BaseAppLogger:
         """
         Преобразует строковое представление уровня логирования в константу logging.
         """
-        level_map = {
-            'DEBUG': logging.DEBUG,
-            'INFO': logging.INFO,
-            'WARNING': logging.WARNING,
-            'ERROR': logging.ERROR,
-            'CRITICAL': logging.CRITICAL
-        }
+
         upper_str = level_str.upper()
-        if upper_str not in level_map:
+
+        if upper_str not in BaseAppLogger.level_map:
             raise ValueError(f"Неизвестный уровень логирования: {level_str}. Допустимые: DEBUG, INFO, WARNING, ERROR, CRITICAL")
-        return level_map[upper_str]
+        return BaseAppLogger.level_map[upper_str]
 
     # --------------------------------------------------------------------------
     # Вспомогательные методы для формирования указателя на место вызова

@@ -76,7 +76,18 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..network.thread_network import DownloadThread, UploadThread
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
+
+
+try:
+    from ..network.dop_yadisk.ya_dop import yadisk_download_file, yadisk_upload_file
+except ImportError as e:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 2)
+        from ..network.dop_yadisk.ya_dop import yadisk_download_file, yadisk_upload_file
+    except ImportError as e:
+        pass #  raise # e # pass
 
 try:
     from ..controllers.conf.get_config import get_config_env
@@ -86,7 +97,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..controllers.conf.get_config import get_config_env
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 
@@ -95,14 +106,40 @@ except ImportError as e:
 # Сторонние библиотеки
 
 
+# class SyncService:
+#     def __init__(self):
+#         # Загружаем настройки при инициализации (можно передавать извне)
+#         config = get_config_env()
+#         self.token = config['YANDEX_TOKEN']
+#         self.remote_path = config['database_remote_path']
+#         self.local_path = config['database_local_path']
+
 class SyncService:
     def __init__(self):
-        # Загружаем настройки при инициализации (можно передавать извне)
         config = get_config_env()
         self.token = config['YANDEX_TOKEN']
         self.remote_path = config['database_remote_path']
         self.local_path = config['database_local_path']
 
+    def download_sync(self, progress_callback=None):
+        """Синхронное скачивание файла с Диска."""
+        return yadisk_download_file(
+            ya_token=self.token,
+            ya_file_path=self.remote_path,
+            local_file_path=self.local_path,
+            if_err=True,
+            progress_callback=progress_callback
+        )
+
+    def upload_sync(self, progress_callback=None):
+        """Синхронная загрузка файла на Диск."""
+        return yadisk_upload_file(
+            ya_token=self.token,
+            local_file_path=self.local_path,
+            ya_file_path=self.remote_path,
+            if_err=True,
+            progress_callback=progress_callback
+        )
     def prepare_download(self) -> DownloadThread:
         """Возвращает настроенный, но ещё не запущенный поток для скачивания."""
         thread = DownloadThread(self.token, self.remote_path, self.local_path)

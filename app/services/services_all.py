@@ -77,7 +77,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..utils.logger import AppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..backend.database import Database
@@ -88,7 +88,7 @@ except ImportError as e:
         from ..backend.database import Database
     except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from database import")
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..models.bd.models import Patient, Appointment, AppointmentNote, Photo
@@ -99,7 +99,7 @@ except ImportError as e:
         from ..models.bd.models import Patient, Appointment, AppointmentNote, Photo
     except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from models import")
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..backend.repositories.repositories_all import BaseRepository, PatientRepository, AppointmentRepository, PatientRepository, AppointmentNoteRepository, PhotoRepository
@@ -110,7 +110,7 @@ except ImportError as e:
         from ..backend.repositories.repositories_all import BaseRepository, PatientRepository, AppointmentRepository, PatientRepository, AppointmentNoteRepository, PhotoRepository
     except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from repositories_all import")
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
@@ -121,7 +121,7 @@ except ImportError as e:
         from ..dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
     except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from dto import")
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..exceptions import PatientNotFoundError, PatientValidationError, AppointmentNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, AppException
@@ -132,7 +132,7 @@ except ImportError as e:
         from ..exceptions import PatientNotFoundError, PatientValidationError, AppointmentNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, AppException
     except ImportError as e:
         AppLogger.get_instance(name='system').critical("Ошибка from exceptions import")
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 
@@ -555,12 +555,52 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     #         self.logger.info(f"Создан приём id={dto_out.id}")
     #         return dto_out
     
+    # def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+    #     """
+    #     Создаёт новый приём.
+    #     :param dto: DTO с данными (используются patient_id, date, time).
+    #     :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
+    #                     и её ID автоматически подставлен.
+    #     """
+    #     self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
+
+    #     with self._db.session_scope() as session:
+    #         # Проверка существования пациента
+    #         patient_repo = PatientRepository(session)
+    #         patient = patient_repo.get_by_id(dto.patient_id)
+    #         if patient is None:
+    #             raise PatientNotFoundError(dto.patient_id)
+
+    #         # Обработка заметки
+    #         note_id = None
+    #         if note_text:
+    #             # Создаём экземпляр NoteService с тем же подключением к БД
+    #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+    #             note_dto = note_service.get_or_create_note(note_text)
+    #             if note_dto:
+    #                 note_id = note_dto.id
+
+    #         appointment = self._model_class(
+    #             patient_id=dto.patient_id,
+    #             date=dto.date,
+    #             time=dto.time,
+    #             note_id=note_id
+    #         )
+    #         session.add(appointment)
+    #         session.flush()  # чтобы получить id
+    #         dto_out = self._dto_class.from_orm(appointment)
+    #         self.logger.info(f"Создан приём id={dto_out.id}")
+    #         return dto_out
+
     def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
         """
         Создаёт новый приём.
-        :param dto: DTO с данными (используются patient_id, date, time).
+
+        :param dto: DTO с данными (используются patient_id, date, time, note_id).
         :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
-                        и её ID автоматически подставлен.
+                        и её ID автоматически подставлен (заменяет dto.note_id).
+        :return: DTO созданного приёма.
+        :raises PatientNotFoundError: если пациент с указанным ID не найден.
         """
         self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
 
@@ -571,8 +611,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             if patient is None:
                 raise PatientNotFoundError(dto.patient_id)
 
-            # Обработка заметки
-            note_id = None
+            # Обработка заметки: приоритет у note_text, иначе используем dto.note_id
+            note_id = dto.note_id
             if note_text:
                 # Создаём экземпляр NoteService с тем же подключением к БД
                 note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
@@ -592,6 +632,51 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             self.logger.info(f"Создан приём id={dto_out.id}")
             return dto_out
 
+    # def create_appointment(self, dto: AppointmentDTO) -> AppointmentDTO:
+    #     """
+    #     Создаёт новый приём.
+    #     Если dto.note_text задан, заметка будет найдена или создана автоматически.
+    #     Если dto.note_id задан, будет использована существующая заметка.
+    #     Если заданы оба, приоритет у note_text (новая заметка создаётся и привязывается, note_id игнорируется).
+    #     """
+    #     self.logger.debug(f"Создание приёма: {dto}")
+
+    #     with self._db.session_scope() as session:
+    #         # Проверка существования пациента
+    #         patient_repo = PatientRepository(session)
+    #         patient = patient_repo.get_by_id(dto.patient_id)
+    #         if patient is None:
+    #             raise PatientNotFoundError(dto.patient_id)
+
+    #         # Обработка заметки
+    #         note_id = dto.note_id
+    #         if dto.note_text is not None:
+    #             # Используем NoteService для поиска или создания заметки по тексту
+    #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+    #             # ВАЖНО: note_service должен работать в той же сессии? 
+    #             # Либо передаём ему сессию, либо он создаст свою.
+    #             # Лучше сделать метод, принимающий сессию, или использовать существующий сервис с новой сессией.
+    #             # Для простоты можно создать заметку напрямую через репозиторий.
+    #             note_repo = AppointmentNoteRepository(session)
+    #             note = note_repo.get_by_text_exact(dto.note_text)
+    #             if not note:
+    #                 note = AppointmentNote(text=dto.note_text)
+    #                 session.add(note)
+    #                 session.flush()
+    #             note_id = note.id
+    #         # else оставляем note_id как есть (может быть None)
+
+    #         appointment = self._model_class(
+    #             patient_id=dto.patient_id,
+    #             date=dto.date,
+    #             time=dto.time,
+    #             note_id=note_id
+    #         )
+    #         session.add(appointment)
+    #         session.flush()
+    #         dto_out = self._dto_class.from_orm(appointment)
+    #         self.logger.info(f"Создан приём id={dto_out.id}")
+    #         return dto_out
 
     def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
         """

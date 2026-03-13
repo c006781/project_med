@@ -209,7 +209,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from .controllers.conf.get_config import get_config_env
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from .network.thread_network import UploadThread , DownloadThread
@@ -219,7 +219,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from .network.thread_network import UploadThread , DownloadThread
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 

@@ -67,7 +67,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger import AppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 # if True:
 # # if not 'app.models' in sys.modules.keys():
@@ -101,7 +101,7 @@ except ImportError as e:
         from .models import Patient, Appointment, AppointmentNote, Photo
         # from . import models
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 # del temp_from
 # 

@@ -60,6 +60,10 @@ def get_getenv (
             dotenv_path = dotenv_path,
         )
 
+        load_dotenv( # Принудительно перезагружаем переменные в os.environ если было хобя бы 1но изменение
+            dotenv_path=dotenv_path, 
+            override=True
+        )
         thec = os.getenv(key)
         
     if not thec:

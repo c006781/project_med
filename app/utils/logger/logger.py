@@ -107,7 +107,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...controllers.conf.get_config import get_config_env
     except ImportError as e:
-        raise # e # pass
+        pass #  pass #  raise # e # pass
 
 try:
     from .base_logger import BaseAppLogger
@@ -117,7 +117,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 0)
         from .base_logger import BaseAppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 # Сторонние библиотеки
@@ -206,6 +206,29 @@ if __name__ == '__main__':
     PatientService_.get_patient4(4)
 
     helper()
+
+
+
+    AppLogger.get_instance(
+        name='test1',
+        config='default1',
+    ).info("test1")
+    AppLogger.get_instance(
+        name='test2',
+        enable_file_logging='default1',
+    ).info("test2")
+    AppLogger.get_instance(
+        name='test3',
+        use_name_in_filename='default1',
+    ).info("test3")
+
+
+    AppLogger.get_instance(
+        name='test4',
+        config='default1',
+        enable_file_logging='default1',
+        use_name_in_filename='default1',
+    ).info("test4")
 
     0==0
 

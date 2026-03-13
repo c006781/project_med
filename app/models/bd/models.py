@@ -92,7 +92,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 3)
         from ...utils.logger import AppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 # temp_from = 'app.controllers.conf.get_config'.split('.')
 # temp_from = {
@@ -113,7 +113,7 @@ except ImportError as e:
         )
         from ...controllers.conf.get_config import get_config_env as get_config_env
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 # del temp_from
 
 # temp_from = 'app.models.bd.temp_data_bd'.split('.')
@@ -136,7 +136,7 @@ except ImportError as e:
         )
         from .temp_data_bd import generate_test_data as generate_test_data
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 # del temp_from

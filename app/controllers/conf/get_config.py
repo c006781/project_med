@@ -166,7 +166,7 @@ except ImportError as e:
 
         from .getenv import get_getenv as get_getenv
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 # del temp_from
 
 def get_config_env():

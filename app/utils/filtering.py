@@ -39,23 +39,53 @@ def _convert_value(column, value: Any) -> Any:
     """
     Преобразует строковое значение в тип, соответствующий колонке SQLAlchemy.
     """
+    # if value is None:
+    #     return None
+    
+    # if isinstance(value, (list, tuple)):
+    #     return [_convert_value(column, v) for v in value]
+    
+    # if isinstance(column.type, Date):
+    #     return datetime.date.fromisoformat(value)
+    # if isinstance(column.type, Integer):
+    #     return int(value)
+    # if isinstance(column.type, Float):
+    #     return float(value)
+    # if isinstance(column.type, Time):
+    #     # ожидается формат ЧЧ:ММ
+    #     try:
+    #         return datetime.time.fromisoformat(value)  # Python 3.11+
+    #     except AttributeError:
+    #         # для более старых версий Python
+    #         h, m = map(int, value.split(':'))
+    #         return datetime.time(h, m)
+    # # по умолчанию строка
+    # return value
+
     if value is None:
         return None
+    if isinstance(value, (list, tuple)):
+        return [_convert_value(column, v) for v in value]
     if isinstance(column.type, Date):
+        if isinstance(value, datetime.date):
+            return value
         return datetime.date.fromisoformat(value)
     if isinstance(column.type, Integer):
+        if isinstance(value, int):
+            return value
         return int(value)
     if isinstance(column.type, Float):
+        if isinstance(value, float):
+            return value
         return float(value)
     if isinstance(column.type, Time):
-        # ожидается формат ЧЧ:ММ
+        if isinstance(value, datetime.time):
+            return value
         try:
-            return datetime.time.fromisoformat(value)  # Python 3.11+
+            return datetime.time.fromisoformat(value)
         except AttributeError:
-            # для более старых версий Python
             h, m = map(int, value.split(':'))
             return datetime.time(h, m)
-    # по умолчанию строка
     return value
 
 

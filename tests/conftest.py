@@ -7,7 +7,7 @@ import os  # Импорт модуля os для работы с путями ф
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 import tempfile
-
+from datetime import date, time 
 # Импорты модулей
 # def _add_package_name(
 #     file_module: str = None,
@@ -132,11 +132,22 @@ import tempfile
 # Добавляем корень проекта в sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.backend.repositories import PatientRepository, AppointmentRepository
-from app.services import PatientService, AppointmentService, NoteService, PhotoService
-from app.controllers.conf.get_config import get_config_env
-from app.models.bd.models import Base
+from app.backend.repositories import (
+    PatientRepository, AppointmentRepository,
+    AppointmentNoteRepository, PhotoRepository
+)
+from app.services import (
+    PatientService, AppointmentService,
+    NoteService, PhotoService, SyncService
+)
+from app.models.bd.models import (
+    Base, Patient, Appointment, AppointmentNote, Photo
+)
 from app.backend.database import Database
+
+from app.controllers.conf.get_config import get_config_env
+from app.controllers.conf.getenv import get_dotenv_path, save_env_file
+
 
 # Сторонние библиотеки
 # pip install pytest pytest-cov pytest-mock
@@ -144,6 +155,8 @@ import pytest # pip install pytest
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+
+
 
 @pytest.fixture(scope="session")
 def engine():
@@ -233,3 +246,75 @@ def sample_patient(db_session):
     db_session.add(patient)
     db_session.commit()  # коммитим, чтобы получить id
     return patient
+
+@pytest.fixture
+def patient_repo(db_session):
+    return PatientRepository(db_session)
+
+@pytest.fixture
+def appointment_repo(db_session):
+    return AppointmentRepository(db_session)
+
+@pytest.fixture
+def note_repo(db_session):
+    return AppointmentNoteRepository(db_session)
+
+@pytest.fixture
+def photo_repo(db_session):
+    return PhotoRepository(db_session)
+
+@pytest.fixture
+def appointment_service(database):
+    return AppointmentService(database)
+
+@pytest.fixture
+def note_service(database):
+    return NoteService(database)
+
+@pytest.fixture
+def sync_service():
+    return SyncService()
+
+# @pytest.fixture
+# def temp_env_file(tmp_path):
+#     """Создаёт временный .env файл для тестов конфигурации."""
+#     env_file = tmp_path / ".env"
+#     env_file.write_text("")
+#     return str(env_file)
+
+@pytest.fixture
+def sample_appointment(db_session, sample_patient, sample_note):
+    from app.models.bd.models import Appointment
+    app = Appointment(
+        patient_id=sample_patient.id,
+        date=date.today(),
+        time=time(10, 0),
+        note_id=sample_note.id
+    )
+    db_session.add(app)
+    db_session.commit()
+    return app
+
+@pytest.fixture
+def sample_note(db_session):
+    note = AppointmentNote(text="Тестовая заметка")
+    db_session.add(note)
+    db_session.commit()
+    return note
+
+@pytest.fixture
+def sample_photo(db_session, sample_appointment, tmp_path):
+    storage = tmp_path / "photos"
+    storage.mkdir(exist_ok=True)
+    rel_path = "app1/test.jpg"
+    full_path = storage / rel_path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_bytes(b"dummy")
+    photo = Photo(
+        appointment_id=sample_appointment.id,
+        file_path=rel_path,
+        description="Тестовое фото"
+    )
+    db_session.add(photo)
+    db_session.commit()
+    return photo

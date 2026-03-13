@@ -87,7 +87,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..utils.logger.logger import AppLogger
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..backend.database import Database
@@ -97,7 +97,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..backend.database import Database
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..backend.repositories import (
@@ -118,7 +118,7 @@ except ImportError as e:
             PhotoRepository
         )
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..controllers.conf.get_config import get_config_env
@@ -128,7 +128,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..controllers.conf.get_config import get_config_env
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..services import (
@@ -150,7 +150,7 @@ except ImportError as e:
             SyncService
         )
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..dto import (
@@ -170,7 +170,7 @@ except ImportError as e:
             PhotoDTO
         )
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     from ..exceptions import (
@@ -198,7 +198,7 @@ except ImportError as e:
             UploadError
         )
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 try:
     # from ..models.bd.models import init_db  # для инициализации БД
@@ -210,7 +210,7 @@ except ImportError as e:
         # from ..models.bd.models import init_db  # для инициализации БД
         from ..models.bd.models import create_db, generate_test_data
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 # Сторонние библиотеки
 
@@ -728,19 +728,39 @@ def photo():
     """Управление фотографиями приёмов."""
     pass
 
+# @photo.command('list')
+# @click.option('--appointment-id', required=True, type=int, help='ID приёма')
+# def photo_list(appointment_id):
+#     """Список фото для приёма."""
+#     AppLogger.get_instance( name = 'system' ).debug( f"Список фото для приёма appointment_id={appointment_id}" )
+#     service = get_photo_service()
+#     try:
+#         photos = service.get_photos_for_appointment(appointment_id)
+#         if not photos:
+#             click.echo("Фото не найдены.")
+#             return
+#         for p in photos:
+#             click.echo(f"ID: {p.id}, Файл: {p.file_path}, Описание: {p.description}")
+#     except Exception as e:
+#         click.echo(f"Ошибка: {e}", err=True)
+
 @photo.command('list')
-@click.option('--appointment-id', required=True, type=int, help='ID приёма')
+@click.option('--appointment-id', type=int, help='ID приёма (если не указан, выводятся все фото)')
 def photo_list(appointment_id):
-    """Список фото для приёма."""
-    AppLogger.get_instance( name = 'system' ).debug( f"Список фото для приёма appointment_id={appointment_id}" )
+    """Список фотографий. Если указан appointment-id, показываются фото только этого приёма."""
+    AppLogger.get_instance(name='system').debug(f"Запрос списка фото, appointment_id={appointment_id}")
     service = get_photo_service()
     try:
-        photos = service.get_photos_for_appointment(appointment_id)
+        if appointment_id is not None:
+            photos = service.get_photos_for_appointment(appointment_id)
+        else:
+            photos = service.get_all()  # используем унаследованный метод из BaseService
         if not photos:
             click.echo("Фото не найдены.")
             return
         for p in photos:
-            click.echo(f"ID: {p.id}, Файл: {p.file_path}, Описание: {p.description}")
+            # Выводим информацию о каждом фото
+            click.echo(f"ID: {p.id}, Приём ID: {p.appointment_id}, Файл: {p.file_path}, Описание: {p.description}")
     except Exception as e:
         click.echo(f"Ошибка: {e}", err=True)
 
@@ -810,58 +830,100 @@ def init_db(recreate, test_data):
 @click.command()
 def sync_download():
     """Скачать базу данных с Яндекс.Диска (асинхронно с отображением прогресса)."""
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Скачать базу данных с Яндекс.Диска (асинхронно с отображением прогресса))"
+    )
+
     service = get_sync_service()
-    thread = service.prepare_download()
     click.echo("Начинаем скачивание...")
+    # thread = service.prepare_download()
+
+    # def progress_callback(current, total):
+    #     percent = (current / total) * 100 if total else 0
+    #     click.echo(f"\rПрогресс: {current}/{total} ({percent:.1f}%)", nl=False)
+
+    # def on_finished(code):
+    #     if code == 0:
+    #         click.echo("\nСкачивание успешно завершено.")
+    #     else:
+    #         click.echo(f"\nСкачивание завершилось с ошибкой (код {code})")
+
+    # thread.progress.connect(progress_callback)
+    # thread.finished.connect(on_finished)
+    # thread.error.connect(lambda msg: click.echo(f"\nОшибка: {msg}", err=True))
+    # thread.start()
+
+    # from PySide6.QtCore import QEventLoop
+    # loop = QEventLoop()
+    # thread.finished.connect(loop.quit)
+    # thread.error.connect(loop.quit)
+    # loop.exec()
 
     def progress_callback(current, total):
         percent = (current / total) * 100 if total else 0
+        # Используем \r для обновления строки
         click.echo(f"\rПрогресс: {current}/{total} ({percent:.1f}%)", nl=False)
 
-    def on_finished(code):
-        if code == 0:
-            click.echo("\nСкачивание успешно завершено.")
+    try:
+        result = service.download_sync(progress_callback=progress_callback)
+        click.echo()  # перевод строки после завершения
+        if result == 0:
+            click.echo("Скачивание успешно завершено.")
         else:
-            click.echo(f"\nСкачивание завершилось с ошибкой (код {code})")
-
-    thread.progress.connect(progress_callback)
-    thread.finished.connect(on_finished)
-    thread.error.connect(lambda msg: click.echo(f"\nОшибка: {msg}", err=True))
-    thread.start()
-
-    from PySide6.QtCore import QEventLoop
-    loop = QEventLoop()
-    thread.finished.connect(loop.quit)
-    thread.error.connect(loop.quit)
-    loop.exec()
+            click.echo(f"Скачивание завершилось с ошибкой (код {result})")
+    except Exception as e:
+        click.echo(f"\nОшибка: {e}", err=True)
 
 @click.command()
 def sync_upload():
     """Загрузить локальную базу данных на Яндекс.Диск."""
+
+    AppLogger.get_instance(
+        name = 'system'
+    ).debug(
+        f"Загрузить локальную базу данных на Яндекс.Диск"
+    )
+
     service = get_sync_service()
-    thread = service.prepare_upload()
     click.echo("Начинаем загрузку...")
+
+    # thread = service.prepare_upload()
+    # def progress_callback(current, total):
+    #     percent = (current / total) * 100 if total else 0
+    #     click.echo(f"\rПрогресс: {current}/{total} ({percent:.1f}%)", nl=False)
+
+    # def on_finished(code):
+    #     if code == 0:
+    #         click.echo("\nЗагрузка успешно завершена.")
+    #     else:
+    #         click.echo(f"\nЗагрузка завершилась с ошибкой (код {code})")
+
+    # thread.progress.connect(progress_callback)
+    # thread.finished.connect(on_finished)
+    # thread.error.connect(lambda msg: click.echo(f"\nОшибка: {msg}", err=True))
+    # thread.start()
+
+    # from PySide6.QtCore import QEventLoop
+    # loop = QEventLoop()
+    # thread.finished.connect(loop.quit)
+    # thread.error.connect(loop.quit)
+    # loop.exec()
 
     def progress_callback(current, total):
         percent = (current / total) * 100 if total else 0
         click.echo(f"\rПрогресс: {current}/{total} ({percent:.1f}%)", nl=False)
 
-    def on_finished(code):
-        if code == 0:
-            click.echo("\nЗагрузка успешно завершена.")
+    try:
+        result = service.upload_sync(progress_callback=progress_callback)
+        click.echo()
+        if result == 0:
+            click.echo("Загрузка успешно завершена.")
         else:
-            click.echo(f"\nЗагрузка завершилась с ошибкой (код {code})")
-
-    thread.progress.connect(progress_callback)
-    thread.finished.connect(on_finished)
-    thread.error.connect(lambda msg: click.echo(f"\nОшибка: {msg}", err=True))
-    thread.start()
-
-    from PySide6.QtCore import QEventLoop
-    loop = QEventLoop()
-    thread.finished.connect(loop.quit)
-    thread.error.connect(loop.quit)
-    loop.exec()
+            click.echo(f"Загрузка завершилась с ошибкой (код {result})")
+    except Exception as e:
+        click.echo(f"\nОшибка: {e}", err=True)
 
 @click.command()
 def stats():

@@ -67,7 +67,7 @@ except ImportError as e:
         _add_package_name(file_module = __file__,levels_up = 2)
         from ..models.bd.models import Base as Base
     except ImportError as e:
-        raise # e # pass
+        pass #  raise # e # pass
 
 
 # Сторонние библиотеки

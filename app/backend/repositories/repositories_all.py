@@ -233,6 +233,30 @@ class AppointmentRepository(BaseRepository):
         self.logger.debug(f"get_all_with_note")
         return self._session.query(Appointment).options(joinedload(Appointment.note)).all()
 
+    def get_all_with_relations(self) -> List[Appointment]:
+        """Возвращает все приёмы с подгруженными пациентом и заметкой."""
+        self.logger.debug("get_all_with_relations")
+        return self._session.query(Appointment).options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.note)
+        ).all()
+
+    def get_by_patient_with_relations(self, patient_id: int) -> List[Appointment]:
+        """Возвращает приёмы пациента с подгруженными пациентом и заметкой."""
+        self.logger.debug(f"get_by_patient_with_relations: patient_id={patient_id}")
+        return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.note)
+        ).all()
+
+    def get_by_id_with_relations(self, appointment_id: int) -> Optional[Appointment]:
+        """Возвращает приём по ID с подгруженными связями."""
+        self.logger.debug(f"get_by_id_with_relations: appointment_id={appointment_id}")
+        return self._session.query(Appointment).options(
+            joinedload(Appointment.patient),
+            joinedload(Appointment.note)
+        ).filter(Appointment.id == appointment_id).first()
+    
     # остальные методы...
 
 

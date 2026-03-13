@@ -140,7 +140,8 @@ except ImportError as e:
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import joinedload
+# from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 
 
 
@@ -413,7 +414,8 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         self.logger.debug(f"Удаление пациента id={patient_id}")
         with self._db.session_scope() as session:
             # Получаем пациента со связанными приёмами (чтобы собрать ID заметок)
-            patient = session.get(Patient, patient_id)
+            # patient = session.get(Patient, patient_id)
+            patient = session.query(Patient).options(selectinload(Patient.appointments)).filter(Patient.id == patient_id).first()
             if patient is None:
                 raise PatientNotFoundError(patient_id)
 
@@ -435,22 +437,28 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
                         self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая при удалении пациента")
 
             self.logger.info(f"Удалён пациент id={patient_id}")
+
     def get_patients_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[PatientDTO]:
-        self.logger.debug(f"Возвращает записи, отфильтрованные по заданным условиям")
+        self.logger.debug(f"Возвращает записи, отфильтрованные по заданным условиям^ filters={filters}, fuzzy_threshold={fuzzy_threshold}")
         return self.get_filtered(filters, fuzzy_threshold)    
 
+
+
 class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
-    def __init__(
-            self, 
-            db: Database, 
-            logger_name: Optional[str] = None, 
-        ):
+    """
+    Сервис для работы с приёмами.
+    Все методы, возвращающие DTO, стараются использовать подгрузку связей (patient, note)
+    для предотвращения N+1 запросов.
+    """
+
+    def __init__(self, db: Database, logger_name: Optional[str] = None):
         if logger_name is None:
             logger_name = self.__class__.__name__
-
+          
         # Вызов конструктора базового класса с указанием классов модели, DTO и репозитория
+  
         super().__init__(
-            db          = db,
+            db=db,
             repo_class  = AppointmentRepository,
             model_class = Appointment,
             dto_class   = AppointmentDTO,
@@ -458,139 +466,78 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         )
 
     def _not_found_exception(self, entity_id: int) -> Exception:
+        """Возвращает исключение, если приём не найден."""
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
         return AppointmentNotFoundError(entity_id)
 
-    # Специфический метод
+    # ----------------------------------------------------------------------
+    # Переопределение методов получения данных с подгрузкой связей
+    # ----------------------------------------------------------------------
+
+    def get_all(self) -> List[AppointmentDTO]:
+        """
+        Возвращает все приёмы с предварительно загруженными patient и note.
+        Использует метод репозитория get_all_with_relations().
+        """
+        self.logger.debug("get_all (with relations)")
+        with self._db.session_scope() as session:
+            repo = self._get_repo(session)
+            items = repo.get_all_with_relations()
+            dtos = [self._dto_class.from_orm(item) for item in items]
+            self.logger.debug(f"Получено {len(dtos)} записей")
+            return dtos
+
     def get_appointments_by_patient(self, patient_id: int) -> List[AppointmentDTO]:
         """
-        Все приёмы пациента.
+        Возвращает все приёмы пациента с подгруженными связями.
         """
-        self.logger.debug(f"Запрос приёмов пациента id={patient_id}")
+        self.logger.debug(f"get_appointments_by_patient: patient_id={patient_id}")
         with self._db.session_scope() as session:
             repo = self._get_repo(session)
-            # Предполагаем, что у AppointmentRepository есть метод get_by_patient
-            apps = repo.get_by_patient(patient_id)
-            return [self._dto_class.from_orm(a) for a in apps]
+            items = repo.get_by_patient_with_relations(patient_id)
+            dtos = [self._dto_class.from_orm(item) for item in items]
+            self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
+            return dtos
 
     def get_appointment(self, appointment_id: int) -> AppointmentDTO:
-        self.logger.debug(f"Возвращает запись по ID ({appointment_id})")
-        return self.get_by_id(appointment_id)
-
-    # def delete_appointment(self, appointment_id: int) -> None:
-    #     self.logger.debug(f"Удаляет запись по ID ({appointment_id})")
-    #     self.delete(appointment_id)
-
-    def delete_appointment(self, appointment_id: int) -> None:
         """
-        Удаляет приём. Если заметка больше не используется другими приёмами,
-        удаляет и её.
+        Возвращает один приём по ID с подгруженными связями.
+        Не вызывает get_by_id, чтобы избежать рекурсии.
         """
-        self.logger.debug(f"Удаление приёма id={appointment_id}")
+        self.logger.debug(f"get_appointment: id={appointment_id}")
         with self._db.session_scope() as session:
             repo = self._get_repo(session)
-            appointment = repo.get_by_id(appointment_id)
-            if appointment is None:
+            item = repo.get_by_id_with_relations(appointment_id)
+            if item is None:
                 raise AppointmentNotFoundError(appointment_id)
+            return self._dto_class.from_orm(item)
 
-            note_id = appointment.note_id  # запоминаем до удаления
+    def get_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[AppointmentDTO]:
+        """
+        Возвращает отфильтрованные приёмы с подгруженными связями.
+        Переопределён для добавления eager loading.
+        """
+        from ..utils.filtering import apply_filters, apply_post_filters
 
-            # Удаляем приём
-            repo.delete(appointment)
-            session.flush()  # принудительно выполняем удаление в БД
+        self.logger.debug(f"get_filtered (with relations) filters={filters}")
+        with self._db.session_scope() as session:
+            # Строим запрос с подгрузкой связей
+            query = session.query(self._model_class).options(
+                joinedload(Appointment.patient),
+                joinedload(Appointment.note)
+            )
+            query = apply_filters(query, self._model_class, filters, fuzzy_threshold=fuzzy_threshold)
+            post_filters = getattr(query, '_post_filters', [])
+            items = query.all()
+            if post_filters:
+                items = apply_post_filters(items, post_filters, self._model_class)
+            dtos = [self._dto_class.from_orm(item) for item in items]
+            self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
+            return dtos
 
-            # Если была заметка, проверяем, остались ли другие приёмы с ней
-            if note_id is not None:
-                remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
-                if remaining == 0:
-                    # Удаляем заметку
-                    try:
-                        note_repo = AppointmentNoteRepository(session)
-                        note = note_repo.get_by_id(note_id)
-                        if note:
-                            note_repo.delete(note)
-                            self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
-                    except Exception as e:
-                        # Логируем ошибку, но не прерываем удаление приёма
-                        self.logger.exception(f"Не удалось удалить заметку id={note_id}: {e}")
-
-    def get_appointments_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[AppointmentDTO]:
-        return self.get_filtered(filters, fuzzy_threshold)
-
-    # def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
-    #     """
-    #     Создаёт новый приём.
-    #     :param dto: DTO с данными (поля patient_id, date, time, note_id могут быть None)
-    #     :param note_text: если передан, создаётся новая заметка с этим текстом и привязывается к приёму.
-    #     """
-    #     self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
-    #     with self._db.session_scope() as session:
-    #         # Проверка существования пациента
-    #         patient_repo = PatientRepository(session)
-    #         patient = patient_repo.get_by_id(dto.patient_id)
-    #         if patient is None:
-    #             raise PatientNotFoundError(dto.patient_id)
-
-    #         # Обработка заметки
-    #         note_id = dto.note_id
-    #         if note_text is not None:
-    #             from app.models.bd.models import AppointmentNote
-    #             note = AppointmentNote(text=note_text)
-    #             session.add(note)
-    #             session.flush()
-    #             note_id = note.id
-
-    #         appointment = self._model_class(
-    #             patient_id=dto.patient_id,
-    #             date=dto.date,
-    #             time=dto.time,
-    #             note_id=note_id
-    #         )            
-
-    #         session.add(appointment)
-            
-    #         session.flush() # Чтобы получить id, можно сделать flush
-
-    #         dto_out = self._dto_class.from_orm(appointment)
-    #         self.logger.info(f"Создан приём id={dto_out.id}")
-    #         return dto_out
-    
-    # def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
-    #     """
-    #     Создаёт новый приём.
-    #     :param dto: DTO с данными (используются patient_id, date, time).
-    #     :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
-    #                     и её ID автоматически подставлен.
-    #     """
-    #     self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
-
-    #     with self._db.session_scope() as session:
-    #         # Проверка существования пациента
-    #         patient_repo = PatientRepository(session)
-    #         patient = patient_repo.get_by_id(dto.patient_id)
-    #         if patient is None:
-    #             raise PatientNotFoundError(dto.patient_id)
-
-    #         # Обработка заметки
-    #         note_id = None
-    #         if note_text:
-    #             # Создаём экземпляр NoteService с тем же подключением к БД
-    #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
-    #             note_dto = note_service.get_or_create_note(note_text)
-    #             if note_dto:
-    #                 note_id = note_dto.id
-
-    #         appointment = self._model_class(
-    #             patient_id=dto.patient_id,
-    #             date=dto.date,
-    #             time=dto.time,
-    #             note_id=note_id
-    #         )
-    #         session.add(appointment)
-    #         session.flush()  # чтобы получить id
-    #         dto_out = self._dto_class.from_orm(appointment)
-    #         self.logger.info(f"Создан приём id={dto_out.id}")
-    #         return dto_out
+    # ----------------------------------------------------------------------
+    # Методы создания, обновления и удаления (без изменений)
+    # ----------------------------------------------------------------------
 
     def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
         """
@@ -601,6 +548,7 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                         и её ID автоматически подставлен (заменяет dto.note_id).
         :return: DTO созданного приёма.
         :raises PatientNotFoundError: если пациент с указанным ID не найден.
+
         """
         self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
 
@@ -611,13 +559,13 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             if patient is None:
                 raise PatientNotFoundError(dto.patient_id)
 
-            # Обработка заметки: приоритет у note_text, иначе используем dto.note_id
+            # Обработка заметки
             note_id = dto.note_id
             if note_text:
                 # Создаём экземпляр NoteService с тем же подключением к БД
+
                 note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
-                # note_dto = note_service.get_or_create_note(note_text)
-                note_dto = note_service.get_or_create_note_in_session(session, note_text)   # используем текущую сессию
+                note_dto = note_service.get_or_create_note_in_session(session, note_text)
                 if note_dto:
                     note_id = note_dto.id
 
@@ -629,98 +577,14 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             )
             session.add(appointment)
             session.flush()  # чтобы получить id
+
             dto_out = self._dto_class.from_orm(appointment)
             self.logger.info(f"Создан приём id={dto_out.id}")
             return dto_out
 
-    # def create_appointment(self, dto: AppointmentDTO) -> AppointmentDTO:
-    #     """
-    #     Создаёт новый приём.
-    #     Если dto.note_text задан, заметка будет найдена или создана автоматически.
-    #     Если dto.note_id задан, будет использована существующая заметка.
-    #     Если заданы оба, приоритет у note_text (новая заметка создаётся и привязывается, note_id игнорируется).
-    #     """
-    #     self.logger.debug(f"Создание приёма: {dto}")
-
-    #     with self._db.session_scope() as session:
-    #         # Проверка существования пациента
-    #         patient_repo = PatientRepository(session)
-    #         patient = patient_repo.get_by_id(dto.patient_id)
-    #         if patient is None:
-    #             raise PatientNotFoundError(dto.patient_id)
-
-    #         # Обработка заметки
-    #         note_id = dto.note_id
-    #         if dto.note_text is not None:
-    #             # Используем NoteService для поиска или создания заметки по тексту
-    #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
-    #             # ВАЖНО: note_service должен работать в той же сессии? 
-    #             # Либо передаём ему сессию, либо он создаст свою.
-    #             # Лучше сделать метод, принимающий сессию, или использовать существующий сервис с новой сессией.
-    #             # Для простоты можно создать заметку напрямую через репозиторий.
-    #             note_repo = AppointmentNoteRepository(session)
-    #             note = note_repo.get_by_text_exact(dto.note_text)
-    #             if not note:
-    #                 note = AppointmentNote(text=dto.note_text)
-    #                 session.add(note)
-    #                 session.flush()
-    #             note_id = note.id
-    #         # else оставляем note_id как есть (может быть None)
-
-    #         appointment = self._model_class(
-    #             patient_id=dto.patient_id,
-    #             date=dto.date,
-    #             time=dto.time,
-    #             note_id=note_id
-    #         )
-    #         session.add(appointment)
-    #         session.flush()
-    #         dto_out = self._dto_class.from_orm(appointment)
-    #         self.logger.info(f"Создан приём id={dto_out.id}")
-    #         return dto_out
-
-    # def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
-    #     """
-    #     Обновляет приём.
-    #     Если передан note_text, то создаётся новая заметка, и ID старой заменяется новой.
-    #     Если note_text не передан, но dto.note_id указан, то привязывается существующая заметка.
-    #     """
-    #     if dto.id is None:
-    #         self.logger.warning("Попытка обновления приёма без id")
-    #         raise ValueError("ID приёма не указан")
-    #     self.logger.debug(f"Обновление приёма id={dto.id}")
-    #     with self._db.session_scope() as session:
-    #         repo = self._get_repo(session)
-    #         app = repo.get_by_id(dto.id)
-    #         if app is None:
-    #             raise AppointmentNotFoundError(dto.id)
-
-    #         app.date = dto.date
-    #         app.time = dto.time
-
-    #         if note_text is not None:
-    #             from app.models.bd.models import AppointmentNote
-    #             note = AppointmentNote(text=note_text)
-    #             session.add(note)
-    #             session.flush()
-    #             app.note_id = note.id
-    #         elif dto.note_id is not None:
-    #             app.note_id = dto.note_id
-    #         # иначе оставляем без изменений
-
-    #         # Если нужно менять пациента, то тоже можно, но осторожно
-    #         # app.patient_id = dto.patient_id
-
-    #         updated_dto = self._dto_class.from_orm(app)
-    #         self.logger.info(f"Обновлён приём id={updated_dto.id}")
-    #         return updated_dto
     def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
         """
-        Обновляет приём.
-        Если передан note_text, заметка будет найдена или создана по тексту,
-        и ID старой заметки будет заменён на новую. Старая заметка будет удалена,
-        если она больше не используется другими приёмами.
-        Если note_text не передан, но dto.note_id указан, привязывается существующая заметка.
+        Обновляет существующий приём.
         """
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
@@ -730,48 +594,448 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
 
         with self._db.session_scope() as session:
             repo = self._get_repo(session)
-            app = repo.get_by_id(dto.id)
+            app = repo.get_by_id_with_relations(dto.id)  # используем метод с подгрузкой для получения старых связей
             if app is None:
                 raise AppointmentNotFoundError(dto.id)
 
-            old_note_id = app.note_id  # запоминаем старую заметку до изменений
+            old_note_id = app.note_id
 
             # Обновляем основные поля
             app.date = dto.date
             app.time = dto.time
 
             # Обработка заметки
-            # if note_text is not None:
-            #     # Используем NoteService для поиска или создания заметки по тексту
-            #     note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
-            #     note_dto = note_service.get_or_create_note(note_text)
-            #     app.note_id = note_dto.id if note_dto else None
-            # elif dto.note_id is not None:
-            #     app.note_id = dto.note_id
             if note_text is not None:
                 # Используем NoteService с переданной сессией
                 note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
-                note_dto = note_service.get_or_create_note_in_session(session, note_text)   # передаём сессию
+                note_dto = note_service.get_or_create_note_in_session(session, note_text)
                 app.note_id = note_dto.id if note_dto else None
             elif dto.note_id is not None:
                 app.note_id = dto.note_id
-            # Иначе оставляем текущую заметку (app.note_id не меняется)
 
             # Если заметка изменилась и была старая заметка
             if old_note_id is not None and old_note_id != app.note_id:
                 # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
                 remaining = session.query(Appointment).filter(Appointment.note_id == old_note_id).count()
-                if remaining == 0:
-                    # Удаляем старую заметку
+                if remaining == 0:                
+                    # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
                     note_repo = AppointmentNoteRepository(session)
                     note = note_repo.get_by_id(old_note_id)
                     if note:
                         note_repo.delete(note)
                         self.logger.info(f"Заметка id={old_note_id} удалена как неиспользуемая")
 
-            updated_dto = self. _dto_class.from_orm(app)
+            updated_dto = self._dto_class.from_orm(app)
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
             return updated_dto
+
+    def delete_appointment(self, appointment_id: int) -> None:
+        """
+        Удаляет приём и, если заметка больше не используется, удаляет её.
+        """
+        self.logger.debug(f"Удаление приёма id={appointment_id}")
+        with self._db.session_scope() as session:
+            repo = self._get_repo(session)
+            appointment = repo.get_by_id_with_relations(appointment_id)
+            if appointment is None:
+                raise AppointmentNotFoundError(appointment_id)
+
+            note_id = appointment.note_id
+
+            repo.delete(appointment)
+            session.flush()
+
+            if note_id is not None:
+                remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+                if remaining == 0:
+                    note_repo = AppointmentNoteRepository(session)
+                    note = note_repo.get_by_id(note_id)
+                    if note:
+                        note_repo.delete(note)
+                        self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
+
+
+
+# class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
+#     """
+#     Сервис для работы с приёмами.
+#     Все методы, возвращающие DTO, стараются использовать подгрузку связей (patient, note)
+#     для предотвращения N+1 запросов.
+#     """
+#     def __init__(
+#             self, 
+#             db: Database, 
+#             logger_name: Optional[str] = None, 
+#         ):
+#         if logger_name is None:
+#             logger_name = self.__class__.__name__
+
+#         # Вызов конструктора базового класса с указанием классов модели, DTO и репозитория
+#         super().__init__(
+#             db          = db,
+#             repo_class  = AppointmentRepository,
+#             model_class = Appointment,
+#             dto_class   = AppointmentDTO,
+#             logger_name = logger_name
+#         )
+
+#     # def get_by_id(self, entity_id: int) -> AppointmentDTO:
+#     #     """Переопределяем, чтобы использовать подгрузку связей."""
+#     #     return self.get_appointment(entity_id)Я
+
+#     def get_all(self) -> List[AppointmentDTO]:
+#         """
+#         Возвращает все приёмы с предварительно загруженными patient и note.
+#         Использует метод репозитория get_all_with_relations().
+#         """
+#         self.logger.debug("get_all (with relations)")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             # Используем метод с подгрузкой
+#             items = repo.get_all_with_relations()
+#             dtos = [self._dto_class.from_orm(item) for item in items]
+#             self.logger.debug(f"Получено {len(dtos)} записей")
+#             return dtos
+
+#     def get_appointments_by_patient(self, patient_id: int) -> List[AppointmentDTO]:
+#         """Возвращает приёмы пациента с подгрузкой связей."""
+#         self.logger.debug(f"get_appointments_by_patient: patient_id={patient_id}")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             items = repo.get_by_patient_with_relations(patient_id)
+#             dtos = [self._dto_class.from_orm(item) for item in items]
+#             self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
+#             return dtos
+
+#     def get_appointment(self, appointment_id: int) -> AppointmentDTO:
+#         """
+#         Возвращает один приём по ID с подгруженными связями.
+#         Не вызывает get_by_id, чтобы избежать рекурсии.
+#         """
+#         self.logger.debug(f"get_appointment: id={appointment_id}")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             item = repo.get_by_id_with_relations(appointment_id)
+#             if item is None:
+#                 raise AppointmentNotFoundError(appointment_id)
+#             return self._dto_class.from_orm(item)
+
+#     def _not_found_exception(self, entity_id: int) -> Exception:
+#         """Возвращает исключение, если приём не найден."""
+#         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
+#         return AppointmentNotFoundError(entity_id)
+
+#     # Специфический метод
+#     def get_appointments_by_patient(self, patient_id: int) -> List[AppointmentDTO]:
+#         """
+#         Все приёмы пациента.
+#         """
+#         self.logger.debug(f"Запрос приёмов пациента id={patient_id}")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             # Предполагаем, что у AppointmentRepository есть метод get_by_patient
+#             apps = repo.get_by_patient(patient_id)
+#             return [self._dto_class.from_orm(a) for a in apps]
+
+#     def get_appointment(self, appointment_id: int) -> AppointmentDTO:
+#         self.logger.debug(f"Возвращает запись по ID ({appointment_id})")
+#         return self.get_by_id(appointment_id)
+
+#     # def delete_appointment(self, appointment_id: int) -> None:
+#     #     self.logger.debug(f"Удаляет запись по ID ({appointment_id})")
+#     #     self.delete(appointment_id)
+
+#     def delete_appointment(self, appointment_id: int) -> None:
+#         """
+#         Удаляет приём. Если заметка больше не используется другими приёмами,
+#         удаляет и её.
+#         """
+#         self.logger.debug(f"Удаление приёма id={appointment_id}")
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             appointment = repo.get_by_id(appointment_id)
+#             if appointment is None:
+#                 raise AppointmentNotFoundError(appointment_id)
+
+#             note_id = appointment.note_id  # запоминаем до удаления
+
+#             # Удаляем приём
+#             repo.delete(appointment)
+#             session.flush()  # принудительно выполняем удаление в БД
+
+#             # Если была заметка, проверяем, остались ли другие приёмы с ней
+#             if note_id is not None:
+#                 remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+#                 if remaining == 0:
+#                     # Удаляем заметку
+#                     try:
+#                         note_repo = AppointmentNoteRepository(session)
+#                         note = note_repo.get_by_id(note_id)
+#                         if note:
+#                             note_repo.delete(note)
+#                             self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
+#                     except Exception as e:
+#                         # Логируем ошибку, но не прерываем удаление приёма
+#                         self.logger.exception(f"Не удалось удалить заметку id={note_id}: {e}")
+
+#     def get_appointments_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60) -> List[AppointmentDTO]:
+#         return self.get_filtered(filters, fuzzy_threshold)
+
+#     # def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+#     #     """
+#     #     Создаёт новый приём.
+#     #     :param dto: DTO с данными (поля patient_id, date, time, note_id могут быть None)
+#     #     :param note_text: если передан, создаётся новая заметка с этим текстом и привязывается к приёму.
+#     #     """
+#     #     self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
+#     #     with self._db.session_scope() as session:
+#     #         # Проверка существования пациента
+#     #         patient_repo = PatientRepository(session)
+#     #         patient = patient_repo.get_by_id(dto.patient_id)
+#     #         if patient is None:
+#     #             raise PatientNotFoundError(dto.patient_id)
+
+#     #         # Обработка заметки
+#     #         note_id = dto.note_id
+#     #         if note_text is not None:
+#     #             from app.models.bd.models import AppointmentNote
+#     #             note = AppointmentNote(text=note_text)
+#     #             session.add(note)
+#     #             session.flush()
+#     #             note_id = note.id
+
+#     #         appointment = self._model_class(
+#     #             patient_id=dto.patient_id,
+#     #             date=dto.date,
+#     #             time=dto.time,
+#     #             note_id=note_id
+#     #         )            
+
+#     #         session.add(appointment)
+            
+#     #         session.flush() # Чтобы получить id, можно сделать flush
+
+#     #         dto_out = self._dto_class.from_orm(appointment)
+#     #         self.logger.info(f"Создан приём id={dto_out.id}")
+#     #         return dto_out
+    
+#     # def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+#     #     """
+#     #     Создаёт новый приём.
+#     #     :param dto: DTO с данными (используются patient_id, date, time).
+#     #     :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
+#     #                     и её ID автоматически подставлен.
+#     #     """
+#     #     self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
+
+#     #     with self._db.session_scope() as session:
+#     #         # Проверка существования пациента
+#     #         patient_repo = PatientRepository(session)
+#     #         patient = patient_repo.get_by_id(dto.patient_id)
+#     #         if patient is None:
+#     #             raise PatientNotFoundError(dto.patient_id)
+
+#     #         # Обработка заметки
+#     #         note_id = None
+#     #         if note_text:
+#     #             # Создаём экземпляр NoteService с тем же подключением к БД
+#     #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+#     #             note_dto = note_service.get_or_create_note(note_text)
+#     #             if note_dto:
+#     #                 note_id = note_dto.id
+
+#     #         appointment = self._model_class(
+#     #             patient_id=dto.patient_id,
+#     #             date=dto.date,
+#     #             time=dto.time,
+#     #             note_id=note_id
+#     #         )
+#     #         session.add(appointment)
+#     #         session.flush()  # чтобы получить id
+#     #         dto_out = self._dto_class.from_orm(appointment)
+#     #         self.logger.info(f"Создан приём id={dto_out.id}")
+#     #         return dto_out
+
+#     def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+#         """
+#         Создаёт новый приём.
+
+#         :param dto: DTO с данными (используются patient_id, date, time, note_id).
+#         :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
+#                         и её ID автоматически подставлен (заменяет dto.note_id).
+#         :return: DTO созданного приёма.
+#         :raises PatientNotFoundError: если пациент с указанным ID не найден.
+#         """
+#         self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
+
+#         with self._db.session_scope() as session:
+#             # Проверка существования пациента
+#             patient_repo = PatientRepository(session)
+#             patient = patient_repo.get_by_id(dto.patient_id)
+#             if patient is None:
+#                 raise PatientNotFoundError(dto.patient_id)
+
+#             # Обработка заметки: приоритет у note_text, иначе используем dto.note_id
+#             note_id = dto.note_id
+#             if note_text:
+#                 # Создаём экземпляр NoteService с тем же подключением к БД
+#                 note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+#                 # note_dto = note_service.get_or_create_note(note_text)
+#                 note_dto = note_service.get_or_create_note_in_session(session, note_text)   # используем текущую сессию
+#                 if note_dto:
+#                     note_id = note_dto.id
+
+#             appointment = self._model_class(
+#                 patient_id=dto.patient_id,
+#                 date=dto.date,
+#                 time=dto.time,
+#                 note_id=note_id
+#             )
+#             session.add(appointment)
+#             session.flush()  # чтобы получить id
+#             dto_out = self._dto_class.from_orm(appointment)
+#             self.logger.info(f"Создан приём id={dto_out.id}")
+#             return dto_out
+
+#     # def create_appointment(self, dto: AppointmentDTO) -> AppointmentDTO:
+#     #     """
+#     #     Создаёт новый приём.
+#     #     Если dto.note_text задан, заметка будет найдена или создана автоматически.
+#     #     Если dto.note_id задан, будет использована существующая заметка.
+#     #     Если заданы оба, приоритет у note_text (новая заметка создаётся и привязывается, note_id игнорируется).
+#     #     """
+#     #     self.logger.debug(f"Создание приёма: {dto}")
+
+#     #     with self._db.session_scope() as session:
+#     #         # Проверка существования пациента
+#     #         patient_repo = PatientRepository(session)
+#     #         patient = patient_repo.get_by_id(dto.patient_id)
+#     #         if patient is None:
+#     #             raise PatientNotFoundError(dto.patient_id)
+
+#     #         # Обработка заметки
+#     #         note_id = dto.note_id
+#     #         if dto.note_text is not None:
+#     #             # Используем NoteService для поиска или создания заметки по тексту
+#     #             note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+#     #             # ВАЖНО: note_service должен работать в той же сессии? 
+#     #             # Либо передаём ему сессию, либо он создаст свою.
+#     #             # Лучше сделать метод, принимающий сессию, или использовать существующий сервис с новой сессией.
+#     #             # Для простоты можно создать заметку напрямую через репозиторий.
+#     #             note_repo = AppointmentNoteRepository(session)
+#     #             note = note_repo.get_by_text_exact(dto.note_text)
+#     #             if not note:
+#     #                 note = AppointmentNote(text=dto.note_text)
+#     #                 session.add(note)
+#     #                 session.flush()
+#     #             note_id = note.id
+#     #         # else оставляем note_id как есть (может быть None)
+
+#     #         appointment = self._model_class(
+#     #             patient_id=dto.patient_id,
+#     #             date=dto.date,
+#     #             time=dto.time,
+#     #             note_id=note_id
+#     #         )
+#     #         session.add(appointment)
+#     #         session.flush()
+#     #         dto_out = self._dto_class.from_orm(appointment)
+#     #         self.logger.info(f"Создан приём id={dto_out.id}")
+#     #         return dto_out
+
+#     # def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+#     #     """
+#     #     Обновляет приём.
+#     #     Если передан note_text, то создаётся новая заметка, и ID старой заменяется новой.
+#     #     Если note_text не передан, но dto.note_id указан, то привязывается существующая заметка.
+#     #     """
+#     #     if dto.id is None:
+#     #         self.logger.warning("Попытка обновления приёма без id")
+#     #         raise ValueError("ID приёма не указан")
+#     #     self.logger.debug(f"Обновление приёма id={dto.id}")
+#     #     with self._db.session_scope() as session:
+#     #         repo = self._get_repo(session)
+#     #         app = repo.get_by_id(dto.id)
+#     #         if app is None:
+#     #             raise AppointmentNotFoundError(dto.id)
+
+#     #         app.date = dto.date
+#     #         app.time = dto.time
+
+#     #         if note_text is not None:
+#     #             from app.models.bd.models import AppointmentNote
+#     #             note = AppointmentNote(text=note_text)
+#     #             session.add(note)
+#     #             session.flush()
+#     #             app.note_id = note.id
+#     #         elif dto.note_id is not None:
+#     #             app.note_id = dto.note_id
+#     #         # иначе оставляем без изменений
+
+#     #         # Если нужно менять пациента, то тоже можно, но осторожно
+#     #         # app.patient_id = dto.patient_id
+
+#     #         updated_dto = self._dto_class.from_orm(app)
+#     #         self.logger.info(f"Обновлён приём id={updated_dto.id}")
+#     #         return updated_dto
+#     def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None) -> AppointmentDTO:
+#         """
+#         Обновляет приём.
+#         Если передан note_text, заметка будет найдена или создана по тексту,
+#         и ID старой заметки будет заменён на новую. Старая заметка будет удалена,
+#         если она больше не используется другими приёмами.
+#         Если note_text не передан, но dto.note_id указан, привязывается существующая заметка.
+#         """
+#         if dto.id is None:
+#             self.logger.warning("Попытка обновления приёма без id")
+#             raise ValueError("ID приёма не указан")
+
+#         self.logger.debug(f"Обновление приёма id={dto.id}")
+
+#         with self._db.session_scope() as session:
+#             repo = self._get_repo(session)
+#             app = repo.get_by_id(dto.id)
+#             if app is None:
+#                 raise AppointmentNotFoundError(dto.id)
+
+#             old_note_id = app.note_id  # запоминаем старую заметку до изменений
+
+#             # Обновляем основные поля
+#             app.date = dto.date
+#             app.time = dto.time
+
+#             # Обработка заметки
+#             # if note_text is not None:
+#             #     # Используем NoteService для поиска или создания заметки по тексту
+#             #     note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+#             #     note_dto = note_service.get_or_create_note(note_text)
+#             #     app.note_id = note_dto.id if note_dto else None
+#             # elif dto.note_id is not None:
+#             #     app.note_id = dto.note_id
+#             if note_text is not None:
+#                 # Используем NoteService с переданной сессией
+#                 note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+#                 note_dto = note_service.get_or_create_note_in_session(session, note_text)   # передаём сессию
+#                 app.note_id = note_dto.id if note_dto else None
+#             elif dto.note_id is not None:
+#                 app.note_id = dto.note_id
+#             # Иначе оставляем текущую заметку (app.note_id не меняется)
+
+#             # Если заметка изменилась и была старая заметка
+#             if old_note_id is not None and old_note_id != app.note_id:
+#                 # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
+#                 remaining = session.query(Appointment).filter(Appointment.note_id == old_note_id).count()
+#                 if remaining == 0:
+#                     # Удаляем старую заметку
+#                     note_repo = AppointmentNoteRepository(session)
+#                     note = note_repo.get_by_id(old_note_id)
+#                     if note:
+#                         note_repo.delete(note)
+#                         self.logger.info(f"Заметка id={old_note_id} удалена как неиспользуемая")
+
+#             updated_dto = self. _dto_class.from_orm(app)
+#             self.logger.info(f"Обновлён приём id={updated_dto.id}")
+#             return updated_dto
 
 
 class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):

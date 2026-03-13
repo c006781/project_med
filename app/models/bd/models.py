@@ -153,7 +153,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, F
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy import event
+from sqlalchemy import event, Index
 
 Base = declarative_base()
 
@@ -171,6 +171,10 @@ class Patient(Base):
 
     # Отношение к приёмам
     appointments = relationship("Appointment", back_populates="patient", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('ix_patient_last_name', 'last_name'),
+    )
     
     def __repr__(self):
         return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"

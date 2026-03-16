@@ -5,8 +5,8 @@
 
 import os
 from .backend.database import Database
-from .controllers.conf.get_config import get_config_env
-# from .controllers.config_manager.manager import get_config_env
+# from .controllers.conf.get_config import get_config_env
+from .controllers.config_manager.manager import get_config_env
 from .services import (
     PatientService,
     AppointmentService,

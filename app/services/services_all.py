@@ -649,14 +649,18 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             sess.flush() # принудительно выполняем удаление, чтобы обновить состояние БД
 
             # Проверяем каждую заметку: остались ли ещё приёмы, ссылающиеся на неё
+            # for note_id in note_ids:
+            #     remaining = sess.query(Appointment).filter(Appointment.note_id == note_id).count()
+            #     if remaining == 0:
+            #         # Заметка больше не используется — удаляем её
+            #         note = sess.get(AppointmentNote, note_id)
+            #         if note:
+            #             sess.delete(note)
+            #             self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая при удалении пациента")
+           
+            note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
             for note_id in note_ids:
-                remaining = sess.query(Appointment).filter(Appointment.note_id == note_id).count()
-                if remaining == 0:
-                    # Заметка больше не используется — удаляем её
-                    note = sess.get(AppointmentNote, note_id)
-                    if note:
-                        sess.delete(note)
-                        self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая при удалении пациента")
+                note_service.cleanup_unused_note(note_id, sess)
 
             self.logger.info(f"Удалён пациент id={patient_id}")
 
@@ -893,8 +897,23 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
         except Exception as e:
             self.logger.exception(f"Ошибка чтения файла {file_path}")
             raise  # пробрасываем дальше
-        return self.create_note(text, session=session)        
-        
+        return self.create_note(text, session=session)      
+      
+    def cleanup_unused_note(self, note_id: int, session: Session) -> None:
+        """
+        Удаляет заметку, если на неё больше не ссылаются никакие приёмы.
+        Если заметка используется, ничего не делает.
+        """
+        if note_id is None:
+            return
+        # Проверяем, остались ли приёмы с этой заметкой
+        remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+        if remaining == 0:
+            note_repo = AppointmentNoteRepository(session)
+            note = note_repo.get_by_id(note_id)
+            if note:
+                note_repo.delete(note)
+                self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")       
 
 class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
     """
@@ -932,20 +951,20 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
         return AppointmentNotFoundError(entity_id)
     
-    def _cleanup_unused_note(self, note_id: int, session: Session) -> None:
-        """
-        Проверяет, используется ли заметка с указанным ID в других приёмах.
-        Если нет – удаляет её.
-        """
-        if note_id is None:
-            return
-        remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
-        if remaining == 0:
-            note_repo = AppointmentNoteRepository(session)
-            note = note_repo.get_by_id(note_id)
-            if note:
-                note_repo.delete(note)
-                self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
+    # def _cleanup_unused_note(self, note_id: int, session: Session) -> None:
+    #     """
+    #     Проверяет, используется ли заметка с указанным ID в других приёмах.
+    #     Если нет – удаляет её.
+    #     """
+    #     if note_id is None:
+    #         return
+    #     remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+    #     if remaining == 0:
+    #         note_repo = AppointmentNoteRepository(session)
+    #         note = note_repo.get_by_id(note_id)
+    #         if note:
+    #             note_repo.delete(note)
+    #             self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")
 
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей
@@ -1251,7 +1270,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             # Если заметка изменилась и была старая заметка
             if old_note_id is not None and old_note_id != app.note_id:
                 # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
-                 self._cleanup_unused_note(old_note_id, sess)
+                #  self._cleanup_unused_note(old_note_id, sess)
+                 self._note_service.cleanup_unused_note(old_note_id, sess)
                 # remaining = sess.query(Appointment).filter(Appointment.note_id == old_note_id).count()
                 # if remaining == 0:
                 #     note_repo = AppointmentNoteRepository(sess)
@@ -1304,7 +1324,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             sess.flush()
 
             if note_id is not None:
-                self._cleanup_unused_note(note_id, sess)
+                # self._cleanup_unused_note(note_id, sess)
+                self._note_service.cleanup_unused_note(note_id, sess)    
                 # remaining = sess.query(Appointment).filter(Appointment.note_id == note_id).count()
                 # if remaining == 0:
                 #     note_repo = AppointmentNoteRepository(sess)

@@ -214,7 +214,11 @@ class BaseConfigManager:
         Возвращает копию текущего кеша (словарь).
         """
         return self._config.copy()
-
+    
+    @property
+    def config_exists(self) -> bool:
+        """Возвращает True, если файл конфигурации существует на диске."""
+        return os.path.exists(self._config_path)
 
 class AppConfigManager(BaseConfigManager):
     """
@@ -248,7 +252,12 @@ class AppConfigManager(BaseConfigManager):
         super().__init__(config_path or self._config_path, self._defaults)
 
     @classmethod
-    def get_instance(cls, force_new: bool = False, config_path: Optional[str] = None) -> 'AppConfigManager':
+    def get_instance(
+        cls, 
+        force_new: bool = False, 
+        config_path: Optional[str] = None,
+        create_if_missing: bool = False
+    ) -> 'AppConfigManager':
         """
         Возвращает экземпляр менеджера конфигурации (паттерн Multiton).
 
@@ -268,6 +277,10 @@ class AppConfigManager(BaseConfigManager):
         # Создаём новый экземпляр
         instance = cls(config_path)
         cls._instances[config_path] = instance
+
+        if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+            instance.save()  # сохраняем умолчания
+
         return instance
 
 

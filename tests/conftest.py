@@ -145,7 +145,8 @@ from app.models.bd.models import (
 )
 from app.backend.database import Database
 
-from app.controllers.conf.get_config import get_config_env
+# from app.controllers.conf.get_config import get_config_env
+from app.controllers.config_manager.manager import get_config_env
 from app.controllers.conf.getenv import get_dotenv_path, save_env_file
 
 

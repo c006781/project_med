@@ -120,15 +120,17 @@ except ImportError as e:
     except ImportError as e:
         pass #  raise # e # pass
 
-try:
-    from ..controllers.conf.get_config import get_config_env
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..controllers.conf.get_config import get_config_env
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+#     # from ..controllers.conf.get_config import get_config_env
+#     from ..controllers.config_manager.manager import get_config_env
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         # from ..controllers.conf.get_config import get_config_env
+#         from ..controllers.config_manager.manager import get_config_env
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
 try:
     from ..services import (
@@ -212,6 +214,30 @@ except ImportError as e:
     except ImportError as e:
         pass #  raise # e # pass
 
+try:
+    from ..dependencies import (
+        get_db,
+        get_patient_service,
+        get_appointment_service,
+        get_note_service,
+        get_photo_service,
+        get_sync_service,
+        init_db,
+    )
+except ImportError:
+    # fallback с _add_package_name
+    _add_package_name(file_module=__file__, levels_up=2)
+    from ..dependencies import (
+        get_db,
+        get_patient_service,
+        get_appointment_service,
+        get_note_service,
+        get_photo_service,
+        get_sync_service,
+        init_db,
+    )
+
+
 # Сторонние библиотеки
 
 import click # pip install click
@@ -221,37 +247,37 @@ from sqlalchemy.orm import sessionmaker
 # Инициализация общих объектов
 # ------------------------------------------------------------------------------
 
-def get_db() -> Database:
-    """Возвращает экземпляр Database, сконфигурированный из .env."""
-    config = get_config_env()
-    db_path = config['database_local_path']
+# def get_db() -> Database:
+#     """Возвращает экземпляр Database, сконфигурированный из .env."""
+#     config = get_config_env()
+#     db_path = config['database_local_path']
 
-    AppLogger.get_instance(
-        name = 'system'
-    ).debug(
-        f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
-    )
+#     AppLogger.get_instance(
+#         name = 'system'
+#     ).debug(
+#         f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
+#     )
 
-    db_url = f"sqlite:///{config['database_local_path']}"
-    return Database(db_url)
+#     db_url = f"sqlite:///{config['database_local_path']}"
+#     return Database(db_url)
 
-def get_patient_service() -> PatientService:
-    return PatientService(get_db())
+# def get_patient_service() -> PatientService:
+#     return PatientService(get_db())
 
-def get_appointment_service() -> AppointmentService:
-    db = get_db()
-    note_service = NoteService(db)
-    return AppointmentService(db, note_service=note_service)
-def get_note_service() -> NoteService:
-    return NoteService(get_db())
+# def get_appointment_service() -> AppointmentService:
+#     db = get_db()
+#     note_service = NoteService(db)
+#     return AppointmentService(db, note_service=note_service)
+# def get_note_service() -> NoteService:
+#     return NoteService(get_db())
 
-def get_photo_service() -> PhotoService:
-    config = get_config_env()
-    photos_path = config.get('PHOTOS_STORAGE_PATH', './photos')
-    return PhotoService(get_db(), photos_path)
+# def get_photo_service() -> PhotoService:
+#     config = get_config_env()
+#     photos_path = config.get('PHOTOS_STORAGE_PATH', './photos')
+#     return PhotoService(get_db(), photos_path)
 
-def get_sync_service() -> SyncService:
-    return SyncService()
+# def get_sync_service() -> SyncService:
+#     return SyncService()
 
 # ------------------------------------------------------------------------------
 # Группа команд для пациентов
@@ -719,16 +745,9 @@ def note_create(text):
 @click.option('--file', type=click.Path(exists=True, readable=True), required=True, help='Файл с текстом заметки')
 def note_create_from_file(file):
     """Создать заметку из текстового файла."""
-    AppLogger.get_instance( name = 'system' ).debug( f"Создать заметку из текстового файла" )
-    try:
-        with open(file, 'r', encoding='utf-8') as f:
-            text = f.read()
-    except Exception as e:
-        click.echo(f"Ошибка чтения файла: {e}", err=True)
-        return
     service = get_note_service()
     try:
-        dto = service.create_note(text)
+        dto = service.create_note_from_file(file)
         click.echo(f"Заметка создана с ID: {dto.id}")
     except Exception as e:
         click.echo(f"Ошибка: {e}", err=True)
@@ -843,32 +862,51 @@ def photo_delete(id):
 # Команды инициализации, синхронизации и статистики
 # ------------------------------------------------------------------------------
 
+# @click.command()
+# @click.option('--recreate/--no-recreate', default=False, help='Пересоздать БД (удалить существующую)')
+# @click.option('--test-data/--no-test-data', default=True, help='Заполнить тестовыми данными')
+# def init_db(recreate, test_data):
+#     """Инициализировать базу данных (создать таблицы, опционально тестовые данные)."""
+#     config = get_config_env()
+#     db_path = config['database_local_path']
+#     AppLogger.get_instance(
+#         name = 'system'
+#     ).debug(
+#         f"Инициализировать базу данных (создать таблицы, опционально тестовые данные): {db_path} ({os.path.abspath(db_path)})"
+#     )
+#     try:
+#         # Создаём движок и таблицы
+#         engine = create_db(db_path, recreate=recreate)
+#         if test_data:
+#             generate_test_data(db_path)
+#             # Создаём сессию и заполняем тестовыми данными
+#             # Session = sessionmaker(bind=engine)
+#             # session = Session()
+#             # generate_test_data(session)
+#             # session.close()
+#             click.echo("Тестовые данные добавлены.")
+#         click.echo(f"База данных инициализирована: {db_path} ({os.path.abspath(db_path)})")
+#     except Exception as e:
+#         click.echo(f"Ошибка инициализации БД: {e}", err=True)
+
 @click.command()
 @click.option('--recreate/--no-recreate', default=False, help='Пересоздать БД (удалить существующую)')
 @click.option('--test-data/--no-test-data', default=True, help='Заполнить тестовыми данными')
 def init_db(recreate, test_data):
     """Инициализировать базу данных (создать таблицы, опционально тестовые данные)."""
-    config = get_config_env()
-    db_path = config['database_local_path']
+#     """Инициализировать базу данных (создать таблицы, опционально тестовые данные)."""
     AppLogger.get_instance(
         name = 'system'
     ).debug(
-        f"Инициализировать базу данных (создать таблицы, опционально тестовые данные): {db_path} ({os.path.abspath(db_path)})"
+        f"Инициализировать базу данных (создать таблицы, опционально тестовые данные)"
     )
     try:
-        # Создаём движок и таблицы
-        engine = create_db(db_path, recreate=recreate)
-        if test_data:
-            generate_test_data(db_path)
-            # Создаём сессию и заполняем тестовыми данными
-            # Session = sessionmaker(bind=engine)
-            # session = Session()
-            # generate_test_data(session)
-            # session.close()
-            click.echo("Тестовые данные добавлены.")
-        click.echo(f"База данных инициализирована: {db_path} ({os.path.abspath(db_path)})")
+        init_db(recreate=recreate, test_data=test_data)  # вызов из dependencies
+        click.echo("База данных инициализирована.")
+        # click.echo(f"База данных инициализирована: {db_path} ({os.path.abspath(db_path)})")
     except Exception as e:
         click.echo(f"Ошибка инициализации БД: {e}", err=True)
+
 
 @click.command()
 def sync_download():

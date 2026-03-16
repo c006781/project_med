@@ -202,12 +202,14 @@ def _add_package_name(
 
 
 try:
-    from .controllers.conf.get_config import get_config_env
+    # from .controllers.conf.get_config import get_config_env
+    from .controllers.config_manager.manager import get_config_env
 except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 3)
-        from .controllers.conf.get_config import get_config_env
+        _add_package_name(file_module = __file__,levels_up = 0)
+        # from .controllers.conf.get_config import get_config_env
+        from .controllers.config_manager.manager import get_config_env
     except ImportError as e:
         pass #  raise # e # pass
 
@@ -216,7 +218,7 @@ try:
 except ImportError as e:
     try:
         # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 3)
+        _add_package_name(file_module = __file__,levels_up = 0)
         from .network.thread_network import UploadThread , DownloadThread
     except ImportError as e:
         pass #  raise # e # pass

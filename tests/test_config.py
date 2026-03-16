@@ -2,7 +2,8 @@
 import pytest
 import os
 from app.controllers.conf.getenv import get_getenv, save_env_file, crete_env_file, get_dotenv_path
-from app.controllers.conf.get_config import get_config_env
+# from app.controllers.conf.get_config import get_config_env
+from app.controllers.config_manager.manager import get_config_env
 
 def test_get_dotenv_path_default():
     path = get_dotenv_path()

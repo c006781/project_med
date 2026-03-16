@@ -880,7 +880,20 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             sess.flush()
             self.logger.info(f"Создана новая заметка id={note.id}")
             return self._dto_class.from_orm(note)
-        
+
+    def create_note_from_file(self, file_path: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
+        """
+        Создаёт заметку, читая текст из файла.
+        :raises FileNotFoundError, IOError
+        """
+        self.logger.debug(f"Создание заметки из файла: {file_path}")
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+        except Exception as e:
+            self.logger.exception(f"Ошибка чтения файла {file_path}")
+            raise  # пробрасываем дальше
+        return self.create_note(text, session=session)        
         
 
 class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):

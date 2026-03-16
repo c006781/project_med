@@ -175,36 +175,44 @@ def get_config_env():
     """
 
     return {
-        'YANDEX_TOKEN':  get_getenv(
-            key =   'YANDEX_TOKEN',
-            start_value= '----',
-        ),
+        # 'YANDEX_TOKEN':  get_getenv(
+        #     key =   'YANDEX_TOKEN',
+        #     start_value= '----',
+        # ),
 
-        'database_local_path':  get_getenv(
-            key =   'database_local_path',
-            start_value = os.path.join(*['.','clinic.db']),
-        ),
-        'database_remote_path': get_getenv( 
-            key =   'database_remote_path',
-            start_value= 'Проекты/test/bd/clinic.db',
-        ),
+        # 'database_local_path':  get_getenv(
+        #     key =   'database_local_path',
+        #     start_value = os.path.join(*['.','clinic.db']),
+        # ),
+        # 'database_remote_path': get_getenv( 
+        #     key =   'database_remote_path',
+        #     start_value= 'Проекты/test/bd/clinic.db',
+        # ),
 
         
-        'LOG_LEVEL': get_getenv(  
-            key =   'LOG_LEVEL',
-            start_value= 'DEBUG', # уровень логирования (DEBUG, INFO, WARNING, ERROR)
-        ),
-        'LOG_FILE': get_getenv( 
-            key =   'LOG_FILE',
-            start_value= os.path.join(*['.','logs','app.log']), # путь к файлу лога (например, logs/app.log)
-        ),
-        'LOG_MAX_BYTES': get_getenv( 
-            key =   'LOG_MAX_BYTES',
-            start_value= str(10 * 1024 * 1024),  # максимальный размер файла до ротации (в байтах)
-        ),
-        'LOG_BACKUP_COUNT': get_getenv( 
-            key =   'LOG_BACKUP_COUNT',
-            start_value= str(5), # количество сохраняемых бэкапов
+        # 'LOG_LEVEL': get_getenv(  
+        #     key =   'LOG_LEVEL',
+        #     start_value= 'DEBUG', # уровень логирования (DEBUG, INFO, WARNING, ERROR)
+        # ),
+        # 'LOG_FILE': get_getenv( 
+        #     key =   'LOG_FILE',
+        #     start_value= os.path.join(*['.','logs','app.log']), # путь к файлу лога (например, logs/app.log)
+        # ),
+        # 'LOG_MAX_BYTES': get_getenv( 
+        #     key =   'LOG_MAX_BYTES',
+        #     start_value= str(10 * 1024 * 1024),  # максимальный размер файла до ротации (в байтах)
+        # ),
+        # 'LOG_BACKUP_COUNT': get_getenv( 
+        #     key =   'LOG_BACKUP_COUNT',
+        #     start_value= str(5), # количество сохраняемых бэкапов
+        # ),
+        # 'PHOTOS_STORAGE_PATH': get_getenv( 
+        #     key =   'PHOTOS_STORAGE_PATH',
+        #     start_value= os.path.join(*['.','photos']), # путь к файлу лога (например, logs/app.log)
+        # ),
+        'APP_CONFIG_PATH': get_getenv( 
+            key =   'APP_CONFIG_PATH',
+            start_value= os.path.join(*['config.msgpack']), # путь к файлу лога (например, logs/app.log)
         ),
 
         # 'password': get_getenv(

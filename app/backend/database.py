@@ -70,6 +70,16 @@ except ImportError as e:
         pass #  raise # e # pass
 
 
+try:
+    from ..models.bd.temp_data_bd import populate_test_data
+except ImportError as e:
+    try:
+        # Попытка абсолютного импорта, если модуль запущен как скрипт
+        _add_package_name(file_module = __file__,levels_up = 2)
+        from ..models.bd.temp_data_bd import populate_test_data
+    except ImportError as e:
+        pass #  raise # e # pass
+
 # Сторонние библиотеки
 
 from sqlalchemy import create_engine
@@ -116,4 +126,15 @@ class Database:
         """Закрывает все сессии и удаляет привязку к потокам."""
         self.Session.remove()
 
+
+
+    def create_tables(self, recreate: bool = False):
+        if recreate:
+            Base.metadata.drop_all(self.engine)
+            # pass
+        Base.metadata.create_all(self.engine)
+
+    def fill_test_data(self):
+        with self.session_scope() as session:
+            populate_test_data(session)
 # 0==0

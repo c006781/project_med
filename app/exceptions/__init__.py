@@ -1,4 +1,4 @@
-# exceptions/__init__.py
+# app/exceptions/__init__.py
 """
 Пакет кастомных исключений приложения.
 Здесь собраны все исключения, которые могут возникать в процессе работы.
@@ -6,7 +6,7 @@
 """
 
 
-from .exceptions_all import(
+from app.exceptions.exceptions_all import(
     # Импортируем базовое исключение
     AppException,
 

@@ -1,7 +1,7 @@
 # tests/test_dto.py
 from datetime import date
 from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
-from app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
 
 def test_patient_dto_from_orm():
     patient = Patient(id=1, first_name="Иван", last_name="Петров", birth_date=date(1990,1,1), phone="123", email="test@test.ru")

@@ -4,19 +4,19 @@
 """
 
 import os
-from .backend.database import Database
+from app.database.database import Database
 # from .controllers.conf.get_config import get_config_env
-from .controllers.config_manager.manager import get_config_env
-from .services import (
+from app.config.config_manager.manager import get_config_env
+from app.services import (
     PatientService,
     AppointmentService,
     NoteService,
     PhotoService,
-    SyncService,
+    SyncService
 )
-from .models.bd.models import create_db
-from .models.bd.temp_data_bd import generate_test_data
-from .utils.logger import AppLogger
+# from .backend.bd.clinic import create_db
+# from .backend.bd.temp_data_bd import generate_test_data
+from app.utils.logger import AppLogger
 
 
 def get_db() -> Database:

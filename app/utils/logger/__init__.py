@@ -1,10 +1,10 @@
-# app/backend/repositories/__init__.py
+# app/utils/logger/__init__.py
 """
 Класс логера 
 """
 
 from .logger import( 
-    AppLogger,
+    AppLogger
 )
 
 __all__ = [

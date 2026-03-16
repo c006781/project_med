@@ -1,4 +1,4 @@
-# /home/admin-rkc/Git/My_cods/project_med/app/network/__init__.py
+# app/network/__init__.py
 """
 Пакет app.network — сетевое взаимодействие и синхронизация.
 
@@ -8,13 +8,13 @@
 """
 
 # Импортируем классы потоков из thread_network
-from .thread_network import (
+from app.network.thread_network import (
     DownloadThread, 
     UploadThread,
 )
 
 # Импортируем функции работы с Яндекс.Диском из подпакета dop_yadisk
-from .dop_yadisk import (
+from app.network.ya_dop import (
     yadisk_download_file, 
     yadisk_upload_file,
 )

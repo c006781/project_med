@@ -59,28 +59,30 @@ def _add_package_name(
         # Если мы в корне — можно оставить None или пустую строку
         __package__ = None
 
-try:
-    from ...utils.logger import AppLogger
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 3)
-        from ...utils.logger import AppLogger
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+from app.utils.logger import AppLogger
+# except ImportError as e:
+#     # try:
+#     # Попытка абсолютного импорта, если модуль запущен как скрипт
+#     _add_package_name(file_module = __file__,levels_up = 3)
+#     from ...utils.logger import AppLogger
+#     # except ImportError as e:
+#     #     pass #  raise # e # pass
 
-try:
-    from .models import Patient, Appointment, AppointmentNote, Photo
+# try:
+# Относительный импорт моделей — это и разрывает цикл!
+from .clinic import Patient, Appointment, AppointmentNote, Photo
+# from app.backend.bd.clinic import Patient, Appointment, AppointmentNote, Photo
     # from . import models
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 1)
+# except ImportError as e:
+    # try:
+    #     # Попытка абсолютного импорта, если модуль запущен как скрипт
+    #     _add_package_name(file_module = __file__,levels_up = 1)
 
-        from .models import Patient, Appointment, AppointmentNote, Photo
-        # from . import models
-    except ImportError as e:
-        pass #  raise # e # pass
+    #     from .clinic import Patient, Appointment, AppointmentNote, Photo
+    #     # from . import models
+    # except ImportError as e:
+    #     pass #  raise # e # pass
 
 # del temp_from
 # 

@@ -1,7 +1,7 @@
 # tests/test_ya_dop.py
 import pytest
 from unittest.mock import MagicMock, patch
-from app.network.dop_yadisk.ya_dop import yadisk_download_file, yadisk_upload_file
+from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
 
 @patch('app.network.dop_yadisk.ya_dop.yadisk.YaDisk')
 def test_yadisk_download_file_success(mock_yadisk, tmp_path):

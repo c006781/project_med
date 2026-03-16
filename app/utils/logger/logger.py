@@ -99,27 +99,32 @@ def _add_package_name(
         # Если мы в корне — можно оставить None или пустую строку
         __package__ = None
 
-try:
+# try:
     # from ...controllers.conf.get_config import get_config_env
-    from ...controllers.config_manager.manager import get_config_env
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 3)
-        # from ...controllers.conf.get_config import get_config_env
-        from ...controllers.config_manager.manager import get_config_env
-    except ImportError as e:
-        pass #  pass #  raise # e # pass
+# from ...config.config_manager.manager import get_config_env
+# # === ЗАЩИТА ОТ РЕКУРСИИ ===
+# if 'app.config.config_manager.manager' not in sys.modules:
+#     from ...config.config_manager.manager import get_config_env
+# else:
+#     get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
+# except ImportError as e:
+#     # try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#     _add_package_name(file_module = __file__,levels_up = 3)
+#     # from ...controllers.conf.get_config import get_config_env
+#     from ...config.config_manager.manager import get_config_env
+    # except ImportError as e:
+    #     pass #  pass #  raise # e # pass
 
-try:
-    from .base_logger import BaseAppLogger
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 0)
-        from .base_logger import BaseAppLogger
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+from app.utils.logger.base_logger import BaseAppLogger
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 0)
+#         from .base_logger import BaseAppLogger
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
 
 # Сторонние библиотеки
@@ -143,6 +148,12 @@ class AppLogger(BaseAppLogger):
     # Словарь экземпляров (ключ - имя логгера)
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]: # переопределяем,
+        if 'app.config.config_manager.manager' not in sys.modules:
+            from app.config.config_manager.manager import get_config_env
+        else:
+            get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
+        
+        # tt = sys.modules['app.config.config_manager.manager']
         return get_config_env()
 
 

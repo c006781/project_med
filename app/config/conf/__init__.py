@@ -1,4 +1,4 @@
-# /home/admin-rkc/Git/My_cods/project_med/app/controllers/conf/__init__.py
+# app/config/conf/__init__.py
 """
 Пакет app.controllers.conf — конфигурация приложения.
 
@@ -8,13 +8,13 @@
 """
 
 # Импортируем функцию получения всех настроек из модуля get_config
-from .get_config import (
+from app.config.conf.get_config import (
      # главная функция для получения словаря конфигурации
     get_config_env,
 )
 
 # Импортируем основные функции для работы с .env из модуля getenv
-from .getenv import( 
+from app.config.conf.getenv import( 
     # получить значение ключа из окружения (с созданием, если отсутствует)
     get_getenv, 
     # получить путь к .env файлу

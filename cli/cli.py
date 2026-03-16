@@ -79,46 +79,46 @@ def _add_package_name(
         # Если мы в корне — можно оставить None или пустую строку
         __package__ = None
 
-try:
-    from ..utils.logger.logger import AppLogger
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..utils.logger.logger import AppLogger
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+from app.utils.logger.logger import AppLogger
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..app.utils.logger.logger import AppLogger
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
-    from ..backend.database import Database
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..backend.database import Database
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+# from app.backend.database import Database
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..app.backend.database import Database
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
-    from ..backend.repositories import (
-        PatientRepository,
-        AppointmentRepository,
-        AppointmentNoteRepository,
-        PhotoRepository
-    )
+# try:
+# from app.backend.repositories import (
+#         PatientRepository,
+#         AppointmentRepository,
+#         AppointmentNoteRepository,
+#         PhotoRepository
+#     )
 
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..backend.repositories import (
-            PatientRepository,
-            AppointmentRepository,
-            AppointmentNoteRepository,
-            PhotoRepository
-        )
-    except ImportError as e:
-        pass #  raise # e # pass
+# except ImportError as e:
+    # try:
+    #     # Попытка абсолютного импорта, если модуль запущен как скрипт
+    #     _add_package_name(file_module = __file__,levels_up = 2)
+    #     from ..app.backend.repositories import (
+    #         PatientRepository,
+    #         AppointmentRepository,
+    #         AppointmentNoteRepository,
+    #         PhotoRepository
+    #     )
+    # except ImportError as e:
+    #     pass #  raise # e # pass
 
 # try:
 #     # from ..controllers.conf.get_config import get_config_env
@@ -132,50 +132,50 @@ except ImportError as e:
 #     except ImportError as e:
 #         pass #  raise # e # pass
 
-try:
-    from ..services import (
-        PatientService,
-        AppointmentService,
-        NoteService,
-        PhotoService,
-        SyncService
-    )
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..services import (
-            PatientService,
-            AppointmentService,
-            NoteService,
-            PhotoService,
-            SyncService
-        )
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+# from app.services import (
+#         PatientService,
+#         AppointmentService,
+#         NoteService,
+#         PhotoService,
+#         SyncService
+#     )
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..app.services import (
+#             PatientService,
+#             AppointmentService,
+#             NoteService,
+#             PhotoService,
+#             SyncService
+#         )
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
-    from ..dto import (
+# try:
+from app.dto import (
         PatientDTO,
         AppointmentDTO,
         AppointmentNoteDTO,
         PhotoDTO
     )
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..dto import (
-            PatientDTO,
-            AppointmentDTO,
-            AppointmentNoteDTO,
-            PhotoDTO
-        )
-    except ImportError as e:
-        pass #  raise # e # pass
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..app.dto import (
+#             PatientDTO,
+#             AppointmentDTO,
+#             AppointmentNoteDTO,
+#             PhotoDTO
+#         )
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
-    from ..exceptions import (
+# try:
+from app.exceptions import (
         PatientNotFoundError,
         PatientValidationError,
         AppointmentNotFoundError,
@@ -185,63 +185,64 @@ try:
         DownloadError,
         UploadError
     )
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..exceptions import (
-            PatientNotFoundError,
-            PatientValidationError,
-            AppointmentNotFoundError,
-            AppointmentNoteNotFoundError,
-            PhotoNotFoundError,
-            PhotoFileError,
-            DownloadError,
-            UploadError
-        )
-    except ImportError as e:
-        pass #  raise # e # pass
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..app.exceptions import (
+#             PatientNotFoundError,
+#             PatientValidationError,
+#             AppointmentNotFoundError,
+#             AppointmentNoteNotFoundError,
+#             PhotoNotFoundError,
+#             PhotoFileError,
+#             DownloadError,
+#             UploadError
+#         )
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
+# try:
     # from ..models.bd.models import init_db  # для инициализации БД
-    from ..models.bd.models import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        # from ..models.bd.models import init_db  # для инициализации БД
-        from ..models.bd.models import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
-    except ImportError as e:
-        pass #  raise # e # pass
+# from app.backend.bd.clinic import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         # from ..models.bd.models import init_db  # для инициализации БД
+#         from ..app.backend.bd.clinic import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
+#     except ImportError as e:
+#         pass #  raise # e # pass
 
-try:
-    from ..dependencies import (
+# try:
+from app.dependencies import (
         get_db,
         get_patient_service,
         get_appointment_service,
         get_note_service,
         get_photo_service,
         get_sync_service,
-        init_db,
+        init_db as init_db_deps,
     )
-except ImportError:
-    # fallback с _add_package_name
-    _add_package_name(file_module=__file__, levels_up=2)
-    from ..dependencies import (
-        get_db,
-        get_patient_service,
-        get_appointment_service,
-        get_note_service,
-        get_photo_service,
-        get_sync_service,
-        init_db,
-    )
+# except ImportError:
+#     # fallback с _add_package_name
+#     _add_package_name(file_module=__file__, levels_up=2)
+#     from ..app.dependencies import (
+#         get_db,
+#         get_patient_service,
+#         get_appointment_service,
+#         get_note_service,
+#         get_photo_service,
+#         get_sync_service,
+#         init_db,
+#     )
 
 
 # Сторонние библиотеки
 
 import click # pip install click
-from sqlalchemy.orm import sessionmaker  
+# from sqlalchemy.orm import sessionmaker  
 
 # ------------------------------------------------------------------------------
 # Инициализация общих объектов
@@ -901,7 +902,7 @@ def init_db(recreate, test_data):
         f"Инициализировать базу данных (создать таблицы, опционально тестовые данные)"
     )
     try:
-        init_db(recreate=recreate, test_data=test_data)  # вызов из dependencies
+        init_db_deps(recreate=recreate, test_data=test_data)  # вызов из dependencies
         click.echo("База данных инициализирована.")
         # click.echo(f"База данных инициализирована: {db_path} ({os.path.abspath(db_path)})")
     except Exception as e:
@@ -1480,11 +1481,14 @@ def menu():
             click.pause()
 
 
-
-
-if __name__ == '__main__':
-    if len(sys.argv) == 1:
+def start_cli(
+        if_len_sys_argv_1 : bool = True    
+):
+    if if_len_sys_argv_1:
         # Если аргументы не переданы, запускаем интерактивное меню
         menu()
     else:
         cli()
+
+if __name__ == '__main__':
+    start_cli(len(sys.argv) == 1)

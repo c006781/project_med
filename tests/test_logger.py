@@ -1,6 +1,6 @@
 # tests/test_logger.py
 import pytest
-import os
+# import os
 import logging
 from app.utils.logger.logger import AppLogger
 from app.utils.logger.base_logger import BaseAppLogger

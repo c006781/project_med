@@ -68,24 +68,24 @@ def _add_package_name(
 # if len(
 #     set(sys.modules.keys()).intersection(temp_from)
 # ) == 0:
-try:
-    from .getenv import get_getenv as get_getenv
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(
-            file_module = __file__,
-            levels_up = 1,
-            # path_join = [
+# try:
+from app.config.conf.getenv import get_getenv as get_getenv
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(
+#             file_module = __file__,
+#             levels_up = 1,
+#             # path_join = [
                 
-            # ] + [
-            #     '.' for _ in range(1) # насколько шагов назад нужно
-            # ],
-        )
+#             # ] + [
+#             #     '.' for _ in range(1) # насколько шагов назад нужно
+#             # ],
+#         )
 
-        from .getenv import get_getenv as get_getenv
-    except ImportError as e:
-        pass #  raise # e # pass
+#         from .getenv import get_getenv as get_getenv
+#     except ImportError as e:
+#         pass #  raise # e # pass
 # del temp_from
 
 def get_config_env():

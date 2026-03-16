@@ -1,10 +1,9 @@
-# /home/admin-rkc/Git/My_cods/project_med/app/models/__init__.py
-"""
-Пакет app.models — содержит подпакет bd с моделями SQLAlchemy.
-"""
+# app/database/__init__.py
+
+
 
 # Импортируем модели из подпакета bd
-from .bd import (
+from app.database.database_shema import (
     Patient, 
     Appointment, 
     AppointmentNote, 
@@ -12,15 +11,19 @@ from .bd import (
 )
 
 # Также можно импортировать функцию генерации тестовых данных, если она нужна на этом уровне
-from .bd import (
+from app.database.database_shema import (
     generate_test_data,
 )
 
-# Определяем публичный интерфейс
+
+from app.database.database import Database
+
 __all__ = [
     'Patient',
     'Appointment',
     'AppointmentNote',
     'Photo',
     'generate_test_data',
+
+    'Database',
 ]

@@ -1,7 +1,7 @@
 import os
 from PySide6.QtCore import QThread, Signal # pip install PySide6
 
-from .dop_yadisk.ya_dop import yadisk_download_file, yadisk_upload_file
+from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
 
 class DownloadThread(QThread):
     """

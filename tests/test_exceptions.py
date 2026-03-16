@@ -1,11 +1,18 @@
 # tests/test_exceptions.py
 import pytest
 from app.exceptions import (
-    PatientNotFoundError, PatientValidationError,
-    AppointmentNotFoundError, AppointmentNoteNotFoundError,
-    PhotoNotFoundError, PhotoFileError,
-    DownloadError, UploadError, TokenError,
-    DatabaseError, IntegrityError, ConnectionError
+    PatientNotFoundError, 
+    PatientValidationError,
+    AppointmentNotFoundError, 
+    # AppointmentNoteNotFoundError,
+    # PhotoNotFoundError, 
+    PhotoFileError,
+    DownloadError, 
+    # UploadError, 
+    TokenError,
+    # DatabaseError, 
+    IntegrityError, 
+    # ConnectionError
 )
 
 def test_patient_not_found_error():

@@ -17,90 +17,93 @@
 
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 from typing import Any, Dict, Optional
 
-import logging
+# import logging
 
 # Импорты модулей
-def _add_package_name(
-    file_module: str = None,
-    levels_up: int = 3,           # <-- сколько уровней вверх до корня проекта
-) -> None:
+# def _add_package_name(
+#     file_module: str = None,
+#     levels_up: int = 3,           # <-- сколько уровней вверх до корня проекта
+# ) -> None:
     
-    """
-    Что это (кратко): Добавляет корень проекта в sys.path и устанавливает правильный __package__.
+#     """
+#     Что это (кратко): Добавляет корень проекта в sys.path и устанавливает правильный __package__.
 
-    Что это (максимально подробно): Эта функция настраивает окружение Python таким образом, чтобы можно было использовать относительные импорты (например, from .module import something) без необходимости запускать скрипт с флагом "-m" (как модуль). Она работает только если скрипт запущен напрямую (не импортирован). Функция получает абсолютный путь к текущему файлу, добавляет родительскую директорию в sys.path (список путей для поиска модулей), и устанавливает глобальную переменную __package__ как имя текущей директории. Это полезно в проектах с nested папками, где импорты могут сломаться.
+#     Что это (максимально подробно): Эта функция настраивает окружение Python таким образом, чтобы можно было использовать относительные импорты (например, from .module import something) без необходимости запускать скрипт с флагом "-m" (как модуль). Она работает только если скрипт запущен напрямую (не импортирован). Функция получает абсолютный путь к текущему файлу, добавляет родительскую директорию в sys.path (список путей для поиска модулей), и устанавливает глобальную переменную __package__ как имя текущей директории. Это полезно в проектах с nested папками, где импорты могут сломаться.
 
-    Как работает: Сначала объявляется global __package__ для изменения системной переменной. Затем os.path.abspath(__file__) дает полный путь к скрипту, os.path.dirname убирает имя файла, оставляя папку. sys.path.append добавляет родительскую папку (dirname еще раз). Наконец, __package__ = basename(package_dir) — имя папки. Вызывается только в if __name__ == '__main__', чтобы не мешать, если скрипт импортирован.
+#     Как работает: Сначала объявляется global __package__ для изменения системной переменной. Затем os.path.abspath(__file__) дает полный путь к скрипту, os.path.dirname убирает имя файла, оставляя папку. sys.path.append добавляет родительскую папку (dirname еще раз). Наконец, __package__ = basename(package_dir) — имя папки. Вызывается только в if __name__ == '__main__', чтобы не мешать, если скрипт импортирован.
 
-    Примеры запуска:
-    # В скрипте: if __name__ == '__main__': _add_package_name()
-    # После вызова: sys.path включает родительскую папку (например, '/path/to/modules'), __package__ = 'parsers_sheregeh'. Теперь относительные импорты работают.
-    # Если запустить как модуль (python -m script), функция не нужна, но она не навредит.
-    # Если не вызвать: относительный импорт from .module... может вызвать ImportError: attempted relative import with no known parent package.
+#     Примеры запуска:
+#     # В скрипте: if __name__ == '__main__': _add_package_name()
+#     # После вызова: sys.path включает родительскую папку (например, '/path/to/modules'), __package__ = 'parsers_sheregeh'. Теперь относительные импорты работают.
+#     # Если запустить как модуль (python -m script), функция не нужна, но она не навредит.
+#     # Если не вызвать: относительный импорт from .module... может вызвать ImportError: attempted relative import with no known parent package.
 
-    :param file_module: (str) = обычно __file__  - указатель на путь к модулю, папку которого делаем пакетом для относительных импортов (содержит путь к текущему скрипту)
-    :param levels_up: (int) - на сколько уровней подниматься вверх до корня проекта
-                       (подберите под структуру вашего проекта)
-                       Примеры:
-                         2 → до папки app
-    """
-    if file_module is None:
-        file_module = __file__
+#     :param file_module: (str) = обычно __file__  - указатель на путь к модулю, папку которого делаем пакетом для относительных импортов (содержит путь к текущему скрипту)
+#     :param levels_up: (int) - на сколько уровней подниматься вверх до корня проекта
+#                        (подберите под структуру вашего проекта)
+#                        Примеры:
+#                          2 → до папки app
+#     """
+#     if file_module is None:
+#         file_module = __file__
 
-    # Получаем директорию текущего файла
-    current_dir = os.path.dirname(os.path.abspath(file_module))
+#     # Получаем директорию текущего файла
+#     current_dir = os.path.dirname(os.path.abspath(file_module))
 
-    # Поднимаемся на levels_up уровней вверх — это и будет корень проекта
-    project_root = current_dir
-    for _ in range(levels_up):
-        project_root = os.path.dirname(project_root)
+#     # Поднимаемся на levels_up уровней вверх — это и будет корень проекта
+#     project_root = current_dir
+#     for _ in range(levels_up):
+#         project_root = os.path.dirname(project_root)
 
-    # Добавляем корень проекта в начало sys.path (высокий приоритет)
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
+#     # Добавляем корень проекта в начало sys.path (высокий приоритет)
+#     if project_root not in sys.path:
+#         sys.path.insert(0, project_root)
 
-    # Вычисляем правильное значение __package__
-    # Пример: /project_med/app/models/bd → "app.models.bd"
-    rel_path = os.path.relpath(current_dir, project_root)
+#     # Вычисляем правильное значение __package__
+#     # Пример: /project_med/app/models/bd → "app.models.bd"
+#     rel_path = os.path.relpath(current_dir, project_root)
     
-    if rel_path == '.':
-        package_name = ''
-    else:
-        package_name = rel_path.replace(os.sep, '.').strip('.')
+#     if rel_path == '.':
+#         package_name = ''
+#     else:
+#         package_name = rel_path.replace(os.sep, '.').strip('.')
 
-    # Устанавливаем __package__
-    global __package__
-    if package_name:
-        __package__ = package_name
-    else:
-        # Если мы в корне — можно оставить None или пустую строку
-        __package__ = None
+#     # Устанавливаем __package__
+#     global __package__
+#     if package_name:
+#         __package__ = package_name
+#     else:
+#         # Если мы в корне — можно оставить None или пустую строку
+#         __package__ = None
 
 
 # Для получения пути к файлу конфигурации временно используем старую функцию.
-try:
-    from ..conf.get_config import get_config_env as _old_get_config_env
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 2)
-        from ..conf.get_config import get_config_env as _old_get_config_env 
-    except ImportError as e:
-        pass #  raise # e # pass
+# try:
+from app.config.conf.get_config import get_config_env as _old_get_config_env
+# except ImportError as e:
+#     try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#         _add_package_name(file_module = __file__,levels_up = 2)
+#         from ..conf.get_config import get_config_env as _old_get_config_env 
+#     except ImportError as e:
+#         pass #  raise # e # pass
     
-try:
-    from ...utils.logger.logger import AppLogger
-except ImportError as e:
-    try:
-        # Попытка абсолютного импорта, если модуль запущен как скрипт
-        _add_package_name(file_module = __file__,levels_up = 3)
-        from ...utils.logger.logger import AppLogger
-    except ImportError as e:
-        pass #  raise # e # pass
+# # try:
+# if 'app.utils.logger.logger' not in sys.modules:
+#     from ...utils.logger.logger import AppLogger
+# else:
+#     AppLogger = sys.modules['app.utils.logger.logger'].AppLogger
+# except ImportError as e:
+#     # try:
+#         # Попытка абсолютного импорта, если модуль запущен как скрипт
+#     _add_package_name(file_module = __file__,levels_up = 3)
+#     from ...utils.logger.logger import AppLogger
+    # except ImportError as e:
+    #     pass #  raise # e # pass
 
 
 
@@ -127,7 +130,7 @@ class BaseConfigManager:
         self, 
         config_path: str = None, 
         defaults: Dict[str, Any] = None,
-        logger:logging = None,
+        # logger:logging = None,
     ):
         """
         Инициализирует менеджер.
@@ -140,7 +143,16 @@ class BaseConfigManager:
         self._config = self._defaults.copy()  # начинаем с умолчаний
         self._load()  # загружаем из файла, если он существует
          # Логирование, если доступно
-        self.logger = logger or AppLogger.get_instance(f"{self.__class__.__name__}_{self._config_path}")
+        
+        # if not logger:
+        #     logger = logging.Logger(f"{self.__class__.__name__}_{self._config_path}")
+        #     if 'app.utils.logger.logger' not in sys.modules:
+        #         from app.utils.logger.logger import AppLogger
+        #     else:
+        #         AppLogger = sys.modules['project_med.app.utils.logger.logger'].AppLogger
+        #     logger = AppLogger.get_instance(name=f"{self.__class__.__name__}_{self._config_path}")
+
+        # self.logger = logger 
 
     def _load(self) -> None:
         """
@@ -152,18 +164,18 @@ class BaseConfigManager:
             # Файла нет – используем defaults, файл не создаём до первого сохранения
             return
 
-        try:
-            with open(self._config_path, 'rb') as f:
-                data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
-            if not isinstance(data, dict):
-                # Если файл содержит не словарь, игнорируем его
-                return
-            # Обновляем кеш: значения из файла перезаписывают defaults
-            self._config.update(data)
-        except (msgpack.UnpackException, EOFError, OSError) as e:
-            # В случае ошибки чтения (повреждённый файл) оставляем defaults
-            self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
-            pass
+        # try:
+        with open(self._config_path, 'rb') as f:
+            data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+        if not isinstance(data, dict):
+            # Если файл содержит не словарь, игнорируем его
+            return
+        # Обновляем кеш: значения из файла перезаписывают defaults
+        self._config.update(data)
+        # except (msgpack.UnpackException, EOFError, OSError) as e:
+        #     # В случае ошибки чтения (повреждённый файл) оставляем defaults
+        #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
+        #     pass
 
     def save(self) -> None:
         """

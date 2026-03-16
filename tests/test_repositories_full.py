@@ -2,11 +2,11 @@
 
 from datetime import date, time
 
-from app.backend.repositories import (
+from app.repositories import (
     PatientRepository, AppointmentRepository,
     AppointmentNoteRepository, PhotoRepository
 )
-from app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
 
 import pytest
 

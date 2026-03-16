@@ -1,15 +1,6 @@
-
-
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
-
-
-import shutil
-
-from typing import Type, TypeVar, Generic, List
-
-from datetime import time
 
 # Импорты модулей
 # def _add_package_name(
@@ -69,76 +60,81 @@ from datetime import time
 #         __package__ = None
 
 # try:
-from app.network.thread_network import DownloadThread, UploadThread
+from app.database.database_shema.clinic import Base as Base
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
-#         from ..network.thread_network import DownloadThread, UploadThread
+#         from ..backend.bd.clinic import Base as Base
 #     except ImportError as e:
 #         pass #  raise # e # pass
 
 
 # try:
-from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
+from app.database.database_shema.temp_data_bd import populate_test_data
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
 #         _add_package_name(file_module = __file__,levels_up = 2)
-#         from ..network.ya_dop import yadisk_download_file, yadisk_upload_file
+#         from ..backend.bd.temp_data_bd import populate_test_data
 #     except ImportError as e:
 #         pass #  raise # e # pass
 
-# try:
-    # from ..controllers.conf.get_config import get_config_env
-from app.config.config_manager.manager import get_config_env
-# except ImportError as e:
-#     try:
-#         # Попытка абсолютного импорта, если модуль запущен как скрипт
-#         _add_package_name(file_module = __file__,levels_up = 2)
-#         # from ..controllers.conf.get_config import get_config_env
-#         from ..controllers.config_manager.manager import get_config_env
-#     except ImportError as e:
-#         pass #  raise # e # pass
+# Сторонние библиотеки
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, scoped_session
+from contextlib import contextmanager
 
-
-
-
-
-
-class SyncService:
-    def __init__(self):
-        config = get_config_env()
-        self.token = config['YANDEX_TOKEN']
-        self.remote_path = config['database_remote_path']
-        self.local_path = config['database_local_path']
-
-    def download_sync(self, progress_callback=None):
-        """Синхронное скачивание файла с Диска."""
-        return yadisk_download_file(
-            ya_token=self.token,
-            ya_file_path=self.remote_path,
-            local_file_path=self.local_path,
-            if_err=True,
-            progress_callback=progress_callback
+class Database:
+    """
+    Центральный класс для работы с БД.
+    Создаёт движок, фабрику сессий и предоставляет контекстный менеджер для сессий.
+    """
+    def __init__(self, db_url: str):
+        self.engine = create_engine(
+            db_url, 
+            echo=False, 
+            future=True,
+            connect_args={"check_same_thread": False},
         )
+        self.Session = scoped_session(sessionmaker(bind=self.engine, future=True))
+        # Автоматическое создание таблиц (если их нет)
+        Base.metadata.create_all(self.engine)
 
-    def upload_sync(self, progress_callback=None):
-        """Синхронная загрузка файла на Диск."""
-        return yadisk_upload_file(
-            ya_token=self.token,
-            local_file_path=self.local_path,
-            ya_file_path=self.remote_path,
-            if_err=True,
-            progress_callback=progress_callback
-        )
-    def prepare_download(self) -> DownloadThread:
-        """Возвращает настроенный, но ещё не запущенный поток для скачивания."""
-        thread = DownloadThread(self.token, self.remote_path, self.local_path)
-        # Можно добавить общие обработчики, но лучше оставить GUI подключаться
-        return thread
+    def get_session(self):
+        """Возвращает сессию, привязанную к текущему потоку."""
+        return self.Session()
 
-    def prepare_upload(self) -> UploadThread:
-        thread = UploadThread(self.token, self.local_path, self.remote_path)
-        return thread
+    @contextmanager
+    def session_scope(self):
+        """
+        Контекстный менеджер для безопасной работы с сессией.
+        Автоматически коммитит при успехе или откатывает при ошибке.
+        """
+        session = self.get_session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def close(self):
+        """Закрывает все сессии и удаляет привязку к потокам."""
+        self.Session.remove()
+
+
+
+    def create_tables(self, recreate: bool = False):
+        if recreate:
+            Base.metadata.drop_all(self.engine)
+            # pass
+        Base.metadata.create_all(self.engine)
+
+    def fill_test_data(self):
+        with self.session_scope() as session:
+            populate_test_data(session)
+# 0==0

@@ -1,7 +1,7 @@
 # tests/test_temp_data_bd.py
 import pytest
-from app.models.bd.temp_data_bd import generate_test_data, populate_test_data
-from app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.temp_data_bd import generate_test_data, populate_test_data
+from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
 
 def test_populate_test_data(db_session):
     # БД пустая
@@ -20,7 +20,7 @@ def test_populate_test_data_idempotent(db_session):
 
 def test_generate_test_data(tmp_path):
     db_path = tmp_path / "test.db"
-    from app.models.bd.models import create_db
+    from app.database.database_shema.clinic import create_db
     create_db(str(db_path), recreate=True)  # создаём таблицы
     generate_test_data(str(db_path))
     from sqlalchemy import create_engine
@@ -28,7 +28,7 @@ def test_generate_test_data(tmp_path):
         f"sqlite:///{db_path}",
         # connect_args={"check_same_thread": False},
     )
-    from app.models.bd.models import Base
+    from app.database.database_shema.clinic import Base
     Base.metadata.create_all(engine)  # таблицы уже должны быть созданы, но для проверки
     from sqlalchemy.orm import sessionmaker
     Session = sessionmaker(bind=engine)

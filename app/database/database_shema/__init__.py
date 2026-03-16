@@ -1,4 +1,4 @@
-# /home/admin-rkc/Git/My_cods/project_med/app/models/bd/__init__.py
+# app/database/database_shema/__init__.py
 """
 Пакет app.models.bd — модели базы данных (SQLAlchemy).
 
@@ -8,7 +8,7 @@
 """
 
 # Импортируем классы моделей из модуля models
-from .models import (
+from .clinic import (
     Patient, 
     Appointment, 
     AppointmentNote, 

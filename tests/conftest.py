@@ -6,7 +6,7 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-import tempfile
+# import tempfile
 from datetime import date, time 
 # Импорты модулей
 # def _add_package_name(
@@ -132,7 +132,7 @@ from datetime import date, time
 # Добавляем корень проекта в sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.backend.repositories import (
+from app.repositories import (
     PatientRepository, AppointmentRepository,
     AppointmentNoteRepository, PhotoRepository
 )
@@ -140,14 +140,14 @@ from app.services import (
     PatientService, AppointmentService,
     NoteService, PhotoService, SyncService
 )
-from app.models.bd.models import (
+from app.database.database_shema.clinic import (
     Base, Patient, Appointment, AppointmentNote, Photo
 )
-from app.backend.database import Database
+from app.database.database_shema import Database
 
 # from app.controllers.conf.get_config import get_config_env
-from app.controllers.config_manager.manager import get_config_env
-from app.controllers.conf.getenv import get_dotenv_path, save_env_file
+# from app.config.config_manager.manager import get_config_env
+# from app.config.conf.getenv import get_dotenv_path, save_env_file
 
 
 # Сторонние библиотеки
@@ -155,7 +155,10 @@ from app.controllers.conf.getenv import get_dotenv_path, save_env_file
 import pytest # pip install pytest
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import (
+    # sessionmaker, 
+    Session
+)
 
 
 
@@ -240,7 +243,7 @@ def photo_service(database, tmp_path):
 @pytest.fixture
 def sample_patient(db_session):
     """Создаёт тестового пациента в БД и возвращает его ORM-объект."""
-    from app.models.bd.models import Patient
+    from app.database.database_shema.clinic import Patient
     patient = Patient(
         first_name="Иван",
         last_name="Петров",
@@ -289,7 +292,7 @@ def sync_service():
 
 @pytest.fixture
 def sample_appointment(db_session, sample_patient, sample_note):
-    from app.models.bd.models import Appointment
+    from app.database.database_shema.clinic import Appointment
     app = Appointment(
         patient_id=sample_patient.id,
         date=date.today(),

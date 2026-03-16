@@ -1,4 +1,4 @@
-# /home/admin-rkc/Git/My_cods/project_med/app/services/__init__.py
+# app/services/__init__.py
 """
 Пакет app.services — бизнес-логика приложения (сервисы).
 
@@ -8,16 +8,16 @@
 """
 
 # Импортируем основные сервисы из services_all
-from .services_all import (
+from app.services.services_all import (
     PatientService, 
     AppointmentService, 
     NoteService, 
-    PhotoService,
+    PhotoService
 )
 
 # Импортируем сервис синхронизации из sync_service
-from .sync_service import (
-    SyncService,
+from app.services.sync_service import (
+    SyncService
 )
 
 # Экспортируем все классы сервисов
@@ -26,7 +26,7 @@ __all__ = [
     'AppointmentService',
     'NoteService',
     'PhotoService',
-    'SyncService',
+    'SyncService'
 ]
 
 # Примечание: сервисы инкапсулируют логику работы с БД и внешними ресурсами.

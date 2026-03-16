@@ -1,9 +1,9 @@
 # tests/test_config.py
 import pytest
 import os
-from app.controllers.conf.getenv import get_getenv, save_env_file, crete_env_file, get_dotenv_path
+from app.config.conf.getenv import get_getenv, save_env_file, crete_env_file, get_dotenv_path
 # from app.controllers.conf.get_config import get_config_env
-from app.controllers.config_manager.manager import get_config_env
+from app.config.config_manager.manager import get_config_env
 
 def test_get_dotenv_path_default():
     path = get_dotenv_path()
@@ -51,7 +51,7 @@ LOG_BACKUP_COUNT=2
     # Подменим функцию get_dotenv_path, чтобы возвращала наш файл
     def mock_get_dotenv_path(name=None):
         return str(env_file)
-    import app.controllers.conf.getenv
+    import app.config.conf.getenv
     original = app.controllers.conf.getenv.get_dotenv_path
     app.controllers.conf.getenv.get_dotenv_path = mock_get_dotenv_path
     try:

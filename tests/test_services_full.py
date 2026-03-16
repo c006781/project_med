@@ -22,7 +22,7 @@ def test_appointment_service_get_by_id_not_found(appointment_service):
 
 def test_appointment_service_get_by_patient(appointment_service, sample_appointment, sample_patient, db_session):
     # Добавим ещё приём
-    from app.models.bd.models import Appointment
+    from app.database.database_shema.clinic import Appointment
     app2 = Appointment(patient_id=sample_patient.id, date=date.today())
     db_session.add(app2)
     db_session.commit()

@@ -1,4 +1,4 @@
-# app/backend/repositories/__init__.py
+# app/repositories/__init__.py
 """
 Все репозитории для работы с БД
 """

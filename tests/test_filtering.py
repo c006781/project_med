@@ -1,8 +1,8 @@
 # tests/test_filtering.py
 import pytest
 from datetime import date
-from app.utils.filtering import apply_filters, apply_post_filters, FilterOperator
-from app.models.bd.models import Patient
+from app.utils.filtering.filtering import apply_filters, apply_post_filters, FilterOperator
+from app.database.database_shema.clinic import Patient
 
 def test_apply_filters_eq(db_session):
     query = db_session.query(Patient)

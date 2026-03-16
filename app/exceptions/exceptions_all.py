@@ -74,14 +74,6 @@ class PhotoValidationError(AppException):
         message = f"Ошибка валидации фотографии, поле '{field}': {reason}."
         super().__init__(message, code=4002)
 
-# class PhotoFileError(AppException):
-#     """
-#     Ошибка при работе с файлом фотографии (не найден, не удалось скопировать и т.д.).
-#     """
-#     def __init__(self, path: str, operation: str, reason: str):
-#         message = f"Ошибка {operation} файла '{path}': {reason}."
-#         super().__init__(message, code=4003)
-
 class PhotoFileError(AppException):
     def __init__(self, path: str, operation: str, reason: str, errno: int = None):
         message = f"Ошибка {operation} файла '{path}': {reason}"

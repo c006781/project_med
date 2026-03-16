@@ -59,31 +59,6 @@ def _add_package_name(
         __package__ = None
 
 
-# if True:
-# # if not 'app.controllers.conf.get_config' in sys.modules.keys():
-#     try:
-#         from ...controllers.conf.get_config import get_config_env as get_config_env
-#     except ImportError as e:
-#         # Попытка абсолютного импорта, если модуль запущен как скрипт
-#         _add_package_name(
-#             file_module = __file__,
-#             levels_up = 3
-#         )
-#         from ...controllers.conf.get_config import get_config_env as get_config_env
-
-
-# # if not 'app.models.bd.temp_data_bd' in sys.modules.keys():
-#     try:
-#         from .temp_data_bd import generate_test_data as generate_test_data
-#     except ImportError as e:
-#         # Попытка абсолютного импорта, если модуль запущен как скрипт
-#         _add_package_name(
-#             file_module = __file__,
-#             levels_up = 1
-#         )
-#         from .temp_data_bd import generate_test_data as generate_test_data
-
-
 try:
     from ...utils.logger import AppLogger
 except ImportError as e:
@@ -94,14 +69,6 @@ except ImportError as e:
     except ImportError as e:
         pass #  raise # e # pass
 
-# temp_from = 'app.controllers.conf.get_config'.split('.')
-# temp_from = {
-#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
-# }
-# # if not 'get_getenv' in sys.modules.keys():
-# if len(
-#     set(sys.modules.keys()).intersection(temp_from)
-# ) == 0:
 try:
     # from ...controllers.conf.get_config import get_config_env as get_config_env
     from ...controllers.config_manager.manager import get_config_env
@@ -116,16 +83,6 @@ except ImportError as e:
         from ...controllers.config_manager.manager import get_config_env
     except ImportError as e:
         pass #  raise # e # pass
-# del temp_from
-
-# temp_from = 'app.models.bd.temp_data_bd'.split('.')
-# temp_from = {
-#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
-# }
-# # if not 'get_getenv' in sys.modules.keys():
-# if len(
-#     set(sys.modules.keys()).intersection(temp_from)
-# ) == 0:
 
 try:
     from .temp_data_bd import generate_test_data as generate_test_data
@@ -139,10 +96,6 @@ except ImportError as e:
         from .temp_data_bd import generate_test_data as generate_test_data
     except ImportError as e:
         pass #  raise # e # pass
-
-
-# del temp_from
-
 
 
 

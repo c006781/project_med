@@ -69,27 +69,6 @@ except ImportError as e:
     except ImportError as e:
         pass #  raise # e # pass
 
-# if True:
-# # if not 'app.models' in sys.modules.keys():
-#     try:
-#         from .models import Patient, Appointment, AppointmentNote, Photo
-#     except ImportError as e:
-#         # Попытка абсолютного импорта, если модуль запущен как скрипт
-#         _add_package_name(
-#             file_module = __file__,
-#             levels_up = 0
-#         )
-
-#         from .models import Patient, Appointment, AppointmentNote, Photo
-
-# temp_from = 'app.models.bd.models'.split('.')
-# temp_from = {
-#     '.'.join(temp_from[x:]) for x in range(len(temp_from))
-# }
-# # if not 'get_getenv' in sys.modules.keys():
-# if len(
-#     set(sys.modules.keys()).intersection(temp_from)
-# ) == 0:
 try:
     from .models import Patient, Appointment, AppointmentNote, Photo
     # from . import models

@@ -3,7 +3,8 @@ from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
 from datetime import date, time
 
-from interfaces.cli.cli import cli, patient, appointment, note, photo, init_db, sync_download, sync_upload, stats, menu
+from interfaces.cli.cli import create_cli 
+#cli, patient, appointment, note, photo, init_db, sync_download, sync_upload, stats, menu
 from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
 from app.exceptions import (
     PatientNotFoundError, PatientValidationError,
@@ -117,8 +118,17 @@ def test_patient_list_no_filter(runner, mock_patient_service):
             email="maria@test.ru"
         ),
     ]
+
     # Затем запускается команда 'patient list' и проверяется, что вывод содержит двух пациентов
-    result = runner.invoke(patient, ['list'])
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
+            'list'
+        ]
+    )
     assert result.exit_code == 0
     assert "ID: 1, ФИО: Петров Иван" in result.output
     assert "ID: 2, ФИО: Иванова Мария" in result.output
@@ -143,9 +153,13 @@ def test_patient_list_with_filter(runner, mock_patient_service):
             email="ivan@test.ru"
         )
     ]
-    result = runner.invoke(
-        patient, 
+
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
         [
+            'patient', 
             'list', 
             '--filter', 
             'last_name:like:Петров'
@@ -183,14 +197,19 @@ def test_patient_list_fuzzy_filter(runner, mock_patient_service):
             email="ivan@test.ru"
         )
     ]
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'list', 
             '--filter', 
             'fuzzy:last_name:Петроф', 
             '--fuzzy-threshold', 
             '70'
-            ]
+        ]
         )
     assert result.exit_code == 0
     mock_patient_service.get_patients_filtered.assert_called_once_with(
@@ -213,7 +232,16 @@ def test_patient_list_empty(runner, mock_patient_service):
     - Проверяется, что вывод содержит сообщение "Пациенты не найдены."
     """
     mock_patient_service.get_patients_filtered.return_value = []
-    result = runner.invoke(patient, ['list'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient,
+        [
+            'patient',
+            'list'
+        ]
+        )
     assert result.exit_code == 0
     assert "Пациенты не найдены." in result.output
 
@@ -226,7 +254,18 @@ def test_patient_list_invalid_filter(runner):
     - Проверяется, что код возврата команды не равен 0
     - Проверяется, что вывод содержит сообщение "Неверный формат фильтра"
     """
-    result = runner.invoke(patient, ['list', '--filter', 'wrongformat'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
+            'list', 
+            '--filter', 
+            'wrongformat'
+        ]
+    )
     assert result.exit_code != 0
     assert "Неверный формат фильтра" in result.output
 
@@ -251,8 +290,12 @@ def test_patient_get_success(runner, mock_patient_service):
     )
     
     # Затем запускается команда 'patient get' c id=1
-    result = runner.invoke(
-        patient, [
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'get', 
             '--id', 
             '1'
@@ -279,7 +322,18 @@ def test_patient_get_not_found(runner, mock_patient_service):
     """
     # Mock объект PatientService выбрасывает исключение PatientNotFoundError при вызове get_patient_by_id с id=1
     mock_patient_service.get_patient_by_id.side_effect = PatientNotFoundError(1)
-    result = runner.invoke(patient, ['get', '--id', '1'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
+            'get', 
+            '--id', 
+            '1'
+        ]
+    )
     # Проверяется, что код возврата команды равен 0 (click обрабатывает исключение и выводит текст)
     assert result.exit_code == 0
     # Проверяется, что вывод содержит сообщение "Пациент с идентификатором 1 не найден."
@@ -309,8 +363,13 @@ def test_patient_create_success(runner, mock_patient_service):
         # электронная почта
         email=""
     )
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'create', 
             '--first-name', 
             'Новый', 
@@ -336,8 +395,13 @@ def test_patient_create_validation_error(runner, mock_patient_service):
         "first_name", 
         "пустое"
     )
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'create',
             '--first-name', 
             '', 
@@ -379,8 +443,13 @@ def test_patient_update_success(runner, mock_patient_service):
         phone="", 
         email=""
     )
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient,
+        [
+            'patient', 
             'update', 
             '--id', 
             '1', 
@@ -403,8 +472,13 @@ def test_patient_update_not_found(runner, mock_patient_service):
     """
     # Mock объект PatientService выбрасывает исключение PatientNotFoundError при вызове get_patient_by_id с id=1
     mock_patient_service.get_patient_by_id.side_effect = PatientNotFoundError(1)
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'update', 
             '--id', 
             '1', 
@@ -425,8 +499,13 @@ def test_patient_delete_success(runner, mock_patient_service):
     - Проверяется, что функция delete_patient была вызвана с параметром id=1
     - Проверяется, что вывод содержит сообщение "Пациент ID 1 удалён."
     """
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'delete', 
             '--id', 
             '1'
@@ -447,8 +526,13 @@ def test_patient_delete_not_found(runner, mock_patient_service):
     - Проверяется, что вывод содержит сообщение "Пациент с идентификатором 1 не найден."
     """
     mock_patient_service.delete_patient.side_effect = PatientNotFoundError(1)
-    result = runner.invoke(
-        patient, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
             'delete', 
             '--id', 
             '1'
@@ -491,7 +575,16 @@ def test_appointment_list_all(runner, mock_appointment_service):
             note_text=""
         )
     ]
-    result = runner.invoke(appointment, ['list'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
+            'list'
+        ]
+    )
     assert result.exit_code == 0
     # Проверяется, что вывод содержит сообщение "ID: 1, Пациент ID: 1"
     assert "ID: 1, Пациент ID: 1" in result.output
@@ -520,8 +613,13 @@ def test_appointment_list_by_patient(runner, mock_appointment_service):
             note_text=""
         )
     ]
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'list', 
             '--patient-id', 
             '1'
@@ -560,8 +658,13 @@ def test_appointment_list_with_filter(runner, mock_appointment_service):
              note_text="осмотр"
         )
     ]
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'list', 
             '--filter', 
             'date:eq:2025-03-17'
@@ -597,8 +700,13 @@ def test_appointment_get_success(runner, mock_appointment_service):
         patient_name="Петров Иван", 
         note_text="осмотр"
     )
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'get', 
             '--id', 
             '1'
@@ -619,8 +727,13 @@ def test_appointment_get_not_found(runner, mock_appointment_service):
     - Проверяется, что вывод содержит сообщение "Приём с идентификатором 1 не найден."
     """
     mock_appointment_service.get_appointment.side_effect = AppointmentNotFoundError(1)
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'get', 
             '--id', 
             '1'
@@ -655,8 +768,13 @@ def test_appointment_create_success(runner, mock_appointment_service):
         # текст заметки
         note_text=""
     )
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'create', 
             '--patient-id',
             '1', 
@@ -682,8 +800,13 @@ def test_appointment_create_patient_not_found(runner, mock_appointment_service):
     - Проверяется, что вывод содержит сообщение "Пациент с идентификатором 1 не найден."
     """
     mock_appointment_service.create_appointment.side_effect = PatientNotFoundError(1)
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'create', 
             '--patient-id', 
             '1', 
@@ -725,8 +848,13 @@ def test_appointment_update_success(runner, mock_appointment_service):
         patient_name="", 
         note_text="новая"
     )
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
             'update', 
             '--id', 
             '1', 
@@ -752,7 +880,18 @@ def test_appointment_update_not_found(runner, mock_appointment_service):
     - Проверяется, что вывод содержит сообщение "Приём с идентификатором 1 не найден."
     """
     mock_appointment_service.get_appointment.side_effect = AppointmentNotFoundError(1)
-    result = runner.invoke(appointment, ['update', '--id', '1'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
+            'update', 
+            '--id', 
+            '1'
+        ]
+    )
     assert result.exit_code == 0
     assert "Приём с идентификатором 1 не найден." in result.output
 
@@ -766,7 +905,18 @@ def test_appointment_delete_success(runner, mock_appointment_service):
     - Проверяется, что код возврата команды равен 0
     - Проверяется, что вывод содержит сообщение "Приём ID 1 удалён."
     """
-    result = runner.invoke(appointment, ['delete', '--id', '1'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment, 
+        [
+            'appointment', 
+            'delete', 
+            '--id', 
+            '1'
+        ]
+    )
     assert result.exit_code == 0
     mock_appointment_service.delete_appointment.assert_called_once_with(1)
     assert "Приём ID 1 удалён." in result.output
@@ -796,8 +946,15 @@ def test_note_list(runner, mock_note_service):
             text="Заметка 2"
         ),
     ]
-    result = runner.invoke(
-        note, ['list']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
+            'list'
+        ]
     )
     assert result.exit_code == 0
     assert "ID: 1, Текст: Заметка 1" in result.output
@@ -818,8 +975,17 @@ def test_note_get_success(runner, mock_note_service):
         id=1, 
         text="Длинный текст заметки"
     )
-    result = runner.invoke(
-        note, ['get', '--id', '1']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
+            'get', 
+            '--id', 
+            '1'
+        ]
     )
     assert result.exit_code == 0
     assert "ID: 1" in result.output
@@ -838,8 +1004,17 @@ def test_note_get_not_found(runner, mock_note_service):
     # Mock объект NoteService выбрасывает исключение AppointmentNoteNotFoundError при вызове get_note с id=1
     mock_note_service.get_note.side_effect = AppointmentNoteNotFoundError(1)
     # Затем запускается команда 'note get' c id=1
-    result = runner.invoke(
-        note, ['get', '--id', '1']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
+            'get', 
+            '--id', 
+            '1'
+        ]
     )
     # Проверяется, что код возврата команды равен 0
     assert result.exit_code == 0
@@ -860,8 +1035,16 @@ def test_note_create(runner, mock_note_service):
         id=5, 
         text="новая заметка"
     )
-    result = runner.invoke(
-        note, ['create', 'новая заметка']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
+            'create', 
+            'новая заметка'
+        ]
     )
     assert result.exit_code == 0
     mock_note_service.create_note.assert_called_once_with("новая заметка")
@@ -884,7 +1067,18 @@ def test_note_create_from_file(runner, mock_note_service, tmp_path):
         id=6, 
         text="содержимое файла"
     )
-    result = runner.invoke(note, ['create-from-file', '--file', str(file)])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
+            'create-from-file', 
+            '--file', 
+            str(file)
+        ]
+    )
     assert result.exit_code == 0
     mock_note_service.create_note_from_file.assert_called_once_with(str(file))
     assert "Заметка создана с ID: 6" in result.output
@@ -903,8 +1097,13 @@ def test_note_update(runner, mock_note_service):
         id=1, 
         text="обновлённый текст"
     )
-    result = runner.invoke(
-        note, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
             'update', 
             '--id', 
             '1', 
@@ -929,8 +1128,13 @@ def test_note_delete(runner, mock_note_service):
     - Проверяется, что функция delete_note была вызвана с параметром id=1
     - Проверяется, что вывод содержит сообщение "Заметка ID 1 удалена."
     """
-    result = runner.invoke(
-        note, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # note, 
+        [
+            'note', 
             'delete', 
             '--id', 
             '1'
@@ -969,8 +1173,15 @@ def test_photo_list_all(runner, mock_photo_service):
             description="desc2"
         ),
     ]
-    result = runner.invoke(
-        photo, ['list']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
+            'list'
+        ]
     )
     assert result.exit_code == 0
     assert "ID: 1, Приём ID: 1, Файл: path1.jpg, Описание: desc1" in result.output
@@ -994,7 +1205,18 @@ def test_photo_list_by_appointment(runner, mock_photo_service):
             description="desc1"
         )
     ]
-    result = runner.invoke(photo, ['list', '--appointment-id', '1'])
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
+            'list', 
+            '--appointment-id', 
+            '1'
+        ]
+    )
     assert result.exit_code == 0
     mock_photo_service.get_photos_for_appointment.assert_called_once_with(1)
 
@@ -1016,8 +1238,13 @@ def test_photo_add_success(runner, mock_photo_service, tmp_path):
         file_path="app1/test.jpg", 
         description="test"
     )
-    result = runner.invoke(
-        photo, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
             'add', 
             '--appointment-id', 
             '1', 
@@ -1043,8 +1270,13 @@ def test_photo_add_appointment_not_found(runner, mock_photo_service, tmp_path):
     img = tmp_path / "test.jpg"
     img.write_bytes(b"data")
     mock_photo_service.add_photo_to_appointment.side_effect = AppointmentNotFoundError(1)
-    result = runner.invoke(
-        photo, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
             'add', 
             '--appointment-id', 
             '1', 
@@ -1073,8 +1305,13 @@ def test_photo_add_file_error(runner, mock_photo_service, tmp_path):
         "копирование",  # описание ошибки
         "ошибка"  # сообщение об ошибке
     )
-    result = runner.invoke(
-        photo, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
             'add', 
             '--appointment-id', 
             '1',
@@ -1096,8 +1333,17 @@ def test_photo_delete_success(runner, mock_photo_service):
     - Проверяется, что функция delete_photo была вызвана с параметром id=1
     - Проверяется, что вывод содержит сообщение "Фото ID 1 удалено."
     """
-    result = runner.invoke(
-        photo, ['delete', '--id', '1']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
+            'delete', 
+            '--id', 
+            '1'
+        ]
     )
     assert result.exit_code == 0
     # Проверка, что функция delete_photo была вызвана с параметром id=1
@@ -1116,8 +1362,17 @@ def test_photo_delete_not_found(runner, mock_photo_service):
     - Проверяется, что в выводе есть строка "Фотография с идентификатором 1 не найдена."
     """
     mock_photo_service.delete_photo.side_effect = PhotoNotFoundError(1)
-    result = runner.invoke(
-        photo, ['delete', '--id', '1']
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # photo, 
+        [
+            'photo', 
+            'delete', 
+            '--id', 
+            '1'
+        ]
     )
     assert result.exit_code == 0
     assert "Фотография с идентификатором 1 не найдена." in result.output
@@ -1136,7 +1391,21 @@ def test_init_db(runner):
     - Проверяется, что в выводе есть строка "База данных инициализирована."
     """
     with patch('interfaces.cli.cli.init_db_deps') as mock_init:
-        result = runner.invoke(init_db)
+    
+        cli = create_cli()  # создаём экземпляр CLI для теста
+        result = runner.invoke( 
+            cli,
+            # init_db,
+            [
+                'init-db', 
+                # 'init_db', 
+            ]
+        )
+        # cli = create_cli()
+        # print("Доступные команды:", list(cli.commands.keys()))
+        # result = runner.invoke(cli, ['init_db'])
+        # print(result.output)
+
         assert result.exit_code == 0
         mock_init.assert_called_once_with(recreate=False, test_data=True)
         assert "База данных инициализирована." in result.output
@@ -1151,7 +1420,18 @@ def test_init_db_with_options(runner):
     - Проверяется, что в выводе есть строка "База данных инициализирована."
     """
     with patch('interfaces.cli.cli.init_db_deps') as mock_init:
-        result = runner.invoke(init_db, ['--recreate', '--no-test-data'])
+    
+        cli = create_cli()  # создаём экземпляр CLI для теста
+        result = runner.invoke( 
+            cli,
+            # init_db, 
+            [
+                'init-db', 
+                # 'init_db', 
+                '--recreate', 
+                '--no-test-data'
+            ]
+        )
         assert result.exit_code == 0
         mock_init.assert_called_once_with(recreate=True, test_data=False)
 
@@ -1165,8 +1445,17 @@ def test_sync_download_success(runner, mock_sync_service):
     - Проверяется, что код возврата команды равен 0
     - Проверяется, что в выводе есть строка "Скачивание успешно завершено."
     """
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
     mock_sync_service.download_sync.return_value = 0
-    result = runner.invoke(sync_download)
+    result = runner.invoke( 
+        cli,
+        # sync_download,
+        [
+            # 'sync_download', 
+            'sync-download', 
+        ]
+    )
     assert result.exit_code == 0
     assert "Скачивание успешно завершено." in result.output
 
@@ -1180,8 +1469,17 @@ def test_sync_download_error(runner, mock_sync_service):
     - Проверяется, что код возврата команды равен 0
     - Проверяется, что в выводе есть строка "Скачивание завершилось с ошибкой (код 1)"
     """
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
     mock_sync_service.download_sync.return_value = 1
-    result = runner.invoke(sync_download)
+    result = runner.invoke( 
+        cli,
+        # sync_download,
+        [
+            # 'sync_download', 
+            'sync-download', 
+        ]
+    )
     assert result.exit_code == 0
     assert "Скачивание завершилось с ошибкой (код 1)" in result.output
 
@@ -1199,7 +1497,15 @@ def test_sync_upload_success(runner, mock_sync_service):
     mock_sync_service.upload_sync.return_value = 0
     
     # Затем запускается команда 'sync upload'
-    result = runner.invoke(sync_upload)
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # sync_upload,
+        [
+            # 'sync_upload', 
+            'sync-upload', 
+        ]
+    )
     
     # Проверяется, что код возврата команды равен 0
     assert result.exit_code == 0
@@ -1218,7 +1524,16 @@ def test_sync_upload_error(runner, mock_sync_service):
     - Проверяется, что в выводе есть строка "Загрузка завершилась с ошибкой (код 2)"
     """
     mock_sync_service.upload_sync.return_value = 2
-    result = runner.invoke(sync_upload)
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # sync_upload,
+        [
+            # 'sync_upload', 
+            'sync-upload', 
+        ]
+    )
     assert result.exit_code == 0
     assert "Загрузка завершилась с ошибкой (код 2)" in result.output
 
@@ -1244,7 +1559,15 @@ def test_stats(runner):
         mock_session = MagicMock()
         mock_db.session_scope.return_value.__enter__.return_value = mock_session
         mock_session.query.return_value.count.side_effect = [10, 5, 3, 7]
-        result = runner.invoke(stats)
+    
+        cli = create_cli()  # создаём экземпляр CLI для теста
+        result = runner.invoke( 
+            cli,
+            # stats,
+            [
+                'stats', 
+            ]
+        )
         assert result.exit_code == 0
         assert "Пациентов: 10" in result.output
         assert "Приёмов: 5" in result.output
@@ -1268,8 +1591,15 @@ def test_menu_patient_flow(runner, monkeypatch, mock_patient_service):
     monkeypatch.setattr('builtins.input', lambda _: next(inputs))
     
     with patch('interfaces.cli.cli.click.pause', return_value=None):  # чтобы не ждать нажатия
-        result = runner.invoke(
-            menu, input='\n'.join(['1', '0', '0'])
+    
+        cli = create_cli()  # создаём экземпляр CLI для теста
+        result = runner.invoke( 
+            cli,
+            # menu, 
+            [
+                'menu', 
+            ],
+            input='\n'.join(['1', '0', '0'])
         )
     # Просто проверяем, что команда выполнилась без ошибок
     assert result.exit_code == 0
@@ -1291,8 +1621,14 @@ def test_menu_appointment_flow(runner, monkeypatch):
     )
     
     with patch('interfaces.cli.cli.click.pause'):  # чтобы не ждать нажатия
-        result = runner.invoke(
-            menu, input='\n'.join(['2', '0', '0'])
+        cli = create_cli()  # создаём экземпляр CLI для теста
+        result = runner.invoke( 
+            cli,
+            # menu,
+            [
+                'menu', 
+            ], 
+            input='\n'.join(['2', '0', '0'])
         )
 
     # Просто проверяем, что команда выполнилась без ошибок
@@ -1313,7 +1649,17 @@ def test_patient_create_missing_required(runner):
     - Проверяется, что код возврата команды не равен 0
     - Проверяется, что вывод содержит информацию о том, что какие поля обязательны
     """
-    result = runner.invoke(patient, ['create'])  # без --first-name и --last-name
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # patient, 
+        [
+            'patient', 
+            'create'
+            # без --first-name и --last-name
+        ]
+    )  
     assert result.exit_code != 0
     assert "Missing option" in result.output or "requires" in result.output
 
@@ -1326,8 +1672,13 @@ def test_appointment_create_invalid_date(runner):
     - Проверяется, что код возврата команды равен 0
     - Проверяется, что вывод содержит информацию о том, что дата имеет неправильный формат
     """
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli,
+        # appointment,
+        [
+            'appointment', 
             'create', 
             '--patient-id', 
             '1', 
@@ -1347,8 +1698,13 @@ def test_appointment_create_invalid_time(runner):
     - Проверяется, что код возврата команды равен 0
     - Проверяется, что вывод содержит информацию о том, что время имеет неправильный формат
     """
-    result = runner.invoke(
-        appointment, [
+    
+    cli = create_cli()  # создаём экземпляр CLI для теста
+    result = runner.invoke( 
+        cli, 
+        # appointment, 
+        [
+            'appointment', 
             'create', 
             '--patient-id', 
             '1', 

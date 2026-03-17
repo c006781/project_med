@@ -143,7 +143,8 @@ from app.services import (
 from app.database.database_shema.clinic import (
     Base, Patient, Appointment, AppointmentNote, Photo
 )
-from app.database.database_shema import Database
+# from app.database.database_shema import Database
+from app.database import Database
 
 # from app.controllers.conf.get_config import get_config_env
 # from app.config.config_manager.manager import get_config_env
@@ -219,37 +220,59 @@ def database(db_session):
 
 @pytest.fixture
 def patient_service(database):
-    """Фикстура сервиса пациентов."""
+    """
+    Фикстура сервиса пациентов.
+
+    Возвращает экземпляр PatientService, инициализированный с помощью Database.
+    """
     return PatientService(database)
 
 @pytest.fixture
 def appointment_service(database, note_service):
+    """
+    Фикстура сервиса приёмов.
+
+    Возвращает экземпляр AppointmentService, инициализированный с помощью Database и NoteService.
+    """
     return AppointmentService(database, note_service=note_service)
 
 @pytest.fixture
 def note_service(database):
+    """
+    Фикстура сервиса заметок.
+
+    Возвращает экземпляр NoteService, инициализированный с помощью Database.
+    """
     return NoteService(database)
 
 @pytest.fixture
 def photo_service(database, tmp_path):
     """
     Фикстура PhotoService с временной папкой для хранения фото.
+
     tmp_path — встроенная фикстура pytest, создаёт временную директорию.
+
+    Возвращает экземпляр PhotoService, инициализированный с помощью Database и временной папки для фото.
     """
     storage = tmp_path / "photos"
-    storage.mkdir()
+    storage.mkdir(parents=True, exist_ok=True)
     return PhotoService(database, str(storage))
+
 
 @pytest.fixture
 def sample_patient(db_session):
-    """Создаёт тестового пациента в БД и возвращает его ORM-объект."""
+    """
+    Создаёт тестового пациента в БД и возвращает его ORM-объект.
+
+    Patient(first_name="Иван", last_name="Петров", birth_date=None, phone="+71234567890", email="ivan@test.ru")
+    """
     from app.database.database_shema.clinic import Patient
     patient = Patient(
-        first_name="Иван",
-        last_name="Петров",
-        birth_date=None,
-        phone="+71234567890",
-        email="ivan@test.ru"
+        first_name="Иван",  # имя
+        last_name="Петров",  # фамилия
+        birth_date=None,  # дата рождения
+        phone="+71234567890",  # телефон
+        email="ivan@test.ru"  # электронная почта
     )
     db_session.add(patient)
     db_session.commit()  # коммитим, чтобы получить id
@@ -257,41 +280,72 @@ def sample_patient(db_session):
 
 @pytest.fixture
 def patient_repo(db_session):
+    """
+    Возвращает репозиторий для работы с пациентами (PatientRepository).
+
+    db_session — сессия БД, которая будет использоваться для работы с репозиторием.
+    """
     return PatientRepository(db_session)
 
 @pytest.fixture
 def appointment_repo(db_session):
+    """
+    Возвращает репозиторий для работы с приёмами (AppointmentRepository).
+    """
     return AppointmentRepository(db_session)
 
 @pytest.fixture
 def note_repo(db_session):
+    """
+    Возвращает репозиторий для работы с заметками приёмов (AppointmentNoteRepository).
+    """
     return AppointmentNoteRepository(db_session)
 
 @pytest.fixture
 def photo_repo(db_session):
+    """
+    Возвращает репозиторий для работы с фотографиями приёмов (PhotoRepository).
+    """
     return PhotoRepository(db_session)
 
 @pytest.fixture
-def appointment_service(database, note_service):
-    return AppointmentService(database, note_service=note_service)
+def appointment_service(database, note_service, photo_service):
+    """
+    Фикстура сервиса приёмов.
+    Возвращает AppointmentService с уже созданным Database и сервисами NoteService и PhotoService.
+    """
+    return AppointmentService(database, note_service=note_service, photo_service=photo_service)
 
 @pytest.fixture
 def note_service(database):
+    """
+    Фикстура сервиса заметок приёмов.
+
+    Возвращает экземпляр NoteService, инициализированный с помощью Database.
+    """
     return NoteService(database)
 
 @pytest.fixture
 def sync_service():
+    """
+    Возвращает экземпляр SyncService, инициализированный для синхронизации с Яндекс.Диском.
+    """
     return SyncService()
-
-# @pytest.fixture
-# def temp_env_file(tmp_path):
-#     """Создаёт временный .env файл для тестов конфигурации."""
-#     env_file = tmp_path / ".env"
-#     env_file.write_text("")
-#     return str(env_file)
 
 @pytest.fixture
 def sample_appointment(db_session, sample_patient, sample_note):
+    """
+    Фикстура примера приёма.
+
+    Создаёт приём с данными: пациент - sample_patient, заметка - sample_note,
+    дата и время - сегодня и 10:00 соответственно.
+
+    db_session — сессия БД, которая будет использоваться для работы с репозиторием.
+
+    Returns:
+        Appointment: созданный приём.
+    """
+    
     from app.database.database_shema.clinic import Appointment
     app = Appointment(
         patient_id=sample_patient.id,
@@ -305,6 +359,16 @@ def sample_appointment(db_session, sample_patient, sample_note):
 
 @pytest.fixture
 def sample_note(db_session):
+    """
+    Фикстура примера заметки.
+
+    Создаёт заметку с текстом "Тестовая заметка" и добавляет ее в БД.
+
+    db_session — сессия БД, которая будет использоваться для работы с репозиторием.
+
+    Returns:
+        AppointmentNote: созданная заметка.
+    """
     note = AppointmentNote(text="Тестовая заметка")
     db_session.add(note)
     db_session.commit()
@@ -312,6 +376,19 @@ def sample_note(db_session):
 
 @pytest.fixture
 def sample_photo(db_session, sample_appointment, tmp_path):
+    """
+    Фикстура примера фото.
+
+    Создаёт фото с данными: приём - sample_appointment, путь к файлу - app1/test.jpg,
+    описание - "Тестовое фото". Создаёт временный файл с данным именем test.jpg,
+    и добавляет фото в БД.
+
+    db_session — сессия БД, которая будет использоваться для работы с репозиторием.
+    tmp_path — временная папка, созданная pytest.
+
+    Returns:
+        Photo: созданное фото.
+    """
     storage = tmp_path / "photos"
     storage.mkdir(exist_ok=True)
     rel_path = "app1/test.jpg"

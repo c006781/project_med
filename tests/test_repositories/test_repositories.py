@@ -2,8 +2,8 @@
 
 
 # Стандартные библиотеки Python
-import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 
 
@@ -84,8 +84,8 @@ import sys  # Импорт модуля sys для работы с систем�
 #     except ImportError as e:
 #         pass
 
-from app.backend.repositories import PatientRepository
-from app.models.bd.models import Patient
+from app.repositories import PatientRepository
+from app.database.database_shema.clinic import Patient
 
 # Сторонние библиотеки
 
@@ -93,23 +93,42 @@ from app.models.bd.models import Patient
 import pytest # pip install pytest
 
 def test_patient_repository_get_all(db_session, sample_patient):
+    """
+    Тест на получение списка всех пациентов из репозитория.
+
+    Проверяет, что репозиторий может вернуть список всех пациентов и что в этом списке есть sample_patient.
+    """
     # repo = PatientRepository(db_session)
     # patients = repo.get_all()
     # assert len(patients) >= 1
     # assert sample_patient in patients
+    
     repo = PatientRepository(db_session)
     patients = repo.get_all()
     assert sample_patient.id in [p.id for p in patients]
 
 def test_patient_repository_get_by_id(db_session, sample_patient):
+    """
+    Тест на получение пациента по id из репозитория.
+
+    Проверяет, что репозиторий может вернуть пациента по id и что возвращенный пациент имеет id, равный sample_patient.id.
+    """
     repo = PatientRepository(db_session)
     patient = repo.get_by_id(sample_patient.id)
     assert patient is not None
     assert patient.id == sample_patient.id
 
 def test_patient_repository_add(db_session):
+    """
+    Тест на добавление пациента в репозиторий.
+    
+    Создаём нового пациента, добавляем его в репозиторий, commit'им сессию и проверяем, что id у пациента не None.
+    """
     repo = PatientRepository(db_session)
-    patient = Patient(first_name="Новый", last_name="Пациент")
+    patient = Patient(
+        first_name="Новый", 
+        last_name="Пациент"
+    )
     repo.add(patient)
     db_session.commit()  # в репозитории commit не делаем, но в тесте можем
     assert patient.id is not None

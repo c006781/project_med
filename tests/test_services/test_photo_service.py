@@ -82,8 +82,15 @@ from app.exceptions import AppointmentNotFoundError
 import pytest # pip install pytest
 
 def test_add_photo_to_appointment(photo_service, db_session, sample_patient, tmp_path):
+    """
+    Тест на добавление фото к приёму.
+
+    Создаёт приём, временный файл-картинку, добавляет фото к приёму
+    и проверяет, что файл скопирован в хранилище.
+    """
+    from app.database.database_shema.clinic import Appointment
     # Создаём приём
-    from app.models.bd.models import Appointment
+    # Создаём приём
     app = Appointment(patient_id=sample_patient.id, date=date.today())
     db_session.add(app)
     db_session.commit()
@@ -109,6 +116,12 @@ def test_add_photo_to_appointment(photo_service, db_session, sample_patient, tmp
         assert f.read() == b"fake image content"
 
 def test_add_photo_to_nonexistent_appointment(photo_service, tmp_path):
+    """
+    Тест на добавление фото к несуществующему приёму.
+
+    Создаём временный файл-картинку, пытаемся добавить фото к приёму с несуществующим ID
+    и проверяем, что был вызван исключение AppointmentNotFoundError.
+    """
     img_path = tmp_path / "test.jpg"
     img_path.write_bytes(b"fake image content")
     with pytest.raises(AppointmentNotFoundError):

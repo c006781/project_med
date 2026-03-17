@@ -2,8 +2,8 @@
 
 
 # Стандартные библиотеки Python
-import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 
 
@@ -92,20 +92,58 @@ from app.exceptions import PatientNotFoundError, PatientValidationError
 import pytest # pip install pytest
 
 def test_get_all_patients(patient_service, sample_patient):
+    """
+    Тестирование функции get_all_patients сервиса PatientService.
+
+    Ожидаем, что функция get_all_patients возвращает список всех пациентов,
+    а также что в этом списке есть пациент с идентификатором sample_patient.id.
+    """
     patients = patient_service.get_all_patients()
     assert len(patients) >= 1
     assert any(p.id == sample_patient.id for p in patients)
 
 def test_get_patient_by_id_found(patient_service, sample_patient):
+    """
+    Тестирование функции get_patient_by_id сервиса PatientService в случае
+    наличия пациента с указанным идентификатором.
+
+    Ожидаем, что функция get_patient_by_id возвращает объект PatientDTO
+    с данными пациента, соответствующими переданному идентификатору.
+    """
     dto = patient_service.get_patient_by_id(sample_patient.id)
     assert dto.id == sample_patient.id
     assert dto.first_name == sample_patient.first_name
 
 def test_get_patient_by_id_not_found(patient_service):
+    """
+    Тестирование функции get_patient_by_id сервиса PatientService в случае
+    отсутствия пациента с указанным идентификатором.
+
+    Ожидаем, что функция get_patient_by_id выбрасывает исключение
+    PatientNotFoundError, если пациент с указанным идентификатором
+    не найден в базе данных.
+    """
+    # Ожидаем, что функция get_patient_by_id выбрасывает исключение
+    # PatientNotFoundError, если пациент с указанным идентификатором
+    # не найден в базе данных
     with pytest.raises(PatientNotFoundError):
         patient_service.get_patient_by_id(9999)
 
 def test_create_patient(patient_service):
+    """
+    Тестирование функции create_patient сервиса PatientService.
+
+    Создаём тестовый DTO с данными и попытаемся создать нового пациента.
+    Проверяет, что функция create_patient возвращает DTO с заполненными полями и correct ID.
+
+    DTO с данными:
+        * id - None (будет автоматически заполнен)
+        * first_name - "Анна"
+        * last_name - "Смирнова"
+        * birth_date - None
+        * phone - ""
+        * email - ""
+    """
     dto_in = PatientDTO(
         id=None,
         first_name="Анна",
@@ -115,16 +153,32 @@ def test_create_patient(patient_service):
         email=""
     )
     dto_out = patient_service.create_patient(dto_in)
-    assert dto_out.id is not None
-    assert dto_out.first_name == "Анна"
+    assert dto_out.id is not None, "ID should be assigned"
+    assert dto_out.first_name == "Анна", "First name should be 'Анна'"
+    assert dto_out.last_name == "Смирнова", "Last name should be 'Смирнова'"
+    assert dto_out.birth_date is None, "Birth date should be None"
+    assert dto_out.phone == "", "Phone should be empty"
+    assert dto_out.email == "", "Email should be empty"
 
 def test_create_patient_validation_error(patient_service):
+    """
+    Тестирование функции create_patient сервиса PatientService.
+    
+    Создаём тестового DTO с пустыми полями и попытаемся создать пациента.
+    Проверяет, что функция create_patient выбрасывает исключение PatientValidationError.
+    """
     with pytest.raises(PatientValidationError):
         patient_service.create_patient(PatientDTO(
             id=None, first_name="", last_name="", birth_date=None, phone="", email=""
         ))
 
 def test_update_patient(patient_service, sample_patient):
+    """
+    Тестирование функции update_patient сервиса PatientService.
+    
+    Создаёт тестового пациента и обновляет его данные.
+    Проверяет, что обновлённый пациент соответствует ожидаемым данным.
+    """
     dto_update = PatientDTO(
         id=sample_patient.id,
         first_name="Пётр",
@@ -138,6 +192,13 @@ def test_update_patient(patient_service, sample_patient):
     assert updated.phone == "+79999999999"
 
 def test_delete_patient(patient_service, sample_patient, db_session):
+    """
+    Тестирование функции delete_patient сервиса PatientService.
+
+    Ожидаем, что функция delete_patient удаляет пациента из базы данных
+    и выбрасывает исключение PatientNotFoundError, если попытаться получить
+    удалённого пациента.
+    """
     patient_service.delete_patient(sample_patient.id)
     db_session.commit()  # фиксируем удаление
     db_session.expire_all()  # чтобы сбросить кэш сессии

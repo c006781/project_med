@@ -75,37 +75,64 @@ from datetime import date, time
 #     except ImportError as e:
 #         pass
 
-from app.models.bd.models import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
 
 # Сторонние библиотеки
 import pytest # pip install pytest
 
 def test_patient_creation(db_session):
-    """Проверка создания пациента."""
+    """
+    Проверка создания пациента.
+
+    Создаём экземпляр класса Patient, добавляем его в сессию,
+    commit'им сессию и проверяем, что id у пациента не None,
+    и что поля first_name и last_name содержат ожидаемые значения.
+    """
+    # Создаём экземпляр класса Patient
     patient = Patient(first_name="Тест", last_name="Тестов")
+    # Добавляем пациента в сессию
     db_session.add(patient)
+    # Commit'им сессию
     db_session.commit()
+    # Проверяем, что id у пациента не None
     assert patient.id is not None
+    # Проверяем, что поля first_name и last_name содержат ожидаемые значения
     assert patient.first_name == "Тест"
     assert patient.last_name == "Тестов"
-
+ 
 def test_patient_appointment_relationship(db_session, sample_patient):
-    """Проверка связи пациент -> приёмы."""
+    """Проверка связи пациент -> приёмы.
+
+    Создаём заметку и добавляем ее в сессию.
+    Создаём приём, связанный с заметкой и пациентом, и добавляем его в сессию.
+    Commit'им сессию.
+    Обновляем объект пациента, чтобы загрузить связь.
+    Проверяем, что у пациента есть 1 приём, и что приём имеет ожидаемые значения.
+    """
+    # Создаём заметку
     note = AppointmentNote(text="Заметка")
+    # Добавляем заметку в сессию
     db_session.add(note)
+    # Commit'им сессию
     db_session.commit()
 
+    # Создаём приём, связанный с заметкой и пациентом
     app = Appointment(
         patient_id=sample_patient.id,
         date=date.today(),
         time=time(10, 0),
         note_id=note.id
     )
+    # Добавляем приём в сессию
     db_session.add(app)
+    # Commit'им сессию
     db_session.commit()
 
-    # Обновляем объект пациента (чтобы загрузилась связь)
+    # Обновляем объект пациента, чтобы загрузить связь
     db_session.refresh(sample_patient)
+
+    # Проверяем, что у пациента есть 1 приём
     assert len(sample_patient.appointments) == 1
+    # Проверяем, что приём имеет ожидаемые значения
     assert sample_patient.appointments[0].id == app.id
     assert sample_patient.appointments[0].note.text == "Заметка"

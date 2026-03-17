@@ -12,7 +12,13 @@ import pytest
 
 # ---------- PatientRepository (дополнительные тесты) ----------
 def test_patient_repository_get_unique_values(patient_repo, db_session):
-    """Проверка получения уникальных значений столбца."""
+    """
+    Проверка получения уникальных значений столбца.
+
+    Создаём несколько пациентов с разными фамилиями, добавляем их в БД,
+    и проверяем, что репозиторий возвращает список уникальных значений
+    столбца last_name.
+    """
     # Добавим несколько пациентов с разными фамилиями
     patients = [
         Patient(first_name="A", last_name="Smith"),
@@ -25,12 +31,29 @@ def test_patient_repository_get_unique_values(patient_repo, db_session):
     assert set(unique_last_names) == {"Smith", "Johnson"}
 
 def test_patient_repository_add_and_get(patient_repo, db_session):
+    """
+    Тест на добавление и получении пациента из репозитория.
+
+    Создаём нового пациента, добавляем его в репозиторий, commit'им сессию и
+    проверяем, что репозиторий может вернуть пациента по id и что возвращенный
+    пациент имеет expected значения.
+    """
+    # Создаём нового пациента
     patient = Patient(first_name="Test", last_name="Testov")
+
+    # Добавляем пациента в репозиторий
     patient_repo.add(patient)
+    # Commit'им сессию
     db_session.commit()
+
+    # Получаем пациента по id
     fetched = patient_repo.get_by_id(patient.id)
+
+    # Проверяем, что репозиторий может вернуть пациента
     assert fetched is not None
+    # Проверяем, что возвращенный пациент имеет expected значения
     assert fetched.first_name == "Test"
+    assert fetched.last_name == "Testov"
 
 # def test_patient_repository_update(patient_repo, db_session, sample_patient):
 #     sample_patient.first_name = "Updated"
@@ -40,22 +63,49 @@ def test_patient_repository_add_and_get(patient_repo, db_session):
 #     assert updated.first_name == "Updated"
 
 def test_patient_repository_delete(patient_repo, db_session, sample_patient):
+    """
+    Тест на удаление пациента из репозитория.
+
+    Проверяет, что функция delete_patient удаляет пациента из репозитория
+    и выбрасывает исключение PatientNotFoundError, если попытаться получить
+    удалённого пациента.
+    """
     patient_repo.delete(sample_patient)
     db_session.commit()
     assert patient_repo.get_by_id(sample_patient.id) is None
 
 # ---------- AppointmentNoteRepository ----------
 def test_note_repository_get_by_id(note_repo, sample_note):
+    """
+    Тест на получение заметки по id из репозитория.
+
+    Проверяет, что репозиторий может вернуть заметку по id и что возвращенная заметка
+    имеет текст "Тестовая заметка".
+    """
     note = note_repo.get_by_id(sample_note.id)
     assert note is not None
     assert note.text == "Тестовая заметка"
 
 def test_note_repository_add(note_repo, db_session):
+    """
+    Тест на добавление новой заметки в репозиторий.
+
+    Проверяет, что репозиторий может добавить новую заметку и что возвращенная заметка
+    имеет id и текст "Новая заметка".
+    """
+    # Создаём новую заметку
     note = AppointmentNote(text="Новая заметка")
+    # Добавляем ее в репозиторий
     note_repo.add(note)
+    # Коммитим изменения в БД
     db_session.commit()
+    # Проверяем, что заметка имеет id
     assert note.id is not None
-    assert note_repo.get_by_id(note.id).text == "Новая заметка"
+    # Проверяем, что репозиторий может вернуть заметку по id
+    fetched_note = note_repo.get_by_id(note.id)
+    assert fetched_note is not None
+    # Проверяем, что текст заметки соответствует добавленному
+    assert fetched_note.text == "Новая заметка"
 
 # def test_note_repository_update(note_repo, db_session, sample_note):
 #     sample_note.text = "Изменённая заметка"
@@ -65,18 +115,36 @@ def test_note_repository_add(note_repo, db_session):
 #     assert updated.text == "Изменённая заметка"
 
 def test_note_repository_delete(note_repo, db_session, sample_note):
+    """
+    Тест на удаление заметки из репозитория.
+
+    Проверяет, что репозиторий может удалить заметку и что возвращенная заметка
+    является None.
+    """
     note_repo.delete(sample_note)
     db_session.commit()
     assert note_repo.get_by_id(sample_note.id) is None
 
 def test_note_repository_get_unique_values(note_repo, db_session):
+    """
+    Тест на получение уникальных значений столбца.
+
+    Создаём несколько заметок с разными текстами, добавляем их в БД,
+    и проверяем, что репозиторий может вернуть уникальные значения
+    столбца "text".
+    """
+    # Создаём несколько заметок с разными текстами
     notes = [
         AppointmentNote(text="Текст A"),
         AppointmentNote(text="Текст B"),
-        AppointmentNote(text="Текст A"),
+        AppointmentNote(text="Текст A"),  # дублируем текст
     ]
+
+    # добавляем заметки в БД
     db_session.add_all(notes)
     db_session.commit()
+
+    # проверяем, что репозиторий может вернуть уникальные значения столбца "text"
     unique_texts = note_repo.get_unique_values("text")
     assert set(unique_texts) == {"Текст A", "Текст B"}
 

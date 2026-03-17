@@ -2,7 +2,12 @@
 
 from datetime import date, time
 from app.dto import AppointmentDTO, AppointmentNoteDTO
-from app.exceptions import AppointmentNotFoundError, PatientNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError
+from app.exceptions import (
+    AppointmentNotFoundError, 
+    PatientNotFoundError, 
+    AppointmentNoteNotFoundError, 
+    PhotoNotFoundError
+)
 from pathlib import Path
 import pytest
 
@@ -28,6 +33,33 @@ def test_appointment_service_get_by_patient(appointment_service, sample_appointm
     db_session.commit()
     apps = appointment_service.get_appointments_by_patient(sample_patient.id)
     assert len(apps) == 2
+
+def test_appointment_service_get_by_patient_page(appointment_service, sample_patient, db_session):
+    from app.database.database_shema.clinic import Appointment
+    # Создаём 25 приёмов
+    for i in range(25):
+        app = Appointment(
+            patient_id=sample_patient.id,
+            date=date.today()
+        )
+        db_session.add(app)
+    db_session.commit()
+
+    dtos, total = appointment_service.get_appointments_by_patient_page(
+        patient_id=sample_patient.id,
+        offset=0,
+        limit=10
+    )
+    assert len(dtos) == 10
+    assert total == 25
+
+    dtos2, total2 = appointment_service.get_appointments_by_patient_page(
+        patient_id=sample_patient.id,
+        offset=10,
+        limit=10
+    )
+    assert len(dtos2) == 10
+    assert total2 == 25
 
 def test_appointment_service_create(appointment_service, sample_patient, db_session):
     """
@@ -249,3 +281,79 @@ def test_sync_service_prepare_upload(sync_service):
     assert thread.token == sync_service.token
     assert thread.local_path == sync_service.local_path
     assert thread.remote_path == sync_service.remote_path
+
+
+from unittest.mock import patch, MagicMock
+
+# def test_sync_service_download_with_progress(sync_service):
+#     mock_download = patch('app.network.ya_dop.yadisk_download_file').start()
+#     mock_download.return_value = 0
+
+#     progress_called = []
+#     def progress_cb(current, total):
+#         progress_called.append((current, total))
+
+#     result = sync_service.download_sync(progress_callback=progress_cb)
+#     assert result == 0
+#     mock_download.assert_called_once_with(
+#         ya_token=sync_service.token,
+#         ya_file_path=sync_service.remote_path,
+#         local_file_path=sync_service.local_path,
+#         if_err=True,
+#         progress_callback=progress_cb
+#     )
+#     # Колбэк может не вызываться, если файл маленький, но проверим, что он передан
+
+def test_sync_service_download_with_progress(sync_service):
+    with patch('app.network.ya_dop.yadisk.YaDisk') as mock_yadisk_class:
+        mock_y = MagicMock()
+        mock_y.check_token.return_value = True
+        mock_y.exists.return_value = True
+        mock_yadisk_class.return_value = mock_y
+
+        progress_called = []
+        def progress_cb(current, total):
+            progress_called.append((current, total))
+
+        result = sync_service.download_sync(progress_callback=progress_cb)
+        assert result == 0
+        mock_y.download.assert_called_once()
+
+# def test_sync_service_upload_with_progress(sync_service):
+#     mock_upload = patch('app.network.ya_dop.yadisk_upload_file').start()
+#     mock_upload.return_value = 0
+
+#     progress_called = []
+#     def progress_cb(current, total):
+#         progress_called.append((current, total))
+
+#     result = sync_service.upload_sync(progress_callback=progress_cb)
+#     assert result == 0
+#     mock_upload.assert_called_once_with(
+#         ya_token=sync_service.token,
+#         local_file_path=sync_service.local_path,
+#         ya_file_path=sync_service.remote_path,
+#         if_err=True,
+#         progress_callback=progress_cb
+#     )
+
+def test_sync_service_upload_with_progress(sync_service):
+    
+    with patch('app.network.ya_dop.yadisk.YaDisk') as mock_yadisk_class:
+        mock_y = MagicMock()
+        mock_y.check_token.return_value = True
+        mock_y.exists.return_value = False  # для создания папки
+        mock_yadisk_class.return_value = mock_y
+
+        progress_called = []
+        def progress_cb(current, total):
+            progress_called.append((current, total))
+
+        # Создаём временный локальный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile() as tmp:
+            sync_service.local_path = tmp.name
+            result = sync_service.upload_sync(progress_callback=progress_cb)
+        assert result == 0
+        mock_y.mkdir.assert_called_once()
+        mock_y.upload.assert_called_once()

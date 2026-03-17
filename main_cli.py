@@ -1,5 +1,5 @@
 import sys
-import cli.cli
+import interfaces.cli.cli as cli
 
 
 if __name__ == '__main__':

@@ -3,7 +3,7 @@
 
 
 # Импортируем модели из подпакета bd
-from app.database.database_shema import (
+from .database_shema import (
     Patient, 
     Appointment, 
     AppointmentNote, 
@@ -11,12 +11,14 @@ from app.database.database_shema import (
 )
 
 # Также можно импортировать функцию генерации тестовых данных, если она нужна на этом уровне
-from app.database.database_shema import (
+from .database_shema import (
     generate_test_data,
 )
 
 
-from app.database.database import Database
+# from app.database.database import Database
+# from app.database import Database
+from .database import Database
 
 __all__ = [
     'Patient',

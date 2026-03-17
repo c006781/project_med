@@ -4,7 +4,8 @@
 """
 
 import os
-from app.database.database import Database
+# from app.database.database import Database
+from app.database import Database
 # from .controllers.conf.get_config import get_config_env
 from app.config.config_manager.manager import get_config_env
 from app.services import (

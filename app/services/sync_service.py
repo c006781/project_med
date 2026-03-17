@@ -1,15 +1,15 @@
 
 
-# Стандартные библиотеки Python
-import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# # Стандартные библиотеки Python
+# import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 
-import shutil
+# import shutil
 
-from typing import Type, TypeVar, Generic, List
+# from typing import Type, TypeVar, Generic, List
 
-from datetime import time
+# from datetime import time
 
 # Импорты модулей
 # def _add_package_name(

@@ -178,7 +178,7 @@ class BaseRepository(Generic[ModelType], ABC):
             # Отфильтровываем fuzzy-операторы, они не поддерживаются на уровне SQL
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
             if sql_filters:
-                query, _  = apply_filters(query, self.model_class, sql_filters)
+                query, _ = apply_filters(query, self.model_class, sql_filters)
         if order_by:
             query = query.order_by(*order_by)
         return query.offset(offset).limit(limit).all()
@@ -189,7 +189,7 @@ class BaseRepository(Generic[ModelType], ABC):
         if filters:
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
             if sql_filters:
-                query, _  = apply_filters(query, self.model_class, sql_filters)
+                query, _ = apply_filters(query, self.model_class, sql_filters)
         return query.count()
 
 
@@ -249,7 +249,7 @@ class AppointmentRepository(BaseRepository):
         if filters:
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
             if sql_filters:
-                query = apply_filters(query, Appointment, sql_filters)
+                query, _ = apply_filters(query, Appointment, sql_filters)
         if order_by:
             query = query.order_by(*order_by)
         return query.offset(offset).limit(limit).all()

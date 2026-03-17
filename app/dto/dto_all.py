@@ -41,9 +41,9 @@ class PatientDTO(BaseDTO):
     id: Optional[int]  # id может быть None для нового пациента
     first_name: str
     last_name: str
-    birth_date: Optional[date]  # Может быть None, если не указано
-    phone: Optional[str]
-    email: Optional[str]
+    birth_date: Optional[date]   = None  # Может быть None, если не указано
+    phone: Optional[str]  = None 
+    email: Optional[str]  = None 
     # created_at: Optional[datetime]  # Можно добавить, если нужно в интерфейсе
 
     @classmethod

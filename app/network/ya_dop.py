@@ -3,7 +3,7 @@
 import os
 
 # Сторонние библиотеки
-import yadisk # pip install yadisk
+import yadisk # pip install yadisk requests
 
 # def yadisk_download_file(
 #         ya_token:str,

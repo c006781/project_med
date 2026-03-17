@@ -1,4 +1,4 @@
-import os
+# import os
 from PySide6.QtCore import QThread, Signal # pip install PySide6
 
 from app.network.ya_dop import yadisk_download_file, yadisk_upload_file

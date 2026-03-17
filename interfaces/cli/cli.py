@@ -306,14 +306,16 @@ def patient_list(filter, fuzzy_threshold):
             parts = f.split(':', 2)
             if len(parts) != 3:
                 click.echo("Неверный формат fuzzy-фильтра: fuzzy:column:value", err=True)
-                return
+                raise click.Abort() 
+                # return
             _, column, value = parts
             filters.append({'column': column, 'operator': 'fuzzy', 'value': value})
         else:
             parts = f.split(':', 2)
             if len(parts) != 3:
                 click.echo(f"Неверный формат фильтра: {f}. Используйте column:operator:value", err=True)
-                return
+                raise click.Abort()  
+                # return
             column, op, value = parts
             filters.append({'column': column, 'operator': op, 'value': value})
     try:
@@ -510,8 +512,10 @@ def appointment_get(id):
         click.echo(f"Дата: {a.date}")
         click.echo(f"Время: {a.time}")
         click.echo(f"Заметка ID: {a.note_id}")
-        if a.note:
+        # if a.note:
+        if a.note_text:
             click.echo(f"Текст заметки: {a.note.text}")
+            # click.echo(f"Текст заметки: {a.note.note_text}")
     except AppointmentNotFoundError as e:
         click.echo(str(e), err=True)
     except Exception as e:

@@ -620,7 +620,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     def __init__(
         self,
         db: Database,
-        note_service: Optional['NoteService'] = None,  # внедряем зависимость
+        note_service: Optional['NoteService'] = None,  
+        photo_service: Optional['PhotoService'] = None,   
         logger_name: Optional[str] = None
     ):
         if logger_name is None:
@@ -637,6 +638,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         )
 
         self._note_service = note_service
+        self._photo_service = photo_service
+
         # Если не передан, создадим по умолчанию (для совместимости)
         if self._note_service is None:
             self._note_service = NoteService(db, logger_name=logger_name + ".NoteService")
@@ -792,14 +795,47 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
             return updated_dto
 
-    def delete_appointment(self, appointment_id: int, session: Optional[Session] = None) -> None:
+    # def delete_appointment(self, appointment_id: int, session: Optional[Session] = None) -> None:
+    #     """Удаляет приём и, если заметка больше не используется, удаляет её."""
+    #     self.logger.debug(f"Удаление приёма id={appointment_id}")
+    #     with self._session_scope(session) as sess:
+    #         repo = self._get_repo(sess)
+    #         appointment = repo.get_by_id_with_relations(appointment_id)
+    #         if appointment is None:
+    #             raise AppointmentNotFoundError(appointment_id)
+
+    #         note_id = appointment.note_id
+
+    #         repo.delete(appointment)
+    #         sess.flush()
+
+    #         if note_id is not None:
+    #             # self._cleanup_unused_note(note_id, sess)
+    #             self._note_service.cleanup_unused_note(note_id, sess)    
+
+    def delete_appointment(
+            self, 
+            appointment_id: int, 
+            session: Optional[Session] = None
+        ) -> None:
         """Удаляет приём и, если заметка больше не используется, удаляет её."""
-        self.logger.debug(f"Удаление приёма id={appointment_id}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             appointment = repo.get_by_id_with_relations(appointment_id)
             if appointment is None:
                 raise AppointmentNotFoundError(appointment_id)
+
+            # Удаляем фото, если есть сервис
+            if self._photo_service is not None:
+                for photo in appointment.photos:
+                    self._photo_service.delete_photo(photo.id, session=sess)
+            else:
+                self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
+
+            # # Сначала удаляем фото (чтобы файлы тоже удалились)
+            # photo_service = PhotoService(self._db, logger_name=self.logger.name + ".PhotoService")
+            # for photo in appointment.photos:
+            #     photo_service.delete_photo(photo.id, session=sess)
 
             note_id = appointment.note_id
 
@@ -807,8 +843,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             sess.flush()
 
             if note_id is not None:
-                # self._cleanup_unused_note(note_id, sess)
-                self._note_service.cleanup_unused_note(note_id, sess)    
+                self._note_service.cleanup_unused_note(note_id, sess)
+
 
     def get_appointments_by_patient_page(self, patient_id: int, offset: int, limit: int,
                                          filters: Optional[List[Dict[str, Any]]] = None,
@@ -980,7 +1016,11 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
     #         self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dto_out)} записей")
     #         return dto_out
 
-    def get_photos_for_appointment(self, appointment_id: int, session: Optional[Session] = None) -> List[PhotoDTO]:
+    def get_photos_for_appointment(
+            self, 
+            appointment_id: int, 
+            session: Optional[Session] = None
+        ) -> List[PhotoDTO]:
         """
         Возвращает список фотографий для указанного приёма.
         """

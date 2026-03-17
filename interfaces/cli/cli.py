@@ -514,7 +514,8 @@ def appointment_get(id):
         click.echo(f"Заметка ID: {a.note_id}")
         # if a.note:
         if a.note_text:
-            click.echo(f"Текст заметки: {a.note.text}")
+            # click.echo(f"Текст заметки: {a.note.text}")
+            click.echo(f"Текст заметки: {a.note_text}")
             # click.echo(f"Текст заметки: {a.note.note_text}")
     except AppointmentNotFoundError as e:
         click.echo(str(e), err=True)

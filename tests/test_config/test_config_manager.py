@@ -4,7 +4,7 @@ import msgpack
 from app.config.config_manager.manager import AppConfigManager, get_config_env
 
 def test_config_manager_create(tmp_path):
-    """
+    """ 
     Тест для создания нового экземпляра AppConfigManager.
 
     AppConfigManager.get_instance должен возвращать новый экземпляр

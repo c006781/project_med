@@ -19,8 +19,13 @@ class BaseDTO:
     @classmethod
     def from_orm(cls: Type[DTOType], model: ModelType) -> DTOType:
         """
-        Создаёт DTO из экземпляра SQLAlchemy-модели.
-        Должен быть переопределён в наследниках.
+        Создаёт DTO (Data Transfer Object) из экземпляра SQLAlchemy-модели.
+        
+        Это статический метод, который берёт экземпляр модели SQLAlchemy 
+        и преобразует его в экземпляр DTO (класс, унаследованный от BaseDTO).
+        
+        Метод должен быть переопределён в наследниках, чтобы обеспечить 
+        корректное преобразование модели в DTO.
         """
         raise NotImplementedError("Метод from_orm должен быть реализован в наследнике")
 
@@ -50,14 +55,17 @@ class PatientDTO(BaseDTO):
     def from_orm(cls, model):
         """
         Создаёт DTO из модели SQLAlchemy.
+        
+        Этот метод берёт модель SQLAlchemy и преобразует ее в DTO.
+        Он просто копирует значения полей модели в соответствующие поля DTO.
         """
         return cls(
-            id=model.id,
-            first_name=model.first_name,
-            last_name=model.last_name,
-            birth_date=model.birth_date,
-            phone=model.phone,
-            email=model.email,
+            id=model.id,  # id может быть None, если модель не сохранена в БД
+            first_name=model.first_name,  # имя
+            last_name=model.last_name,  # фамилия
+            birth_date=model.birth_date,  # дата рождения
+            phone=model.phone,  # телефон
+            email=model.email,  # электронная почта
         )
     
 @dataclass
@@ -72,7 +80,25 @@ class AppointmentDTO(BaseDTO):
     note_text: Optional[str] = None # поле для текста заметки
 
     @classmethod
+    # def from_orm(cls, model: Appointment) -> AppointmentDTO:
     def from_orm(cls, model):
+        """
+        Создаёт DTO из модели Appointment.
+
+        DTO будет содержать id, patient_id, date, time, note_id,
+        а также имя пациента и текст заметки (если они есть).
+
+        :param model: экземпляр модели Appointment
+        :return: экземпляр DTO с данными из модели
+        """
+        # Создаём DTO с данными из модели
+        # id - это id приёма
+        # patient_id - это id пациента, к которому относится приём
+        # date - это дата приёма
+        # time - это время приёма (может быть None, если не указано)
+        # note_id - это id заметки, если она есть (может быть None, если нет)
+        # patient_name - это имя пациента, к которому относится приём (если он есть)
+        # note_text - это текст заметки, если она есть (может быть None, если нет)
         return cls(
             id=model.id,
             patient_id=model.patient_id,
@@ -91,6 +117,12 @@ class AppointmentNoteDTO(BaseDTO):
 
     @classmethod
     def from_orm(cls, model):
+        """
+        Создаёт DTO из модели AppointmentNote.
+
+        model - это экземпляр модели AppointmentNote, а не DTO.
+        DTO будет содержать id и текст заметки.
+        """
         return cls(
             id=model.id,
             text=model.text,
@@ -105,12 +137,18 @@ class PhotoDTO(BaseDTO):
     description: Optional[str]
 
     @classmethod
-    def from_orm(cls, model):
+    # def from_orm(cls, model: Photo) -> PhotoDTO:
+    def from_orm(cls, model) :
+        """
+        Создаёт DTO из модели Photo.
+        model - это экземпляр модели Photo, а не DTO.
+        """
+        # Создаём DTO с значениями из модели
         return cls(
-            id=model.id,
-            appointment_id=model.appointment_id,
-            file_path=model.file_path,
-            description=model.description,
+            id=model.id,  # id может быть None для нового фото
+            appointment_id=model.appointment_id,  # id приёма, к которому привязано фото
+            file_path=model.file_path,  # путь к файлу с фотографией
+            description=model.description,  # описание фотографии
         )
 
 

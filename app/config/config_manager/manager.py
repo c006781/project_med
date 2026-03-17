@@ -222,7 +222,14 @@ class AppConfigManager(BaseConfigManager):
 def get_config_env() -> Dict[str, Any]:
     """
     Возвращает словарь с текущей конфигурацией, используя новый менеджер.
-    Эта функция предназначена для замены старой get_config_env из conf.get_config.
+
+    Ранее мы использовали функцию get_config_env из conf.get_config, которая
+    возвращала словарь с конфигурацией. Теперь мы используем новый менеджер
+    AppConfigManager, который хранит конфигурацию в формате MessagePack.
+
+    Мы получаем экземпляр менеджера с помощью AppConfigManager.get_instance(),
+    а затем вызываем у него метод get_all(), который возвращает копию текущего
+    кеша конфигурации.
     """
     manager = AppConfigManager.get_instance()
     return manager.get_all()

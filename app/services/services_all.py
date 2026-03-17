@@ -793,32 +793,23 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
 
             updated_dto = self._dto_class.from_orm(app)
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
-            return updated_dto
-
-    # def delete_appointment(self, appointment_id: int, session: Optional[Session] = None) -> None:
-    #     """Удаляет приём и, если заметка больше не используется, удаляет её."""
-    #     self.logger.debug(f"Удаление приёма id={appointment_id}")
-    #     with self._session_scope(session) as sess:
-    #         repo = self._get_repo(sess)
-    #         appointment = repo.get_by_id_with_relations(appointment_id)
-    #         if appointment is None:
-    #             raise AppointmentNotFoundError(appointment_id)
-
-    #         note_id = appointment.note_id
-
-    #         repo.delete(appointment)
-    #         sess.flush()
-
-    #         if note_id is not None:
-    #             # self._cleanup_unused_note(note_id, sess)
-    #             self._note_service.cleanup_unused_note(note_id, sess)    
+            return updated_dto   
 
     def delete_appointment(
             self, 
             appointment_id: int, 
             session: Optional[Session] = None
         ) -> None:
-        """Удаляет приём и, если заметка больше не используется, удаляет её."""
+        """
+        Удаляет приём и, если заметка больше не используется, удаляет её.
+        
+        Шаги:
+        1. Получаем приём из базы данных с подгруженными связями.
+        2. Если приём не найден, выбрасываем исключение.
+        3. Если приём имеет фото, удаляем их.
+        4. Если приём имел заметку, и она больше не используется, удаляем ее.
+        5. Удаляем сам приём.
+        """
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             appointment = repo.get_by_id_with_relations(appointment_id)
@@ -831,14 +822,11 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                     self._photo_service.delete_photo(photo.id, session=sess)
             else:
                 self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
-
-            # # Сначала удаляем фото (чтобы файлы тоже удалились)
-            # photo_service = PhotoService(self._db, logger_name=self.logger.name + ".PhotoService")
-            # for photo in appointment.photos:
-            #     photo_service.delete_photo(photo.id, session=sess)
-
+            
+            # Если приём имел заметку, и она больше не используется, удаляем ее
             note_id = appointment.note_id
-
+            
+            # Удаляем приём
             repo.delete(appointment)
             sess.flush()
 
@@ -846,28 +834,42 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 self._note_service.cleanup_unused_note(note_id, sess)
 
 
-    def get_appointments_by_patient_page(self, patient_id: int, offset: int, limit: int,
-                                         filters: Optional[List[Dict[str, Any]]] = None,
-                                         order_by: Optional[List] = None,
-                                         session: Optional[Session] = None) -> Tuple[List[AppointmentDTO], int]:
+    def get_appointments_by_patient_page(
+        self, 
+        patient_id: int,  # ID пациента, для которого хотим получить страницу приёмов
+        offset: int,  # смещение страницы
+        limit: int,  # размер страницы
+        filters: Optional[List[Dict[str, Any]]] = None,  # фильтры SQL
+        order_by: Optional[List] = None,  # сортировка SQL
+        session: Optional[Session] = None  # сессия для работы в одной транзакции
+    ) -> Tuple[List[AppointmentDTO], int]:
         """
         Возвращает страницу приёмов пациента с подгруженными связями.
         """
         self.logger.debug(f"Запрос страницы приёмов пациента {patient_id}: offset={offset}, limit={limit}")
         with self._session_scope(session) as sess:
+            # получаем репозиторий
             repo = self._get_repo(sess)
             items = repo.get_page_by_patient(patient_id, offset, limit, filters=filters, order_by=order_by)
             total = repo.count_by_patient(patient_id, filters=filters)
             dtos = [self._dto_class.from_orm(item) for item in items]
             return dtos, total
 
-class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
+class PhotoService(
+    BaseService[Photo, PhotoDTO, PhotoRepository]
+):
     """
     Сервис для работы с фотографиями приёмов.
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
     """
 
-    def __init__(self, db: Database, photos_storage_path: str, logger_name: Optional[str] = None):
+    def __init__(
+        self, 
+        db: Database, 
+        photos_storage_path: str, 
+        logger_name: 
+        Optional[str] = None
+    ):
         if logger_name is None:
             logger_name = self.__class__.__name__
         super().__init__(
@@ -1023,22 +1025,39 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
         ) -> List[PhotoDTO]:
         """
         Возвращает список фотографий для указанного приёма.
+
+        1. Создаём сессию SQLAlchemy (если не указана, то создаем новую).
+        2. Получаем репозиторий фотографий.
+        3. Получаем список фотографий для указанного приёма.
+        4. Создаём список DTO для фотографий.
+        5. Если файл фотографии не существует на диске или имеет статус 'pending', то выводим предупреждение.
+        6. Возвращаем список DTO для фотографий.
         """
         self.logger.debug(f"Запрос фото для приёма id={appointment_id}")
+
+        # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
         with self._session_scope(session) as sess:
+            # 2. Получаем репозиторий фотографий
             repo = self._get_repo(sess)
+            
+            # 3. Получаем список фотографий для указанного приёма
             photos = repo.get_by_appointment(appointment_id)
+            
+            # 4. Создаём список DTO для фотографий
             dtos = []
             for p in photos:
-
                 full_path = os.path.join(self._storage_path, p.file_path)
 
+                # 5. Если файл фотографии не существует на диске или имеет статус 'pending', то выводим предупреждение
                 if p.file_path == 'pending':
                     self.logger.warning(f"Фото id={p.id} имеет статус 'pending' (файл не загружен)")
                 elif not os.path.exists(full_path):
                     self.logger.warning(f"Файл фото id={p.id} отсутствует на диске: {full_path}")
                     
+                # 6. Создаём DTO для фотографии и добавляем в список
                 dtos.append(self._dto_class.from_orm(p))
+            
+            # 7. Возвращаем список DTO для фотографий
             self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dtos)} записей")
             return dtos
     
@@ -1079,7 +1098,16 @@ class PhotoService(BaseService[Photo, PhotoDTO, PhotoRepository]):
     def _generate_target_path(self, source_path: str, appointment_id: int, photo_id: int) -> str:
         """
         Генерирует полный путь для сохранения файла на основе appointment_id и photo_id.
+
         Формат: <storage>/app_<appointment_id>/<photo_id>_<name(base_name)>_<unique_id>_<ext(base_name)>
+
+        <storage> - путь к папке для хранения файлов
+        app_<appointment_id> - папка для хранения файлов приёма с указанным ID
+        <photo_id>_<name(base_name)>_<unique_id>_<ext(base_name)> - имя файла
+
+        <name(base_name)> - имя файла без расширения (например, "image")
+        <unique_id> - уникальный идентификатор (например, "12345678")
+        <ext(base_name)> - расширение файла (например, ".jpg")
         """
         base_name = os.path.basename(source_path)
         name, ext = os.path.splitext(base_name)

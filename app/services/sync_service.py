@@ -109,13 +109,44 @@ from app.config.config_manager.manager import get_config_env
 
 class SyncService:
     def __init__(self):
+        """
+        Инициализация объекта SyncService:
+            - получение токена Яндекс.Диска из .env
+            - получение пути к файлу на Яндекс.Диске
+            - получение пути к локальному файлу
+        """
         config = get_config_env()
+        # получение токена Яндекс.Диска из .env
         self.token = config['YANDEX_TOKEN']
+        # получение пути к файлу на Яндекс.Диске
         self.remote_path = config['database_remote_path']
+        # получение пути к локальному файлу
         self.local_path = config['database_local_path']
 
     def download_sync(self, progress_callback=None):
-        """Синхронное скачивание файла с Диска."""
+        """
+        Синхронное скачивание файла с Яндекс.Диска.
+
+        :param progress_callback: Функция, вызываемая для обновления прогресса.
+                              Принимает два аргумента: (already_done, total)
+
+        :return: 0 при успехе, -1 при проблеме с токеном, -2 если файл не существует на диске,
+                 -3 при другой ошибке.
+        """
+        # вызов функции yadisk_download_file с параметрами, сохраненными в __init__
+        # return yadisk_download_file(
+        #     ya_token=self.token,
+        #     ya_file_path=self.remote_path,
+        #     local_file_path=self.local_path,
+        #     if_err=True,
+        #     progress_callback=progress_callback
+        # )
+
+        # yadisk_download_file вызывает функцию yadisk_download_file с параметрами,
+        # сохраненными в __init__, и передает прогресс загрузки
+        # в колбэк _progress_callback.
+        # Если возникнет какая-либо ошибка, то сообщение об ошибке
+        # передается в колбэк error.
         return yadisk_download_file(
             ya_token=self.token,
             ya_file_path=self.remote_path,
@@ -125,7 +156,29 @@ class SyncService:
         )
 
     def upload_sync(self, progress_callback=None):
-        """Синхронная загрузка файла на Диск."""
+        """
+        Синхронная загрузка файла на Яндекс.Диск.
+
+        :param progress_callback: Функция, вызываемая для обновления прогресса.
+                              Принимает два аргумента: (already_done, total)
+
+        :return: 0 при успехе, -1 при проблеме с токеном, -2 если файл не существует на локальном диске,
+                 -3 при другой ошибке.
+        """
+        # вызов функции yadisk_upload_file с параметрами, сохраненными в __init__
+        # return yadisk_upload_file(
+        #     ya_token=self.token,
+        #     local_file_path=self.local_path,
+        #     ya_file_path=self.remote_path,
+        #     if_err=True,
+        #     progress_callback=progress_callback
+        # )
+
+        # yadisk_upload_file вызывает функцию yadisk_upload_file с параметрами,
+        # сохраненными в __init__, и передает прогресс загрузки
+        # в колбэк _progress_callback.
+        # Если возникнет какая-либо ошибка, то сообщение об ошибке
+        # передается в колбэк error.
         return yadisk_upload_file(
             ya_token=self.token,
             local_file_path=self.local_path,
@@ -134,11 +187,26 @@ class SyncService:
             progress_callback=progress_callback
         )
     def prepare_download(self) -> DownloadThread:
-        """Возвращает настроенный, но ещё не запущенный поток для скачивания."""
+        """
+        Возвращает настроенный, но ещё не запущенный поток для скачивания.
+        
+        Это метод возвращает настроенный, но не запущенный поток DownloadThread.
+        Поток будет скачивать файл с Яндекс.Диска в локальную файловую систему.
+        Он будет вызывать функцию _progress_callback для обновления прогресса.
+        """
+        # Создаем настроенный, но не запущенный поток DownloadThread
         thread = DownloadThread(self.token, self.remote_path, self.local_path)
         # Можно добавить общие обработчики, но лучше оставить GUI подключаться
+        # к сигналам и слотам потока
         return thread
 
     def prepare_upload(self) -> UploadThread:
+        """
+        Возвращает настроенный, но ещё не запущенный поток для загрузки.
+
+        Это метод возвращает настроенный, но не запущенный поток UploadThread.
+        Поток будет загружать файл из локальной файловой системы на Яндекс.Диск.
+        Он будет вызывать функцию _progress_callback для обновления прогресса.
+        """
         thread = UploadThread(self.token, self.local_path, self.remote_path)
         return thread

@@ -16,7 +16,16 @@ class DownloadThread(QThread):
     error = Signal(str)
 
     def __init__(self, token: str, remote_path: str, local_path: str, parent=None):
+        """
+        Инициализация потока для скачивания файла с Диска.
+
+        :param token: (str) OAuth-токен для авторизации.
+        :param remote_path: (str) Путь к файлу на Яндекс.Диске.
+        :param local_path: (str) Локальный путь для сохранения файла.
+        :param parent: (QObject/None) Родительский объект (по умолчанию None).
+        """
         super().__init__(parent)
+        # сохраняем параметры для использования в run
         self.token = token
         self.remote_path = remote_path
         self.local_path = local_path
@@ -26,16 +35,32 @@ class DownloadThread(QThread):
         self.progress.emit(current, total)
 
     def run(self):
+        """
+        Запуск потока для скачивания файла с Диска.
+
+        В этом методе происходит вызов функции yadisk_download_file с параметрами,
+        сохраненными в __init__. Если функция работает успешно, то сигнал finished
+        эмити код завершения (0 - успех), а если возникла ошибка, то сигнал error
+        эмити сообщение об ошибке.
+        """
         try:
+            # Вызов функции скачивания файла с Диска
             result = yadisk_download_file(
+                # Токен для авторизации
                 ya_token=self.token,
+                # Путь к файлу на Яндекс.Диске
                 ya_file_path=self.remote_path,
+                # Локальный путь для сохранения файла
                 local_file_path=self.local_path,
+                # Выводить ошибки (True) или метки на ошибки (False)
                 if_err=True,
+                # Колбэк для передачи прогресса
                 progress_callback=self._progress_callback
             )
-            self.finished.emit(result)  # result == 0 при успехе
+            # Сигнал, эмитирующий код завершения (0 - успех)
+            self.finished.emit(result)
         except Exception as e:
+            # Сигнал, эмитирующий сообщение об ошибке
             self.error.emit(str(e))
 
 
@@ -52,16 +77,42 @@ class UploadThread(QThread):
     error = Signal(str)
 
     def __init__(self, token: str, local_path: str, remote_path: str, parent=None):
+        """
+        Инициализация потока для загрузки файла на Диск.
+
+        :param token: (str) OAuth-токен для авторизации.
+        :param local_path: (str) Локальный путь к файлу, который будет загружен на Диск.
+        :param remote_path: (str) Путь к файлу на Яндекс.Диске, куда будет загружен файл.
+        :param parent: (QObject/None) Родительский объект (по умолчанию None).
+        """
         super().__init__(parent)
+        # сохраняем параметры для использования в run
         self.token = token
         self.local_path = local_path
         self.remote_path = remote_path
 
     def _progress_callback(self, current: int, total: int):
+        """
+        Колбэк для передачи прогресса загрузки файла на Диск.
+        Эмитируется изнутри функции run в потоке UploadThread.
+
+        :param current: (int) Текущее значение прогресса (например, количество байт, уже переданных на Диск).
+        :param total: (int) Общее количество байт, которое будет передано на Диск.
+        """
         self.progress.emit(current, total)
 
     def run(self):
+        """
+        Запуск потока для загрузки файла на Диск.
+        Функция run вызывает функцию yadisk_upload_file с параметрами,
+        сохраненными в __init__, и передает прогресс загрузки
+        в колбэк _progress_callback.
+        Если возникнет какая-либо ошибка, то сообщение об ошибке
+        передается в колбэк error.
+        """
         try:
+            # вызов функции yadisk_upload_file с параметрами,
+            # сохраненными в __init__
             result = yadisk_upload_file(
                 ya_token=self.token,
                 local_file_path=self.local_path,
@@ -69,8 +120,10 @@ class UploadThread(QThread):
                 if_err=True,
                 progress_callback=self._progress_callback
             )
+            # передача результата в колбэк finished
             self.finished.emit(result)
         except Exception as e:
+            # передача сообщения об ошибке в колбэк error
             self.error.emit(str(e))
 
 

@@ -4,6 +4,16 @@
 """
 
 import os
+from typing import (
+    # get_type_hints,
+    Optional, 
+    get_origin, 
+    get_args
+)
+import datetime
+# import inspect
+from typing import Union
+
 # from app.database.database import Database
 from app.database import Database
 # from .controllers.conf.get_config import get_config_env
@@ -18,6 +28,12 @@ from app.services import (
 # from .backend.bd.clinic import create_db
 # from .backend.bd.temp_data_bd import generate_test_data
 from app.utils.logger import AppLogger
+
+
+
+
+
+from pydantic import BaseModel
 
 
 def get_db() -> Database:
@@ -140,17 +156,233 @@ def init_db(
 #         # click.echo(f"{title}: {value}")
 #     return return_
 
+def get_text_echo(
+    data: dict,  # Pydantic DTO
+    exclude_fields: list = None , # список полей, которые не нужно выводить (например, ['id'])
+    if_str_limit : int = None,  # ограничение длины выводимого текста (например, 50)
+    rename_map: dict = None, # словарь переименований полей (например, {'first_name': 'First Name'})
+):
+    """
+    Получает текст для вывода в термінал (например, click.echo).
+
+    :param data: Pydantic DTO
+    :param exclude_fields: список полей, которые не нужно выводить (например, ['id'])
+    :param if_str_limit: ограничение длины выводимого текста (например, 50)
+    :param rename_map: словарь переименования заголовков
+    :return: список текстов для вывода в термінал
+    """
+    # если не указано ограничение длины выводимого текста, то встановим его в 50 символов
+    if not if_str_limit:
+        if_str_limit = 50
+
+
+    # если ограничение длины выводимого текста установлено в 0, то не ограничиваем длину выводимого текста
+    if if_str_limit <= 0:
+        if_str_limit = None
+
+    return_ = []  # список текстов для вывода в термінал
+
+    lists  = get_key_value_dto(  # преобразуем Pydantic DTO в словарь
+        data,
+        exclude_fields,  # список полей, которые не нужно выводить
+        rename_map,
+    )
+
+    if not isinstance(lists, list):
+        lists = [lists]    
+
+    for a in lists:
+        text_echo = []  # список строк для вывода в термінал
+        for k, v in a.items():  # для каждого поля в словаре
+            # если значение поля короче 53 символов, то добавляем к тексту троеточие в конце
+            if (if_str_limit is not None) and (len(str(v)) > (if_str_limit+3)):
+                text_echo.append(f"{k}: {str(v)[:if_str_limit]}...")  
+            else:
+                text_echo.append(f"{k}: {v}")  # добавляем к тексту целое значение поля
+        text_echo = '\t '.join(text_echo)  # преобразуем список строк в одну строку
+        return_.append(text_echo)  # добавляем к списку текст для вывода в термінал
+    return return_  # возвращаем список текстов для вывода в термінал
+
 def get_key_value_dto(
-        dto, 
-        exclude_fields=None
+        list_, 
+        exclude_fields:list = None,
+        rename_map: dict = None  
     ):
     """
     Преобразует Pydantic DTO в словарь вида {человеко-читаемое название: значение}.
     
-    :param dto: экземпляр Pydantic DTO
-    :param exclude_fields: список полей, которые не нужно выводить (например, ['id'])
+  
+    :param list_: один DTO или список DTO
+    :param exclude_fields: поля для исключения
+    :param rename_map: словарь {исходное_имя: новое_имя} для переименования заголовков
     """
-    data = dto.model_dump(exclude_none=True)
-    if exclude_fields:
-        data = {k: v for k, v in data.items() if k not in exclude_fields}
-    return {k.replace('_', ' ').title(): v for k, v in data.items()}
+    # data = dto.model_dump(exclude_none=True)
+    if isinstance(list_, list):
+        # for i in list_:
+        return [
+            get_key_value_dto(i, exclude_fields, rename_map) for i in list_
+        ]
+    else:
+        data={}
+        # Если передан объект с методом model_dump (Pydantic модель), используем его
+        if hasattr(list_, 'model_dump'):
+            items = list_.model_dump(exclude_none=True).items()
+        elif isinstance(list_, dict):
+            items = list_.items()
+        else:
+            # fallback для других случаев
+            items = dict(list_).items()
+
+        for k, v in items:
+            if exclude_fields and k in exclude_fields:
+                continue
+            # Применяем переименование, если есть
+            if rename_map and k in rename_map:
+                title = rename_map[k]
+            else:
+                # Стандартное преобразование: замена подчёркиваний на пробелы и капитализация
+                title = k.replace('_', ' ').title()
+            data[title] = v
+        return data
+
+def get_dto_fields(dto_class: BaseModel, exclude: list = None):
+    """
+    Возвращает список полей DTO с метаданными: имя, тип, обязательное ли.
+    
+    :param dto_class: класс Pydantic модели
+    :param exclude: список полей, которые не нужно выводить
+    """
+    # исключаем поля из списка exclude
+    exclude = exclude or []
+    fields = []
+    # перебираем все поля DTO
+    for name, field in dto_class.model_fields.items():
+        # если поле не должно быть исключено, то продолжаем
+        if name in exclude:
+            continue
+        # получаем тип поля
+        field_type = field.annotation
+        # если тип поля Optional, то получаем реальный тип
+        is_optional = False
+        origin = get_origin(field_type)
+        # if get_origin(field_type) is Optional:
+        if origin is Union and type(None) in get_args(field_type):
+            is_optional = True
+            # получаем реальный тип
+            args = get_args(field_type)
+            field_type = args[0] if args else None
+        # добавляем поле в список
+        fields.append({
+            # имя поля
+            'name': name,
+            # тип поля
+            'type': field_type,
+            # является ли поле обязательным
+            'required': not is_optional and field.is_required(),
+            # описание поля
+            'description': field.description or name.replace('_', ' ').title()
+        })
+    return fields
+
+def create_click_options(dto_class: BaseModel, action='create'):
+    """
+    Возвращает декоратор с опциями click, соответствующими полям DTO.
+    Для action='update' поле id добавляется как required.
+    """
+    import click
+    exclude = ['id'] if action == 'create' else []
+    fields = get_dto_fields(dto_class, exclude=exclude)
+
+    def decorator(func):
+        for f in fields:
+            name = f['name']
+            opt_name = f'--{name.replace("_", "-")}'
+            # Для update поля необязательны
+            required = f['required'] if action == 'create' else False
+            field_type = f['type']
+            description = f['description']
+
+            # Определяем тип опции в click
+            if field_type == str:
+                param_type = str
+            elif field_type == int:
+                param_type = int
+            elif field_type == datetime.date:
+                param_type = str  # будем парсить отдельно
+            elif field_type == datetime.time:
+                param_type = str
+            else:
+                param_type = str  # fallback
+
+            # Добавляем опцию
+            decorator_func = click.option(
+                opt_name,
+                required=required,
+                type=param_type,
+                help=description
+            )
+            func = decorator_func(func)
+        return func
+    return decorator
+
+def collect_dto_from_input(
+        dto_class: BaseModel, 
+        exclude: list = None, 
+        rename_map: dict = None
+    ):
+    """
+    В интерактивном режиме запрашивает у пользователя значения полей DTO.
+    Возвращает словарь {имя_поля: значение} с преобразованными типами.
+    
+    :param dto_class: класс Pydantic модели
+    :param exclude: список полей для исключения
+    :param rename_map: словарь для переименования заголовков {имя_поля: отображаемое имя}
+    """
+    import click
+    
+    # исключаем поля из списка exclude
+    exclude = exclude or []
+    # получаем список полей DTO с метаданными: имя, тип, обязательное ли
+    fields = get_dto_fields(dto_class, exclude=exclude)
+    data = {}
+    # перебираем все поля DTO
+    for f in fields:
+        # если есть rename_map, используем его, иначе берем description из поля
+        display_name = rename_map.get(f['name'], f['description']) if rename_map else f['description']
+        #формируем запрос для ввода
+        prompt = f"{display_name}" + (" (обязательно)" if f['required'] else "")
+        # цикл ввода
+        while True:
+            # просим пользователя ввести значение
+            value = click.prompt(prompt, default="", show_default=False)
+            # если поле не является обязательным и пользователь ничего не ввёл
+            if not value and not f['required']:
+                # добавляем поле в словарь с None
+                data[f['name']] = None
+                break
+            # если поле является обязательным и пользователь ничего не ввёл
+            if not value and f['required']:
+                # выводим сообщение об ошибке
+                click.echo("Поле обязательно. Повторите ввод.")
+                continue
+            if not value and not f['required']:
+                data[f['name']] = None
+                break
+            try:
+                # если тип поля int, то преобразуем строку в int
+                if f['type'] == int:
+                    data[f['name']] = int(value)
+                # если тип поля datetime.date, то преобразуем строку в datetime.date
+                elif f['type'] == datetime.date:
+                    data[f['name']] = datetime.date.fromisoformat(value)
+                # если тип поля datetime.time, то преобразуем строку в datetime.time
+                elif f['type'] == datetime.time:
+                    data[f['name']] = datetime.time.fromisoformat(value)
+                else:
+                    # если тип поля не int, datetime.date, datetime.time, то оставляем строку как есть
+                    data[f['name']] = value
+                break
+            except ValueError:
+                # выводим сообщение об ошибке
+                click.echo(f"Неверный формат для типа {f['type'].__name__}. Попробуйте снова.")
+    return data

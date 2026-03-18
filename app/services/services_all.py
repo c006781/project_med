@@ -271,24 +271,32 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     
     def get_dtos(
             self, 
-            item_s:Union[List, Any] #:list 
+            item_s:Union[List, Any]  # список объектов или один объект
     )-> Union[List, Any] : 
+        """
+        Возвращает список DTO из списка объектов или один DTO из объекта.
+        Если получен список объектов, то для каждого объекта пытается создать DTO.
+        Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
+        """
         if isinstance(item_s, list):
-            dtos = []
+            dtos = []  # список DTO
             for item in item_s:
-                try:
-                    self.logger.debug(f"item: {item}")
-                    self.logger.debug(f"self._dto_class.model_validate: {self._dto_class.model_validate(item)}")
-                    
-                    dtos.append(self._dto_class.model_validate(item))
-                except Exception as e:
-                    self.logger.error(f"Ошибка валидации для объекта: {item}")
-                    self.logger.error(f"Поле time: {getattr(item, 'time', None)}")
-                    raise e
-            self.logger.debug(f"Получено {len(dtos)} записей")
+                # try:
+                dtos.append(self.get_dtos(item))  # рекурсивно добавляем DTO в список
+                # except Exception as e:
+                #     self.logger.error(f"Ошибка валидации для объекта: {item}")  # логгируем ошибку
+                #     raise e  # выбрасываем исключение
+            self.logger.debug(f"Получено {len(dtos)} записей")  # логгируем количество полученных DTO
             return dtos
         else:
-            return self._dto_class.model_validate(item_s)
+            # данные из ТБ
+            try:
+                dto = self._dto_class.model_validate(item_s)  # создаем DTO из объекта
+            except Exception as e:
+                self.logger.error(f"Ошибка валидации для объекта: {item}")  # логгируем ошибку
+                raise e  # выбрасываем исключение
+            
+            return dto
     
     def get_dto_out(
             self, 
@@ -452,6 +460,7 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
 
             # commit произойдёт автоматически при выходе из session_scope
             # updated_dto = self._dto_class.from_orm(patient)
+            # sess.commit()  # Явный коммит
             updated_dto = self.get_dto_out(patient)
             self.logger.info(f"Обновлён пациент id={updated_dto.id}")
             return updated_dto  
@@ -688,7 +697,55 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         """Возвращает исключение, если приём не найден."""
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
         return AppointmentNotFoundError(entity_id)
-    
+
+    def get_dtos(
+            self, 
+            item_s:Union[List[AppointmentDTO], AppointmentDTO]  
+    )-> Union[List[AppointmentDTO], AppointmentDTO] : 
+        """
+        Возвращает список DTO из списка объектов или один DTO из объекта.
+        Если получен список объектов, то для каждого объекта пытается создать DTO.
+        Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
+        """
+        if isinstance(item_s, list):
+            # Если получен список объектов
+            dtos = []  # список DTO
+            for item in item_s:
+                # для каждого объекта пытаемся создать DTO
+                dtos.append(self.get_dtos(item))  # рекурсивно добавляем DTO в список
+            self.logger.debug(f"Получено {len(dtos)} записей")
+            return dtos
+        else:
+            # данные из ТБ
+            try:
+                # создаем DTO из объекта
+                dto = self._dto_class.model_validate(item_s)  
+            except Exception as e:
+                # если объект не может быть конвертирован в DTO, то выбрасываем исключение
+                self.logger.error(f"Ошибка валидации для объекта: {item_s}")
+                raise e
+            
+            # данные, которые подтягиваем отдельно
+            try:
+                # если объект имеет поле patient, то подгружаем его имя
+                if item_s.patient:
+                    dto.patient_name = f"{item_s.patient.last_name} {item_s.patient.first_name}"
+            except Exception as e:
+                # если нет поля patient, то выбрасываем исключение
+                self.logger.error(f"Ошибка валидации для объекта (patient_name): {item_s}")
+                raise e
+            
+            try:
+                # если объект имеет поле note, то подгружаем текст заметки
+                if item_s.note:
+                    dto.note_text = item_s.note.text
+            except Exception as e:
+                # если нет поля note, то выбрасываем исключение
+                self.logger.error(f"Ошибка валидации для объекта (note): {item_s}")
+                raise e
+            
+            return dto
+
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей
     # ----------------------------------------------------------------------
@@ -704,6 +761,17 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             # dtos = [self._dto_class.model_validate(item) for item in items]
             dtos = self.get_dtos(items)
             # self.logger.debug(f"Получено {len(dtos)} записей")
+
+            # dtos = []
+            # for item in items:
+            #     # dto = self.get_dtos(item)
+            #     dto = self._dto_class.model_validate(item)
+                
+            #     # Заполняем виртуальные поля
+            #     if item.patient:
+            #         dto.patient_name = f"{item.patient.last_name} {item.patient.first_name}"
+            #     if item.note:
+            #         dto.note_text = item.note.text
             return dtos
         
     def get_appointments_by_patient(self, patient_id: int, session: Optional[Session] = None) -> List[AppointmentDTO]:

@@ -165,7 +165,8 @@ def test_appointment_service_update(appointment_service, sample_appointment):
 
 def test_appointment_service_update_with_new_note(appointment_service, sample_appointment):
     updated = appointment_service.update_appointment(
-        AppointmentDTO.from_orm(sample_appointment),
+        # AppointmentDTO.from_orm(sample_appointment),
+        AppointmentDTO.model_validate(sample_appointment),
         note_text="Обновлённая заметка"
     )
     assert updated.note_id is not None

@@ -12,6 +12,23 @@ from app.exceptions import (
     PhotoNotFoundError, PhotoFileError
 )
 
+
+def check_output_lines(output, expected_lines):
+    """
+    Проверяет, что вывод содержит ожидаемые строки с заданными фрагментами.
+    
+    :param output: многострочный вывод команды (строка)
+    :param expected_lines: список списков строк. Каждый внутренний список содержит
+                           фрагменты, которые должны присутствовать в соответствующей
+                           строке вывода.
+    """
+    lines = output.strip().split('\n')
+    assert len(lines) == len(expected_lines), \
+        f"Количество строк не совпадает: ожидалось {len(expected_lines)}, получено {len(lines)}"
+    for i, (line, expected) in enumerate(zip(lines, expected_lines)):
+        for part in expected:
+            assert part in line, f"Строка {i} не содержит '{part}': {line}"
+
 # ----------------------------------------------------------------------
 # Фикстуры для моков сервисов
 # ----------------------------------------------------------------------
@@ -129,9 +146,17 @@ def test_patient_list_no_filter(runner, mock_patient_service):
             'list'
         ]
     )
+    print(result.output)
     assert result.exit_code == 0
-    assert "ID: 1, ФИО: Петров Иван" in result.output
-    assert "ID: 2, ФИО: Иванова Мария" in result.output
+    # assert "ID: 1, ФИО: Петров Иван" in result.output
+    # assert "ID: 2, ФИО: Иванова Мария" in result.output
+
+    expected = [
+        ["ID: 1", "Имя: Иван", "Фамилия: Петров", "Дата рождения: 1990-01-01", "Телефон: 123", "Email: ivan@test.ru"],
+        ["ID: 2", "Имя: Мария", "Фамилия: Иванова", "Дата рождения: 1985-05-05", "Телефон: 456", "Email: maria@test.ru"]
+    ]
+    check_output_lines(result.output, expected)
+
 
 def test_patient_list_with_filter(runner, mock_patient_service):
     """
@@ -306,9 +331,12 @@ def test_patient_get_success(runner, mock_patient_service):
     assert result.exit_code == 0
     
     # Проверяется, что вывод содержит информацию о пациенте
-    assert "ID: 1" in result.output
-    assert "Имя: Иван" in result.output
-    assert "Фамилия: Петров" in result.output
+    # assert "ID: 1" in result.output
+    # assert "Id: 1" in result.output
+    # assert "Имя: Иван" in result.output
+    # assert "Фамилия: Петров" in result.output
+    expected = [["ID: 1", "Имя: Иван", "Фамилия: Петров", "Дата рождения: 1990-01-01", "Телефон: 123", "Email: ivan@test.ru"]]
+    check_output_lines(result.output, expected)
 
 def test_patient_get_not_found(runner, mock_patient_service):
     """
@@ -587,9 +615,14 @@ def test_appointment_list_all(runner, mock_appointment_service):
     )
     assert result.exit_code == 0
     # Проверяется, что вывод содержит сообщение "ID: 1, Пациент ID: 1"
-    assert "ID: 1, Пациент ID: 1" in result.output
-    # Проверяется, что вывод содержит сообщение "ID: 2"
-    assert "ID: 2" in result.output
+    # assert "ID: 1, Пациент ID: 1" in result.output
+    # # Проверяется, что вывод содержит сообщение "ID: 2"
+    # assert "ID: 2" in result.output
+    expected = [
+        ["ID: 1", "ID пациента: 1", "Дата: " + date.today().isoformat(), "Время: 10:00:00", "Пациент: Петров Иван", "Заметка: Заметка"],
+        ["ID: 2", "ID пациента: 2", "Дата: " + date.today().isoformat(), "Время: 11:00:00", "Пациент: Иванова Мария"]
+    ]
+    check_output_lines(result.output, expected)
 
 def test_appointment_list_by_patient(runner, mock_appointment_service):
     """
@@ -713,8 +746,11 @@ def test_appointment_get_success(runner, mock_appointment_service):
         ]
     )
     assert result.exit_code == 0
-    assert "ID: 1" in result.output
-    assert "Текст заметки: осмотр" in result.output
+    # # assert "ID: 1" in result.output
+    # assert "Id: 1" in result.output
+    # assert "Текст заметки: осмотр" in result.output
+    expected = [["ID: 1", "Дата: " + date.today().isoformat(), "Время: 10:00:00", "Пациент: Петров Иван", "Заметка: осмотр"]]
+    check_output_lines(result.output, expected)
 
 def test_appointment_get_not_found(runner, mock_appointment_service):
     """
@@ -957,8 +993,13 @@ def test_note_list(runner, mock_note_service):
         ]
     )
     assert result.exit_code == 0
-    assert "ID: 1, Текст: Заметка 1" in result.output
-    assert "ID: 2" in result.output
+    # assert "ID: 1, Текст: Заметка 1" in result.output
+    # assert "ID: 2" in result.output
+    expected = [
+        ["ID: 1", "Текст заметки: Заметка 1"],
+        ["ID: 2", "Текст заметки: Заметка 2"]
+    ]
+    check_output_lines(result.output, expected)
 
 def test_note_get_success(runner, mock_note_service):
     """
@@ -988,8 +1029,10 @@ def test_note_get_success(runner, mock_note_service):
         ]
     )
     assert result.exit_code == 0
-    assert "ID: 1" in result.output
-    assert "Текст:\nДлинный текст заметки" in result.output
+    # assert "Id: 1" in result.output
+    # assert "Текст:\nДлинный текст заметки" in result.output
+    expected = [["ID: 1", "Текст заметки: Длинный текст заметки"]]
+    check_output_lines(result.output, expected)
 
 def test_note_get_not_found(runner, mock_note_service):
     """
@@ -1043,6 +1086,7 @@ def test_note_create(runner, mock_note_service):
         [
             'note', 
             'create', 
+            '--text',
             'новая заметка'
         ]
     )
@@ -1106,7 +1150,8 @@ def test_note_update(runner, mock_note_service):
             'note', 
             'update', 
             '--id', 
-            '1', 
+            '1',
+            '--text', 
             'обновлённый текст'
         ]
     )
@@ -1184,8 +1229,13 @@ def test_photo_list_all(runner, mock_photo_service):
         ]
     )
     assert result.exit_code == 0
-    assert "ID: 1, Приём ID: 1, Файл: path1.jpg, Описание: desc1" in result.output
-    assert "ID: 2" in result.output
+    # assert "ID: 1, Приём ID: 1, Файл: path1.jpg, Описание: desc1" in result.output
+    # assert "ID: 2" in result.output
+    expected = [
+        ["ID: 1", "Путь к файлу: path1.jpg", "Описание: desc1"],
+        ["ID: 2", "Путь к файлу: path2.jpg", "Описание: desc2"]
+    ]
+    check_output_lines(result.output, expected)
 
 def test_photo_list_by_appointment(runner, mock_photo_service):
     """

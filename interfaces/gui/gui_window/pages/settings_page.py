@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Slot, Qt
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from app.config.config_manager.manager import AppConfigManager

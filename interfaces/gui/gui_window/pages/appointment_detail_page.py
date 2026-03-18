@@ -6,9 +6,9 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QDateEdit, QTimeEdit,
     QTextEdit, QPushButton, QMessageBox, QHBoxLayout,
-    QListWidget, QListWidgetItem, QFileDialog, QInputDialog
+    QListWidget, QListWidgetItem, QFileDialog, QInputDialog, QLabel
 )
-from PySide6.QtCore import Qt, Slot, QDate, QTime
+from PySide6.QtCore import Qt, Slot, QDate, QTime, QSize
 from PySide6.QtGui import QPixmap, QIcon
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
@@ -61,7 +61,7 @@ class AppointmentDetailPage(BasePage):
 
         # Список фото
         self.photo_list = QListWidget()
-        self.photo_list.setIconSize(Qt.QSize(100, 100))
+        self.photo_list.setIconSize(QSize(100, 100))
         self.photo_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.photo_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         main_layout.addWidget(QLabel("Фотографии:"))

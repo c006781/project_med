@@ -5,7 +5,7 @@
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QHeaderView, QMessageBox, QInputDialog
+    QHeaderView, QMessageBox, QInputDialog, QLineEdit, QTableView
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, Slot, QSortFilterProxyModel
 from PySide6.QtGui import QIcon

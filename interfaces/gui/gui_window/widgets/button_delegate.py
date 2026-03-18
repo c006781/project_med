@@ -6,13 +6,15 @@
 from PySide6.QtWidgets import QStyledItemDelegate, QPushButton, QStyleOptionButton, QApplication
 from PySide6.QtCore import Qt, QModelIndex, QAbstractItemModel, QEvent, QSize
 from PySide6.QtGui import QPainter, QMouseEvent
-
+from PySide6.QtCore import Signal
 
 class ButtonDelegate(QStyledItemDelegate):
     """
     Делегат, рисующий кнопку в ячейке.
     При клике испускает сигнал button_clicked с индексом строки.
     """
+    button_clicked = Signal(int)
+    
     def __init__(self, parent=None, button_text="..."):
         super().__init__(parent)
         self.button_text = button_text
@@ -39,7 +41,8 @@ class ButtonDelegate(QStyledItemDelegate):
             mouse_event = event
             if mouse_event.button() == Qt.MouseButton.LeftButton:
                 # Эмитируем сигнал (можно через модель, но проще через главное окно)
-                self.parent().button_clicked.emit(index.row())
+                # self.parent().button_clicked.emit(index.row())
+                self.button_clicked.emit(index.row())
                 return True
         return False
 

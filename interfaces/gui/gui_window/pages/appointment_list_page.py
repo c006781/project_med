@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
     QTableView, QPushButton, QHeaderView, QMessageBox,
     QLineEdit, QLabel, QTextEdit, QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, Slot, QSortFilterProxyModel
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, Slot, QSortFilterProxyModel, QSize
+from PySide6.QtGui import QPixmap , QIcon
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
@@ -196,7 +196,7 @@ class AppointmentListPage(BasePage):
 
         # Список фото
         self.photo_list = QListWidget()
-        self.photo_list.setIconSize(Qt.QSize(100, 100))
+        self.photo_list.setIconSize(QSize(100, 100))
         self.photo_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.photo_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.photo_list.itemDoubleClicked.connect(self._on_photo_double_clicked)

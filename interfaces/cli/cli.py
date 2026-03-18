@@ -224,7 +224,11 @@ from app.dependencies import (
         get_photo_service,
         get_sync_service,
         init_db as init_db_deps,
-        get_key_value_dto,
+        # get_key_value_dto,
+        get_text_echo,
+        create_click_options,
+        collect_dto_from_input,
+        get_dto_fields,
     )
 # except ImportError:
 #     # fallback с _add_package_name
@@ -370,12 +374,33 @@ def create_cli():
             patients = service.get_patients_filtered(filters, fuzzy_threshold)
 
             # Выводим список пациентов, если он не пустой
+
             if not patients:
                 click.echo("Пациенты не найдены.")
                 return
-            for p in patients:
-                click.echo(f"ID: {p.id}, ФИО: {p.last_name} {p.first_name}, "
-                        f"Дата рождения: {p.birth_date}, Телефон: {p.phone}")
+            
+            rename_map_patients = {
+                'id': 'ID',
+                'first_name': 'Имя',
+                'last_name': 'Фамилия',
+                'birth_date': 'Дата рождения',
+                'phone': 'Телефон',
+                'email': 'Email'
+            }
+           
+            for text_echo in get_text_echo(
+                patients,
+                exclude_fields=[
+                    # 'Note Id'
+                    # 'note_id'
+                ],
+                rename_map = rename_map_patients,
+            ):
+                click.echo(text_echo)
+
+            # for p in patients:
+            #     click.echo(f"ID: {p.id}, ФИО: {p.last_name} {p.first_name}, "
+            #             f"Дата рождения: {p.birth_date}, Телефон: {p.phone}")
         except Exception as e:
             click.echo(f"Ошибка: {e}", err=True)
 
@@ -389,8 +414,29 @@ def create_cli():
         service = get_patient_service()
         try:
             p = service.get_patient_by_id(id)
-            for title, value in get_key_value_dto(p).items():
-                click.echo(f"{title}: {value}")
+            data = p.model_dump(exclude_none=True)
+
+            rename_map_patients = {
+                'id': 'ID',
+                'first_name': 'Имя',
+                'last_name': 'Фамилия',
+                'birth_date': 'Дата рождения',
+                'phone': 'Телефон',
+                'email': 'Email'
+            }   
+            
+            for text_echo in get_text_echo(
+                data,
+                exclude_fields=[
+                    # 'Note Id'
+                    # 'note_id'
+                ],
+                rename_map = rename_map_patients,
+            ):
+                click.echo(text_echo)
+
+
+
             # click.echo(f"ID: {p.id}")
             # click.echo(f"Имя: {p.first_name}")
             # click.echo(f"Фамилия: {p.last_name}")
@@ -402,124 +448,71 @@ def create_cli():
         except Exception as e:
             click.echo(f"Ошибка: {e}", err=True)
 
+
+
     @patient.command('create')
-    @click.option('--first-name', required=True, help='Имя')
-    @click.option('--last-name', required=True, help='Фамилия')
-    @click.option('--birth-date', help='Дата рождения (ГГГГ-ММ-ДД)')
-    @click.option('--phone', help='Телефон')
-    @click.option('--email', help='Email')
-    def patient_create(
-        first_name, 
-        last_name, 
-        birth_date, 
-        phone, 
-        email
-    ):
-        """
-        Создать нового пациента.
-        
-        Функция создает нового пациента по указанным параметрам.
-        Она использует сервис PatientService для создания пациента.
-        """
-        # Логирование начала выполнения функции
-        AppLogger.get_instance( name = 'system' ).debug( 
-            f"Создать нового пациента (указывайте только изменяемые поля). first_name={first_name}, last_name={last_name}, birth_date={birth_date}, phone={phone}, email={email}" 
-        )
-        
-        # Получаем сервис PatientService
+    # @click.option('--first-name', required=True, help='Имя')
+    # @click.option('--last-name', required=True, help='Фамилия')
+    # @click.option('--birth-date', help='Дата рождения (ГГГГ-ММ-ДД)')
+    # @click.option('--phone', help='Телефон')
+    # @click.option('--email', help='Email')
+    @create_click_options(PatientDTO, action='create')
+    def patient_create(**kwargs):
+        """Создать нового пациента."""
+        AppLogger.get_instance(name='system').debug(f"Создание пациента: {kwargs}")
         service = get_patient_service()
-        
-        # Если указана дата рождения, то преобразуем ее в формате date
-        bd = None
-        if birth_date:
+        # Преобразуем дату, если передана строка
+        if kwargs.get('birth_date'):
             try:
-                # Попытка преобразовать строку даты рождения в формате date
-                bd = date.fromisoformat(birth_date)
+                kwargs['birth_date'] = date.fromisoformat(kwargs['birth_date'])
             except ValueError:
-                # Если преобразование не удалось, то выводим ошибку
                 click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
                 return
-        
-        # Создаем объект DTO для передачи данных пациента
-        dto_in = PatientDTO(
-            id=None,  # ID создается автоматически
-            first_name=first_name,
-            last_name=last_name,
-            birth_date=bd,  # Дата рождения
-            phone=phone,  # Телефон
-            email=email  # Email
-        )
-        
+        dto_in = PatientDTO(**kwargs)
         try:
-            # Создаем пациента с помощью сервиса
             dto_out = service.create_patient(dto_in)
-            # Выводим результат
             click.echo(f"Пациент создан с ID: {dto_out.id}")
         except PatientValidationError as e:
-            # Если возникла ошибка валидации, то выводим ее
             click.echo(f"Ошибка валидации: {e}", err=True)
         except Exception as e:
-            # Если возникла любая другая ошибка, то выводим ее
             click.echo(f"Ошибка: {e}", err=True)
 
     @patient.command('update')
-    @click.option('--id', required=True, type=int, help='ID пациента')
-    @click.option('--first-name', help='Имя')
-    @click.option('--last-name', help='Фамилия')
-    @click.option('--birth-date', help='Дата рождения (ГГГГ-ММ-ДД)')
-    @click.option('--phone', help='Телефон')
-    @click.option('--email', help='Email')
-    def patient_update(id, first_name, last_name, birth_date, phone, email):
-        """
-        Обновляет данные пациента (указывайте только изменяемые поля).
+    # @click.option('--id', required=True, type=int, help='ID пациента')
+    # @click.option('--id', required=True, type=int, help='ID пациента')
+    # @click.option('--first-name', help='Имя')
+    # @click.option('--last-name', help='Фамилия')
+    # @click.option('--birth-date', help='Дата рождения (ГГГГ-ММ-ДД)')
+    # @click.option('--phone', help='Телефон')
+    # @click.option('--email', help='Email')
+    @create_click_options(PatientDTO, action='update')
+    def patient_update( **kwargs):
+        """Обновить данные пациента (указывайте только изменяемые поля)."""
+
+        id = kwargs.pop('id', None)
+        if id is None:
+            click.echo("Ошибка: не указан ID пациента", err=True)
+            return
+        id = int(id)
         
-        Функция обновляет данные пациента по ID, изменяя указанные поля.
-        Она использует сервис PatientService для обновления пациента.
-        """
-        AppLogger.get_instance( name = 'system' ).debug( 
-            f"Обновить данные пациента (указывайте только изменяемые поля). id={id}, ..." 
-        )
-        
-        # Получаем сервис PatientService
         service = get_patient_service()
-        
         try:
-            # Получаем существующего пациента по ID
             existing = service.get_patient_by_id(id)
-            
-            # Обновляем поля
-            if first_name is not None:
-                # Если указано имя, то обновляем его
-                existing.first_name = first_name
-            if last_name is not None:
-                # Если указана фамилия, то обновляем ее
-                existing.last_name = last_name
-            if birth_date is not None:
-                # Если указана дата рождения, то преобразуем ее в формате date
-                try:
-                    existing.birth_date = date.fromisoformat(birth_date)
-                except ValueError:
-                    # Если преобразование не удалось, то выводим ошибку
-                    click.echo("Неверный формат даты.", err=True)
-                    return
-            if phone is not None:
-                # Если указан телефон, то обновляем его
-                existing.phone = phone
-            if email is not None:
-                # Если указан email, то обновляем его
-                existing.email = email
-            
-            # Обновляем пациента с помощью сервиса
+            # Обновляем только переданные поля
+            for key, value in kwargs.items():
+                if value is not None:  # опциональные поля могут быть None
+                    if key == 'birth_date' and isinstance(value, str):
+                        try:
+                            value = date.fromisoformat(value)
+                        except ValueError:
+                            click.echo("Неверный формат даты.", err=True)
+                            return
+                    setattr(existing, key, value)
             updated = service.update_patient(existing)
             click.echo(f"Пациент ID {updated.id} обновлён.")
         except PatientNotFoundError as e:
-            # Если пациент не найден, то выводим ошибку
             click.echo(str(e), err=True)
-        except PatientValidationError as e:
-            # Если возникла ошибка валидации, то выводим ее
-            click.echo(f"Ошибка валидации: {e}", err=True)
         except Exception as e:
-            # Если возникла любая другая ошибка, то выводим ее
             click.echo(f"Ошибка: {e}", err=True)
 
     @patient.command('delete')
@@ -602,15 +595,31 @@ def create_cli():
             else:
                 # Если не указаны ни patient_id, ни фильтры, то выводятся все приёмы
                 apps = service.get_all()
+
             if not apps:
                 click.echo("Приёмы не найдены.")
                 return
-            
-            for a in apps:
-                # Если есть заметка, покажем её текст (обрезанный)
-                note_text = a.note_text[:50] + "..." if a.note_text else ""
-                click.echo(f"ID: {a.id}, Пациент ID: {a.patient_id}, "
-                        f"Дата: {a.date}, Время: {a.time}, Заметка: {note_text}")
+
+            rename_map_appointments = {
+                'id': 'ID',
+                'patient_id': 'ID пациента',
+                'date': 'Дата',
+                'time': 'Время',
+                'note_id': 'ID заметки',
+                'patient_name': 'Пациент',
+                'note_text': 'Заметка'
+            }   
+
+            for text_echo in get_text_echo(
+                apps,
+                exclude_fields=[
+                    # 'Note Id'
+                    'note_id'
+                ],
+                rename_map = rename_map_appointments,
+            ):
+                click.echo(text_echo)
+                
         except Exception as e:
             click.echo(f"Ошибка: {e}", err=True)
 
@@ -627,11 +636,32 @@ def create_cli():
         try:
             # Получаем информацию о приёме с указанным ID
             a = service.get_appointment(id)
-            for title, value in get_key_value_dto(
-                a, 
-                exclude_fields=['patient_id', 'note_id'] # можно исключить, если не нужны
-            ).items():
-                click.echo(f"{title}: {value}")
+            data = a.model_dump(exclude_none=True)
+            # for title, value in get_key_value_dto(
+            #     data, 
+            #     exclude_fields=['patient_id', 'note_id'] # можно исключить, если не нужны
+            # ).items():
+            #     click.echo(f"{title}: {value}")
+
+            rename_map_appointments = {
+                'id': 'ID',
+                'patient_id': 'ID пациента',
+                'date': 'Дата',
+                'time': 'Время',
+                'note_id': 'ID заметки',
+                'patient_name': 'Пациент',
+                'note_text': 'Заметка'
+            }   
+
+            for text_echo in get_text_echo(
+                data,
+                exclude_fields=[
+                    'patient_id', 'note_id'
+                ],
+                rename_map = rename_map_appointments,
+            ):
+                click.echo(text_echo)
+
             # Выводим полученную информацию
             # click.echo(f"ID: {a.id}")
             # click.echo(f"Пациент ID: {a.patient_id}")
@@ -649,37 +679,36 @@ def create_cli():
             # Если произошла какая-то другая ошибка, то вывести ее текст
             click.echo(f"Ошибка: {e}", err=True)
 
-    @appointment.command('create')
-    @click.option('--patient-id', required=True, type=int, help='ID пациента')
-    @click.option('--date', 'date_str', required=True, help='Дата приёма (ГГГГ-ММ-ДД)')  # переименовано
-    @click.option('--time', 'time_str', help='Время (ЧЧ:ММ)')
-    @click.option('--note-text', help='Текст заметки (будет создана или использована существующая)')
-    def appointment_create(patient_id, date_str, time_str, note_text):
-        """Создать новый приём. Заметка будет найдена или создана автоматически."""
-        AppLogger.get_instance( name = 'system' ).debug( f"Создать новый приём. Заметка будет найдена или создана автоматически patient_id={patient_id}, ..." )
-        service = get_appointment_service()
-        try:
-            app_date = date.fromisoformat(date_str)   # используем date_str
-        except ValueError:
-            click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
-            return
 
-        app_time = None
-        if time_str:
+    @appointment.command('create')
+    # @click.option('--patient-id', required=True, type=int, help='ID пациента')
+    # @click.option('--date', 'date_str', required=True, help='Дата приёма (ГГГГ-ММ-ДД)')  # переименовано
+    # @click.option('--time', 'time_str', help='Время (ЧЧ:ММ)')
+    # @click.option('--note-text', help='Текст заметки (будет создана или использована существующая)')
+    @create_click_options(AppointmentDTO, action='create')
+    def appointment_create(**kwargs):
+        """Создать новый приём. Заметка будет найдена или создана автоматически."""
+        AppLogger.get_instance(name='system').debug(f"Создание приёма: {kwargs}")
+        service = get_appointment_service()
+
+        # Преобразование даты и времени
+        if 'date' in kwargs and isinstance(kwargs['date'], str):
             try:
-                h, m = map(int, time_str.split(':'))
-                app_time = time(h, m)
+                kwargs['date'] = date.fromisoformat(kwargs['date'])
+            except ValueError:
+                click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
+                return
+        if 'time' in kwargs and kwargs['time'] and  isinstance(kwargs['time'], str):
+            try:
+                h, m = map(int, kwargs['time'].split(':'))
+                kwargs['time'] = time(h, m)
             except:
                 click.echo("Неверный формат времени. Используйте ЧЧ:ММ.", err=True)
                 return
 
-        dto_in = AppointmentDTO(
-            id=None,
-            patient_id=patient_id,
-            date=app_date,
-            time=app_time,
-            note_id=None
-        )
+        # Извлекаем note_text, если передан (это виртуальное поле, не в DTO)
+        note_text = kwargs.pop('note_text', None)
+        dto_in = AppointmentDTO(**kwargs)
         try:
             dto_out = service.create_appointment(dto_in, note_text=note_text)
             click.echo(f"Приём создан с ID: {dto_out.id}")
@@ -689,49 +718,47 @@ def create_cli():
             click.echo(f"Ошибка: {e}", err=True)
 
     @appointment.command('update')
-    @click.option('--id', required=True, type=int, help='ID приёма')
-    @click.option('--date', 'date_str', help='Новая дата (ГГГГ-ММ-ДД)')  # переименовано
-    @click.option('--time', 'time_str', help='Новое время (ЧЧ:ММ)')
-    @click.option('--note-id', type=int, help='Новый ID существующей заметки')
-    @click.option('--note-text', help='Текст новой заметки (если указан, заменяет заметку)')
-    def appointment_update(id, date_str, time_str, note_id, note_text):
-        """
-        Обновить приём.
+    # @click.option('--id', required=True, type=int, help='ID приёма')
+    # @click.option('--date', 'date_str', help='Новая дата (ГГГГ-ММ-ДД)')  # переименовано
+    # @click.option('--time', 'time_str', help='Новое время (ЧЧ:ММ)')
+    # @click.option('--note-id', type=int, help='Новый ID существующей заметки')
+    # @click.option('--note-text', help='Текст новой заметки (если указан, заменяет заметку)')
+    # @click.option('--id', required=True, type=int, help='ID приёма')
+    @create_click_options(AppointmentDTO, action='update')
+    def appointment_update(**kwargs):
+        """Обновить приём."""
 
-        id - ID приёма, который нужно обновить.
-        date_str - новая дата (ГГГГ-ММ-ДД), если указана.
-        time_str - новое время (ЧЧ:ММ), если указано.
-        note_id - новый ID существующей заметки, если указан.
-        note_text - текст новой заметки, если указан. Если указан, заменяет существующую заметку.
-        """
-        AppLogger.get_instance(name='system').debug(f"Обновить приём id={id}, ...")
-
-        date_str = date_str if date_str else None
-        time_str = time_str if time_str else None
+        id = kwargs.pop('id', None)
+        if id is None:
+            click.echo("Ошибка: не указан ID приёма", err=True)
+            return
+        id = int(id)
 
         service = get_appointment_service()
         try:
-
             existing = service.get_appointment(id)
-
-            if date_str:
+            
+            # Преобразование даты/времени, если переданы
+            if 'date' in kwargs and kwargs['date']:
                 try:
-                    existing.date = date.fromisoformat(date_str)  # используем date из импорта
+                    kwargs['date'] = date.fromisoformat(kwargs['date'])
                 except ValueError:
                     click.echo("Неверный формат даты.", err=True)
                     return
-            if time_str:
+            if 'time' in kwargs and kwargs['time']:
                 try:
-                    h, m = map(int, time_str.split(':'))
-                    existing.time = time(h, m)  # time из импорта
+                    h, m = map(int, kwargs['time'].split(':'))
+                    kwargs['time'] = time(h, m)
                 except:
                     click.echo("Неверный формат времени.", err=True)
                     return
 
-            dto_in = existing
-            if note_id is not None:
-                dto_in.note_id = note_id
-            updated = service.update_appointment(dto_in, note_text=note_text)
+            note_text = kwargs.pop('note_text', None)
+            # Обновляем существующий DTO
+            for key, value in kwargs.items():
+                if value is not None:
+                    setattr(existing, key, value)
+            updated = service.update_appointment(existing, note_text=note_text)
             click.echo(f"Приём ID {updated.id} обновлён.")
         except AppointmentNotFoundError as e:
             click.echo(str(e), err=True)
@@ -801,9 +828,24 @@ def create_cli():
             if not notes:
                 click.echo("Заметки не найдены.")
                 return
-            for n in notes:
-                # print('3')
-                click.echo(f"ID: {n.id}, Текст: {n.text[:50]}...")
+            
+            rename_map_note = {
+                'id': 'ID',
+                'text': 'Текст заметки'
+            }  
+
+            for text_echo in get_text_echo(
+                notes,
+                exclude_fields=[
+                    # 'Note Id'
+                    # 'note_id'
+                ],
+                rename_map = rename_map_note,
+            ):
+                click.echo(text_echo)
+            # for n in notes:
+            #     # print('3')
+            #     click.echo(f"ID: {n.id}, Текст: {n.text[:50]}...")
         except Exception as e:
             click.echo(f"Ошибка: {e}", err=True)
 
@@ -828,13 +870,32 @@ def create_cli():
         try:
             # Получаем информацию о заметке с указанным ID
             n = service.get_note(id)
+            data = n.model_dump(exclude_none=True)
 
             # Выводим полученную информацию
-            for title, value in get_key_value_dto(
-                n, 
-                 # можно исключить, если не нужны
-            ).items():
-                click.echo(f"{title}: {value}")
+            # for title, value in get_key_value_dto(
+            #     data, 
+            #      # можно исключить, если не нужны
+            # ).items():
+            #     click.echo(f"{title}: {value}")
+
+
+            rename_map_note = {
+                'id': 'ID',
+                'text': 'Текст заметки'
+            }   
+
+            for text_echo in get_text_echo(
+                data,
+                exclude_fields=[
+                    # 'Note Id'
+                    # 'note_id'
+                ],
+                rename_map = rename_map_note,
+            ):
+                click.echo(text_echo)
+
+
             # click.echo(f"ID: {n.id}")
             # click.echo(f"Текст:\n{n.text}")
         except AppointmentNoteNotFoundError as e:
@@ -845,27 +906,25 @@ def create_cli():
             click.echo(f"Ошибка: {e}", err=True)
 
     @note.command('create')
-    @click.argument('text')
-    def note_create(text):
-        """
-        Создать заметку (текст передаётся как аргумент).
-
-        Эта функция использует сервис get_note_service() для доступа к заметкам.
-        Она создает новую заметку с текстом, переданным как аргумент.
-        Если какая-то ошибка происходит при попытке создания заметки, то она выводится на экран.
-        """
-        AppLogger.get_instance( name = 'system' ).debug( f"Создать заметку (текст передаётся как аргумент) text={text}" )
+    # @click.argument('text')
+    @create_click_options(AppointmentNoteDTO, action='create')
+    def note_create(**kwargs):
+        """Создать заметку."""
         service = get_note_service()
         try:
-            # Создаем новую заметку с текстом, переданным как аргумент
-            dto = service.create_note(text)
-            
-            # Выводим созданную заметку
+            dto = service.create_note(kwargs['text'])
             click.echo(f"Заметка создана с ID: {dto.id}")
         except Exception as e:
-            # Если произошла какая-то ошибка, то вывести ее текст
             click.echo(f"Ошибка: {e}", err=True)
 
+    # @note.command('create')
+    # @create_click_options(AppointmentNoteDTO, action='create')
+    # def note_create(**kwargs):
+    #     service = get_note_service()
+    #     dto = service.create_note(kwargs['text'])
+    #     click.echo(f"Заметка создана с ID: {dto.id}")
+
+    
     @note.command('create-from-file')
     @click.option('--file', type=click.Path(exists=True, readable=True), required=True, help='Файл с текстом заметки')
     def note_create_from_file(file):
@@ -888,30 +947,26 @@ def create_cli():
             click.echo(f"Ошибка: {e}", err=True)
 
     @note.command('update')
-    @click.option('--id', required=True, type=int, help='ID заметки')
-    @click.argument('text')
-    def note_update(id, text):
-        """
-        Обновить текст заметки.
-
-        Это функция использует сервис get_note_service() для доступа к заметкам.
-        Она обновляет текст существующей заметки, указанной по ID.
-        Если какая-то ошибка происходит при попытке обновить текст заметки, то она выводится на экран.
-        """
-        AppLogger.get_instance( name = 'system' ).debug( f"Обновить текст заметки id={id}, text={text}" )
+    # @click.option('--id', required=True, type=int, help='ID заметки')
+    # @click.argument('text')
+    @create_click_options(AppointmentNoteDTO, action='update')
+    def note_update( **kwargs):
+        id = kwargs.pop('id', None)
+        if id is None:
+            click.echo("Ошибка: не указан ID заметки", err=True)
+            return
+        id = int(id)
+        
+        """Обновить текст заметки."""
         service = get_note_service()
         try:
-            # Обновляем текст существующей заметки, указанной по ID
-            dto = service.update_note(id, text)
-            
-            # Выводим обновленную заметку
-            click.echo(f"Заметка ID {dto.id} обновлена.")
+            updated = service.update_note(id, kwargs['text'])
+            click.echo(f"Заметка ID {updated.id} обновлена.")
         except AppointmentNoteNotFoundError as e:
-            # Если заметки с указанным ID не существует, то вывести ошибку
             click.echo(str(e), err=True)
         except Exception as e:
-            # Если произошла какая-то ошибка, то вывести ее текст
             click.echo(f"Ошибка: {e}", err=True)
+
 
     @note.command('delete')
     @click.option('--id', required=True, type=int, help='ID заметки')
@@ -979,8 +1034,26 @@ def create_cli():
                 return
             
             # Выводим информацию о каждом фото
-            for p in photos:
-                click.echo(f"ID: {p.id}, Приём ID: {p.appointment_id}, Файл: {p.file_path}, Описание: {p.description}")
+            # for p in photos:
+            #     click.echo(f"ID: {p.id}, Приём ID: {p.appointment_id}, Файл: {p.file_path}, Описание: {p.description}")
+            
+            rename_map_photo = {
+                'id': 'ID',
+                'appointment_id': 'ID приёма',
+                'file_path': 'Путь к файлу',
+                'description': 'Описание',
+            }     
+            
+            for text_echo in get_text_echo(
+                photos,
+                exclude_fields=[
+                    # 'Note Id'
+                    'appointment_id'
+                ],
+                rename_map = rename_map_photo,
+            ):
+                click.echo(text_echo)
+        
         except Exception as e:
             click.echo(f"Ошибка: {e}", err=True)
 
@@ -988,35 +1061,18 @@ def create_cli():
     @click.option('--appointment-id', required=True, type=int, help='ID приёма')
     @click.option('--file', required=True, type=click.Path(exists=True), help='Путь к файлу изображения')
     @click.option('--description', default='', help='Описание')
-    def photo_add(appointment_id, file, description):
-        """
-        Добавляет фото к приёму.
-
-        Параметры:
-            appointment_id - ID приёма, к которому добавляется фото.
-            file - путь к файлу изображения.
-            description - описание фотографии (необязательно).
-
-        Возвращает:
-            ID добавленной фотографии (если операция прошла успешно).
-
-        Исключения:
-            AppointmentNotFoundError - если приём с указанным ID не существует.
-            PhotoFileError - если файл с указанным путём не существует или не удаётся его скопировать.
-        """
-        AppLogger.get_instance( name = 'system' ).debug( f"Добавить фото к приёму appointment_id={appointment_id}, description={description}" )
+    def photo_add(**kwargs):
+        """Добавить фото к приёму."""
         service = get_photo_service()
+        appointment_id = kwargs['appointment_id']
+        file_path = kwargs['file']          # исправлено: было kwargs['file_path']
+        description = kwargs.get('description', '')
         try:
-            # Создаём DTO для добавленной фотографии
-            dto = service.add_photo_to_appointment(appointment_id, file, description)
-            
-            # Выводим ID добавленной фотографии
+            dto = service.add_photo_to_appointment(appointment_id, file_path, description)
             click.echo(f"Фото добавлено с ID: {dto.id}")
         except (AppointmentNotFoundError, PhotoFileError) as e:
-            # Если приём с указанным ID не существует, то выводим ошибку
             click.echo(str(e), err=True)
         except Exception as e:
-            # Если произошла какая-то другая ошибка, то выводим ее текст
             click.echo(f"Ошибка: {e}", err=True)
 
     @photo.command('delete')
@@ -1273,6 +1329,14 @@ def create_cli():
         создать нового пациента, обновить данные пациента, удалить пациента, а также поискать пациентов
         с фильтрами.
         """
+        rename_map_patients = {
+            'id': 'ID',
+            'first_name': 'Имя',
+            'last_name': 'Фамилия',
+            'birth_date': 'Дата рождения (ГГГГ-ММ-ДД)',
+            'phone': 'Телефон',
+            'email': 'Email'
+        }
         while True:
             click.clear()
             click.echo("=== Управление пациентами ===")
@@ -1307,43 +1371,162 @@ def create_cli():
                 click.pause()
             elif choice == 3:
                 # Создать нового пациента
-                first_name = click.prompt("Имя", type=str)
-                last_name = click.prompt("Фамилия", type=str)
-                birth_date = click.prompt("Дата рождения (ГГГГ-ММ-ДД, оставьте пустым)", default="")
-                phone = click.prompt("Телефон (оставьте пустым)", default="")
-                email = click.prompt("Email (оставьте пустым)", default="")
-                ctx.invoke(
-                    patient_create,
-                    first_name=first_name,
-                    last_name=last_name,
-                    birth_date=birth_date if birth_date else None,
-                    phone=phone if phone else None,
-                    email=email if email else None
+                # rename_map_patients = {
+                #     'id': 'ID',
+                #     'first_name': 'Имя',
+                #     'last_name': 'Фамилия',
+                #     'birth_date': 'Дата рождения (ГГГГ-ММ-ДД)',
+                #     'phone': 'Телефон',
+                #     'email': 'Email'
+                # }
+                data = collect_dto_from_input(
+                    PatientDTO, 
+                    exclude=['id'], 
+                    rename_map = rename_map_patients
                 )
+                ctx.invoke(patient_create, **data)
                 click.pause()
+
+                # # Создать нового пациента
+
+                # first_name = click.prompt("Имя", type=str)
+                # last_name = click.prompt("Фамилия", type=str)
+                # birth_date = click.prompt("Дата рождения (ГГГГ-ММ-ДД, оставьте пустым)", default="")
+                # phone = click.prompt("Телефон (оставьте пустым)", default="")
+                # email = click.prompt("Email (оставьте пустым)", default="")
+
+
+
+                # ctx.invoke(
+                #     patient_create,
+                #     first_name=first_name,
+                #     last_name=last_name,
+                #     birth_date=birth_date if birth_date else None,
+                #     phone=phone if phone else None,
+                #     email=email if email else None
+                # )
+                # click.pause()
+
             elif choice == 4:
-                # Обновить данные пациента
                 pid = click.prompt("ID пациента для обновления", type=int)
-                # Можно показать текущие данные (дополнительно)
-                click.echo("Оставьте поле пустым, если не хотите его менять.")
-                first_name = click.prompt("Новое имя", default="")
-                last_name = click.prompt("Новая фамилия", default="")
-                birth_date = click.prompt("Новая дата рождения", default="")
-                phone = click.prompt("Новый телефон", default="")
-                email = click.prompt("Новый email", default="")
-                kwargs = {}
-                if first_name:
-                    kwargs['first_name'] = first_name
-                if last_name:
-                    kwargs['last_name'] = last_name
-                if birth_date:
-                    kwargs['birth_date'] = birth_date
-                if phone:
-                    kwargs['phone'] = phone
-                if email:
-                    kwargs['email'] = email
-                ctx.invoke(patient_update, id=pid, **kwargs)
+                service = get_patient_service()
+                try:
+                    current = service.get_patient_by_id(pid)
+                    click.echo("\n--- Текущие данные ---")
+
+                    # rename_map_patients = {
+                    #     'id': 'ID',
+                    #     'first_name': 'Имя',
+                    #     'last_name': 'Фамилия',
+                    #     'birth_date': 'Дата рождения (ГГГГ-ММ-ДД)',
+                    #     'phone': 'Телефон',
+                    #     'email': 'Email'
+                    # }
+
+                    # Выводим текущие данные с русскими названиями
+                    for line in get_text_echo(
+                        current, 
+                        rename_map=rename_map_patients
+                    ):
+                        click.echo(line)
+                    click.echo("----------------------\n")
+                except PatientNotFoundError as e:
+                    click.echo(str(e))
+                    click.pause()
+                    continue
+
+                # Собираем новые значения (пустые строки игнорируем)
+                fields = get_dto_fields(PatientDTO, exclude=['id'])
+                update_data = {}
+                for f in fields:
+                    # Используем русское название из rename_map, если есть
+                    display_name = rename_map_patients.get(f['name'], f['description'])
+                    prompt = f"Новое значение для '{display_name}' (Enter - оставить текущее)"
+                    val = click.prompt(prompt, default="")
+                    if val:
+                        # Преобразование типа
+                        if f['type'] == int:
+                            update_data[f['name']] = int(val)
+                        elif f['type'] == date:
+                            try:
+                                update_data[f['name']] = date.fromisoformat(val)
+                            except ValueError:
+                                click.echo("Неверный формат даты. Пропускаем поле.")
+                        # elif f['type'] == str:
+                        else:
+                            update_data[f['name']] = val
+                        # 0==0
+                        # при необходимости добавьте другие типы
+                    
+                # click.echo(f"update_data keys: {list(update_data.keys())}")
+                # click.echo(f"update_data values: {update_data}")
+
+                ctx.invoke(patient_update, id=pid, **update_data)
+                
                 click.pause()
+            # elif choice == 4:
+            #     pid = click.prompt("ID пациента для обновления", type=int)
+            #     service = get_patient_service()
+            #     try:
+            #         current = service.get_patient_by_id(pid)
+            #         click.echo("\n--- Текущие данные ---")
+            #         for k, v in current.model_dump().items():
+            #             if k != 'id':
+            #                 click.echo(f"{k}: {v}")
+            #         click.echo("----------------------\n")
+            #     except PatientNotFoundError as e:
+            #         click.echo(str(e))
+            #         click.pause()
+            #         continue
+
+            #     # Собираем новые значения (пустые строки игнорируем)
+            #     fields = get_dto_fields(PatientDTO, exclude=['id'])
+            #     update_data = {}
+            #     for f in fields:
+            #         prompt = f"Новое значение для '{f['description']}' (Enter - оставить текущее)"
+            #         val = click.prompt(prompt, default="")
+            #         if val:
+            #             # Преобразуем тип
+            #             if f['type'] == int:
+            #                 update_data[f['name']] = int(val)
+            #             elif f['type'] == date:
+            #                 try:
+            #                     update_data[f['name']] = date.fromisoformat(val)
+            #                 except ValueError:
+            #                     click.echo("Неверный формат даты. Пропускаем поле.")
+            #             elif f['type'] == str:
+            #                 update_data[f['name']] = val
+            #             # и т.д.
+            #     ctx.invoke(patient_update, id=pid, **update_data)
+            #     click.pause()
+
+                # # Обновить данные пациента
+                # pid = click.prompt("ID пациента для обновления", type=int)
+
+                # # Можно показать текущие данные (дополнительно)
+                # click.echo("Оставьте поле пустым, если не хотите его менять.")
+
+                # first_name = click.prompt("Новое имя", default="")
+                # last_name = click.prompt("Новая фамилия", default="")
+                # birth_date = click.prompt("Новая дата рождения", default="")
+                # phone = click.prompt("Новый телефон", default="")
+                # email = click.prompt("Новый email", default="")
+                
+                # kwargs = {}
+                # if first_name:
+                #     kwargs['first_name'] = first_name
+                # if last_name:
+                #     kwargs['last_name'] = last_name
+                # if birth_date:
+                #     kwargs['birth_date'] = birth_date
+                # if phone:
+                #     kwargs['phone'] = phone
+                # if email:
+                #     kwargs['email'] = email
+
+                # ctx.invoke(patient_update, id=pid, **kwargs)
+
+                # click.pause()
             elif choice == 5:
                 # Удалить пациента
                 pid = click.prompt("ID пациента для удаления", type=int)
@@ -1373,6 +1556,15 @@ def create_cli():
 
     def appointment_menu():
         """Меню управления приёмами."""
+        rename_map_appointments = {
+            'id': 'ID',
+            'patient_id': 'ID пациента',
+            'date': 'Дата (ГГГГ-ММ-ДД)',
+            'time': 'Время (ЧЧ:MM)',
+            'note_id': 'ID заметки',
+            'patient_name': 'Пациент',
+            'note_text': 'Заметка'
+        }
         while True:
             click.clear()
             click.echo("=== Управление приёмами ===")
@@ -1409,76 +1601,84 @@ def create_cli():
 
             # 4. Создать новый приём
             elif choice == 4:
-                patient_id = click.prompt("ID пациента", type=int)
-                date_str = click.prompt("Дата (ГГГГ-ММ-ДД)", type=str)
-                time_str = click.prompt("Время (ЧЧ:ММ, оставьте пустым)", default="")
-                # note_id = click.prompt("ID существующей заметки (оставьте пустым, если нет)", default="", type=int)
-                note_text = click.prompt("Текст заметки (оставьте пустым, если нет)", default="")
-                # ctx.invoke(
-                #     appointment_create,
-                #     patient_id=patient_id,
-                #     date=date_str,
-                #     time=time_str if time_str else None,
-                #     # note_id=note_id if note_id else None,
-                #     note_text=note_text if note_text else None
-                # )
-                ctx.invoke(
-                    appointment_create,
-                    patient_id=patient_id,
-                    date_str=date_str if date_str else None,
-                    time_str=time_str if time_str else None,   # <-- исправлено имя
-                    note_text=note_text if note_text else None
-                )
-                click.pause()
 
+                # rename_map_appointments = {
+                #     'id': 'ID',
+                #     'patient_id': 'ID пациента',
+                #     'date': 'Дата (ГГГГ-ММ-ДД)',
+                #     'time': 'Время (ЧЧ:MM)',
+                #     'note_id': 'ID заметки',
+                #     'patient_name': 'Пациент',
+                #     'note_text': 'Заметка'
+                # }
+                data = collect_dto_from_input(
+                    AppointmentDTO,
+                    exclude=[
+                        'id', 
+                        'patient_name', 
+                        'note_id',
+                        'note_text'
+                    ],
+                    rename_map=rename_map_appointments
+                )
+                note_text = click.prompt("Текст заметки (оставьте пустым, если нет)", default="")
+                if note_text:
+                    data['note_text'] = note_text
+                ctx.invoke(appointment_create, **data)
+                click.pause()
             # 5. Обновить приём
             elif choice == 5:
+                # appointment_update_set
+                # rename_map_appointments = {
+                #     'id': 'ID',
+                #     'patient_id': 'ID пациента',
+                #     'date': 'Дата (ГГГГ-ММ-ДД)',
+                #     'time': 'Время (ЧЧ:MM)',
+                #     'note_id': 'ID заметки',
+                #     'patient_name': 'Пациент',
+                #     'note_text': 'Заметка'
+                # }
                 aid = click.prompt("ID приёма для обновления", type=int)
-                # Получаем текущие данные приёма
-                service = get_appointment_service()
                 try:
-                    current_app = service.get_appointment(aid)
-                except Exception as e:
-                    click.echo(f"Ошибка: {e}")
+                    current = get_appointment_service().get_appointment(aid)
+                    click.echo("\n--- Текущие данные приёма ---")
+                    for line in get_text_echo(current, rename_map=rename_map_appointments):
+                        click.echo(line)
+                    click.echo("-----------------------------\n")
+                except AppointmentNotFoundError as e:
+                    click.echo(str(e))
                     click.pause()
                     continue
 
-                click.echo("\n--- Текущие данные приёма ---")
-                click.echo(f"Дата: {current_app.date}")
-                click.echo(f"Время: {current_app.time or 'не указано'}")
-                if current_app.note_text:
-                    click.echo(f"Заметка: {current_app.note_text}")
-                else:
-                    click.echo("Заметка: отсутствует")
-                click.echo("-----------------------------\n")
-
-                # Ввод новых значений (если пусто – оставляем старое)
-                date_str = click.prompt("Новая дата (ГГГГ-ММ-ДД)", default=str(current_app.date))
-                time_str = click.prompt("Новое время (ЧЧ:ММ)", default=str(current_app.time) if current_app.time else "")
-                note_text = click.prompt(
-                    "Новый текст заметки (Enter – оставить текущую, новый текст – заменить)",
-                    default=""
-                )
-
-                kwargs = {}
-                # Если дата изменилась – передаём
-                if date_str != str(current_app.date):
-                    # kwargs['date'] = date_str
-                    kwargs['date_str'] = date_str
-                # Если время изменилось – передаём (учитываем, что может быть пустым)
-                new_time = time_str if time_str else None
-                old_time = str(current_app.time) if current_app.time else ""
-                if new_time != old_time:
-                    # kwargs['time'] = time_str if time_str else None  # передаём пустую строку или None
-                    kwargs['time_str'] = time_str if time_str else None  # передаём пустую строку или None
-                # Если введён новый текст заметки – передаём note_text
+                fields = get_dto_fields(AppointmentDTO, exclude=['id', 'patient_name', 'note_text'])
+                update_data = {}
+                for f in fields:
+                    display_name = rename_map_appointments.get(f['name'], f['description'])
+                    prompt = f"Новое значение для '{display_name}' (Enter - оставить текущее)"
+                    val = click.prompt(prompt, default="")
+                    if val:
+                        if f['type'] == int:
+                            update_data[f['name']] = int(val)
+                        elif f['type'] == date:
+                            try:
+                                update_data[f['name']] = date.fromisoformat(val)
+                            except ValueError:
+                                click.echo("Неверный формат даты. Пропускаем поле.")
+                        elif f['type'] == time:
+                            try:
+                                h, m = map(int, val.split(':'))
+                                update_data[f['name']] = time(h, m)
+                            except:
+                                click.echo("Неверный формат времени. Пропускаем поле.")
+                        else:
+                            update_data[f['name']] = val
+                note_text = click.prompt("Новый текст заметки (Enter - оставить текущую)", default="")
                 if note_text:
-                    kwargs['note_text'] = note_text
-                # Если не введён, но была заметка – оставляем старую (ничего не передаём)
-                # Если не введён и не было заметки – тоже ничего
-
-                ctx.invoke(appointment_update, id=aid, **kwargs)
+                    update_data['note_text'] = note_text
+                ctx.invoke(appointment_update, id=aid, **update_data)
                 click.pause()
+
+            
 
             # 6. Удалить приём
             elif choice == 6:
@@ -1507,7 +1707,6 @@ def create_cli():
                 click.echo("Неверный выбор.")
                 click.pause()
 
-
     def note_menu():
         """
         Меню управления заметками.
@@ -1521,6 +1720,10 @@ def create_cli():
         6. Удалить заметку
         0. Вернуться в главное меню
         """
+        rename_map_note = {
+            'id': 'ID',
+            'text': 'Текст заметки'
+        }
         while True:
             click.clear()
             click.echo("=== Управление заметками ===")
@@ -1533,47 +1736,63 @@ def create_cli():
             click.echo("0. Вернуться в главное меню")
             choice = click.prompt("Выберите действие", type=int)
 
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню управления заметками: choice={choice}" )
-
+            AppLogger.get_instance(name='system').debug(f"Меню управления заметками: choice={choice}")
             ctx = click.get_current_context()
 
-            # Вывести список всех заметок
             if choice == 1:
                 ctx.invoke(note_list)
                 click.pause()
-            # Просмотр заметки по ID
             elif choice == 2:
                 nid = click.prompt("Введите ID заметки", type=int)
                 ctx.invoke(note_get, id=nid)
                 click.pause()
-            # Создать заметку (ввод текста)
             elif choice == 3:
-                text = click.prompt("Введите текст заметки", type=str)
-                ctx.invoke(note_create, text=text)
+                data = collect_dto_from_input(
+                    AppointmentNoteDTO,
+                    exclude=['id'],
+                    rename_map=rename_map_note
+                )
+                ctx.invoke(note_create, **data)
                 click.pause()
-            # Создать заметку из файла
             elif choice == 4:
                 file_path = click.prompt("Путь к файлу", type=click.Path(exists=True))
                 ctx.invoke(note_create_from_file, file=file_path)
                 click.pause()
-            # Обновить заметку
             elif choice == 5:
                 nid = click.prompt("ID заметки для обновления", type=int)
-                text = click.prompt("Новый текст заметки", type=str)
-                ctx.invoke(note_update, id=nid, text=text)
+                try:
+                    current = get_note_service().get_note(nid)
+                    click.echo("\n--- Текущие данные заметки ---")
+                    for line in get_text_echo(current, rename_map=rename_map_note):
+                        click.echo(line)
+                    click.echo("-----------------------------\n")
+                except AppointmentNoteNotFoundError as e:
+                    click.echo(str(e))
+                    click.pause()
+                    continue
+
+                # Собираем новые значения (пустые строки игнорируем)
+                fields = get_dto_fields(AppointmentNoteDTO, exclude=['id'])
+                update_data = {}
+                for f in fields:
+                    display_name = rename_map_note.get(f['name'], f['description'])
+                    prompt = f"Новое значение для '{display_name}' (Enter - оставить текущее)"
+                    val = click.prompt(prompt, default="")
+                    if val:
+                        if f['type'] == str:
+                            update_data[f['name']] = val
+                        # при необходимости добавьте другие типы
+                ctx.invoke(note_update, id=nid, **update_data)
                 click.pause()
-            # Удалить заметку
             elif choice == 6:
                 nid = click.prompt("ID заметки для удаления", type=int)
                 ctx.invoke(note_delete, id=nid)
                 click.pause()
-            # Вернуться в главное меню
             elif choice == 0:
                 break
             else:
                 click.echo("Неверный выбор.")
                 click.pause()
-
 
     def photo_menu():
         """

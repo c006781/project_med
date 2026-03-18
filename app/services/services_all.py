@@ -7,7 +7,7 @@ import os  # Импорт модуля os для работы с путями ф
 import shutil
 import uuid
 
-from typing import Type, TypeVar, Generic, List, Optional, Dict, Any, Tuple
+from typing import Type, TypeVar, Generic, List, Optional, Dict, Any, Tuple, Union
 
 import time as time_module
 # from datetime import time
@@ -208,8 +208,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             items = repo.get_all() # Предполагаем, что в репозитории есть метод get_all()
-            dtos = [self._dto_class.from_orm(item) for item in items]
-            self.logger.debug(f"Получено {len(dtos)} записей")
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            dtos = self.get_dtos(items)
+            # self.logger.debug(f"Получено {len(dtos)} записей")
             return dtos
 
     def get_by_id(self, entity_id: int, session: Optional[Session] = None) -> DTOType:
@@ -223,8 +224,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             item = repo.get_by_id(entity_id)
             if item is None:
                 raise self._not_found_exception(entity_id)
-            dto = self._dto_class.from_orm(item)
-            self.logger.debug(f"Найдена запись {dto}")
+            # dto = self._dto_class.from_orm(item)
+            # dto = self._dto_class.model_validate(item)
+            dto = self.get_dtos(item)
+            # self.logger.debug(f"Найдена запись {dto}")
             return dto
 
     def create(self, dto: DTOType) -> DTOType:
@@ -266,7 +269,35 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             f"Метод _not_found_exception не реализован для {self.__class__.__name__}"
         )
     
-
+    def get_dtos(
+            self, 
+            item_s:Union[List, Any] #:list 
+    )-> Union[List, Any] : 
+        if isinstance(item_s, list):
+            dtos = []
+            for item in item_s:
+                try:
+                    self.logger.debug(f"item: {item}")
+                    self.logger.debug(f"self._dto_class.model_validate: {self._dto_class.model_validate(item)}")
+                    
+                    dtos.append(self._dto_class.model_validate(item))
+                except Exception as e:
+                    self.logger.error(f"Ошибка валидации для объекта: {item}")
+                    self.logger.error(f"Поле time: {getattr(item, 'time', None)}")
+                    raise e
+            self.logger.debug(f"Получено {len(dtos)} записей")
+            return dtos
+        else:
+            return self._dto_class.model_validate(item_s)
+    
+    def get_dto_out(
+            self, 
+            item,
+    ): 
+        return self.get_dtos(item)
+ 
+        
+    
     def get_filtered(
             self, 
             filters: List[Dict[str, Any]], 
@@ -308,8 +339,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             items = query.all()
             if post_filters:
                 items = apply_post_filters(items, post_filters, self._model_class)
-            dtos = [self._dto_class.from_orm(item) for item in items]
-            self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            dtos = self.get_dtos(items)
+            # self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
             return dtos
 
 
@@ -339,7 +371,8 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             repo = self._get_repo(sess)
             items = repo.get_page(offset, limit, filters=filters, order_by=order_by)
             total = repo.count(filters=filters)
-            dtos = [self._dto_class.from_orm(item) for item in items]
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            dtos = self.get_dtos(items)
             return dtos, total
 
 
@@ -389,7 +422,9 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             repo.add(patient)
             # Чтобы получить id, делаем flush (коммит будет в session_scope)
             sess.flush()
-            dto_out = self._dto_class.from_orm(patient)
+            # dto_out = self._dto_class.from_orm(patient)
+            # dto_out = self._dto_class.model_validate(patient)
+            dto_out = self.get_dto_out(patient)
             self.logger.info(f"Создан пациент с id={dto_out.id}")
             return dto_out
            
@@ -416,7 +451,8 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             patient.email = patient_dto.email
 
             # commit произойдёт автоматически при выходе из session_scope
-            updated_dto = self._dto_class.from_orm(patient)
+            # updated_dto = self._dto_class.from_orm(patient)
+            updated_dto = self.get_dto_out(patient)
             self.logger.info(f"Обновлён пациент id={updated_dto.id}")
             return updated_dto  
         
@@ -530,7 +566,8 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             note = self._model_class(text=text)
             sess.add(note)
             sess.flush()
-            dto_out = self._dto_class.from_orm(note)
+            # dto_out = self._dto_class.from_orm(note)
+            dto_out = self.get_dto_out(note)
             self.logger.info(f"Создана заметка id={dto_out.id}")
             return dto_out
 
@@ -545,7 +582,8 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             if note is None:
                 raise AppointmentNoteNotFoundError(note_id)
             note.text = text
-            updated_dto = self._dto_class.from_orm(note)
+            # updated_dto = self._dto_class.from_orm(note)
+            updated_dto = self.get_dto_out(note)
             self.logger.info(f"Обновлена заметка id={updated_dto.id}")
             return updated_dto
 
@@ -571,14 +609,16 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             note = repo.get_by_text_exact(text)
             if note:
                 self.logger.debug(f"Найдена существующая заметка id={note.id}")
-                return self._dto_class.from_orm(note)
+                # return self._dto_class.from_orm(note)
+                return self.get_dto_out(note)
 
             # Создаём новую заметку
             note = self._model_class(text=text)
             sess.add(note)
             sess.flush()
             self.logger.info(f"Создана новая заметка id={note.id}")
-            return self._dto_class.from_orm(note)
+            # return self._dto_class.from_orm(note)
+            return self.get_dto_out(note)
 
     def create_note_from_file(self, file_path: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
@@ -660,8 +700,10 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             repo = self._get_repo(sess)
             items = repo.get_all_with_relations()  # метод репозитория с подгрузкой
             # return [self._dto_class.from_orm(item) for item in items]
-            dtos = [self._dto_class.from_orm(item) for item in items]
-            self.logger.debug(f"Получено {len(dtos)} записей")
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            # dtos = [self._dto_class.model_validate(item) for item in items]
+            dtos = self.get_dtos(items)
+            # self.logger.debug(f"Получено {len(dtos)} записей")
             return dtos
         
     def get_appointments_by_patient(self, patient_id: int, session: Optional[Session] = None) -> List[AppointmentDTO]:
@@ -671,8 +713,10 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             repo = self._get_repo(sess)
             items = repo.get_by_patient_with_relations(patient_id)
             # return [self._dto_class.from_orm(item) for item in items]
-            dtos = [self._dto_class.from_orm(item) for item in items]
-            self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            # dtos = [self._dto_class.model_validate(item) for item in items]
+            dtos = self.get_dtos(items)
+            # self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
             return dtos
 
     def get_appointment(self, appointment_id: int, session: Optional[Session] = None) -> AppointmentDTO:
@@ -683,7 +727,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             item = repo.get_by_id_with_relations(appointment_id)
             if item is None:
                 raise AppointmentNotFoundError(appointment_id)
-            return self._dto_class.from_orm(item)
+            # return self._dto_class.from_orm(item)
+            return  self.get_dtos(item)
 
     def get_filtered(
             self, 
@@ -704,7 +749,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             items = query.all()
             if post_filters:
                 items = apply_post_filters(items, post_filters, self._model_class)
-            return [self._dto_class.from_orm(item) for item in items]
+            # return [self._dto_class.from_orm(item) for item in items]
+            return self.get_dtos(items)
 
     # ----------------------------------------------------------------------
     # Методы создания, обновления и удаления (без изменений)
@@ -747,7 +793,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             )
             sess.add(appointment)
             sess.flush()  # чтобы получить id
-            dto_out = self._dto_class.from_orm(appointment)
+            # dto_out = self._dto_class.from_orm(appointment)
+            dto_out = self.get_dto_out(appointment)
             self.logger.info(f"Создан приём id={dto_out.id}")
             return dto_out
 
@@ -791,7 +838,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 #  self._cleanup_unused_note(old_note_id, sess)
                  self._note_service.cleanup_unused_note(old_note_id, sess)
 
-            updated_dto = self._dto_class.from_orm(app)
+            # updated_dto = self._dto_class.from_orm(app)
+            updated_dto = self.get_dto_out(app)
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
             return updated_dto   
 
@@ -852,7 +900,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             repo = self._get_repo(sess)
             items = repo.get_page_by_patient(patient_id, offset, limit, filters=filters, order_by=order_by)
             total = repo.count_by_patient(patient_id, filters=filters)
-            dtos = [self._dto_class.from_orm(item) for item in items]
+            # dtos = [self._dto_class.from_orm(item) for item in items]
+            dtos = self.get_dtos(items)
             return dtos, total
 
 class PhotoService(
@@ -1002,7 +1051,8 @@ class PhotoService(
             photo.file_path = os.path.relpath(target_path, self._storage_path)
             # при выходе из контекста произойдёт commit, сохраняющий изменения
 
-            dto_out = self._dto_class.from_orm(photo)
+            # dto_out = self._dto_class.from_orm(photo)
+            dto_out = self.get_dto_out(photo)
             self.logger.info(f"Добавлено фото id={dto_out.id} к приёму {appointment_id}")
             return dto_out
     # def get_photos_for_appointment(self, appointment_id: int, session: Optional[Session] = None) -> List[PhotoDTO]:
@@ -1055,7 +1105,8 @@ class PhotoService(
                     self.logger.warning(f"Файл фото id={p.id} отсутствует на диске: {full_path}")
                     
                 # 6. Создаём DTO для фотографии и добавляем в список
-                dtos.append(self._dto_class.from_orm(p))
+                # dtos.append(self._dto_class.from_orm(p))
+                dtos.append(self.get_dto_out(p))
             
             # 7. Возвращаем список DTO для фотографий
             self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dtos)} записей")

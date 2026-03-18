@@ -224,6 +224,7 @@ from app.dependencies import (
         get_photo_service,
         get_sync_service,
         init_db as init_db_deps,
+        get_key_value_dto,
     )
 # except ImportError:
 #     # fallback с _add_package_name
@@ -243,6 +244,8 @@ from app.dependencies import (
 
 import click # pip install click
 # from sqlalchemy.orm import sessionmaker  
+
+
 
 # ------------------------------------------------------------------------------
 # Инициализация общих объектов
@@ -386,12 +389,14 @@ def create_cli():
         service = get_patient_service()
         try:
             p = service.get_patient_by_id(id)
-            click.echo(f"ID: {p.id}")
-            click.echo(f"Имя: {p.first_name}")
-            click.echo(f"Фамилия: {p.last_name}")
-            click.echo(f"Дата рождения: {p.birth_date}")
-            click.echo(f"Телефон: {p.phone}")
-            click.echo(f"Email: {p.email}")
+            for title, value in get_key_value_dto(p).items():
+                click.echo(f"{title}: {value}")
+            # click.echo(f"ID: {p.id}")
+            # click.echo(f"Имя: {p.first_name}")
+            # click.echo(f"Фамилия: {p.last_name}")
+            # click.echo(f"Дата рождения: {p.birth_date}")
+            # click.echo(f"Телефон: {p.phone}")
+            # click.echo(f"Email: {p.email}")
         except PatientNotFoundError as e:
             click.echo(str(e), err=True)
         except Exception as e:
@@ -622,17 +627,21 @@ def create_cli():
         try:
             # Получаем информацию о приёме с указанным ID
             a = service.get_appointment(id)
-            
+            for title, value in get_key_value_dto(
+                a, 
+                exclude_fields=['patient_id', 'note_id'] # можно исключить, если не нужны
+            ).items():
+                click.echo(f"{title}: {value}")
             # Выводим полученную информацию
-            click.echo(f"ID: {a.id}")
-            click.echo(f"Пациент ID: {a.patient_id}")
-            click.echo(f"Дата: {a.date}")
-            click.echo(f"Время: {a.time}")
-            click.echo(f"Заметка ID: {a.note_id}")
+            # click.echo(f"ID: {a.id}")
+            # click.echo(f"Пациент ID: {a.patient_id}")
+            # click.echo(f"Дата: {a.date}")
+            # click.echo(f"Время: {a.time}")
+            # click.echo(f"Заметка ID: {a.note_id}")
             
             # Если к приёму прикреплена заметка, то вывести ее текст
-            if a.note_text:
-                click.echo(f"Текст заметки: {a.note_text}")
+            # if a.note_text:
+            #     click.echo(f"Текст заметки: {a.note_text}")
         except AppointmentNotFoundError as e:
             # Если приём с указанным ID не найден, то вывести ошибку
             click.echo(str(e), err=True)
@@ -821,8 +830,13 @@ def create_cli():
             n = service.get_note(id)
 
             # Выводим полученную информацию
-            click.echo(f"ID: {n.id}")
-            click.echo(f"Текст:\n{n.text}")
+            for title, value in get_key_value_dto(
+                n, 
+                 # можно исключить, если не нужны
+            ).items():
+                click.echo(f"{title}: {value}")
+            # click.echo(f"ID: {n.id}")
+            # click.echo(f"Текст:\n{n.text}")
         except AppointmentNoteNotFoundError as e:
             # Если заметки с указанным ID не существует, то вывести ошибку
             click.echo(str(e), err=True)

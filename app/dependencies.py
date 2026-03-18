@@ -119,3 +119,38 @@ def init_db(
     db.create_tables(recreate=recreate)
     if test_data:
         db.fill_test_data()
+
+# def get_key_value_dto(
+#         dto, 
+#         exclude_fields=None
+# )->dict:
+#     """
+#     Выводит все поля DTO в формате "Название поля: значение".
+#     :param dto: экземпляр Pydantic DTO
+#     :param exclude_fields: список полей, которые не нужно выводить (например, ['id'])
+#     """
+#     return_ = {}
+#     data = dto.model_dump(exclude_none=True)  # исключаем поля с None
+#     for key, value in data.items():
+#         if exclude_fields and key in exclude_fields:
+#             continue
+#         # Преобразуем имя поля в заголовок (например, 'first_name' -> 'First Name')
+#         title = key.replace('_', ' ').title()
+#         return_[title] = value
+#         # click.echo(f"{title}: {value}")
+#     return return_
+
+def get_key_value_dto(
+        dto, 
+        exclude_fields=None
+    ):
+    """
+    Преобразует Pydantic DTO в словарь вида {человеко-читаемое название: значение}.
+    
+    :param dto: экземпляр Pydantic DTO
+    :param exclude_fields: список полей, которые не нужно выводить (например, ['id'])
+    """
+    data = dto.model_dump(exclude_none=True)
+    if exclude_fields:
+        data = {k: v for k, v in data.items() if k not in exclude_fields}
+    return {k.replace('_', ' ').title(): v for k, v in data.items()}

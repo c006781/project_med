@@ -50,6 +50,8 @@ class BaseAppLogger:
     # Словарь экземпляров (ключ - имя логгера)
     _instances: Dict[str, 'BaseAppLogger'] = {}
 
+    _global_handlers = []  # список обработчиков, добавляемых ко всем логгерам
+
     # Простой формат лога: время, уровень, сообщение (всё остальное формируем вручную)
     LOG_FORMAT = '%(asctime)s\t%(levelname)s\t%(message)s'
 
@@ -61,6 +63,24 @@ class BaseAppLogger:
         'CRITICAL': logging.CRITICAL
     }
     
+    @classmethod
+    def add_global_handler(cls, handler):
+        """Добавляет обработчик ко всем существующим и будущим экземплярам логгеров."""
+        cls._global_handlers.append(handler)
+        # Добавляем ко всем уже созданным экземплярам
+        for instance in cls._instances.values():
+            instance.logger.addHandler(handler)
+            # Обновляем список обработчиков экземпляра (опционально)
+            instance.handlers = instance.logger.handlers[:]
+
+    @classmethod
+    def remove_global_handler(cls, handler):
+        if handler in cls._global_handlers:
+            cls._global_handlers.remove(handler)
+        for instance in cls._instances.values():
+            instance.logger.removeHandler(handler)
+            instance.handlers = instance.logger.handlers[:]
+            
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         """
@@ -174,6 +194,10 @@ class BaseAppLogger:
         console_handler.setLevel(self.log_level)
         console_handler.setFormatter(formatter)
         self.logger.addHandler(console_handler)
+
+        # Добавляем глобальные обработчики
+        for handler in self._global_handlers:
+            self.logger.addHandler(handler)
 
         # Сохраняем ссылки на обработчики (может пригодиться для добавления GUI-обработчика позже)
         self.handlers = self.logger.handlers[:]

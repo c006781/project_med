@@ -512,6 +512,20 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         self.logger.debug(f"Запрос пациентов с фильтрацией: filters={filters}, fuzzy_threshold={fuzzy_threshold}")
         return self.get_filtered(filters, fuzzy_threshold, session=session)
    
+    def create(self, dto: PatientDTO) -> PatientDTO:
+        """
+        Универсальный метод создания, вызывающий create_patient.
+        Необходим для совместимости с DynamicEditPage.
+        """
+        return self.create_patient(dto)
+
+    def update(self, dto: PatientDTO) -> PatientDTO:
+        """
+        Универсальный метод обновления, вызывающий update_patient.
+        """
+        return self.update_patient(dto)
+
+
 class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
     """
     Сервис для работы с заметками приёмов.
@@ -557,6 +571,12 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
         self.logger.debug(f"Удаление заметки id={note_id}")
         super().delete(note_id, session=session)
 
+    def create(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+        return self.create_note(dto.text)
+
+    def update(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+        return self.update_note(dto.id, dto.text)
+    
     # ----------------------------------------------------------------------
     # Специфические методы сервиса
     # ----------------------------------------------------------------------
@@ -745,7 +765,16 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 raise e
             
             return dto
+    def create(self, dto: AppointmentDTO) -> AppointmentDTO:
+        """
+        Создаёт приём. Поле note_text может быть передано в dto как виртуальное.
+        """
+        note_text = getattr(dto, 'note_text', None)
+        return self.create_appointment(dto, note_text=note_text)
 
+    def update(self, dto: AppointmentDTO) -> AppointmentDTO:
+        note_text = getattr(dto, 'note_text', None)
+        return self.update_appointment(dto, note_text=note_text)
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей
     # ----------------------------------------------------------------------

@@ -102,8 +102,13 @@ class BaseConfigManager:
         Сохраняет текущий кеш конфигурации в файл (формат MessagePack).
         Создаёт родительские папки, если их нет.
         """
-        # Создаём директорию, если не существует
-        os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
+        # # # Создаём директорию, если не существует
+        # os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
+
+        """Сохраняет текущий кеш конфигурации в файл."""
+        dirname = os.path.dirname(self._config_path)
+        if dirname:  # только если есть директория
+            os.makedirs(dirname, exist_ok=True)
         # Сохраняем в бинарном режиме
         with open(self._config_path, 'wb') as f:
             msgpack.pack(self._config, f)

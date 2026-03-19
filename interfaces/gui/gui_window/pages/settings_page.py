@@ -1,8 +1,6 @@
+# interfaces/gui/gui_window/pages/settings_page.py
 # -*- coding: utf-8 -*-
-"""
-Страница настроек приложения.
-Позволяет редактировать параметры конфигурации и сохранять их в файл.
-"""
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
@@ -19,11 +17,11 @@ class SettingsPage(BasePage):
     """
     Страница настроек.
     """
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.SettingsPage")
         self.config_manager = AppConfigManager.get_instance()
+        self.first_start = False          # флаг первого запуска
         self._setup_ui()
         self._load_settings()
 
@@ -69,7 +67,10 @@ class SettingsPage(BasePage):
         backup_layout = QHBoxLayout()
         backup_layout.addWidget(self.backup_path_edit)
         backup_layout.addWidget(self.backup_path_btn)
-        form_layout.addRow("Папка бекапов:", backup_layout)
+        # form_layout.addRow("Папка бекапов:", backup_layout)
+        # Вместо "Папка бекапов" напишем "Папка для локальных бекапов БД"
+        form_layout.addRow("Папка для локальных бекапов БД:", backup_layout)
+        self.backup_path_edit.setToolTip("Здесь будут сохраняться резервные копии файла базы данных")
 
         # Количество бекапов
         self.backup_count_spin = QSpinBox()
@@ -94,13 +95,11 @@ class SettingsPage(BasePage):
         self.save_btn.clicked.connect(self._save_settings)
 
     def _browse_file(self, line_edit, title, filter_str):
-        """Открывает диалог выбора файла и вставляет путь в line_edit."""
         file_path, _ = QFileDialog.getOpenFileName(self, title, "", filter_str)
         if file_path:
             line_edit.setText(file_path)
 
     def _browse_dir(self, line_edit, title):
-        """Открывает диалог выбора папки."""
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
             line_edit.setText(dir_path)
@@ -111,7 +110,7 @@ class SettingsPage(BasePage):
         self.photos_path_edit.setText(self.config_manager.get('PHOTOS_STORAGE_PATH', ''))
         self.token_edit.setText(self.config_manager.get('YANDEX_TOKEN', ''))
         self.remote_path_edit.setText(self.config_manager.get('database_remote_path', ''))
-        self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))  # возможно, добавить в конфиг
+        self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))
         self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
         self.log_file_check.setChecked(self.config_manager.get('LOG_ENABLED', True))
 
@@ -130,12 +129,17 @@ class SettingsPage(BasePage):
             self.config_manager.save()
             QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены пользователем")
+            
+            # Если это был первый запуск, переходим на главную страницу
+            if self.first_start:
+                self.main_window.page_manager.switch_to('patient_list')
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
             self.logger.exception("Ошибка сохранения настроек")
 
-    def on_enter(self):
-        """При входе на страницу обновляем настройки (на случай внешних изменений)."""
-        self.config_manager.load()  # перезагружаем из файла
+    def on_enter(self, extra_data=None):
+        """При входе на страницу обновляем настройки и запоминаем флаг первого запуска."""
+        self.config_manager.load()
         self._load_settings()
-        self.logger.debug("Страница настроек открыта")
+        self.first_start = extra_data.get('first_start', False) if extra_data else False
+        self.logger.debug(f"Страница настроек открыта, first_start={self.first_start}")

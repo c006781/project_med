@@ -107,159 +107,192 @@ class AppointmentFilterProxyModel(QSortFilterProxyModel):
         return False
 
 
+# class AppointmentListPage(BasePage):
+#     """
+#     Страница со списком приёмов для конкретного пациента.
+#     При переходе ожидается patient_id в extra_data.
+#     """
+
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self.logger = AppLogger.get_instance("gui.AppointmentListPage")
+#         self.appointment_service = get_appointment_service()
+#         self.photo_service = get_photo_service()
+#         self.current_patient_id = None
+#         self.current_appointment_id = None  # выбранный приём
+
+#         self._setup_ui()
+#         self._load_appointments()  # пока без patient_id
+
+#     def _setup_ui(self):
+#         """Создаёт двухпанельный интерфейс."""
+#         main_layout = QVBoxLayout(self)
+
+#         # Верхняя панель с кнопками
+#         top_layout = QHBoxLayout()
+
+#         self.add_btn = QPushButton("Новый приём")
+#         self.add_btn.clicked.connect(self._on_add_appointment)
+#         top_layout.addWidget(self.add_btn)
+
+#         self.delete_btn = QPushButton("Удалить приём")
+#         self.delete_btn.clicked.connect(self._on_delete_appointment)
+#         self.delete_btn.setEnabled(False)
+#         top_layout.addWidget(self.delete_btn)
+
+#         self.refresh_btn = QPushButton("Обновить")
+#         self.refresh_btn.clicked.connect(lambda: self._load_appointments(self.current_patient_id))
+#         top_layout.addWidget(self.refresh_btn)
+
+#         top_layout.addStretch()
+
+#         self.search_edit = QLineEdit()
+#         self.search_edit.setPlaceholderText("Поиск...")
+#         self.search_edit.textChanged.connect(self._on_search_text_changed)
+#         top_layout.addWidget(self.search_edit)
+
+#         main_layout.addLayout(top_layout)
+
+#         # Разделитель: слева таблица, справа детали
+#         splitter = QSplitter(Qt.Orientation.Horizontal)
+
+#         # Левая часть: таблица приёмов
+#         left_widget = QWidget()
+#         left_layout = QVBoxLayout(left_widget)
+#         left_layout.setContentsMargins(0, 0, 0, 0)
+
+#         self.table_view = FilterTableView()
+#         self.table_view.setSortingEnabled(True)
+
+#         self.source_model = AppointmentTableModel()
+#         self.proxy_model = AppointmentFilterProxyModel()
+#         self.proxy_model.setSourceModel(self.source_model)
+#         self.table_view.setModel(self.proxy_model)
+
+#         self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
+#         self.table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+#         self.table_view.selectionModel().selectionChanged.connect(self._on_appointment_selected)
+
+#         self.table_view.horizontalHeader().setStretchLastSection(True)
+#         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+#         left_layout.addWidget(self.table_view)
+#         splitter.addWidget(left_widget)
+
+#         # Правая часть: детали приёма
+#         right_widget = QWidget()
+#         right_layout = QVBoxLayout(right_widget)
+
+#         # Информация о приёме
+#         self.info_label = QLabel("Выберите приём")
+#         right_layout.addWidget(self.info_label)
+
+#         # Заметка
+#         self.note_text = QTextEdit()
+#         self.note_text.setReadOnly(True)
+#         self.note_text.setMaximumHeight(150)
+#         right_layout.addWidget(QLabel("Заметка:"))
+#         right_layout.addWidget(self.note_text)
+
+#         # Список фото
+#         self.photo_list = QListWidget()
+#         self.photo_list.setIconSize(QSize(100, 100))
+#         self.photo_list.setViewMode(QListWidget.ViewMode.IconMode)
+#         self.photo_list.setResizeMode(QListWidget.ResizeMode.Adjust)
+#         self.photo_list.itemDoubleClicked.connect(self._on_photo_double_clicked)
+#         right_layout.addWidget(QLabel("Фотографии:"))
+#         right_layout.addWidget(self.photo_list)
+
+#         splitter.addWidget(right_widget)
+#         splitter.setSizes([400, 600])
+
+#         main_layout.addWidget(splitter)
+
+#     def on_enter(self, extra_data=None):
+#         """При входе загружаем приёмы для указанного пациента."""
+#         self.current_patient_id = extra_data.get('patient_id') if extra_data else None
+#         if self.current_patient_id:
+#             self._load_appointments(self.current_patient_id)
+#         else:
+#             self.source_model.update_appointments([])
+
+#     def _load_appointments(self, patient_id=None):
+#         """Загружает приёмы пациента."""
+#         if patient_id is None:
+#             patient_id = self.current_patient_id
+#         if not patient_id:
+#             return
+#         try:
+#             apps = self.appointment_service.get_appointments_by_patient(patient_id)
+#             self.source_model.update_appointments(apps)
+#             self.logger.debug(f"Загружено {len(apps)} приёмов для пациента {patient_id}")
+#         except Exception as e:
+#             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить приёмы: {e}")
+#             self.logger.exception("Ошибка загрузки приёмов")
+
+#     @Slot()
+#     def _on_add_appointment(self):
+#         """Переход на страницу создания нового приёма."""
+#         if self.current_patient_id and self.page_manager:
+#             self.page_manager.switch_to('appointment_detail', extra_data={
+#                 'patient_id': self.current_patient_id,
+#                 'appointment_id': None  # новый
+#             })
+
+#     @Slot()
+#     def _on_delete_appointment(self):
+#         """Удаление выбранного приёма."""
+#         if not self.current_appointment_id:
+#             return
+#         reply = QMessageBox.question(
+#             self, "Подтверждение",
+#             "Удалить этот приём? Все связанные фото также будут удалены.",
+#             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+#         )
+#         if reply == QMessageBox.StandardButton.Yes:
+#             try:
+#                 self.appointment_service.delete_appointment(self.current_appointment_id)
+#                 QMessageBox.information(self, "Успех", "Приём удалён.")
+#                 self.logger.info(f"Удалён приём ID={self.current_appointment_id}")
+#                 self._load_appointments()
+#                 self._clear_details()
+#                 self.delete_btn.setEnabled(False)
+#             except Exception as e:
+#                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+#                 self.logger.exception("Ошибка удаления приёма")
+
+
 class AppointmentListPage(BasePage):
     """
-    Страница со списком приёмов для конкретного пациента.
-    При переходе ожидается patient_id в extra_data.
+    Страница со списком приёмов.
+    Принимает в extra_data ключ 'patient_id' для фильтрации.
     """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.AppointmentListPage")
         self.appointment_service = get_appointment_service()
-        self.photo_service = get_photo_service()
         self.current_patient_id = None
-        self.current_appointment_id = None  # выбранный приём
-
-        self._setup_ui()
-        self._load_appointments()  # пока без patient_id
-
-    def _setup_ui(self):
-        """Создаёт двухпанельный интерфейс."""
-        main_layout = QVBoxLayout(self)
-
-        # Верхняя панель с кнопками
-        top_layout = QHBoxLayout()
-
-        self.add_btn = QPushButton("Новый приём")
-        self.add_btn.clicked.connect(self._on_add_appointment)
-        top_layout.addWidget(self.add_btn)
-
-        self.delete_btn = QPushButton("Удалить приём")
-        self.delete_btn.clicked.connect(self._on_delete_appointment)
-        self.delete_btn.setEnabled(False)
-        top_layout.addWidget(self.delete_btn)
-
-        self.refresh_btn = QPushButton("Обновить")
-        self.refresh_btn.clicked.connect(lambda: self._load_appointments(self.current_patient_id))
-        top_layout.addWidget(self.refresh_btn)
-
-        top_layout.addStretch()
-
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Поиск...")
-        self.search_edit.textChanged.connect(self._on_search_text_changed)
-        top_layout.addWidget(self.search_edit)
-
-        main_layout.addLayout(top_layout)
-
-        # Разделитель: слева таблица, справа детали
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Левая часть: таблица приёмов
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.table_view = FilterTableView()
-        self.table_view.setSortingEnabled(True)
-
-        self.source_model = AppointmentTableModel()
-        self.proxy_model = AppointmentFilterProxyModel()
-        self.proxy_model.setSourceModel(self.source_model)
-        self.table_view.setModel(self.proxy_model)
-
-        self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        self.table_view.selectionModel().selectionChanged.connect(self._on_appointment_selected)
-
-        self.table_view.horizontalHeader().setStretchLastSection(True)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-
-        left_layout.addWidget(self.table_view)
-        splitter.addWidget(left_widget)
-
-        # Правая часть: детали приёма
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-
-        # Информация о приёме
-        self.info_label = QLabel("Выберите приём")
-        right_layout.addWidget(self.info_label)
-
-        # Заметка
-        self.note_text = QTextEdit()
-        self.note_text.setReadOnly(True)
-        self.note_text.setMaximumHeight(150)
-        right_layout.addWidget(QLabel("Заметка:"))
-        right_layout.addWidget(self.note_text)
-
-        # Список фото
-        self.photo_list = QListWidget()
-        self.photo_list.setIconSize(QSize(100, 100))
-        self.photo_list.setViewMode(QListWidget.ViewMode.IconMode)
-        self.photo_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.photo_list.itemDoubleClicked.connect(self._on_photo_double_clicked)
-        right_layout.addWidget(QLabel("Фотографии:"))
-        right_layout.addWidget(self.photo_list)
-
-        splitter.addWidget(right_widget)
-        splitter.setSizes([400, 600])
-
-        main_layout.addWidget(splitter)
+        # ... остальная инициализация ...
 
     def on_enter(self, extra_data=None):
-        """При входе загружаем приёмы для указанного пациента."""
+        """При входе загружаем приёмы, возможно, для конкретного пациента."""
         self.current_patient_id = extra_data.get('patient_id') if extra_data else None
-        if self.current_patient_id:
-            self._load_appointments(self.current_patient_id)
-        else:
-            self.source_model.update_appointments([])
+        self._load_appointments()
 
-    def _load_appointments(self, patient_id=None):
-        """Загружает приёмы пациента."""
-        if patient_id is None:
-            patient_id = self.current_patient_id
-        if not patient_id:
-            return
+    def _load_appointments(self):
+        """Загружает приёмы, применяя фильтр по patient_id, если он задан."""
         try:
-            apps = self.appointment_service.get_appointments_by_patient(patient_id)
+            if self.current_patient_id:
+                apps = self.appointment_service.get_appointments_by_patient(self.current_patient_id)
+            else:
+                apps = self.appointment_service.get_all()
             self.source_model.update_appointments(apps)
-            self.logger.debug(f"Загружено {len(apps)} приёмов для пациента {patient_id}")
+            self.logger.debug(f"Загружено {len(apps)} приёмов")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить приёмы: {e}")
             self.logger.exception("Ошибка загрузки приёмов")
 
-    @Slot()
-    def _on_add_appointment(self):
-        """Переход на страницу создания нового приёма."""
-        if self.current_patient_id and self.page_manager:
-            self.page_manager.switch_to('appointment_detail', extra_data={
-                'patient_id': self.current_patient_id,
-                'appointment_id': None  # новый
-            })
-
-    @Slot()
-    def _on_delete_appointment(self):
-        """Удаление выбранного приёма."""
-        if not self.current_appointment_id:
-            return
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Удалить этот приём? Все связанные фото также будут удалены.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                self.appointment_service.delete_appointment(self.current_appointment_id)
-                QMessageBox.information(self, "Успех", "Приём удалён.")
-                self.logger.info(f"Удалён приём ID={self.current_appointment_id}")
-                self._load_appointments()
-                self._clear_details()
-                self.delete_btn.setEnabled(False)
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления приёма")
 
     @Slot()
     def _on_search_text_changed(self, text):

@@ -1,4 +1,7 @@
 # tests/test_logger.py
+
+from tests.utils import check_output_lines
+
 import pytest
 # import os
 import logging
@@ -123,6 +126,45 @@ def test_logger_levels(caplog):
     # Возвращаем предыдущий propagate
     std_logger.propagate = old_propagate
 
+# def test_logger_decorator(capsys):
+#     """
+#     Тест для декоратора log_execution_time.
+
+#     Проверяет, что декоратор корректно работает, выводя сообщения о начале и конце функции.
+
+#     :param capsys: (pytest.fixture) Контейнер для захвата вывода.
+#     """
+#     config = {
+#         'LOG_LEVEL': 'DEBUG',
+#         'LOG_FILE': '',
+#         'LOG_MAX_BYTES': '0',
+#         'LOG_BACKUP_COUNT': '0'
+#     }
+#     logger = AppLogger.get_instance('decorator_test', config=config, force_new=True, enable_file_logging=False)
+#     @logger.log_execution_time(description="Тестовая функция")
+#     def func():
+#         """
+#         Тестовая функция, которую декорирует декоратор log_execution_time.
+#         """
+#         return 42
+#     result = func()
+#     # captured = capsys.readouterr()
+#     # assert "Тестовая функция [Начало]" in captured.err
+#     # assert "Тестовая функция [Завершение:" in captured.err
+#     # assert result == 42
+
+
+#     captured = capsys.readouterr() 
+#     expected = [
+#         [
+#             "Тестовая функция","[Начало]",
+#             "Тестовая функция","[Завершение:", "сек]"
+#         ]
+#     ]
+#     check_output_lines(captured.err, expected)
+#     assert result == 42
+
+
 def test_logger_decorator(capsys):
     """
     Тест для декоратора log_execution_time.
@@ -138,14 +180,21 @@ def test_logger_decorator(capsys):
         'LOG_BACKUP_COUNT': '0'
     }
     logger = AppLogger.get_instance('decorator_test', config=config, force_new=True, enable_file_logging=False)
+    
     @logger.log_execution_time(description="Тестовая функция")
     def func():
-        """
+        """        
         Тестовая функция, которую декорирует декоратор log_execution_time.
+        Возвращает 42.
         """
         return 42
+    
     result = func()
-    captured = capsys.readouterr()
-    assert "Тестовая функция [Начало]" in captured.err
-    assert "Тестовая функция [Завершение:" in captured.err
+    captured = capsys.readouterr()  # единственный вызов после выполнения
+
+    expected = [
+        ["Тестовая функция", "[Начало]"],
+        ["Тестовая функция", "[Завершение:", "сек]"]
+    ]
+    check_output_lines(captured.err, expected)
     assert result == 42

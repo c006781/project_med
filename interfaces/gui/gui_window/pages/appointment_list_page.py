@@ -5,6 +5,14 @@
 Левая часть - таблица приёмов, правая - детали выбранного приёма (с фото).
 При клике на строку в таблице справа показывается информация.
 """
+
+from app.utils.logger.logger import AppLogger
+
+from app.services import AppointmentService, PhotoService
+from app.dto import AppointmentDTO
+from app.exceptions import AppointmentNotFoundError
+from app.dependencies import get_appointment_service, get_photo_service
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
     QTableView, QPushButton, QHeaderView, QMessageBox,
@@ -15,11 +23,6 @@ from PySide6.QtGui import QPixmap, QIcon
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
-from app.services import AppointmentService, PhotoService
-from app.dto import AppointmentDTO
-from app.exceptions import AppointmentNotFoundError
-from app.dependencies import get_appointment_service, get_photo_service
-from app.utils.logger.logger import AppLogger
 
 
 class AppointmentTableModel(QAbstractTableModel):

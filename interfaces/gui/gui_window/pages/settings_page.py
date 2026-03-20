@@ -1,6 +1,10 @@
 # interfaces/gui/gui_window/pages/settings_page.py
 # -*- coding: utf-8 -*-
 
+from app.utils.logger.logger import AppLogger
+from interfaces.gui.gui_window.pages.base_page import BasePage
+from app.config.config_manager.manager import AppConfigManager
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
@@ -8,9 +12,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Slot, Qt
 
-from interfaces.gui.gui_window.pages.base_page import BasePage
-from app.config.config_manager.manager import AppConfigManager
-from app.utils.logger.logger import AppLogger
 
 
 class SettingsPage(BasePage):

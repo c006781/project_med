@@ -1,6 +1,8 @@
 # interfaces/gui/gui_window/pages/dynamic_list_page.py
 # -*- coding: utf-8 -*-
 
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QHeaderView, QMessageBox, QTableView, QAbstractItemView
@@ -9,8 +11,6 @@ from PySide6.QtCore import Qt, Signal, Slot, QSortFilterProxyModel
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
-from app.utils.logger.logger import AppLogger
-
 
 class DynamicListPage(BasePage):
     """
@@ -34,7 +34,8 @@ class DynamicListPage(BasePage):
     )
     def __init__(
         self,
-        service,
+        # service,
+        loader_func,
         columns,
         page_title="Список",
         add_action_text="Добавить",
@@ -43,7 +44,8 @@ class DynamicListPage(BasePage):
         parent=None
     ):
         super().__init__(parent)
-        self.service = service
+        # self.service = service
+        self.loader_func = loader_func
         self.columns = columns
         self.page_title = page_title
         self.add_action_text = add_action_text
@@ -51,9 +53,12 @@ class DynamicListPage(BasePage):
         self.edit_on_double_click = edit_on_double_click
         self.logger = AppLogger.get_instance(f"gui.{self.__class__.__name__}")
 
+
         self.current_data = []
         self.selected_dto = None
         self._selection_connected = False
+
+        self.current_extra = None  # запоминаем последние переданные параметры
 
         self._needs_refresh = False
         
@@ -164,7 +169,8 @@ class DynamicListPage(BasePage):
     )
     def _load_data(self):
         try:
-            self.current_data = self.service.get_all()
+            self.current_data = self.loader_func(self.current_extra)
+            # self.current_data = self.service.get_all()
             self.source_model.update_data(self.current_data)
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
@@ -269,7 +275,21 @@ class DynamicListPage(BasePage):
             'DEBUG'
         )
     )
+    # def on_enter(self, extra_data=None):
+    #     self.current_extra = extra_data
+    #     if self._needs_refresh:
+    #         self._load_data()
+    #         self._needs_refresh = False
     def on_enter(self, extra_data=None):
-        if self._needs_refresh:
+        """
+        Определяем, нужно ли перезагружать данные
+        Вызывается при входе на страницу.
+        Если передан extra_data и он отличается от self.current_extra, то перезагружаем данные.
+        """
+        reload_needed = self._needs_refresh
+        if extra_data is not None and extra_data != self.current_extra:
+            self.current_extra = extra_data
+            reload_needed = True
+        if reload_needed:
             self._load_data()
             self._needs_refresh = False

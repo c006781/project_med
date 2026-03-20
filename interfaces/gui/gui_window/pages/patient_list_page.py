@@ -3,6 +3,13 @@
 Страница со списком пациентов.
 Содержит таблицу с кнопками действий, возможность фильтрации и поиска.
 """
+
+from app.utils.logger.logger import AppLogger
+
+from app.services import PatientService
+from app.dto import PatientDTO
+from app.exceptions import PatientNotFoundError, PatientValidationError
+from app.dependencies import get_patient_service
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QHeaderView, QMessageBox, QInputDialog, QLineEdit, QTableView
@@ -13,11 +20,6 @@ from PySide6.QtGui import QIcon
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 from interfaces.gui.gui_window.widgets.button_delegate import ButtonDelegate
-from app.services import PatientService
-from app.dto import PatientDTO
-from app.exceptions import PatientNotFoundError, PatientValidationError
-from app.dependencies import get_patient_service
-from app.utils.logger.logger import AppLogger
 
 
 class PatientTableModel(QAbstractTableModel):

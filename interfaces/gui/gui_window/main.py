@@ -10,11 +10,12 @@ import os
 # Добавляем корень проекта в sys.path, чтобы импортировать app.*
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
 from interfaces.gui.gui_window.main_window import MainWindow
-from app.utils.logger.logger import AppLogger
 
 @AppLogger.get_instance(
         name = 'system'

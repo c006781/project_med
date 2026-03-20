@@ -3,6 +3,13 @@
 Страница редактирования/создания пациента.
 Содержит форму с полями и кнопку сохранения/удаления.
 """
+from app.utils.logger.logger import AppLogger
+
+from app.services import PatientService
+from app.dto import PatientDTO
+from app.exceptions import PatientNotFoundError, PatientValidationError
+from app.dependencies import get_patient_service
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QLineEdit,
     QDateEdit, QPushButton, QMessageBox, QHBoxLayout
@@ -10,11 +17,6 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Slot, QDate
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
-from app.services import PatientService
-from app.dto import PatientDTO
-from app.exceptions import PatientNotFoundError, PatientValidationError
-from app.dependencies import get_patient_service
-from app.utils.logger.logger import AppLogger
 
 
 class PatientEditPage(BasePage):

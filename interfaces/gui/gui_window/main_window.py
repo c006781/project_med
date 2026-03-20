@@ -11,6 +11,16 @@ interfaces/gui/gui_window/main_window.py
 
 import datetime
 
+from app.utils.logger.logger import AppLogger
+
+from app.dependencies import (
+    get_patient_service, get_appointment_service,
+    get_note_service, get_photo_service
+)
+from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
+from app.config.config_manager.manager import AppConfigManager
+from app.network import DownloadThread, UploadThread
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
@@ -25,21 +35,101 @@ from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
+from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
 
-from app.dependencies import (
-    get_patient_service, get_appointment_service,
-    get_note_service, get_photo_service
-)
-from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
-from app.config.config_manager.manager import AppConfigManager
-from app.network import DownloadThread, UploadThread
-from app.utils.logger.logger import AppLogger
 
 
 class MainWindow(QMainWindow):
     """
     Главное окно приложения.
     """
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="MainWindow.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def load_patients(self, extra_data):
+        """
+        Возвращает список всех пациентов из БД.
+
+        :param extra_data: дополнительные данные, которые могут потребоваться
+            для загрузки пациентов (например, фильтры)
+        :return: список пациентов в формате PatientDTO
+        :rtype: List[PatientDTO]
+        """
+        return get_patient_service().get_all_patients()
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="MainWindow.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def load_appointments(self, extra_data):
+        """
+        Возвращает список всех приёмов из БД.
+
+        :param extra_data: словарь с дополнительными данными, которые могут потребоваться
+            для загрузки приёмов (например, фильтры)
+        :return: список приёмов в формате AppointmentDTO
+        :rtype: List[AppointmentDTO]
+        """
+        patient_id = extra_data.get('patient_id') if extra_data else None
+        service = get_appointment_service()
+        if patient_id:
+            return service.get_appointments_by_patient(patient_id)
+        else:
+            return service.get_all()
+        
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="MainWindow.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def load_notes(self, extra_data):
+        """
+        Возвращает список всех заметок из БД. (без фильтрации)
+
+        :param extra_data: дополнительные данные, которые могут потребоваться
+            для загрузки заметок (например, фильтры)
+        :return: список заметок в формате AppointmentNoteDTO
+        :rtype: List[AppointmentNoteDTO]
+        """
+        return get_note_service().get_all()  
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="MainWindow.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def load_photos(self,extra_data):
+        """
+        Возвращает список всех фотографий из БД. (без фильтрации)
+
+        :param extra_data: дополнительные данные, которые могут потребоваться
+            для загрузки фотографий (например, фильтры)
+        :return: список фотографий в формате PhotoDTO
+        :rtype: List[PhotoDTO]
+        """
+        return get_photo_service().get_all()
+
+
 
 
     @AppLogger.get_instance(
@@ -205,7 +295,8 @@ class MainWindow(QMainWindow):
         #     add_action_text="Добавить пациента"
         # )
         self.patient_list_page = DynamicListPage(
-            service=get_patient_service(),
+            # service=get_patient_service(),
+            loader_func=self.load_patients,
             columns=patient_columns,
             page_title="Пациенты",
             add_action_text="Добавить пациента",
@@ -236,7 +327,8 @@ class MainWindow(QMainWindow):
             {'name': 'note_text', 'title': 'Заметка', 'type': str, 'editable': True},
         ]
         self.appointment_list_page = DynamicListPage(
-            service=get_appointment_service(),
+            # service=get_appointment_service(),
+            loader_func=self.load_appointments,
             columns=appointment_columns,
             page_title="Приёмы",
             add_action_text="Новый приём"
@@ -263,7 +355,9 @@ class MainWindow(QMainWindow):
             {'name': 'text', 'title': 'Текст', 'type': str, 'editable': True},
         ]
         self.note_list_page = DynamicListPage(
-            service=get_note_service(),
+            # service=get_note_service(),
+            loader_func=self.load_notes,
+            # loader_func=lambda extra: get_note_service().get_all(),
             columns=note_columns,
             page_title="Заметки",
             add_action_text="Создать заметку"
@@ -285,7 +379,8 @@ class MainWindow(QMainWindow):
             {'name': 'description', 'title': 'Описание', 'type': str, 'editable': True},
         ]
         self.photo_list_page = DynamicListPage(
-            service=get_photo_service(),
+            # service=get_photo_service(),
+            loader_func=self.load_photos,
             columns=photo_columns,
             page_title="Фотографии",
             add_action_text="Добавить фото"
@@ -369,6 +464,7 @@ class MainWindow(QMainWindow):
             'appointment_list',
             extra_data={'patient_id': patient_dto.id}
         )
+        
 
     @AppLogger.get_instance(
             name = 'system'
@@ -421,12 +517,19 @@ class MainWindow(QMainWindow):
             lambda: self.page_manager.switch_to(
                 'appointment_edit', 
                 extra_data={
-                    'patient_id': self.appointment_list_page.current_patient_id
+                    # 'patient_id': self.appointment_list_page.current_patient_id
+                    'patient_id': self.appointment_list_page.current_extra.get('patient_id')
+                    if self.appointment_list_page.current_extra else None
                 }
             )
         )
         self.appointment_list_page.edit_requested.connect(
-            lambda dto: self.page_manager.switch_to('appointment_edit', extra_data={'id': dto.id})
+            lambda dto: self.page_manager.switch_to(
+                'appointment_edit', 
+                extra_data={
+                    'id': dto.id
+                }
+            )
         )
         self.appointment_list_page.delete_requested.connect(self._on_appointment_delete)
 

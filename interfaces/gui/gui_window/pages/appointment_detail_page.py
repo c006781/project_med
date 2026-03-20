@@ -3,6 +3,15 @@
 Страница просмотра и редактирования приёма.
 Позволяет изменять дату, время, заметку, добавлять и удалять фото.
 """
+
+
+from app.utils.logger.logger import AppLogger
+
+from app.services import AppointmentService, PhotoService, NoteService
+from app.dto import AppointmentDTO
+from app.exceptions import AppointmentNotFoundError, PhotoFileError
+from app.dependencies import get_appointment_service, get_photo_service, get_note_service
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QFormLayout, QDateEdit, QTimeEdit,
     QTextEdit, QPushButton, QMessageBox, QHBoxLayout,
@@ -12,17 +21,12 @@ from PySide6.QtCore import Qt, Slot, QDate, QTime, QSize
 from PySide6.QtGui import QPixmap, QIcon
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
-from app.services import AppointmentService, PhotoService, NoteService
-from app.dto import AppointmentDTO
-from app.exceptions import AppointmentNotFoundError, PhotoFileError
-from app.dependencies import get_appointment_service, get_photo_service, get_note_service
-from app.utils.logger.logger import AppLogger
 
 
 class AppointmentDetailPage(BasePage):
-    """
-    Страница создания/редактирования приёма.
-    """
+    # """
+    # Страница создания/редактирования приёма.
+    # """
 
     @AppLogger.get_instance(
             name = 'system'
@@ -34,6 +38,12 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def __init__(self, parent=None):
+        """
+        Инициализирует страницу просмотра и редактирования приёма.
+
+        :param parent: Родительский виджет (QWidget)
+        :type parent: Optional[QWidget]
+        """
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.AppointmentDetailPage")
         self.appointment_service = get_appointment_service()
@@ -57,7 +67,9 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def _setup_ui(self):
-        """Создаёт форму."""
+        """
+        Создаёт форму страницы просмотра и редактирования приёма.
+        """
         main_layout = QVBoxLayout(self)
 
         # Форма
@@ -120,7 +132,9 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def _clear_form(self):
-        """Очищает форму."""
+        """
+        Очищает форму: очищает дату, время, заметку и список фото
+        """
         self.date_edit.setDate(QDate.currentDate())
         self.time_edit.setTime(QTime.currentTime())
         self.note_text.clear()
@@ -137,6 +151,7 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def on_enter(self, extra_data=None):
+
         """
         При входе загружаем данные приёма, если передан appointment_id.
         extra_data: {'patient_id': ..., 'appointment_id': ...}
@@ -162,7 +177,12 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def _load_appointment(self, appointment_id):
-        """Загружает данные приёма и заполняет форму."""
+        """
+        Загружает данные приёма и заполняет форму.
+        :param appointment_id: ID приёма
+        :raises AppointmentNotFoundError: если приём не найден
+        :raises Exception: если произошла ошибка загрузки
+        """
         try:
             app = self.appointment_service.get_appointment(appointment_id)
             self.current_patient_id = app.patient_id
@@ -194,7 +214,12 @@ class AppointmentDetailPage(BasePage):
         )
     )
     def _load_photos(self, appointment_id):
-        """Загружает список фото для приёма."""
+        """
+        Загружает список фото для приёма.
+
+        :param appointment_id: ID приёма
+        :raises Exception: если произошла ошибка загрузки
+        """
         self.photo_list.clear()
         try:
             photos = self.photo_service.get_photos_for_appointment(appointment_id)
@@ -223,7 +248,15 @@ class AppointmentDetailPage(BasePage):
     )
     @Slot()
     def _add_photo(self):
-        """Добавляет новое фото к приёму."""
+        """
+        Добавляет новое фото к приёму.
+
+        Если приём не сохранён, то выводит предупреждение.
+        Если файл не выбран, то функция возвращает None.
+        Если описание не указано, то оно будет пустым.
+        В случае ошибки загрузки фото, выводит предупреждение.
+        Если фото добавлено успешно, то выводит информационное сообщение и обновляет список фото.
+        """
         if not self.current_appointment_id:
             QMessageBox.warning(self, "Предупреждение", "Сначала сохраните приём.")
             return
@@ -260,7 +293,14 @@ class AppointmentDetailPage(BasePage):
     )
     @Slot()
     def _delete_photo(self):
-        """Удаляет выбранное фото."""
+        """
+        Удаляет выбранное фото.
+
+        1. Проверяем, выбрано ли фото.
+        2. Если фото выбрано, то выводим предупреждение о необходимости подтверждения.
+        3. Если пользователь подтвердил удаление, то удаляем фото.
+        4. Если фото успешно удалено, то выводим информационное сообщение и обновляем список фото.
+        """
         current_item = self.photo_list.currentItem()
         if not current_item:
             QMessageBox.warning(self, "Предупреждение", "Выберите фото для удаления.")
@@ -291,7 +331,15 @@ class AppointmentDetailPage(BasePage):
     )
     @Slot()
     def _save_appointment(self):
-        """Сохраняет приём (создание или обновление)."""
+        """
+        Сохраняет приём (создание или обновление).
+
+        1. Читаем дату, время и текст заметки из формы.
+        2. Создаём DTO на основе полученных данных.
+        3. Если приём не существует, то создаем его.
+        4. Если приём существует, то обновляем его.
+        5. Если приём успешно создан или обновлен, то выводим информационное сообщение и возвращаемся к списку приёмов.
+        """
         date = self.date_edit.date().toPython()
         time = self.time_edit.time().toPython()
         note_text = self.note_text.toPlainText().strip()
@@ -336,7 +384,10 @@ class AppointmentDetailPage(BasePage):
     )
     @Slot()
     def _cancel(self):
-        """Отмена редактирования."""
+        """
+        Отмена редактирования приёма.
+        Возвращает на страницу со списком приёмов.
+        """
         self._go_back()
 
     @AppLogger.get_instance(

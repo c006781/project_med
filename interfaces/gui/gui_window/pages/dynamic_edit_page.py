@@ -1,13 +1,13 @@
 # interfaces/gui/gui_window/pages/dynamic_edit_page.py
 # -*- coding: utf-8 -*-
 
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QLineEdit, QSpinBox
 from PySide6.QtCore import Slot
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm
-from app.utils.logger.logger import AppLogger
-
 
 class DynamicEditPage(BasePage):
     """

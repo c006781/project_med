@@ -92,7 +92,11 @@ class PageManager(QObject):
         self._stack.setCurrentIndex(self._page_to_index[prev_page_id])
         self._current_page_id = prev_page_id
 
+        # Оповещаем об изменении навигации
         self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+
+        # теперь также оповещаем о входе на страницу
+        self.page_entered.emit(prev_page_id, None)
 
     @property
     def current_page_id(self) -> Optional[str]:

@@ -153,26 +153,27 @@ class BaseAppLogger:
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
 
         :param name: (str) Имя логгера.
-        :param config: (str/dict) 
+        :param config: (str/dict) : Конфигурация для нового экземпляра (если None, используется провайдер
                 str     - Указатель на экземпляр лога откуда берём этот параметр. 
                 dict    - Словарь с настройками. 
                 None    - Если не передан, загружается через get_default_config().   
-        :param enable_file_logging: (str/bool) 
+        :param enable_file_logging: (str/bool) : Для нового экземпляра: включать ли запись в файл.
                 str     - Указатель на экземпляр лога откуда берём этот параметр. 
                 True    - добавляется файловый обработчик. 
                 False   - только консоль.
-        :param use_name_in_filename: (str/bool) Если True, имя экземпляра вставляется в имя файла лога.
+        :param use_name_in_filename: (str/bool) : Для нового экземпляра: добавлять ли имя в имя файла.
                 str     - Указатель на экземпляр лога откуда берём этот параметр. 
                 True    - имя экземпляра вставляется в имя файла лога. 
                 False   - имя экземпляра НЕ вставляется в имя файла лога.
         """
+
         self.name = name
 
         if isinstance(enable_file_logging, str):
             enable_file_logging = self._instances[enable_file_logging].enable_file_logging
 
         if isinstance(use_name_in_filename, str):
-            enable_file_logging = self._instances[use_name_in_filename].use_name_in_filename
+            use_name_in_filename = self._instances[use_name_in_filename].use_name_in_filename
 
         if isinstance(config, str) and config is not None:
             config = {

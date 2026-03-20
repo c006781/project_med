@@ -177,6 +177,15 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         logger (AppLogger): логгер для записи событий.
     """
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(
         self,
         db: Database,
@@ -185,6 +194,19 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         dto_class: Type[DTOType],
         logger_name: Optional[str] = None
     ):
+        """
+        Инициализирует экземпляр сервиса.
+
+        Parameters:
+            db (Database): экземпляр Database для получения сессий.
+            repo_class (Type[RepoType]): класс репозитория, с которым работает сервис.
+            model_class (Type[ModelType]): класс ORM-модели (нужен для создания экземпляров).
+            dto_class (Type[DTOType]): класс DTO (нужен для преобразования).
+            logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+
+        Attributes:
+            logger (AppLogger): логгер для записи событий.
+        """
         self._db            = db
         self._repo_class    = repo_class
         self._model_class   = model_class
@@ -195,14 +217,44 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             logger_name = self.__class__.__name__
         self.logger = AppLogger.get_instance(logger_name)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _get_repo(self, session) -> RepoType:
-        """Создаёт репозиторий с переданной сессией."""
+        """
+        Создаёт репозиторий с переданной сессией.
+
+        Parameters:
+            session (Session): сессия для работы с БД.
+
+        Returns:
+            RepoType: репозиторий с переданной сессией.
+        """
         return self._repo_class(session)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_all(self, session: Optional[Session] = None) -> List[DTOType]:
         """
         Возвращает список всех записей в виде DTO.
         Логирует начало и конец операции.
+        :param session: сессия для работы с БД
+        :type session: Optional[Session]
+        :return: список записей в виде DTO
+        :rtype: List[DTOType]
         """
         self.logger.debug(f"Запрос всех записей {self._model_class.__name__}")
         with self._session_scope(session) as sess:
@@ -213,41 +265,110 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             # self.logger.debug(f"Получено {len(dtos)} записей")
             return dtos
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_by_id(self, entity_id: int, session: Optional[Session] = None) -> DTOType:
         """
         Возвращает запись по ID.
-        :raises: исключение, возвращаемое методом _not_found_exception(), если не найдено.
+
+        :param entity_id: ID записи, которую мы хотим получить
+        :type entity_id: int
+        :param session: сессия для работы с БД (если не указана, то используем сессию из self._db)
+        :type session: Optional[Session]
+        :return: запись в виде DTO (если не найдено, то возвращаем исключение)
+        :rtype: DTOType
+        :raises: исключение, возвращаемое методом _not_found_exception(), если не найдено
         """
+        # Логируем начинаение операции
         self.logger.debug(f"Запрос {self._model_class.__name__} с id={entity_id}")
+
+        # Создаем сессию для работы с БД (если не указана, то используем сессию из self._db)
         with self._session_scope(session) as sess:
+            # Создаем репозиторий с переданной сессией
             repo = self._get_repo(sess)
+
+            # Получаем запись по ID
             item = repo.get_by_id(entity_id)
+
+            # Если запись не найдена, то возвращаем исключение
             if item is None:
                 raise self._not_found_exception(entity_id)
+
+            # Конвертируем запись из ORM в DTO
             # dto = self._dto_class.from_orm(item)
             # dto = self._dto_class.model_validate(item)
             dto = self.get_dtos(item)
+
+            # Логируем конец операции
             # self.logger.debug(f"Найдена запись {dto}")
             return dto
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def create(self, dto: DTOType) -> DTOType:
         """
         Создаёт новую запись из DTO.
+
         Должен быть переопределён в наследнике, так как логика создания специфична.
+        :param dto: DTO, из которого будет создана новая запись
+        :return: созданная запись в виде DTO
+        :raises: NotImplementedError, если метод не переопределён в наследнике
         """
         raise NotImplementedError("Метод create должен быть переопределён в наследнике")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def update(self, dto: DTOType) -> DTOType:
         """
         Обновляет существующую запись.
+
         Должен быть переопределён в наследнике, так как обновление специфично.
+        :param dto: DTO, из которого будет обновлена запись
+        :return: обновленная запись в виде DTO
+        :raises: NotImplementedError, если метод не переопределён в наследнике
         """
         raise NotImplementedError("Метод update должен быть переопределён в наследнике")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def delete(self, entity_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет запись по ID.
+
         Логирует операцию.
+
+        :param entity_id: ID записи для удаления
+        :param session: сессия для работы с БД (необязательна)
+        :raises: self._not_found_exception, если запись не найдена
+        :return: None
         """
         self.logger.debug(f"Удаление {self._model_class.__name__} с id={entity_id}")
         with self._session_scope(session) as sess:
@@ -260,15 +381,36 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             repo.delete(item)
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
         Возвращает исключение, которое будет выброшено при отсутствии записи.
         Должно быть переопределено в наследнике.
+        :param entity_id: ID записи, которая не была найдена
+        :raises: Exception
+        :return: Exception
         """
         raise NotImplementedError(
             f"Метод _not_found_exception не реализован для {self.__class__.__name__}"
         )
     
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_dtos(
             self, 
             item_s:Union[List, Any]  # список объектов или один объект
@@ -277,6 +419,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         Возвращает список DTO из списка объектов или один DTO из объекта.
         Если получен список объектов, то для каждого объекта пытается создать DTO.
         Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
+        
+        :param item_s: список объектов или один объект
+        :type item_s: Union[List, Any]
+        :return: список DTO или один DTO
+        :rtype: Union[List, Any]
         """
         if isinstance(item_s, list):
             dtos = []  # список DTO
@@ -298,14 +445,40 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             
             return dto
     
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_dto_out(
             self, 
             item,
     ): 
+        """
+        Возвращает DTO из объекта.
+
+        :param item: объект, из которого будет создан DTO
+        :type item: Any
+        :return: DTO, созданный из объекта
+        :rtype: DTOType
+        """
         return self.get_dtos(item)
  
         
     
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_filtered(
             self, 
             filters: List[Dict[str, Any]], 
@@ -353,6 +526,15 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             return dtos
 
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @contextmanager
     def _session_scope(self, session: Optional[Session] = None):
         """
@@ -367,13 +549,39 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
                 yield new_session
 
 
-    def get_page(self, offset: int, limit: int,
-                 filters: Optional[List[Dict[str, Any]]] = None,
-                 order_by: Optional[List] = None,
-                 session: Optional[Session] = None) -> Tuple[List[DTOType], int]:
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def get_page(
+        self, offset: int, 
+        limit: int,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None,
+        session: Optional[Session] = None
+    ) -> Tuple[List[DTOType], int]:
         """
         Возвращает страницу DTO и общее количество записей.
+
+        :param offset: смещение страницы (начиная с 0)
+        :type offset: int
+        :param limit: количество записей на странице
+        :type limit: int
+        :param filters: список словарей с фильтрами для записей
+        :type filters: Optional[List[dict[str, Any]]]
+        :param order_by: список полей для сортировки записей
+        :type order_by: Optional[List]
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: список записей на странице и общее количество записей
+        :rtype: Tuple[List[DTOType], int]
         """
+        
         self.logger.debug(f"Запрос страницы {self._model_class.__name__}: offset={offset}, limit={limit}, filters={filters}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
@@ -389,11 +597,31 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
     """
     Сервис для управления пациентами.
     """
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(
             self, 
             db: Database, 
             logger_name: Optional[str] = None, 
         ):
+        """
+        Инициализирует экземпляр сервиса.
+
+        Parameters:
+            db (Database): экземпляр Database для получения сессий.
+            logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+
+        Attributes:
+            logger (AppLogger): логгер для записи событий.
+        """
         if logger_name is None:
             logger_name = self.__class__.__name__
 
@@ -407,11 +635,27 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         )
 
     # Переопределяем create, так как логика создания специфична
-        
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )   
     def create_patient(self, patient_dto: PatientDTO, session: Optional[Session] = None) -> PatientDTO:
         """
         Создаёт нового пациента. Выполняет валидацию.
+
+        :param patient_dto: DTO для создания пациента
+        :type patient_dto: PatientDTO
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: созданный пациент с id
+        :rtype: PatientDTO
         """
+        
         if not patient_dto.first_name or not patient_dto.last_name:
             self.logger.warning("Попытка создания пациента без имени/фамилии")
             raise PatientValidationError("first_name/last_name", "Имя и фамилия обязательны")
@@ -436,9 +680,29 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             self.logger.info(f"Создан пациент с id={dto_out.id}")
             return dto_out
            
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def update_patient(self, patient_dto: PatientDTO, session: Optional[Session] = None) -> PatientDTO:
         """
         Обновляет существующего пациента.
+
+        Args:
+            patient_dto: PatientDTO - данные для обновления пациента.
+            session: Optional[Session] - сессия БД, которая будет использоваться для работы с репозиторием.
+
+        Returns:
+            PatientDTO: обновленный объект PatientDTO.
+
+        Raises:
+            PatientValidationError: если id не указан.
+            PatientNotFoundError: если пациент с указанным id не найден.
         """
         if patient_dto.id is None:
             self.logger.warning("Попытка обновления пациента без id")
@@ -465,25 +729,95 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             self.logger.info(f"Обновлён пациент id={updated_dto.id}")
             return updated_dto  
         
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     # Переопределяем метод для генерации исключения "не найдено"
     def _not_found_exception(self, entity_id: int) -> Exception:
+        """
+        Генерирует исключение PatientNotFoundError, если пациент с указанным идентификатором не найден в базе данных.
+        
+        :param entity_id: идентификатор пациента
+        :type entity_id: int
+        :return: исключение PatientNotFoundError
+        :rtype: PatientNotFoundError
+        """
         self.logger.error(f"Пациент с идентификатором {entity_id} не найден.'")
         return PatientNotFoundError(entity_id) # Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     # Для совместимости с существующим кодом оставляем методы-обёртки,
     # которые вызывают методы базового класса
     def get_all_patients(self, session: Optional[Session] = None) -> List[PatientDTO]:
+        """
+        Возвращает список всех пациентов в базе данных.
+        
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: список всех пациентов
+        :rtype: List[PatientDTO]
+        """
         self.logger.debug("Запрос всех пациентов")
         return self.get_all(session=session)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_patient_by_id(self, patient_id: int, session: Optional[Session] = None) -> PatientDTO:
+        """
+        Возвращает пациента по его идентификатору.
+
+        Args:
+            patient_id (int): Идентификатор пациента.
+            session (Optional[Session]): Сессия БД. Если не указана, то будет создана новая сессия.
+
+        Returns:
+            PatientDTO: DTO пациента.
+
+        Raises:
+            PatientNotFoundError: Если пациент с указанным идентификатором не найден в базе данных.
+        """
         self.logger.debug(f"Запрос пациента по id={patient_id}")
         return self.get_by_id(patient_id, session=session)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def delete_patient(self, patient_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет пациента. Приёмы удаляются каскадно благодаря настройкам модели.
         После удаления проверяет, остались ли заметки, и удаляет неиспользуемые.
+        :param patient_id: ID пациента, которого нужно удалить
+        :type patient_id: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :raises PatientNotFoundError: если пациент с указанным идентификатором не найден
         """
         self.logger.debug(f"Удаление пациента id={patient_id}")
         with self._session_scope(session) as sess:
@@ -507,21 +841,75 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
 
             self.logger.info(f"Удалён пациент id={patient_id}")
    
-    def get_patients_filtered(self, filters: List[Dict[str, Any]], fuzzy_threshold: int = 60,
-                              session: Optional[Session] = None) -> List[PatientDTO]:
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def get_patients_filtered(
+        self, 
+        filters: List[Dict[str, Any]], 
+        fuzzy_threshold: int = 60,
+        session: Optional[Session] = None
+    ) -> List[PatientDTO]:
+        """
+        Возвращает список пациентов с возможностью фильтрации.
+
+        filters - список словарей, каждый из которых содержит информацию о фильтре:
+            - column: имя столбца (строка)
+            - operator: оператор из FilterOperator
+            - value: значение для сравнения (зависит от оператора)
+        fuzzy_threshold - порог схожести для нечеткого поиска (0-100)
+
+        Функция работает следующим образом:
+        1. Создаем список словарей filters, где каждый словарь содержит информацию о фильтре:
+            - column: имя столбца (строка)
+            - operator: оператор из FilterOperator
+            - value: значение для сравнения (зависит от оператора)
+        2. Создаем экземпляр PatientService
+        3. Вызываем метод get_patients_filtered у PatientService, передавая туда полученный список фильтров и порог схожести
+        4. Выводим список пациентов, если он не пустой
+        """
         self.logger.debug(f"Запрос пациентов с фильтрацией: filters={filters}, fuzzy_threshold={fuzzy_threshold}")
         return self.get_filtered(filters, fuzzy_threshold, session=session)
    
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def create(self, dto: PatientDTO) -> PatientDTO:
         """
         Универсальный метод создания, вызывающий create_patient.
         Необходим для совместимости с DynamicEditPage.
+        :param dto: DTO, содержащий информацию о создаваемом пациенте
+        :type dto: PatientDTO
+        :return: DTO, содержащий информацию о созданном пациенте
+        :rtype: PatientDTO
         """
         return self.create_patient(dto)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        # description="DynamicListPage.get_db",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def update(self, dto: PatientDTO) -> PatientDTO:
         """
         Универсальный метод обновления, вызывающий update_patient.
+        Возвращает обновленный объект PatientDTO.
         """
         return self.update_patient(dto)
 

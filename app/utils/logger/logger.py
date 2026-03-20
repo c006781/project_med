@@ -160,7 +160,6 @@ class AppLogger(BaseAppLogger):
         return config
     
 
-    
 # Автоматическое создание экземпляров при импорте
 if not AppLogger.thec_craete('system'):
     AppLogger.get_instance(
@@ -177,7 +176,7 @@ if not AppLogger.thec_craete('user'):
         enable_file_logging=True,    
         use_name_in_filename=False # используем общий файл из конфига
     )
-
+    
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
     #     level=logging.DEBUG,

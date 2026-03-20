@@ -35,7 +35,15 @@ from app.utils.logger import AppLogger
 
 from pydantic import BaseModel
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_db() -> Database:
     """
     Возвращает экземпляр Database, сконфигурированный из .env.
@@ -59,7 +67,15 @@ def get_db() -> Database:
 
     return Database(db_url)
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_patient_service() -> PatientService:
     """
     Возвращает экземпляр PatientService, инициализированный с помощью Database.
@@ -76,6 +92,15 @@ def get_patient_service() -> PatientService:
 #     note_service = get_note_service()  # можно передать существующий, но проще создать новый
 #     return AppointmentService(db, note_service=note_service)
 
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_appointment_service() -> AppointmentService:
     """
     Возвращает экземпляр AppointmentService, инициализированный с помощью Database,
@@ -90,7 +115,15 @@ def get_appointment_service() -> AppointmentService:
     # Create an instance of AppointmentService with the database, note service, and photo service.
     return AppointmentService(db, note_service=note_service, photo_service=photo_service)
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_note_service() -> NoteService:
     """
     Возвращает экземпляр NoteService, инициализированный с помощью Database.
@@ -100,7 +133,15 @@ def get_note_service() -> NoteService:
     # Create an instance of NoteService with the database.
     return NoteService(get_db())
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_photo_service() -> PhotoService:
     """
     Возвращает экземпляр PhotoService, инициализированный с помощью Database и пути к хранилищу фотографий.
@@ -109,14 +150,30 @@ def get_photo_service() -> PhotoService:
     photos_path = config.get('PHOTOS_STORAGE_PATH', './photos')
     return PhotoService(get_db(), photos_path)
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_sync_service() -> SyncService:
     """
     Возвращает экземпляр SyncService, инициализированный с помощью токена Яндекс.Диска.
     """
     return SyncService()
 
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def init_db(
         recreate: bool = False, 
         test_data: bool = True
@@ -156,6 +213,15 @@ def init_db(
 #         # click.echo(f"{title}: {value}")
 #     return return_
 
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_text_echo(
     data: dict,  # Pydantic DTO
     exclude_fields: list = None , # список полей, которые не нужно выводить (например, ['id'])
@@ -203,6 +269,15 @@ def get_text_echo(
         return_.append(text_echo)  # добавляем к списку текст для вывода в термінал
     return return_  # возвращаем список текстов для вывода в термінал
 
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_key_value_dto(
         list_, 
         exclude_fields:list = None,
@@ -244,7 +319,16 @@ def get_key_value_dto(
                 title = k.replace('_', ' ').title()
             data[title] = v
         return data
-
+    
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def get_dto_fields(dto_class: BaseModel, exclude: list = None):
     """
     Возвращает список полей DTO с метаданными: имя, тип, обязательное ли.
@@ -284,6 +368,16 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
         })
     return fields
 
+    
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def create_click_options(dto_class: BaseModel, action='create'):
     """
     Возвращает декоратор с опциями click, соответствующими полям DTO.
@@ -325,6 +419,16 @@ def create_click_options(dto_class: BaseModel, action='create'):
         return func
     return decorator
 
+    
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def collect_dto_from_input(
         dto_class: BaseModel, 
         exclude: list = None, 

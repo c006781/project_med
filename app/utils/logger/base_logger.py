@@ -734,6 +734,7 @@ class BaseAppLogger:
             except TypeError:
                 # Если функция - встроенная, то имя файла не может быть получено
                 func_filename = "<built-in>"
+
             # Получаем номер строки в файле, в которой находится вызов функции
             func_lineno = func.__code__.co_firstlineno
             # Определяем, является ли функция асинхронной
@@ -759,16 +760,34 @@ class BaseAppLogger:
                 # Формируем строку с описанием
                 desc_part = f"{description} " if description else ""
 
+                # Определяем, нужно ли логировать аргументы
+                effective_log_args = log_args
+
+                # Для __init__ всегда отключаем логирование аргументов
+                if func.__name__ == '__init__':
+                    effective_log_args = False
+                    
                 # Формируем строку с аргументами
+                # args_part = ""
+                # if log_args:
+                #     args_str = ', '.join(repr(a) for a in args) if effective_log_args else ''
+                #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+                #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+                #     args_part = f" with args: ({all_args})"
                 args_part = ""
-                if log_args:
-                    args_str = ', '.join(repr(a) for a in args)
+                if effective_log_args:
+                    # Для методов исключаем self из отображения
+                    display_args = args
+                    # Проверяем, является ли функция методом (первый аргумент обычно self)
+                    if args and inspect.ismethod(func) and func.__self__ is not None:
+                        display_args = args[1:]  # убираем self
+                    args_str = ', '.join(repr(a) for a in display_args)
                     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
                     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
                     args_part = f" with args: ({all_args})"
 
                 # Формируем строку с информацией о вызове функции
-                start_msg = f"{desc_part} [Начало]{args_part}"
+                start_msg = f"{desc_part}[Начало]{args_part}"
 
                 # Формируем полное сообщение
                 formatted_start = logger_instance._format_message(caller_info, start_msg)
@@ -816,16 +835,30 @@ class BaseAppLogger:
                 # Формируем строку с описанием
                 desc_part = f"{description} " if description else ""
 
+
+                effective_log_args = log_args
+                if func.__name__ == '__init__':
+                    effective_log_args = False
+
                 # Формируем строку с аргументами
+                # args_part = ""
+                # if log_args:
+                #     args_str = ', '.join(repr(a) for a in args)
+                #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+                #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+                #     args_part = f" with args: ({all_args})"
+
                 args_part = ""
-                if log_args:
-                    args_str = ', '.join(repr(a) for a in args)
+                if effective_log_args:
+                    display_args = args
+                    if args and inspect.ismethod(func) and func.__self__ is not None:
+                        display_args = args[1:]
+                    args_str = ', '.join(repr(a) for a in display_args)
                     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
                     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
                     args_part = f" with args: ({all_args})"
-
                 # Формируем строку с информацией о вызове функции
-                start_msg = f"{desc_part} [Начало]{args_part}"
+                start_msg = f"{desc_part}[Начало]{args_part}"
 
                 # Формируем полное сообщение
                 formatted_start = logger_instance._format_message(caller_info, start_msg)

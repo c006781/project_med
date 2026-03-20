@@ -1,7 +1,7 @@
 # interfaces/gui/gui_window/pages/dynamic_edit_page.py
 # -*- coding: utf-8 -*-
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox
+from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QLineEdit, QSpinBox
 from PySide6.QtCore import Slot
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
@@ -12,9 +12,18 @@ from app.utils.logger.logger import AppLogger
 class DynamicEditPage(BasePage):
     """
     Универсальная страница редактирования.
-    Использует service.create и service.update (добавленные в сервисы).
+    Поддерживает автоматическую подстановку patient_id при создании приёма.
     """
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(
         self,
         service,
@@ -34,9 +43,21 @@ class DynamicEditPage(BasePage):
         self.field_rename = field_rename or {}
         self.logger = AppLogger.get_instance(f"gui.{self.__class__.__name__}")
 
-        self.current_id = None
+        self.current_id = None               # ID редактируемой записи
+        self.current_patient_id = None        # для приёмов: ID пациента при создании
+        self.current_appointment_id = None    # для приёмов: ID приёма (дублирует current_id)
+
         self._setup_ui()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
 
@@ -65,19 +86,53 @@ class DynamicEditPage(BasePage):
         btn_layout.addStretch()
         main_layout.addLayout(btn_layout)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage.on_enter",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def on_enter(self, extra_data=None):
+        """
+        При входе на страницу:
+          - если передан 'id' – загружаем существующую запись
+          - если передан 'patient_id' и нет 'id' – создаём новый приём для этого пациента
+        """
         self.current_id = extra_data.get('id') if extra_data else None
-        if self.current_appointment_id is None and self.current_patient_id:
-            # Режим создания – предзаполняем поле пациента
-            # Если форма содержит поле patient_id, заполняем его
-            self.patient_id_edit.setText(str(self.current_patient_id))
-            # Можно сделать поле только для чтения
-            self.patient_id_edit.setReadOnly(True)
-        # Далее загрузка существующего приёма или очистка
+        self.current_patient_id = extra_data.get('patient_id') if extra_data else None
+        self.current_appointment_id = self.current_id  # для совместимости
+
+        if self.current_id is not None:
+            # Режим редактирования
+            self._load_entity(self.current_id)
+            self.delete_btn.setEnabled(True)
         else:
+            # Режим создания
             self.form.clear()
             self.delete_btn.setEnabled(False)
 
+            # Если передан patient_id и это страница приёма, заполняем поле
+            if self.current_patient_id is not None and 'patient_id' in self.form.widgets:
+                widget = self.form.widgets['patient_id']
+                if isinstance(widget, QSpinBox):
+                    widget.setValue(self.current_patient_id)
+                elif isinstance(widget, QLineEdit):
+                    widget.setText(str(self.current_patient_id))
+                # Можно сделать поле только для чтения
+                widget.setReadOnly(True)
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._load_entity",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_entity(self, entity_id):
         try:
             dto = self.service.get_by_id(entity_id)
@@ -88,53 +143,50 @@ class DynamicEditPage(BasePage):
             self.logger.exception("Ошибка загрузки записи")
             self._go_back()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._save",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _save(self):
         data = self.form.get_data()
-        # try:
-        #     dto = self.dto_class(**data)
-        #     if self.current_id is None:
-        #         # Создание
-        #         created = self.service.create(dto)  # используем универсальный create
-        #         QMessageBox.information(self, "Успех", f"Запись создана с ID {created.id}")
-        #         self.logger.info(f"Создана запись ID={created.id}")
-        #     else:
-        #         # Обновление
-        #         dto.id = self.current_id
-        #         updated = self.service.update(dto)  # используем универсальный update
-        #         QMessageBox.information(self, "Успех", f"Запись ID {updated.id} обновлена")
-        #         self.logger.info(f"Обновлена запись ID={updated.id}")
-        # except Exception as e:
         try:
             dto = self.dto_class(**data)
             if self.current_id is None:
                 created = self.service.create(dto)
                 QMessageBox.information(self, "Успех", f"Запись создана с ID {created.id}")
+                self.logger.info(f"Создана запись ID={created.id}")
             else:
+                dto.id = self.current_id
                 updated = self.service.update(dto)
                 QMessageBox.information(self, "Успех", f"Запись ID {updated.id} обновлена")
-            
-            # # Находим страницу списка в page_manager и помечаем, что нужно обновить
-            # if self.page_manager:
-            #     list_page_id = self._get_list_page_id()  # нужно определить для каждого типа
-            #     list_page = self.page_manager._pages.get(list_page_id)
-            #     if list_page and hasattr(list_page, 'set_needs_refresh'):
-            #         list_page.set_needs_refresh(True)
-            # self._go_back()
-                    # Помечаем список для обновления
-            #  Находим страницу списка в page_manager и помечаем, что нужно обновить
+                self.logger.info(f"Обновлена запись ID={updated.id}")
+
+            # Помечаем список для обновления
             if self.page_manager and hasattr(self, 'list_page_id'):
                 list_page = self.page_manager._pages.get(self.list_page_id)
                 if list_page and hasattr(list_page, 'set_needs_refresh'):
                     list_page.set_needs_refresh(True)
-            
+
             self._go_back()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
             self.logger.exception("Ошибка сохранения")
-            return
-        # self._go_back()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._delete",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _delete(self):
         if not self.current_id:
@@ -146,30 +198,42 @@ class DynamicEditPage(BasePage):
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                self.service.delete(self.current_id)  # используем универсальный delete (из BaseService)
+                self.service.delete(self.current_id)
                 QMessageBox.information(self, "Успех", "Запись удалена")
                 self.logger.info(f"Удалена запись ID={self.current_id}")
 
-                # Аналогично помечаем список для обновления
                 if self.page_manager and hasattr(self, 'list_page_id'):
                     list_page = self.page_manager._pages.get(self.list_page_id)
                     if list_page and hasattr(list_page, 'set_needs_refresh'):
                         list_page.set_needs_refresh(True)
-            
-                self._go_back()
 
+                self._go_back()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
                 self.logger.exception("Ошибка удаления")
-                return
-            # self._go_back()
 
-            
-
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._cancel",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _cancel(self):
         self._go_back()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicEditPage._go_back",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _go_back(self):
         if self.page_manager:
             self.page_manager.go_back()

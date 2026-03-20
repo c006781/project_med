@@ -24,6 +24,15 @@ class AppointmentDetailPage(BasePage):
     Страница создания/редактирования приёма.
     """
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.AppointmentDetailPage")
@@ -38,6 +47,15 @@ class AppointmentDetailPage(BasePage):
         self._setup_ui()
         self._clear_form()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         """Создаёт форму."""
         main_layout = QVBoxLayout(self)
@@ -92,6 +110,15 @@ class AppointmentDetailPage(BasePage):
         btn_layout.addStretch()
         main_layout.addLayout(btn_layout)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._clear_form",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _clear_form(self):
         """Очищает форму."""
         self.date_edit.setDate(QDate.currentDate())
@@ -100,6 +127,15 @@ class AppointmentDetailPage(BasePage):
         self.photo_list.clear()
         self.current_note_id = None
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage.on_enter",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def on_enter(self, extra_data=None):
         """
         При входе загружаем данные приёма, если передан appointment_id.
@@ -116,6 +152,15 @@ class AppointmentDetailPage(BasePage):
             self._clear_form()
             self.current_note_id = None
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._load_appointment",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_appointment(self, appointment_id):
         """Загружает данные приёма и заполняет форму."""
         try:
@@ -139,6 +184,15 @@ class AppointmentDetailPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
             self.logger.exception("Ошибка загрузки приёма")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._load_photos",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_photos(self, appointment_id):
         """Загружает список фото для приёма."""
         self.photo_list.clear()
@@ -158,6 +212,15 @@ class AppointmentDetailPage(BasePage):
         except Exception as e:
             self.logger.exception("Ошибка загрузки фото")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._add_photo",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _add_photo(self):
         """Добавляет новое фото к приёму."""
@@ -186,6 +249,15 @@ class AppointmentDetailPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось добавить фото: {e}")
             self.logger.exception("Ошибка добавления фото")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._delete_photo",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _delete_photo(self):
         """Удаляет выбранное фото."""
@@ -208,6 +280,15 @@ class AppointmentDetailPage(BasePage):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить фото: {e}")
                 self.logger.exception("Ошибка удаления фото")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._save_appointment",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _save_appointment(self):
         """Сохраняет приём (создание или обновление)."""
@@ -244,11 +325,29 @@ class AppointmentDetailPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить приём: {e}")
             self.logger.exception("Ошибка сохранения приёма")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._cancel",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _cancel(self):
         """Отмена редактирования."""
         self._go_back()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="AppointmentDetailPage._go_back",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _go_back(self):
         """Возврат к предыдущей странице (списку приёмов)."""
         if self.page_manager:

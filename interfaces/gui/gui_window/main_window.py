@@ -43,7 +43,7 @@ class MainWindow(QMainWindow):
 
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow.__init__",
         level = AppLogger._parse_log_level(
@@ -73,11 +73,17 @@ class MainWindow(QMainWindow):
 
         # Подключение сигналов
         self._connect_signals()
+        
+        config_manager = AppConfigManager.get_instance()
+        if not config_manager.config_exists:
+            self.page_manager.switch_to('settings', extra_data={'first_start': True})
+        else:
+            self.page_manager.switch_to('patient_list')
 
         self.logger.info("Главное окно создано")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._setup_ui",
         level = AppLogger._parse_log_level(
@@ -90,7 +96,7 @@ class MainWindow(QMainWindow):
         AppLogger.add_global_handler(handler)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._setup_ui",
         level = AppLogger._parse_log_level(
@@ -170,7 +176,7 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(self.show_log_btn)  # например, после прогресс-бара
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._init_page_manager",
         level = AppLogger._parse_log_level(
@@ -321,13 +327,13 @@ class MainWindow(QMainWindow):
         self.page_manager = PageManager(self.stacked_widget, pages)
 
         # Проверяем наличие файла конфигурации
-        config_manager = AppConfigManager.get_instance()
-        if not config_manager.config_exists:
-            # Первый запуск – открываем настройки с флагом
-            self.page_manager.switch_to('settings', extra_data={'first_start': True})
-        else:
-            # Обычный запуск – открываем список пациентов
-            self.page_manager.switch_to('patient_list')  # начальная страница
+        # config_manager = AppConfigManager.get_instance()
+        # if not config_manager.config_exists:
+        #     # Первый запуск – открываем настройки с флагом
+        #     self.page_manager.switch_to('settings', extra_data={'first_start': True})
+        # else:
+        #     # Обычный запуск – открываем список пациентов
+        #     self.page_manager.switch_to('patient_list')  # начальная страница
         
         # self.page_manager.switch_to('patient_list')  # начальная страница
 
@@ -349,7 +355,7 @@ class MainWindow(QMainWindow):
         # self._connect_signals()
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_patient_appointments_requested",
         level = AppLogger._parse_log_level(
@@ -365,7 +371,7 @@ class MainWindow(QMainWindow):
         )
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._connect_signals",
         level = AppLogger._parse_log_level(
@@ -389,7 +395,7 @@ class MainWindow(QMainWindow):
         self.page_manager.page_entered.connect(self._on_page_entered)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._connect_page_signals",
         level = AppLogger._parse_log_level(
@@ -447,7 +453,7 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
     
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_patient_delete",
         level = AppLogger._parse_log_level(
@@ -474,7 +480,7 @@ class MainWindow(QMainWindow):
                 self.logger.exception("Ошибка удаления пациента")
     
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_appointment_delete",
         level = AppLogger._parse_log_level(
@@ -501,7 +507,7 @@ class MainWindow(QMainWindow):
                 self.logger.exception("Ошибка удаления приёма")
     
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_note_delete",
         level = AppLogger._parse_log_level(
@@ -528,7 +534,7 @@ class MainWindow(QMainWindow):
                 self.logger.exception("Ошибка удаления заметки")
     
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_photo_delete",
         level = AppLogger._parse_log_level(
@@ -559,7 +565,7 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------------------------
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_back_clicked",
         level = AppLogger._parse_log_level(
@@ -573,7 +579,7 @@ class MainWindow(QMainWindow):
         self.page_manager.go_back()
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_settings_clicked",
         level = AppLogger._parse_log_level(
@@ -587,7 +593,7 @@ class MainWindow(QMainWindow):
         self.page_manager.switch_to('settings')
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_action_selected",
         level = AppLogger._parse_log_level(
@@ -608,7 +614,7 @@ class MainWindow(QMainWindow):
         self.action_combo.setCurrentIndex(-1)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._start_download",
         level = AppLogger._parse_log_level(
@@ -635,7 +641,7 @@ class MainWindow(QMainWindow):
         self.logger.info("Запущен поток скачивания")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._update_progress",
         level = AppLogger._parse_log_level(
@@ -653,7 +659,7 @@ class MainWindow(QMainWindow):
             self.progress_bar.setRange(0, 0)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_download_finished",
         level = AppLogger._parse_log_level(
@@ -671,7 +677,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_download_error",
         level = AppLogger._parse_log_level(
@@ -686,7 +692,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Ошибка", message)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._save_changes",
         level = AppLogger._parse_log_level(
@@ -700,7 +706,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Информация", "Функция сохранения изменений пока не реализована.")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._start_upload",
         level = AppLogger._parse_log_level(
@@ -727,7 +733,7 @@ class MainWindow(QMainWindow):
         self.logger.info("Запущен поток загрузки")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_upload_finished",
         level = AppLogger._parse_log_level(
@@ -745,7 +751,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Загрузка завершилась с кодом {code}")
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_upload_error",
         level = AppLogger._parse_log_level(
@@ -760,7 +766,7 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Ошибка", message)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_navigation_changed",
         level = AppLogger._parse_log_level(
@@ -783,7 +789,7 @@ class MainWindow(QMainWindow):
         self.back_btn.setEnabled(len(history) > 0)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow._on_page_entered",
         level = AppLogger._parse_log_level(
@@ -801,7 +807,7 @@ class MainWindow(QMainWindow):
     # Методы для управления прогрессом (могут вызываться из других мест)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow.show_progress",
         level = AppLogger._parse_log_level(
@@ -814,7 +820,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setVisible(visible)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow.set_progress_range",
         level = AppLogger._parse_log_level(
@@ -827,7 +833,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(minimum, maximum)
 
     @AppLogger.get_instance(
-            name = 'db'
+            name = 'system'
     ).log_execution_time(
         description="MainWindow.set_progress_value",
         level = AppLogger._parse_log_level(

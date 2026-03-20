@@ -26,17 +26,53 @@ class PatientTableModel(QAbstractTableModel):
     """
     _headers = ["ID", "Фамилия", "Имя", "Дата рождения", "Телефон", "Email"]
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, patients=None, parent=None):
         super().__init__(parent)
         self._patients = patients or []
         self.logger = AppLogger.get_instance("gui.PatientTableModel")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.rowCount",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def rowCount(self, parent=QModelIndex()):
         return len(self._patients)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.columnCount",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def columnCount(self, parent=QModelIndex()):
         return len(self._headers)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.data",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def data(self, index, role=Qt.ItemDataRole.DisplayRole):
         if not index.isValid():
             return None
@@ -57,11 +93,29 @@ class PatientTableModel(QAbstractTableModel):
                 return patient.email or ""
         return None
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.headerData",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self._headers[section]
         return None
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.sort",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def sort(self, column, order=Qt.SortOrder.AscendingOrder):
         """Сортировка модели (вызывается прокси-моделью)."""
         self.beginResetModel()
@@ -80,12 +134,30 @@ class PatientTableModel(QAbstractTableModel):
             self._patients.sort(key=lambda p: p.email or "", reverse=reverse)
         self.endResetModel()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.update_patients",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def update_patients(self, patients):
         """Обновляет список пациентов."""
         self.beginResetModel()
         self._patients = patients
         self.endResetModel()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientTableModel.get_patient_at_row",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_patient_at_row(self, row):
         """Возвращает пациента по индексу строки."""
         if 0 <= row < len(self._patients):
@@ -98,21 +170,59 @@ class PatientFilterProxyModel(QSortFilterProxyModel):
     Прокси-модель для фильтрации пациентов.
     Поддерживает текстовый фильтр по всем колонкам (или выбранным).
     """
+
+    
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientFilterProxyModel.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self._filter_text = ""
         self._filter_column = -1  # -1 означает все колонки
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientFilterProxyModel.set_filter_text",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def set_filter_text(self, text):
         """Устанавливает текст фильтра."""
         self._filter_text = text.lower()
         self.invalidateFilter()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientFilterProxyModel.set_filter_column",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def set_filter_column(self, column):
         """Устанавливает колонку для фильтрации (-1 для всех)."""
         self._filter_column = column
         self.invalidateFilter()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientFilterProxyModel.filterAcceptsRow",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def filterAcceptsRow(self, source_row, source_parent):
         """Определяет, проходит ли строка фильтр."""
         if not self._filter_text:
@@ -138,6 +248,15 @@ class PatientListPage(BasePage):
 
     button_clicked = Signal(int)  # сигнал о нажатии кнопки (индекс строки)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.PatientListPage")
@@ -145,6 +264,15 @@ class PatientListPage(BasePage):
         self._setup_ui()
         self._load_patients()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         """Создаёт элементы интерфейса."""
         main_layout = QVBoxLayout(self)
@@ -192,6 +320,15 @@ class PatientListPage(BasePage):
 
         main_layout.addWidget(self.table_view)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage._load_patients",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_patients(self):
         """Загружает список пациентов из сервиса и обновляет модель."""
         try:
@@ -202,6 +339,15 @@ class PatientListPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пациентов: {e}")
             self.logger.exception("Ошибка загрузки пациентов")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage._on_add_patient",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _on_add_patient(self):
         """Переход на страницу редактирования нового пациента."""
@@ -209,6 +355,15 @@ class PatientListPage(BasePage):
             # Передаём ID=None, чтобы страница редактирования знала, что это создание
             self.page_manager.switch_to('patient_edit', extra_data={'patient_id': None})
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage._on_action_button_clicked",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot(int)
     def _on_action_button_clicked(self, row):
         """
@@ -222,6 +377,15 @@ class PatientListPage(BasePage):
             if self.page_manager:
                 self.page_manager.switch_to('patient_edit', extra_data={'patient_id': patient.id})
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientListPage._on_search_text_changed",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot(str)
     def _on_search_text_changed(self, text):
         """Обновляет фильтр поиска."""

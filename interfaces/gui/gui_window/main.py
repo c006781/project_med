@@ -16,6 +16,15 @@ from PySide6.QtCore import Qt
 from interfaces.gui.gui_window.main_window import MainWindow
 from app.utils.logger.logger import AppLogger
 
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    description="main",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def main():
     """Главная функция запуска GUI."""
     # Настройка High DPI (для Windows)

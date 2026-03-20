@@ -22,7 +22,16 @@ class DynamicListPage(BasePage):
     edit_requested = Signal(object)
     delete_requested = Signal(object)
     action_requested = Signal(object)  # новый сигнал для дополнительного действия
-
+        
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(
         self,
         service,
@@ -51,9 +60,27 @@ class DynamicListPage(BasePage):
         self._setup_ui()
         self._load_data()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage.set_needs_refresh",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def set_needs_refresh(self, value=True):
         self._needs_refresh = value
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
 
@@ -109,6 +136,15 @@ class DynamicListPage(BasePage):
 
         main_layout.addWidget(self.table_view)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage.showEvent",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def showEvent(self, event):
         super().showEvent(event)
         if not self._selection_connected:
@@ -117,6 +153,15 @@ class DynamicListPage(BasePage):
                 selection_model.selectionChanged.connect(self._on_selection_changed)
                 self._selection_connected = True
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._load_data",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_data(self):
         try:
             self.current_data = self.service.get_all()
@@ -126,9 +171,27 @@ class DynamicListPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
             self.logger.exception("Ошибка загрузки данных")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._on_search_text_changed",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _on_search_text_changed(self, text):
         self.proxy_model.setFilterFixedString(text)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._on_selection_changed",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _on_selection_changed(self, selected, deselected):
         indexes = selected.indexes()
         if indexes:
@@ -144,6 +207,15 @@ class DynamicListPage(BasePage):
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(False)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._on_row_double_clicked",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _on_row_double_clicked(self, index):
         if not self.edit_on_double_click or not index.isValid():
             return
@@ -152,6 +224,15 @@ class DynamicListPage(BasePage):
         if dto:
             self.edit_requested.emit(dto)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._on_delete_clicked",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _on_delete_clicked(self):
         if not self.selected_dto:
@@ -164,12 +245,30 @@ class DynamicListPage(BasePage):
         if reply == QMessageBox.StandardButton.Yes:
             self.delete_requested.emit(self.selected_dto)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage._on_action_clicked",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _on_action_clicked(self):
         """Обработка нажатия дополнительной кнопки."""
         if self.selected_dto:
             self.action_requested.emit(self.selected_dto)
-
+    
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="DynamicListPage.on_enter",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def on_enter(self, extra_data=None):
         if self._needs_refresh:
             self._load_data()

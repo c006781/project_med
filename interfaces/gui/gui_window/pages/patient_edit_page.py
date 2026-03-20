@@ -23,6 +23,15 @@ class PatientEditPage(BasePage):
     Если patient_id не передан (или None), создаётся новый пациент.
     """
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.PatientEditPage")
@@ -32,6 +41,15 @@ class PatientEditPage(BasePage):
         self._setup_ui()
         self._clear_form()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         """Создаёт элементы формы."""
         main_layout = QVBoxLayout(self)
@@ -79,6 +97,15 @@ class PatientEditPage(BasePage):
 
         main_layout.addLayout(btn_layout)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._clear_form",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _clear_form(self):
         """Очищает поля формы."""
         self.first_name_edit.clear()
@@ -87,6 +114,15 @@ class PatientEditPage(BasePage):
         self.phone_edit.clear()
         self.email_edit.clear()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage.on_enter",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def on_enter(self, extra_data=None):
         """
         Вызывается при переходе на страницу.
@@ -103,6 +139,15 @@ class PatientEditPage(BasePage):
             self._clear_form()
             self.delete_btn.setEnabled(False)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._load_patient",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_patient(self, patient_id):
         """Загружает данные пациента по ID и заполняет форму."""
         try:
@@ -124,6 +169,15 @@ class PatientEditPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
             self.logger.exception("Ошибка загрузки пациента")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._save_patient",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _save_patient(self):
         """Сохраняет данные пациента (создание или обновление)."""
@@ -170,6 +224,15 @@ class PatientEditPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
             self.logger.exception("Ошибка сохранения пациента")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._delete_patient",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _delete_patient(self):
         """Удаляет текущего пациента после подтверждения."""
@@ -192,11 +255,29 @@ class PatientEditPage(BasePage):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
                 self.logger.exception("Ошибка удаления пациента")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._cancel",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _cancel(self):
         """Отмена редактирования."""
         self._go_back_to_list()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="PatientEditPage._go_back_to_list",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _go_back_to_list(self):
         """Возврат к списку пациентов."""
         if self.page_manager:

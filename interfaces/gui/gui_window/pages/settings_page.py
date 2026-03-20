@@ -17,6 +17,16 @@ class SettingsPage(BasePage):
     """
     Страница настроек.
     """
+
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage.__init__",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self.logger = AppLogger.get_instance("gui.SettingsPage")
@@ -25,6 +35,15 @@ class SettingsPage(BasePage):
         self._setup_ui()
         self._load_settings()
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage._setup_ui",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _setup_ui(self):
         """Создаёт элементы интерфейса."""
         main_layout = QVBoxLayout(self)
@@ -94,16 +113,43 @@ class SettingsPage(BasePage):
         self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
         self.save_btn.clicked.connect(self._save_settings)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage._browse_file",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _browse_file(self, line_edit, title, filter_str):
         file_path, _ = QFileDialog.getOpenFileName(self, title, "", filter_str)
         if file_path:
             line_edit.setText(file_path)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage._browse_dir",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _browse_dir(self, line_edit, title):
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
             line_edit.setText(dir_path)
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage._load_settings",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def _load_settings(self):
         """Загружает текущие настройки из менеджера и заполняет поля."""
         self.db_path_edit.setText(self.config_manager.get('database_local_path', ''))
@@ -114,6 +160,15 @@ class SettingsPage(BasePage):
         self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
         self.log_file_check.setChecked(self.config_manager.get('LOG_ENABLED', True))
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage._save_settings",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @Slot()
     def _save_settings(self):
         """Сохраняет настройки из полей в менеджер и в файл."""
@@ -137,8 +192,23 @@ class SettingsPage(BasePage):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
             self.logger.exception("Ошибка сохранения настроек")
 
+    @AppLogger.get_instance(
+            name = 'system'
+    ).log_execution_time(
+        description="SettingsPage.on_enter",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def on_enter(self, extra_data=None):
-        """При входе на страницу обновляем настройки и запоминаем флаг первого запуска."""
+        """
+        Вызывается при переходе на страницу настроек.
+        extra_data может содержать 'first_start' (True/False).
+        """
+
+        # """При входе на страницу обновляем настройки и запоминаем флаг первого запуска."""
+
         self.config_manager.load()
         self._load_settings()
         self.first_start = extra_data.get('first_start', False) if extra_data else False

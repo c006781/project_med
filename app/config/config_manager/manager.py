@@ -176,6 +176,7 @@ class AppConfigManager(BaseConfigManager):
         'LOG_BACKUP_COUNT': '5',
         'PHOTOS_STORAGE_PATH': './photos',
         # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
+        'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
     }
 
     # Хранилище для экземпляров (Multiton)

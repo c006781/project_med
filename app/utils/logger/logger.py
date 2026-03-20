@@ -152,9 +152,31 @@ class AppLogger(BaseAppLogger):
         else:
             get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
         
-        # tt = sys.modules['app.config.config_manager.manager']
-        return get_config_env()
+        config = get_config_env()
+        # Добавляем ключ LOG_ARGS, если его нет (по умолчанию False)
+        config.setdefault('LOG_ARGS', False)
 
+        # tt = sys.modules['app.config.config_manager.manager']
+        return config
+    
+
+    
+# Автоматическое создание экземпляров при импорте
+if not AppLogger.thec_craete('system'):
+    AppLogger.get_instance(
+        name='system',
+        # enable_file_logging=False,
+        enable_file_logging=True,
+        use_name_in_filename=False   # используем общий файл из конфига
+    )
+
+if not AppLogger.thec_craete('user'):
+    AppLogger.get_instance(
+        name='user',
+        # enable_file_logging=False,    
+        enable_file_logging=True,    
+        use_name_in_filename=False # используем общий файл из конфига
+    )
 
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования

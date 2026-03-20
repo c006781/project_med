@@ -47,6 +47,19 @@ class BaseAppLogger:
             Возвращает экземпляр логгера с указанным именем.
     """
 
+    # _levels_up = 3
+    _levels_up = 0
+
+
+    skip_patterns_modeles = ( # список пропусков в стеке вызовов модулей и функций для отображения логирования
+        # 'filename' - часть пути до модуля, который пропускаем 
+        # 'function': - ф-ции, которые пропускаем (если не указываем function', то пропуск всех ф-й из 'filename')
+        {
+            'filename':('app','utils','logger','base_logger.py'),
+            'function':('_formatted', 'info', 'debug', 'warning', 'error', 'critical'), 
+        },
+    )
+
     # Словарь экземпляров (ключ - имя логгера)
     _instances: Dict[str, 'BaseAppLogger'] = {}
 
@@ -62,10 +75,20 @@ class BaseAppLogger:
         'ERROR': logging.ERROR,
         'CRITICAL': logging.CRITICAL
     }
-    
+
     @classmethod
     def add_global_handler(cls, handler):
-        """Добавляет обработчик ко всем существующим и будущим экземплярам логгеров."""
+        """
+        Добавляет обработчик ко всем существующим и будущим экземплярам логгеров.
+
+        Это может быть полезно, если вам нужно добавить общий обработчик для всех логгеров в программе.
+        Пример использования:
+            def my_handler(record):
+                # обработка записи лога
+                pass
+            BaseAppLogger.add_global_handler(logging.Handler(my_handler))
+
+        """
         cls._global_handlers.append(handler)
         # Добавляем ко всем уже созданным экземплярам
         for instance in cls._instances.values():
@@ -75,17 +98,36 @@ class BaseAppLogger:
 
     @classmethod
     def remove_global_handler(cls, handler):
+        """
+        Удаляет обработчик из глобального списка и из каждого существующего экземпляра логгера.
+
+        :param handler: Обработчик, который нужно удалить.
+        """
+
+        # Если обработчик есть в глобальном списке, удаляем его
         if handler in cls._global_handlers:
             cls._global_handlers.remove(handler)
+
+        # Удаляем обработчик из каждого существующего экземпляра
         for instance in cls._instances.values():
             instance.logger.removeHandler(handler)
+            # Обновляем список обработчиков экземпляра (опционально)
             instance.handlers = instance.logger.handlers[:]
             
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         """
-        Возвращает конфигурацию по умолчанию.
-        Должен быть переопределён в наследнике.
+        Возвращает конфигурацию по умолчанию, которая будет использоваться, если не указать config при вызове get_instance().
+
+        Метод должен быть переопределён в наследнике, потому что конфигурация по умолчанию зависит от конкретного приложения.
+
+        Если не переопределён, то будет выброшено исключение RuntimeError.
+
+        В наследнике необходимо переопределить метод, чтобы он возвращал словарь с конфигурацией по умолчанию для конкретного приложения.
+
+        Например, если в приложении по умолчанию логгер должен писать в файл с именем "app.log", то
+        метод get_default_config() должен возвращать словарь {"LOG_FILE": "app.log"}.
+
         """
         raise RuntimeError(
             "Метод get_default_config() не переопределён в наследнике. "
@@ -93,6 +135,11 @@ class BaseAppLogger:
         )
 
     def setLevel(self, level):
+        """
+        Установка уровня логирования для логгера.
+
+        Уровень logging, который будет использоваться для логгера, определяется параметром level.
+        """
         self.logger.setLevel(level)
         
     def __init__(
@@ -154,6 +201,7 @@ class BaseAppLogger:
             self.base_log_file = config['LOG_FILE']
             self.log_max_bytes = int(config['LOG_MAX_BYTES'])
             self.log_backup_count = int(config['LOG_BACKUP_COUNT'])
+            self.log_args = config.get('LOG_ARGS', False)   # новый атрибут
         except ValueError as e:
             raise ValueError(f"Ошибка преобразования параметров логирования: {e}")
 
@@ -207,7 +255,13 @@ class BaseAppLogger:
         cls,
         name: str,
     ) -> bool:
-        return (name in cls._instances ) 
+        """
+        Проверяем, существует ли уже экземпляр класса с именем name.
+        
+        :param name: Имя экземпляра класса.
+        :return: True, если экземпляр с именем name существует, False в противном случае.
+        """
+        return (name in cls._instances )
 
     @classmethod
     def get_instance(
@@ -221,9 +275,13 @@ class BaseAppLogger:
         """
         Возвращает экземпляр логгера с указанным именем.
 
-        Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
-        (параметры enable_file_logging и use_name_in_filename игнорируются).
-        Если force_new=True, создаётся новый экземпляр (старый при этом не удаляется).
+        Если force_new=False, то происходит следующее:
+        - Если экземпляр с таким именем уже существует, возвращается существующий
+          (параметры enable_file_logging и use_name_in_filename игнорируются).
+        - Если экземпляр с таким именем не существует, создаётся новый экземпляр.
+
+        Если force_new=True, то:
+        - Создаётся новый экземпляр (старый при этом не удаляется).
 
         :param name: (str) Имя логгера.
         :param force_new: (bool) Принудительное создание нового экземпляра.
@@ -232,8 +290,8 @@ class BaseAppLogger:
         :param use_name_in_filename: (bool) Для нового экземпляра: добавлять ли имя в имя файла.
         :return: Экземпляр BaseAppLogger.
         """
-        # if not force_new and name in cls._instances:
         if not force_new and (cls.thec_craete(name = name)):
+            # Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
             return cls._instances[name]
 
         # Создаём новый экземпляр
@@ -261,30 +319,191 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     # Вспомогательные методы для формирования указателя на место вызова
     # --------------------------------------------------------------------------
-    # def _get_caller_info(
-    #         self, 
-    #         levels_up: int = 2
-    #     ) -> str:
-    #     """Возвращает строку с информацией о caller'е на указанное количество уровней выше."""
-    #     stack = inspect.stack()
-    #     if len(stack) <= levels_up:
-    #         frame_info = stack[-1]
-    #     else:
-    #         frame_info = stack[levels_up]
+    def _convert_patterns_modeles_tips(
+        self,
+        modeles,
+        simple_types = (int, float, str, bool, type(None)),
+    ):  
+        """
+        Преобразует указатель на место вызова в множество значений.
 
-    #     filename = frame_info.filename
-    #     lineno = frame_info.lineno
-    #     funcname = frame_info.function
-    #     return f'File "{filename}", line {lineno}, in <{funcname}>'
-    
+        Если указатель на место вызова является одним из простых типов (int, float, str, bool, None), то возвращает множество с одним элементом - этим указателем.
+        Если указатель на место вызова не является множеством, то возвращает множество с указателем на место вызова как единственным элементом.
+        """
+        
+        if  isinstance(modeles, simple_types):
+            return {modeles}
+        elif  not isinstance(modeles, set):
+            return set(modeles) 
+       
+    def _thec_patterns_modeles_is_none(
+        self,
+        modeles,
+        if_err_tip: bool,
+    )-> bool: 
+        """
+        Проверяет, является ли указатель на место вызова None или пустым.
+        
+        :param modeles: (Any) Указатель на место вызова.
+        :param if_err_tip: (bool) Если True, то если указатель на место вызова None или пустой, то будет выброшено исключение ValueError.
+        :return: (bool) True, если указатель на место вызова None или пустой, False в противном случае.
+        """
+        # Проверка на наличие              
+        if (modeles is None)  : 
+            if if_err_tip :  
+                raise ValueError('err: filename is None')  
+            return True  
+        if (len(modeles) == 0) :
+            if if_err_tip :  
+                raise ValueError('err: filename is None')  
+            return True 
+        
+        return False 
+
+    def _thec_patterns_modeles(
+        self,
+        modeles,
+        if_err_tip,
+    ): 
+        """
+        Проверяет, является ли указатель на место вызова None или пустым.
+        
+        Если указатель на место вызова None или пустой, то возвращает None.
+        Если указатель на место вызова не является множеством, то возвращает множество с указателем на место вызова как единственным элементом.
+        """
+        
+                      
+        # Проверка на наличие   
+        if self._thec_patterns_modeles_is_none(
+            modeles     = modeles,
+            if_err_tip  = if_err_tip,
+        ):
+            return None             
+                
+        modeles = self._convert_patterns_modeles_tips(
+            modeles = modeles
+        )
+        
+        return modeles 
+        
+    def _thec_skip_patterns_modeles(
+        self,
+        patterns_modeles
+    ):  
+        """
+        Проверяет, если при указанных параметрах modeles стоит пропустить
+        логирование.
+
+        :param patterns_modeles: Словарь с параметрами для фильтрации.
+        :return: True - указатель есть в блок листе, False - нет в блок листе.
+        """
+
+        # Проверяем, если указатель на место вызова есть в общем блоке лист
+        for skip_patterns_modele in self.skip_patterns_modeles: 
+            # общий блок лист
+            for i in [
+                'filename', 
+                'function',
+            ]:
+                # Флаг, указывающий на то, что мы проверяем filename или function
+                if_filename  = (i == 'filename')
+                
+                # Проверяем, есть ли указатель на место вызова в skip
+                thec_skip = self._thec_patterns_modeles( 
+                    modeles     = skip_patterns_modele.get(i,{}) ,
+                    if_err_tip  = if_filename,
+                )
+                if thec_skip is None:
+                    # если нет в skip указателя на function, блок лист (так как filename пройден)
+                    # то возвращаем True
+                    return True  
+                
+                # Проверяем, есть ли указатель на место вызова в patterns_modeles
+                thec_modeles = self._thec_patterns_modeles(
+                    modeles     = patterns_modeles.get(i,{}) ,
+                    if_err_tip  = if_filename,
+                )
+                if thec_modeles is None:
+                    # если нет в skip указателя на function, блок лист (так как filename пройден)
+                    # то возвращаем True
+                    return True  
+                    
+                # Проверяем, если указатель на место вызова есть в блок листе
+                for modele in thec_modeles: 
+                    # что проверяем на наличие в блок листе  
+                
+                    if self._thec_patterns_modeles_is_none(
+                        modeles     = modele ,
+                        if_err_tip  = if_filename  , 
+                    ):
+                        # если нет в skip указателя на function, блок лист (так как filename пройден)
+                        # то возвращаем True
+                        return True
+
+                    if ( # проверка на наличие в блок листе
+                        modele in thec_skip
+                    ) or (
+                        modele == thec_skip
+                    ) :
+                        # если указатель на место вызова есть в общем блоке лист, то возвращаем True
+                        return True  
+                    else:
+                        # иначе мы проверяем, если указатель на место вызова есть в skip
+                        skip_thec = True
+                        for skip in thec_skip:
+                            if self._thec_patterns_modeles_is_none(
+                                modeles     = skip ,   
+                                if_err_tip  = if_filename  , 
+                            ):
+                                # если нет в skip указателя на function, блок лист (так как filename пройден)
+                                # то возвращаем True
+                                return True 
+
+                            # проверка на наличие каждого элимента по пути
+                            skip_thec_ = (
+                                (skip in modele) or (skip == modele)
+                            )
+                            
+                            if if_filename or ( skip_thec) : 
+                                # если filename, то нудно проверить нахождение каждого элимента по пути. Если все есть, то переход на проверку function
+                                skip_thec = skip_thec and skip_thec_
+                            else: 
+                                # возможно вернуть  skip_thec_, а не continue
+                                continue
+
+                        if not skip_thec:
+                            # если указатель на место вызова не находится в skip, то возвращаем False
+                            return False   
+            if not skip_thec:
+                # если указатель на место вызова не находится в skip, то возвращаем False
+                return False 
+
+        # если указатель на место вызова не находится в общем блоке лист, то возвращаем True
+        return True
+        
+
+
+
     def _get_caller_info(self, levels_up: int = 2) -> str:
         """
         Возвращает строку с информацией о caller'е.
+
         - Если levels_up > 0: поднимается на указанное количество уровней (стандартное поведение).
         - Если levels_up == 0: автоматически ищет первый фрейм вне модулей логирования.
+
+        Важно: мы используем inspect.stack() для получения стека вызываемых функций.
+        Каждый элемент стека - это объект FrameInfo, содержащий информацию о текущей функции:
+          - filename: путь к файлу, в котором находится функция
+          - lineno: номер строки в файле, в которой находится функция
+          - function: имя функции
+
+        Мы ищем фрейм, чей файл не содержит 'logger' или 'base_logger', чтобы не учитывать
+        вызовы изнутри модулей логирования. Если таких фреймов не найдено, берем последний
+        фрейм (в конце стека).
         """
         import inspect
         stack = inspect.stack()
+        frame_info = stack[-1]
 
         if levels_up > 0:
             # Явно заданная глубина
@@ -295,11 +514,20 @@ class BaseAppLogger:
         else:
             # Автоматический поиск: пропускаем фреймы, относящиеся к логгеру
             # Пропускаем текущий фрейм (индекс 0) и ищем первый, чей файл не содержит 'logger'
+            
             for frame_info in stack[1:]:
+
+                if self._thec_skip_patterns_modeles( # если входит в список пропуска, то след итерация
+                    patterns_modeles={
+                        'filename':(frame_info.filename),
+                        'function':(frame_info.function),  
+                    }
+                ):
+                    continue
+                # если не в списке, то выводим            
                 filename = frame_info.filename
-                # Если имя файла не содержит подстрок 'logger' или 'base_logger', считаем это внешним вызовом
-                if 'logger' not in filename and 'base_logger' not in filename:
-                    break
+                break
+                
             else:
                 # Если не нашли (вдруг весь стек состоит из логгера), берём последний
                 frame_info = stack[-1]
@@ -310,7 +538,18 @@ class BaseAppLogger:
         return f'File "{filename}", line {lineno}, in <{funcname}>'
     
     def _format_message(self, caller_info: str, message: str) -> str:
-        """Форматирует итоговое сообщение, добавляя имя логгера и указатель."""
+        """
+        Форматирует итоговое сообщение, добавляя имя логгера и указатель.
+
+        caller_info - строка, полученная из _get_caller_info, содержащая информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, который будет добавлен к caller_info
+
+        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом табуляции '\t'
+        """
         return f"[{self.name}]\t{caller_info}:\t{message}"
 
     # --------------------------------------------------------------------------
@@ -319,9 +558,20 @@ class BaseAppLogger:
     
     def _formatted(
             self,
-            message,
-            levels_up: int = 0,
+            message: str,  # текст сообщения, которое будет добавлено к caller_info
+            levels_up: int = None,  # глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
     ):
+        """
+        Форматирует итоговое сообщение, добавляя имя логгера и указатель.
+
+        - levels_up: глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
+        - message: текст сообщения, которое будет добавлено к caller_info
+
+        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом табуляции '\t'
+        """
+        if levels_up is None:
+            levels_up = self._levels_up
+
         caller = self._get_caller_info(
             levels_up=levels_up
         )
@@ -332,6 +582,16 @@ class BaseAppLogger:
         
     
     def debug(self, message: str) -> None:
+        """
+        Метод для логирования отладки в уровне DEBUG.
+
+        Он вызывает self.logger.debug сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        """
         self.logger.debug(
             self._formatted(
                 message = message,   
@@ -339,6 +599,16 @@ class BaseAppLogger:
         )
 
     def info(self, message: str) -> None:
+        """
+        Метод для логирования информации в уровне INFO.
+
+        Он вызывает self.logger.info сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        """
         self.logger.info(
             self._formatted(
                 message = message,   
@@ -346,6 +616,16 @@ class BaseAppLogger:
         )
 
     def warning(self, message: str) -> None:
+        """
+        Метод для логирования предупреждения в уровне WARNING.
+
+        Он вызывает self.logger.warning сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        """
         self.logger.warning(
             self._formatted(
                 message = message,   
@@ -353,6 +633,16 @@ class BaseAppLogger:
         )
 
     def error(self, message: str) -> None:
+        """
+        Метод для логирования ошибки в уровне ERROR.
+
+        Он вызывает self.logger.error сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        """
         self.logger.error(
             self._formatted(
                 message = message,   
@@ -360,6 +650,16 @@ class BaseAppLogger:
         )
 
     def critical(self, message: str) -> None:
+        """
+        Метод для логирования критических ошибок в уровне CRITICAL.
+
+        Он вызывает self.logger.critical сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        """
         self.logger.critical(
             self._formatted(
                 message = message,   
@@ -367,6 +667,18 @@ class BaseAppLogger:
         )
 
     def exception(self, message: str, exc_info: bool = True) -> None:
+        """
+        Метод для логирования информации об ошибке в уровне ERROR.
+
+        Он вызывает self.logger.error сформатированным сообщением, которое содержит информацию о вызове функции:
+            - имя файла, в котором находится вызов функции
+            - номер строки в файле, в которой находится вызов функции
+            - имя функции
+            - информацию об ошибке (если exc_info == True)
+
+        message - текст сообщения, которое будет добавлено к caller_info
+        exc_info - флаг, указывающий, нужно ли добавлять информацию об ошибке
+        """
         self.logger.error(
             self._formatted(
                 message = message,   
@@ -376,52 +688,167 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     # Декоратор для замера времени выполнения
     # --------------------------------------------------------------------------
-    def log_execution_time(self, description: str = "", level: int = logging.DEBUG) -> Callable:
+    def log_execution_time(
+            self, 
+            description: str = "", 
+            level: int = logging.DEBUG,
+            log_args: Optional[bool] = None,
+        ) -> Callable:
         """
         Декоратор для логирования времени выполнения функции или метода.
+
+        :param description: дополнительное описание (будет добавлено перед сообщением)
+        :param level: уровень логирования
+        :param log_args: если True, в начало логирования добавляются переданные аргументы.
+                         Если None, используется значение из конфигурации логгера (self.log_args).
         """
         logger_instance = self
 
+        if log_args is None:
+            log_args = self.log_args
+
         def decorator(func: Callable) -> Callable:
-            func_filename = inspect.getfile(func)
+            """
+            Декоратор для логирования времени выполнения функции или метода.
+
+            Он обернул функцию, добавляя информацию о вызове функции:
+                - имя файла, в котором находится вызов функции
+                - номер строки в файле, в которой находится вызов функции
+                - имя функции
+                - информацию об ошибке (если exc_info == True)
+
+            description - текст, добавляемый к caller_info
+            level - уровень логирования
+            log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+            """
+            # func_filename = inspect.getfile(func)
+            # func_lineno = func.__code__.co_firstlineno
+            # func_name = func.__name__
+            # is_async = inspect.iscoroutinefunction(func)
+
+            # Используем квалифицированное имя (с классом, если это метод)
+            func_qualname = func.__qualname__
+            try:
+                # Получаем имя файла, в котором находится вызов функции
+                func_filename = inspect.getfile(func)
+            except TypeError:
+                # Если функция - встроенная, то имя файла не может быть получено
+                func_filename = "<built-in>"
+            # Получаем номер строки в файле, в которой находится вызов функции
             func_lineno = func.__code__.co_firstlineno
-            func_name = func.__name__
+            # Определяем, является ли функция асинхронной
             is_async = inspect.iscoroutinefunction(func)
 
             @wraps(func)
             def sync_wrapper(*args, **kwargs):
-                caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_name}>'
-                desc_part = description if description else ""
+                """
+                Обернулка для синхронных функций.
 
-                start_msg = f"{desc_part} [Начало]" if desc_part else "[Начало]"
+                Она вызывает функцию, добавляя информацию о вызове функции:
+                    - имя файла, в котором находится вызов функции
+                    - номер строки в файле, в которой находится вызов функции
+                    - имя функции
+                    - информацию об аргументах (если log_args == True)
+
+                description - текст, добавляемый к caller_info
+                level - уровень логирования
+                log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+                """
+                caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
+
+                # Формируем строку с описанием
+                desc_part = f"{description} " if description else ""
+
+                # Формируем строку с аргументами
+                args_part = ""
+                if log_args:
+                    args_str = ', '.join(repr(a) for a in args)
+                    kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+                    all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+                    args_part = f" with args: ({all_args})"
+
+                # Формируем строку с информацией о вызове функции
+                start_msg = f"{desc_part} [Начало]{args_part}"
+
+                # Формируем полное сообщение
                 formatted_start = logger_instance._format_message(caller_info, start_msg)
+
+                # Логируем сообщение
                 logger_instance.logger.log(level, formatted_start)
 
+                # Получаем время начала выполнения
                 start_time = time.time()
+
+                # Вызываем функцию
                 result = func(*args, **kwargs)
+
+                # Получаем время окончания выполнения
                 execution_time = time.time() - start_time
 
+                # Формируем строку с информацией о времени выполнения
                 end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+
+                # Формируем полное сообщение
                 formatted_end = logger_instance._format_message(caller_info, end_msg)
+
+                # Логируем сообщение
                 logger_instance.logger.log(level, formatted_end)
 
                 return result
 
             @wraps(func)
             async def async_wrapper(*args, **kwargs):
-                caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_name}>'
-                desc_part = description if description else ""
+                """
+                Обернулка для асинхронных функций.
 
-                start_msg = f"{desc_part} [Начало]" if desc_part else "[Начало]"
+                Она вызывает функцию, добавляя информацию о вызове функции:
+                    - имя файла, в котором находится вызов функции
+                    - номер строки в файле, в которой находится вызов функции
+                    - имя функции
+                    - информацию об аргументах (если log_args == True)
+
+                description - текст, добавляемый к caller_info
+                level - уровень логирования
+                log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+                """
+                caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
+
+                # Формируем строку с описанием
+                desc_part = f"{description} " if description else ""
+
+                # Формируем строку с аргументами
+                args_part = ""
+                if log_args:
+                    args_str = ', '.join(repr(a) for a in args)
+                    kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+                    all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+                    args_part = f" with args: ({all_args})"
+
+                # Формируем строку с информацией о вызове функции
+                start_msg = f"{desc_part} [Начало]{args_part}"
+
+                # Формируем полное сообщение
                 formatted_start = logger_instance._format_message(caller_info, start_msg)
+
+                # Логируем сообщение
                 logger_instance.logger.log(level, formatted_start)
 
+                # Получаем время начала выполнения
                 start_time = time.time()
+
+                # Вызываем функцию
                 result = await func(*args, **kwargs)
+
+                # Получаем время окончания выполнения
                 execution_time = time.time() - start_time
 
+                # Формируем строку с информацией о времени выполнения
                 end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+
+                # Формируем полное сообщение
                 formatted_end = logger_instance._format_message(caller_info, end_msg)
+
+                # Логируем сообщение
                 logger_instance.logger.log(level, formatted_end)
 
                 return result
@@ -434,6 +861,14 @@ class BaseAppLogger:
     # Закрытие логгера
     # --------------------------------------------------------------------------
     def close(self) -> None:
+        """
+        Закрывает логгер, удаляя все хендлеры из него и очищает список хендлеров.
+        
+        1. Берем все хендлеры из логгера (self.logger.handlers[:])
+        2. Закрываем каждый хендлер (handler.close())
+        3. Удаляем каждый хендлер из логгера (self.logger.removeHandler(handler))
+        4. Очищаем список хендлеров (self.handlers.clear())
+        """
         for handler in self.logger.handlers[:]:
             handler.close()
             self.logger.removeHandler(handler)
@@ -441,6 +876,10 @@ class BaseAppLogger:
 
     @classmethod
     def close_all(cls) -> None:
+        """
+        Закрывает все экземпляры логгера, удаляя все хендлеры из каждого из них,
+        и очищает словарь экземпляров.
+        """
         for instance in cls._instances.values():
             instance.close()
         cls._instances.clear()

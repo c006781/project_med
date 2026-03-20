@@ -291,7 +291,15 @@ import click # pip install click
 # ----------------------------------------------------------------------
 # Функция-фабрика, создающая группу команд
 # ----------------------------------------------------------------------
-
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    # description="DynamicListPage.get_db",
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)  
 def create_cli():
     """
     Создаёт и возвращает группу команд Click для CLI.

@@ -29,9 +29,11 @@ class AppointmentDetailPage(BasePage):
     # """
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage.__init__",
+        # description="AppointmentDetailPage.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -45,7 +47,11 @@ class AppointmentDetailPage(BasePage):
         :type parent: Optional[QWidget]
         """
         super().__init__(parent)
-        self.logger = AppLogger.get_instance("gui.AppointmentDetailPage")
+        self.logger = AppLogger.get_instance(
+            name = 'gui.AppointmentDetailPage',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
         self.appointment_service = get_appointment_service()
         self.photo_service = get_photo_service()
         self.note_service = get_note_service()
@@ -58,9 +64,11 @@ class AppointmentDetailPage(BasePage):
         self._clear_form()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._setup_ui",
+        # description="AppointmentDetailPage._setup_ui",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -123,9 +131,11 @@ class AppointmentDetailPage(BasePage):
         main_layout.addLayout(btn_layout)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._clear_form",
+        # description="AppointmentDetailPage._clear_form",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -142,9 +152,11 @@ class AppointmentDetailPage(BasePage):
         self.current_note_id = None
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage.on_enter",
+        # description="AppointmentDetailPage.on_enter",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -168,9 +180,11 @@ class AppointmentDetailPage(BasePage):
             self.current_note_id = None
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._load_appointment",
+        # description="AppointmentDetailPage._load_appointment",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -205,9 +219,11 @@ class AppointmentDetailPage(BasePage):
             self.logger.exception("Ошибка загрузки приёма")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._load_photos",
+        # description="AppointmentDetailPage._load_photos",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -238,9 +254,11 @@ class AppointmentDetailPage(BasePage):
             self.logger.exception("Ошибка загрузки фото")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._add_photo",
+        # description="AppointmentDetailPage._add_photo",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -283,9 +301,11 @@ class AppointmentDetailPage(BasePage):
             self.logger.exception("Ошибка добавления фото")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._delete_photo",
+        # description="AppointmentDetailPage._delete_photo",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -321,9 +341,11 @@ class AppointmentDetailPage(BasePage):
                 self.logger.exception("Ошибка удаления фото")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._save_appointment",
+        # description="AppointmentDetailPage._save_appointment",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -374,9 +396,11 @@ class AppointmentDetailPage(BasePage):
             self.logger.exception("Ошибка сохранения приёма")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentDetailPage._cancel",
+        # description="AppointmentDetailPage._cancel",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -391,7 +415,9 @@ class AppointmentDetailPage(BasePage):
         self._go_back()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentDetailPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
         description="AppointmentDetailPage._go_back",
         level = AppLogger._parse_log_level(

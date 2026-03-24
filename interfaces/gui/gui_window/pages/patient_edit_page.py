@@ -11,7 +11,8 @@ from app.exceptions import PatientNotFoundError, PatientValidationError
 from app.dependencies import get_patient_service
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QFormLayout, QLineEdit,
+    # QWidget, 
+    QVBoxLayout, QFormLayout, QLineEdit,
     QDateEdit, QPushButton, QMessageBox, QHBoxLayout
 )
 from PySide6.QtCore import Slot, QDate
@@ -26,9 +27,11 @@ class PatientEditPage(BasePage):
     """
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage.__init__",
+        # description="PatientEditPage.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -36,7 +39,11 @@ class PatientEditPage(BasePage):
     )
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.logger = AppLogger.get_instance("gui.PatientEditPage")
+        self.logger = AppLogger.get_instance(
+            name = 'gui.PatientEditPage',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
         self.patient_service = get_patient_service()
         self.current_patient_id = None  # ID редактируемого пациента
 
@@ -44,16 +51,24 @@ class PatientEditPage(BasePage):
         self._clear_form()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._setup_ui",
+        # description="PatientEditPage._setup_ui",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _setup_ui(self):
-        """Создаёт элементы формы."""
+        # """Создаёт элементы формы."""
+        """
+        Создаёт элементы формы.
+
+        Создает форму редактирования, содержащую поля для ввода имени, фамилии, даты рождения, телефона и электронной почты.
+        Создает кнопки "Сохранить", "Удалить" и "Отмена".
+        """
         main_layout = QVBoxLayout(self)
 
         # Форма
@@ -100,16 +115,23 @@ class PatientEditPage(BasePage):
         main_layout.addLayout(btn_layout)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._clear_form",
+        # description="PatientEditPage._clear_form",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _clear_form(self):
-        """Очищает поля формы."""
+        # """Очищает поля формы."""
+        """
+        Очищает поля формы.
+
+        Метод очищает поля формы, используемой для редактирования пациента.
+        """
         self.first_name_edit.clear()
         self.last_name_edit.clear()
         self.birth_date_edit.setDate(QDate.currentDate())
@@ -117,18 +139,26 @@ class PatientEditPage(BasePage):
         self.email_edit.clear()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage.on_enter",
+        # description="PatientEditPage.on_enter",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def on_enter(self, extra_data=None):
+        # """
+        # Вызывается при переходе на страницу.
+        # extra_data может содержать 'patient_id'.
+        # """
         """
         Вызывается при переходе на страницу.
-        extra_data может содержать 'patient_id'.
+
+        extra_data может содержать 'patient_id'. Если patient_id не None, то загружаем данные и включаем кнопку удаления.
+        Если patient_id None, то очищаем форму и отключаем кнопку удаления.
         """
         patient_id = extra_data.get('patient_id') if extra_data else None
         self.current_patient_id = patient_id
@@ -142,16 +172,24 @@ class PatientEditPage(BasePage):
             self.delete_btn.setEnabled(False)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._load_patient",
+        # description="PatientEditPage._load_patient",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _load_patient(self, patient_id):
-        """Загружает данные пациента по ID и заполняет форму."""
+        # """Загружает данные пациента по ID и заполняет форму."""
+        """
+        Загружает данные пациента по ID и заполняет форму.
+        
+        :param patient_id: ID пациента
+        :type patient_id: int
+        """
         try:
             patient = self.patient_service.get_patient_by_id(patient_id)
             self.first_name_edit.setText(patient.first_name)
@@ -172,9 +210,11 @@ class PatientEditPage(BasePage):
             self.logger.exception("Ошибка загрузки пациента")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._save_patient",
+        # description="PatientEditPage._save_patient",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -182,7 +222,17 @@ class PatientEditPage(BasePage):
     )
     @Slot()
     def _save_patient(self):
-        """Сохраняет данные пациента (создание или обновление)."""
+        # """Сохраняет данные пациента (создание или обновление)."""
+        """
+        Сохраняет данные пациента (создание или обновление).
+
+        Собирает данные из формы, создает PatientDTO, и передает его в сервис для сохранения.
+        Если пациент создается, то выводится информационное сообщение с ID созданного пациента.
+        Если пациент обновляется, то выводится информационное сообщение с ID обновленного пациента.
+        Если возникла ошибка валидации, то выводится предупреждение с текстом ошибки.
+        Если возникла любая другая ошибка, то выводится критическое сообщение с текстом ошибки.
+        """
+        
         # Собираем данные из формы
         first_name = self.first_name_edit.text().strip()
         last_name = self.last_name_edit.text().strip()
@@ -227,9 +277,11 @@ class PatientEditPage(BasePage):
             self.logger.exception("Ошибка сохранения пациента")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._delete_patient",
+        # description="PatientEditPage._delete_patient",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -237,19 +289,30 @@ class PatientEditPage(BasePage):
     )
     @Slot()
     def _delete_patient(self):
-        """Удаляет текущего пациента после подтверждения."""
+        # """Удаляет текущего пациента после подтверждения."""
+        """
+        Удаляет текущего пациента после подтверждения.
+
+        1. Проверяем, существует ли текущий пациент.
+        2. Если пациент существует, то выводим предупреждение о необходимости подтверждения.
+        3. Если пользователь подтвердил удаление, то удаляем пациента.
+        4. Если пациент успешно удален, то выводим информационное сообщение и возвращаемся к списку пациентов.
+        """
         if not self.current_patient_id:
             return
+
         reply = QMessageBox.question(
             self, "Подтверждение",
             "Вы уверены, что хотите удалить этого пациента? Все связанные приёмы и фото также будут удалены.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 self.patient_service.delete_patient(self.current_patient_id)
                 QMessageBox.information(self, "Успех", "Пациент удалён.")
                 self.logger.info(f"Удалён пациент ID={self.current_patient_id}")
+
                 self._go_back_to_list()
             except PatientNotFoundError:
                 QMessageBox.warning(self, "Ошибка", "Пациент не найден.")
@@ -258,9 +321,11 @@ class PatientEditPage(BasePage):
                 self.logger.exception("Ошибка удаления пациента")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._cancel",
+        # description="PatientEditPage._cancel",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -268,19 +333,31 @@ class PatientEditPage(BasePage):
     )
     @Slot()
     def _cancel(self):
-        """Отмена редактирования."""
+        # """Отмена редактирования."""
+        """
+        Отмена редактирования.
+
+        Возвращает пользователя на страницу со списком пациентов.
+        """
         self._go_back_to_list()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PatientEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="PatientEditPage._go_back_to_list",
+        # description="PatientEditPage._go_back_to_list",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _go_back_to_list(self):
-        """Возврат к списку пациентов."""
+        # """Возврат к списку пациентов."""
+        """
+        Возврат к списку пациентов.
+
+        Если страница управления существует, то возвращаемся к предыдущей странице (список пациентов).
+        """
         if self.page_manager:
             self.page_manager.go_back()  # предполагаем, что предыдущая страница - список пациентов

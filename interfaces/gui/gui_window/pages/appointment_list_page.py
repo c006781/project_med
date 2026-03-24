@@ -8,21 +8,31 @@
 
 from app.utils.logger.logger import AppLogger
 
-from app.services import AppointmentService, PhotoService
-from app.dto import AppointmentDTO
-from app.exceptions import AppointmentNotFoundError
-from app.dependencies import get_appointment_service, get_photo_service
+# from app.services import AppointmentService, PhotoService
+# from app.dto import AppointmentDTO
+# from app.exceptions import AppointmentNotFoundError
+from app.dependencies import (
+    # get_appointment_service, 
+    get_photo_service
+)
+
+# from interfaces.gui.gui_window.pages.base_page import BasePage
+from interfaces.gui.gui_window.pages.dynamic_detail_list_page import DynamicDetailListPage
+# from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
-    QTableView, QPushButton, QHeaderView, QMessageBox,
-    QLineEdit, QLabel, QTextEdit, QListWidget, QListWidgetItem
+    # QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
+    # QTableView, QPushButton, QHeaderView, QMessageBox,
+    # QLineEdit, 
+    QLabel, QTextEdit, QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal, Slot, QSortFilterProxyModel, QSize
+from PySide6.QtCore import (
+    Qt, QAbstractTableModel, QModelIndex, 
+    # Signal, Slot, 
+    QSortFilterProxyModel, QSize
+)
 from PySide6.QtGui import QPixmap, QIcon
 
-from interfaces.gui.gui_window.pages.base_page import BasePage
-from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 
 
 class AppointmentTableModel(QAbstractTableModel):
@@ -32,9 +42,11 @@ class AppointmentTableModel(QAbstractTableModel):
     _headers = ["ID", "Дата", "Время", "Заметка"]
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.__init__",
+        # description="AppointmentTableModel.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -52,11 +64,19 @@ class AppointmentTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._appointments = appointments or []
 
+        self.logger = AppLogger.get_instance(
+            name = 'gui.AppointmentListPage',
+            enable_file_logging = 'AppointmentTableModel',
+            use_name_in_filename = 'AppointmentTableModel',
+        )
+
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.rowCount",
+        # description="AppointmentTableModel.rowCount",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -75,9 +95,11 @@ class AppointmentTableModel(QAbstractTableModel):
 
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.columnCount",
+        # description="AppointmentTableModel.columnCount",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -96,9 +118,11 @@ class AppointmentTableModel(QAbstractTableModel):
         return len(self._headers)
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.data",
+        # description="AppointmentTableModel.data",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -117,8 +141,10 @@ class AppointmentTableModel(QAbstractTableModel):
         """
         if not index.isValid():
             return None
+        
         app = self._appointments[index.row()]
         col = index.column()
+
         if role == Qt.ItemDataRole.DisplayRole:
             if col == 0:
                 return str(app.id)
@@ -131,9 +157,11 @@ class AppointmentTableModel(QAbstractTableModel):
         return None
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.headerData",
+        # description="AppointmentTableModel.headerData",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -157,9 +185,11 @@ class AppointmentTableModel(QAbstractTableModel):
         return None
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.sort",
+        # description="AppointmentTableModel.sort",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -187,9 +217,11 @@ class AppointmentTableModel(QAbstractTableModel):
         self.endResetModel()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.update_appointments",
+        # description="AppointmentTableModel.update_appointments",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -207,9 +239,11 @@ class AppointmentTableModel(QAbstractTableModel):
         self.endResetModel()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentTableModel.get_appointment_at_row",
+        # description="AppointmentTableModel.get_appointment_at_row",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -234,9 +268,11 @@ class AppointmentFilterProxyModel(QSortFilterProxyModel):
 
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentFilterProxyModel.__init__",
+        # description="AppointmentFilterProxyModel.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -256,10 +292,18 @@ class AppointmentFilterProxyModel(QSortFilterProxyModel):
         super().__init__(parent)
         self._filter_text = ""
 
+        self.logger = AppLogger.get_instance(
+            name = 'gui.AppointmentListPage',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentFilterProxyModel.set_filter_text",
+        # description="AppointmentFilterProxyModel.set_filter_text",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -278,9 +322,11 @@ class AppointmentFilterProxyModel(QSortFilterProxyModel):
         self.invalidateFilter()  # Вызываем обновление прокси-модели
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentFilterProxyModel.filterAcceptsRow",
+        # description="AppointmentFilterProxyModel.filterAcceptsRow",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -307,323 +353,153 @@ class AppointmentFilterProxyModel(QSortFilterProxyModel):
         """
         if not self._filter_text:
             return True
+
         source_model = self.sourceModel()
+
         if not source_model:
             return True
+        
         for col in range(source_model.columnCount()):
             index = source_model.index(source_row, col, source_parent)
             data = source_model.data(index, Qt.ItemDataRole.DisplayRole)
             if data and self._filter_text in str(data).lower():
                 return True
+            
         return False
 
 
-class AppointmentListPage(BasePage):
+# class AppointmentListPage(BasePage):
+class AppointmentListPage(DynamicDetailListPage):
     """
-    Страница со списком приёмов.
-    Принимает в extra_data ключ 'patient_id' для фильтрации.
+    Страница со списком приёмов с правой панелью (заметка и фото).
     """
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentListPage.__init__",
+        # description="AppointmentListPage.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.logger = AppLogger.get_instance("gui.AppointmentListPage")
-        self.appointment_service = get_appointment_service()
-        self.photo_service = get_photo_service()  # для загрузки фото
+    def __init__(self, service, loader_func, dto_class, field_configs, *args, **kwargs):
+        """
+        Инициализирует страницу со списком приёмов с правой панелью (заметка и фото).
+        """
+        
+        super().__init__(service, loader_func, dto_class, field_configs, *args, **kwargs)
+        
+        self.logger = AppLogger.get_instance(
+            name = 'gui.AppointmentListPage',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
 
-        self.current_patient_id = None
+        self.photo_service = get_photo_service()
+
         self.current_appointment_id = None
+        self._setup_detail_panel()
 
-        self._setup_ui()
-        self._load_appointments()  # загрузит все, если нет patient_id
+        
+
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentListPage._setup_ui",
+        # description="AppointmentListPage._setup_detail_panel",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
-    def _setup_ui(self):
-        """Создаёт двухпанельный интерфейс."""
-        main_layout = QVBoxLayout(self)
+    def _setup_detail_panel(self):
+        """
+        Создает виджету правой панели.
 
-        # Верхняя панель с кнопками
-        top_layout = QHBoxLayout()
+        Создает виджету с заметкой и фотографиями приема.
+        """
+        # Создаем виджету с заметкой
 
-        self.add_btn = QPushButton("Новый приём")
-        self.add_btn.clicked.connect(self._on_add_appointment)
-        top_layout.addWidget(self.add_btn)
+        self.note_text_edit = QTextEdit()
+        # Установка режима "только для чтения"
+        self.note_text_edit.setReadOnly(True)
 
-        self.delete_btn = QPushButton("Удалить приём")
-        self.delete_btn.clicked.connect(self._on_delete_appointment)
-        self.delete_btn.setEnabled(False)
-        top_layout.addWidget(self.delete_btn)
+        # Добавляем виджету с заметкой в верхнюю часть detail_layout
+        self.detail_layout.addWidget(QLabel("Заметка:"))
+        self.detail_layout.addWidget(self.note_text_edit)
 
-        self.refresh_btn = QPushButton("Обновить")
-        self.refresh_btn.clicked.connect(self._load_appointments)
-        top_layout.addWidget(self.refresh_btn)
-
-        top_layout.addStretch()
-
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Поиск...")
-        self.search_edit.textChanged.connect(self._on_search_text_changed)
-        top_layout.addWidget(self.search_edit)
-
-        main_layout.addLayout(top_layout)
-
-        # Разделитель: слева таблица, справа детали
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-
-        # Левая часть: таблица приёмов
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.table_view = FilterTableView()
-        self.table_view.setSortingEnabled(True)
-
-        self.source_model = AppointmentTableModel()
-        self.proxy_model = AppointmentFilterProxyModel()
-        self.proxy_model.setSourceModel(self.source_model)
-        self.table_view.setModel(self.proxy_model)
-
-        self.table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
-        self.table_view.selectionModel().selectionChanged.connect(self._on_appointment_selected)
-
-        self.table_view.horizontalHeader().setStretchLastSection(True)
-        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-
-        left_layout.addWidget(self.table_view)
-        splitter.addWidget(left_widget)
-
-        # Правая часть: детали приёма
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-
-        self.info_label = QLabel("Выберите приём")
-        right_layout.addWidget(self.info_label)
-
-        self.note_text = QTextEdit()
-        self.note_text.setReadOnly(True)
-        self.note_text.setMaximumHeight(150)
-        right_layout.addWidget(QLabel("Заметка:"))
-        right_layout.addWidget(self.note_text)
-
+        # Создаем виджету со списком фотографий
         self.photo_list = QListWidget()
+
+        # Установка размера иконок фотографий
         self.photo_list.setIconSize(QSize(100, 100))
-        self.photo_list.setViewMode(QListWidget.ViewMode.IconMode)
-        self.photo_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.photo_list.itemDoubleClicked.connect(self._on_photo_double_clicked)
-        right_layout.addWidget(QLabel("Фотографии:"))
-        right_layout.addWidget(self.photo_list)
 
-        splitter.addWidget(right_widget)
-        splitter.setSizes([400, 600])
+        # Добавляем виджету со списком фотографий в верхнюю часть detail_layout
+        self.detail_layout.addWidget(QLabel("Фотографии:"))
+        self.detail_layout.addWidget(self.photo_list)
 
-        main_layout.addWidget(splitter)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentListPage.on_enter",
+        # description="AppointmentListPage.update_details",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
-    def on_enter(self, extra_data=None):
-        """При входе загружаем приёмы для указанного пациента (если patient_id передан)."""
-        self.current_patient_id = extra_data.get('patient_id') if extra_data else None
-        self._load_appointments()
+    def update_details(self, dto):
+        """
+        Обновляет правую панель данными выбранного приёма.
+        Вызывается автоматически при выборе строки в таблице.
 
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._load_appointments",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    def _load_appointments(self):
-        """Загружает приёмы, применяя фильтр по patient_id, если он задан."""
-        try:
-            if self.current_patient_id:
-                apps = self.appointment_service.get_appointments_by_patient(self.current_patient_id)
-            else:
-                apps = self.appointment_service.get_all()
-            self.source_model.update_appointments(apps)
-            self.logger.debug(f"Загружено {len(apps)} приёмов")
-            # Сбрасываем выделение
-            self.table_view.clearSelection()
-            self._clear_details()
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить приёмы: {e}")
-            self.logger.exception("Ошибка загрузки приёмов")
-
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._on_add_appointment",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    @Slot()
-    def _on_add_appointment(self):
-        """Переход на страницу создания нового приёма (с patient_id, если он известен)."""
-        extra = {}
-        if self.current_patient_id:
-            extra['patient_id'] = self.current_patient_id
-        if self.page_manager:
-            self.page_manager.switch_to('appointment_edit', extra_data=extra)
-
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._on_delete_appointment",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    @Slot()
-    def _on_delete_appointment(self):
-        """Удаление выбранного приёма."""
-        if not self.current_appointment_id:
+        :param dto: данные приёма
+        :type dto: AppointmentDTO
+        """
+        if not dto:
             return
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Удалить этот приём? Все связанные фото также будут удалены.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                self.appointment_service.delete_appointment(self.current_appointment_id)
-                QMessageBox.information(self, "Успех", "Приём удалён.")
-                self.logger.info(f"Удалён приём ID={self.current_appointment_id}")
-                self._load_appointments()
-                self._clear_details()
-                self.delete_btn.setEnabled(False)
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления приёма")
+        self.current_appointment_id = dto.id
+        self.note_text_edit.setText(dto.note_text or "")
+        self._load_photos(dto.id)
+
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="AppointmentListPage._on_search_text_changed",
+        # description="AppointmentListPage._load_photos",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
-    @Slot(str)
-    def _on_search_text_changed(self, text):
-        """Обновляет фильтр в таблице."""
-        self.proxy_model.set_filter_text(text)
+    def _load_photos(self, appointment_id):
+        """
+        Загружает фото для приёма и отображает их в списке.
 
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._on_appointment_selected",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    @Slot()
-    def _on_appointment_selected(self, selected, deselected):
-        """Обработка выбора строки в таблице."""
-        indexes = selected.indexes()
-        if indexes:
-            proxy_index = indexes[0]  # берём первый индекс (любой колонки)
-            source_index = self.proxy_model.mapToSource(proxy_index)
-            appointment = self.source_model.get_appointment_at_row(source_index.row())
-            if appointment:
-                self.current_appointment_id = appointment.id
-                self._show_appointment_details(appointment)
-                self.delete_btn.setEnabled(True)
-            else:
-                self._clear_details()
-                self.delete_btn.setEnabled(False)
-        else:
-            self._clear_details()
-            self.delete_btn.setEnabled(False)
-
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._show_appointment_details",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    def _show_appointment_details(self, appointment: AppointmentDTO):
-        """Отображает детали приёма и загружает фото."""
-        self.info_label.setText(f"Приём ID {appointment.id} от {appointment.date} {appointment.time or ''}")
-        self.note_text.setText(appointment.note_text or "")
-        # Загружаем фото
+        :param appointment_id: ID приёма
+        :raises Exception: если произошла ошибка загрузки
+        """
         self.photo_list.clear()
         try:
-            photos = self.photo_service.get_photos_for_appointment(appointment.id)
+            photos = self.photo_service.get_photos_for_appointment(appointment_id)
             for photo in photos:
-                # Здесь нужно получить полный путь к файлу
-                # Временно используем заглушку
-                pixmap = QPixmap()  # должна загружаться из photo.file_path
+                # TODO: загружать реальный QPixmap из файла
+                pixmap = QPixmap()  # заглушка
                 if not pixmap.isNull():
-                    icon = QIcon(pixmap.scaled(100, 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                    icon = QIcon(pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                 else:
                     icon = QIcon()
                 item = QListWidgetItem(icon, photo.description or "")
-                item.setData(Qt.ItemDataRole.UserRole, photo.id)
+                item.setData(Qt.UserRole, photo.id)
                 self.photo_list.addItem(item)
         except Exception as e:
             self.logger.exception("Ошибка загрузки фото")
-
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._clear_details",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    def _clear_details(self):
-        """Очищает панель деталей."""
-        self.info_label.setText("Выберите приём")
-        self.note_text.clear()
-        self.photo_list.clear()
-        self.current_appointment_id = None
-
-    @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        description="AppointmentListPage._on_photo_double_clicked",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
-    )
-    @Slot(QListWidgetItem)
-    def _on_photo_double_clicked(self, item):
-        """При двойном клике на фото можно открыть его в большом окне (заглушка)."""
-        photo_id = item.data(Qt.ItemDataRole.UserRole)
-        QMessageBox.information(self, "Фото", f"Открыть фото ID {photo_id} (не реализовано)")
-        # TODO: открыть полноразмерное фото

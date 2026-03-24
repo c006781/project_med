@@ -95,9 +95,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 @AppLogger.get_instance(
-        name = 'db_test_data'
+    name = 'system',
 ).log_execution_time(
-    description="Заполняем БД тестовыми данными",
+    # description="Заполняем БД тестовыми данными",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -113,7 +113,9 @@ def populate_test_data(session):
     # Проверяем, есть ли уже данные (чтобы не дублировать)
     if session.query(Patient).count() > 0:
         AppLogger.get_instance(
-            name = 'db_test_data'
+            name = 'db_test_data',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
         ).debug(
             f"База данных уже содержит данные. Пропускаем заполнение."
         )
@@ -121,14 +123,18 @@ def populate_test_data(session):
         return
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+            name = 'db_test_data',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
     ).debug(
         f"Заполнение базы тестовыми данными..."
     )    
     # print("Заполнение базы тестовыми данными...")
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+            name = 'db_test_data',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
     ).debug(
         f"Заполнение ТБ 'Пациенты' тестовыми данными..."
     ) 
@@ -166,7 +172,9 @@ def populate_test_data(session):
 
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+        name = 'db_test_data',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Заполнение ТБ 'Заметки' тестовыми данными..."
     ) 
@@ -184,7 +192,9 @@ def populate_test_data(session):
 
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+        name = 'db_test_data',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Заполнение ТБ 'Приёмы' тестовыми данными..."
     ) 
@@ -238,7 +248,9 @@ def populate_test_data(session):
 
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+        name = 'db_test_data',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Заполнение ТБ 'Фотографии' тестовыми данными..."
     ) 
@@ -263,7 +275,9 @@ def populate_test_data(session):
     session.commit()
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+        name = 'db_test_data',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Тестовые данные добавлены и сохранены."
     ) 
@@ -271,9 +285,9 @@ def populate_test_data(session):
 
 
 @AppLogger.get_instance(
-        name = 'db_test_data'
+    name = 'system',
 ).log_execution_time(
-    description="Заполнение БД",
+    # description="Заполнение БД",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -290,7 +304,9 @@ def generate_test_data(db_path:str="clinic.db"):
     )
 
     AppLogger.get_instance(
-        name = 'db_test_data'
+        name = 'db_test_data',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Создание сессии к БД: {db_path} ({os.path.abspath(db_path)})"
     ) 

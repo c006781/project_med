@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/main.py
+
 """
 Точка входа в графическое приложение.
 Запускает главное окно, инициализирует необходимые компоненты.
@@ -8,7 +8,7 @@ import sys
 import os
 
 # Добавляем корень проекта в sys.path, чтобы импортировать app.*
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.utils.logger.logger import AppLogger
 
@@ -44,7 +44,11 @@ def main():
     window.show()
 
     # Логируем запуск
-    logger = AppLogger.get_instance("gui")
+    logger = AppLogger.get_instance(
+        name = 'gui',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
+    )
     logger.info("GUI приложение запущено")
 
     sys.exit(app.exec())

@@ -141,7 +141,8 @@ class BaseAppLogger:
         Уровень logging, который будет использоваться для логгера, определяется параметром level.
         """
         self.logger.setLevel(level)
-        
+
+
     def __init__(
             self,
             name: str,
@@ -169,30 +170,71 @@ class BaseAppLogger:
 
         self.name = name
 
+        # if isinstance(enable_file_logging, str):
+        #     enable_file_logging = self._instances[enable_file_logging].enable_file_logging
+
+        # if isinstance(use_name_in_filename, str):
+        #     use_name_in_filename = self._instances[use_name_in_filename].use_name_in_filename
+
+        # if isinstance(config, str) and config is not None:
+        #     config = {
+        #         'LOG_LEVEL' : dict(zip(BaseAppLogger.level_map.values(), BaseAppLogger.level_map.keys()))[self._instances[config].log_level],
+        #         'LOG_FILE' : self._instances[config].base_log_file,
+        #         'LOG_MAX_BYTES' : self._instances[config].log_max_bytes,
+        #         'LOG_BACKUP_COUNT' : self._instances[config].log_backup_count,
+        #     }
+                
+        # self.enable_file_logging = enable_file_logging
+        # self.use_name_in_filename = use_name_in_filename
+
+        # Сохраняем ссылки, если переданы строки
         if isinstance(enable_file_logging, str):
-            enable_file_logging = self._instances[enable_file_logging].enable_file_logging
+            self._enable_file_logging_ref = enable_file_logging
+            self._enable_file_logging = False  # placeholder
+        else:
+            self._enable_file_logging_ref = None
+            self._enable_file_logging = enable_file_logging
 
         if isinstance(use_name_in_filename, str):
-            use_name_in_filename = self._instances[use_name_in_filename].use_name_in_filename
+            self._use_name_in_filename_ref = use_name_in_filename
+            self._use_name_in_filename = False
+        else:
+            self._use_name_in_filename_ref = None
+            self._use_name_in_filename = use_name_in_filename
 
+        # Обработка config: если строка, берём из другого экземпляра
         if isinstance(config, str) and config is not None:
-            config = {
-                'LOG_LEVEL' : dict(zip(BaseAppLogger.level_map.values(), BaseAppLogger.level_map.keys()))[self._instances[config].log_level],
-                'LOG_FILE' : self._instances[config].base_log_file,
-                'LOG_MAX_BYTES' : self._instances[config].log_max_bytes,
-                'LOG_BACKUP_COUNT' : self._instances[config].log_backup_count,
-            }
-                
-        self.enable_file_logging = enable_file_logging
-        self.use_name_in_filename = use_name_in_filename
+            parent = self._instances.get(config)
+            if parent is not None:
+                config = {
+                    'LOG_LEVEL' : dict(
+                        zip(
+                            BaseAppLogger.level_map.values(), 
+                            BaseAppLogger.level_map.keys()
+                        )
+                    )[parent.log_level],
+                    'LOG_FILE' : parent.base_log_file,
+                    'LOG_MAX_BYTES' : parent.log_max_bytes,
+                    'LOG_BACKUP_COUNT' : parent.log_backup_count,
+                }
+            else:
+                # родитель не найден – используем дефолт
+                config = None
 
         # Загружаем конфигурацию
         if config is None:
             config = self.get_default_config()
 
         # Проверяем наличие обязательных ключей
-        required_keys = ['LOG_LEVEL', 'LOG_FILE', 'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT']
+        required_keys = [
+            'LOG_LEVEL', 
+            'LOG_FILE', 
+            'LOG_MAX_BYTES', 
+            'LOG_BACKUP_COUNT'
+        ]
+
         missing_keys = [key for key in required_keys if key not in config]
+
         if missing_keys:
             raise ValueError(f"Отсутствуют обязательные ключи конфигурации: {missing_keys}")
 
@@ -206,50 +248,166 @@ class BaseAppLogger:
         except ValueError as e:
             raise ValueError(f"Ошибка преобразования параметров логирования: {e}")
 
-        # Формируем фактическое имя файла лога (если нужно)
-        if self.enable_file_logging and self.use_name_in_filename:
-            base, ext = os.path.splitext(self.base_log_file)
-            self.log_file = f"{base}_{self.name}{ext}"
-        else:
-            self.log_file = self.base_log_file
 
-        # Создаём папку для логов, если она не существует
-        log_dir = os.path.dirname(self.log_file)
-        if log_dir and not os.path.exists(log_dir):
-            os.makedirs(log_dir, exist_ok=True)
-
-        # Настраиваем логгер
+        # Создаём логгер (без обработчиков)
         self.logger = logging.getLogger(name)
         self.logger.setLevel(self.log_level)
         self.logger.propagate = False  # предотвращаем дублирование, если есть корневой логгер
 
         # Формат сообщений
-        formatter = logging.Formatter(self.LOG_FORMAT)
+        self.formatter = logging.Formatter(self.LOG_FORMAT)
 
-        # Добавляем файловый обработчик, если разрешено
-        if self.enable_file_logging:
-            file_handler = RotatingFileHandler(
-                filename=self.log_file,
-                maxBytes=self.log_max_bytes,
-                backupCount=self.log_backup_count,
-                encoding='utf-8'
-            )
-            file_handler.setLevel(self.log_level)
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
+        # Консольный обработчик (всегда)
+        self.console_handler = logging.StreamHandler()
+        self.console_handler.setLevel(self.log_level)
+        self.console_handler.setFormatter(self.formatter)
+        self.logger.addHandler(self.console_handler)
 
-        # Консольный обработчик (всегда включён для отладки)
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(self.log_level)
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+        # Инициализируем файловый обработчик (может быть None)
+        self.file_handler = None
+        self._update_file_handler()  # создаст, если нужно
 
         # Добавляем глобальные обработчики
         for handler in self._global_handlers:
             self.logger.addHandler(handler)
 
-        # Сохраняем ссылки на обработчики (может пригодиться для добавления GUI-обработчика позже)
+        # Сохраняем ссылки на обработчики (может пригодиться для GUI)
         self.handlers = self.logger.handlers[:]
+
+
+
+        # # Формируем фактическое имя файла лога (если нужно)
+        # if self.enable_file_logging and self.use_name_in_filename:
+        #     base, ext = os.path.splitext(self.base_log_file)
+        #     self.log_file = f"{base}_{self.name}{ext}"
+        # else:
+        #     self.log_file = self.base_log_file
+
+        # # Создаём папку для логов, если она не существует
+        # log_dir = os.path.dirname(self.log_file)
+        # if log_dir and not os.path.exists(log_dir):
+        #     os.makedirs(log_dir, exist_ok=True)
+
+        # # Настраиваем логгер
+        # self.logger = logging.getLogger(name)
+        # self.logger.setLevel(self.log_level)
+        # self.logger.propagate = False  # предотвращаем дублирование, если есть корневой логгер
+
+        # # Формат сообщений
+        # formatter = logging.Formatter(self.LOG_FORMAT)
+
+        # # Добавляем файловый обработчик, если разрешено
+        # if self.enable_file_logging:
+        #     file_handler = RotatingFileHandler(
+        #         filename=self.log_file,
+        #         maxBytes=self.log_max_bytes,
+        #         backupCount=self.log_backup_count,
+        #         encoding='utf-8'
+        #     )
+        #     file_handler.setLevel(self.log_level)
+        #     file_handler.setFormatter(formatter)
+        #     self.logger.addHandler(file_handler)
+        # else :
+        #     0==0
+        # # Консольный обработчик (всегда включён для отладки)
+        # console_handler = logging.StreamHandler()
+        # console_handler.setLevel(self.log_level)
+        # console_handler.setFormatter(formatter)
+        # self.logger.addHandler(console_handler)
+
+        # # Добавляем глобальные обработчики
+        # for handler in self._global_handlers:
+        #     self.logger.addHandler(handler)
+
+        # # Сохраняем ссылки на обработчики (может пригодиться для добавления GUI-обработчика позже)
+        # self.handlers = self.logger.handlers[:]
+
+    def _update_file_handler(self):
+        """
+        Пересоздаёт файловый обработчик в соответствии с текущими настройками enable_file_logging и use_name_in_filename.
+        """
+        # Если нужен файловый обработчик, но его нет, или он есть, но не должен быть
+        current_enabled = self.enable_file_logging
+        if current_enabled and self.file_handler is None:
+            # Создаём новый
+            self.file_handler = self._create_file_handler()
+            self.logger.addHandler(self.file_handler)
+        elif not current_enabled and self.file_handler is not None:
+            # Удаляем существующий
+            self.logger.removeHandler(self.file_handler)
+            self.file_handler.close()
+            self.file_handler = None
+        elif current_enabled and self.file_handler is not None:
+            # Проверяем, не изменилось ли имя файла (если use_name_in_filename изменилось)
+            new_log_file = self._get_log_file()
+            if self.file_handler.baseFilename != new_log_file:
+                # Заменяем
+                self.logger.removeHandler(self.file_handler)
+                self.file_handler.close()
+                self.file_handler = self._create_file_handler()
+                self.logger.addHandler(self.file_handler)
+
+    def _create_file_handler(self):
+        """Создаёт файловый обработчик на основе текущих настроек."""
+        log_file = self._get_log_file()
+        log_dir = os.path.dirname(log_file)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        handler = RotatingFileHandler(
+            filename=log_file,
+            maxBytes=self.log_max_bytes,
+            backupCount=self.log_backup_count,
+            encoding='utf-8'
+        )
+        handler.setLevel(self.log_level)
+        handler.setFormatter(self.formatter)
+        return handler
+
+    def _get_log_file(self):
+        """Возвращает имя файла лога с учётом use_name_in_filename."""
+        if self.use_name_in_filename:
+            base, ext = os.path.splitext(self.base_log_file)
+            return f"{base}_{self.name}{ext}"
+        return self.base_log_file
+
+    # --- Свойства для динамического получения значений от родителя ---
+    @property
+    def enable_file_logging(self):
+        if self._enable_file_logging_ref:
+            parent = self._instances.get(self._enable_file_logging_ref)
+            if parent is not None:
+                return parent.enable_file_logging
+        return self._enable_file_logging
+
+    @enable_file_logging.setter
+    def enable_file_logging(self, value):
+        if self._enable_file_logging_ref:
+            parent = self._instances.get(self._enable_file_logging_ref)
+            if parent is not None:
+                parent.enable_file_logging = value
+                return
+        self._enable_file_logging = value
+        self._update_file_handler()
+
+    @property
+    def use_name_in_filename(self):
+        if self._use_name_in_filename_ref:
+            parent = self._instances.get(self._use_name_in_filename_ref)
+            if parent is not None:
+                return parent.use_name_in_filename
+        return self._use_name_in_filename
+
+    @use_name_in_filename.setter
+    def use_name_in_filename(self, value):
+        if self._use_name_in_filename_ref:
+            parent = self._instances.get(self._use_name_in_filename_ref)
+            if parent is not None:
+                parent.use_name_in_filename = value
+                return
+        self._use_name_in_filename = value
+        self._update_file_handler()
+
+
 
     @classmethod
     def thec_craete(
@@ -270,8 +428,8 @@ class BaseAppLogger:
         name: str = 'default',
         force_new: bool = False,
         config: Optional[Dict[str, Any]] = None,
-        enable_file_logging: bool = True,
-        use_name_in_filename: bool = False,
+        enable_file_logging: Union[str,bool] = False,
+        use_name_in_filename: Union[str,bool] = False
     ) -> 'BaseAppLogger':
         """
         Возвращает экземпляр логгера с указанным именем.
@@ -320,6 +478,7 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     # Вспомогательные методы для формирования указателя на место вызова
     # --------------------------------------------------------------------------
+
     def _convert_patterns_modeles_tips(
         self,
         modeles,
@@ -689,6 +848,7 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     # Декоратор для замера времени выполнения
     # --------------------------------------------------------------------------
+
     def log_execution_time(
             self, 
             description: str = "", 

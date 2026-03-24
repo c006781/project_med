@@ -178,9 +178,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     """
 
     @AppLogger.get_instance(
-            name = 'system'
-    ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -215,12 +216,18 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         # Настройка логгера: если имя не передано, используем имя класса сервиса
         if logger_name is None:
             logger_name = self.__class__.__name__
-        self.logger = AppLogger.get_instance(logger_name)
+
+        self.logger = AppLogger.get_instance(
+            name = logger_name,
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -239,9 +246,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         return self._repo_class(session)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -266,9 +274,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             return dtos
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -311,9 +320,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             return dto
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -331,9 +342,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         raise NotImplementedError("Метод create должен быть переопределён в наследнике")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -351,9 +364,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         raise NotImplementedError("Метод update должен быть переопределён в наследнике")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -382,9 +397,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -403,9 +420,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         )
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -446,9 +465,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             return dto
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -467,13 +488,13 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         :rtype: DTOType
         """
         return self.get_dtos(item)
- 
-        
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -527,9 +548,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -550,9 +573,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -590,7 +614,28 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
             return dtos, total
-
+        
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца.
+        
+        :param column_name: имя столбца модели (атрибут ORM)
+        :param session: опциональная сессия
+        """
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            return repo.get_unique_values(column_name)
+        
 
 
 class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
@@ -599,9 +644,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
     """
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -636,9 +683,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
 
     # Переопределяем create, так как логика создания специфична
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -681,9 +730,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             return dto_out
            
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -730,9 +781,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             return updated_dto  
         
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -752,9 +805,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return PatientNotFoundError(entity_id) # Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -775,9 +830,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.get_all(session=session)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -801,9 +858,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.get_by_id(patient_id, session=session)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -842,9 +901,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             self.logger.info(f"Удалён пациент id={patient_id}")
    
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -878,9 +939,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.get_filtered(filters, fuzzy_threshold, session=session)
    
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -898,9 +961,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.create_patient(dto)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -920,7 +985,25 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
     """
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def __init__(self, db: Database, logger_name: Optional[str] = None):
+        """
+        Инициализирует сервис для работы с заметками приёмов.
+        
+        :param db: База данных
+        :type db: Database
+        :param logger_name: Имя для логгера (необязательный)
+        :type logger_name: Optional[str]
+        """
         if logger_name is None:
             logger_name = self.__class__.__name__
         super().__init__(
@@ -931,52 +1014,188 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             logger_name=logger_name
         )
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def _not_found_exception(self, entity_id: int) -> Exception:
+        """
+        Возвращает исключение, если заметка с указанным ID не найдена.
+        
+        :param entity_id: ID заметки
+        :return: исключение, если заметка не найдена
+        :rtype: Exception
+        """
         return AppointmentNoteNotFoundError(entity_id)
 
     # ----------------------------------------------------------------------
     # Переопределённые методы базового класса (если нужно добавить логику)
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_all(self, session: Optional[Session] = None) -> List[AppointmentNoteDTO]:
         """
-        Возвращает все заметки.
+        Возвращает список всех заметок.
+
+        :param session: сессия для объединения в одну транзакцию
+        :type session: Optional[Session]
+        :return: список заметок в виде объектов AppointmentNoteDTO
+        :rtype: List[AppointmentNoteDTO]
         """
         self.logger.debug("Запрос всех заметок")
         return super().get_all(session=session)
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_by_id(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
         Возвращает заметку по ID.
+
+        :param note_id: ID заметки
+        :type note_id: int
+        :param session: Сессия базы данных
+        :type session: Optional[Session]
+        :return: DTO заметки
+        :rtype: AppointmentNoteDTO
         """
         self.logger.debug(f"Запрос заметки id={note_id}")
         return super().get_by_id(note_id, session=session)
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def delete(self, note_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет заметку по ID.
+        
+        :param note_id: ID заметки
+        :type note_id: int
+        :param session: сессия для объединения в одну транзакцию
+        :type session: Optional[Session]
         """
         self.logger.debug(f"Удаление заметки id={note_id}")
         super().delete(note_id, session=session)
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def create(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+        """
+        Создает заметку.
+        
+        :param dto: данные заметки
+        :type dto: AppointmentNoteDTO
+        :return: созданная заметка
+        :rtype: AppointmentNoteDTO
+        """
         return self.create_note(dto.text)
 
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def update(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+        """
+        Обновляет заметку по ID.
+        
+        :param dto: данные заметки
+        :type dto: AppointmentNoteDTO
+        :return: обновленная заметка
+        :rtype: AppointmentNoteDTO
+        """
         return self.update_note(dto.id, dto.text)
     
     # ----------------------------------------------------------------------
     # Специфические методы сервиса
     # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_note(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
         Синоним для get_by_id.
+        
+        :param note_id: ID заметки
+        :type note_id: int
+        :param session: сессия для объединения в одну транзакцию
+        :type session: Optional[Session]
+        :return: заметка с указанным ID
+        :rtype: AppointmentNoteDTO
         """
         return self.get_by_id(note_id, session=session)
 
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def create_note(self, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
         Создаёт новую заметку с указанным текстом.
+
+        :param text: текст заметки
+        :type text: str
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: созданная заметка
+        :rtype: AppointmentNoteDTO
         """
         self.logger.debug("Создание заметки")
         with self._session_scope(session) as sess:
@@ -988,34 +1207,113 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             self.logger.info(f"Создана заметка id={dto_out.id}")
             return dto_out
 
-    def update_note(self, note_id: int, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def update_note(
+        self, 
+        note_id: int, 
+        text: str, 
+        session: Optional[Session] = None
+    ) -> AppointmentNoteDTO:
         """
         Обновляет текст существующей заметки.
+
+        Args:
+            note_id: int - ID заметки, которую нужно обновить.
+            text: str - новый текст заметки.
+            session: Optional[Session] - сессия БД, которая будет использоваться для работы с репозиторием.
+
+        Returns:
+            AppointmentNoteDTO: обновленный объект AppointmentNoteDTO.
+
+        Raises:
+            AppointmentNoteNotFoundError: если заметка с указанным ID не найдена.
         """
+
+        # Логгируем начало обновления заметки
         self.logger.debug(f"Обновление заметки id={note_id}")
+
+        # Создаем сессию для работы с репозиторием
         with self._session_scope(session) as sess:
+            
+            # Получаем репозиторий для работы с заметками
             repo = self._get_repo(sess)
+            
+            # Получаем заметку по ID
             note = repo.get_by_id(note_id)
+            
+            # Если заметка не найдена, выбрасываем исключение
             if note is None:
                 raise AppointmentNoteNotFoundError(note_id)
+            
+            # Обновляем текст заметки
             note.text = text
+            
+            # Получаем обновленный DTO из обновленной заметки
             # updated_dto = self._dto_class.from_orm(note)
             updated_dto = self.get_dto_out(note)
+            
+            # Логгируем обновленной заметки
             self.logger.info(f"Обновлена заметка id={updated_dto.id}")
+
+            # Возвращаем обновленный DTO
             return updated_dto
 
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def delete_note(self, note_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет заметку (синоним delete).
+        :param note_id: ID заметки
+        :type note_id: int
+        :param session: сессия для объединения в одну транзакцию
+        :type session: Optional[Session]
         """
+        
         self.logger.debug(f"Удаляет запись по ID ({note_id})")
         self.delete(note_id, session=session)
 
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_or_create_note(self, text: str, session: Optional[Session] = None) -> Optional[AppointmentNoteDTO]:
         """
         Возвращает существующую заметку по точному совпадению текста,
         либо создаёт новую, если такой ещё нет.
         Если text пустой или None, возвращает None.
+        
+        :param text: текст заметки
+        :type text: str
+        :param session: сессия БД, которая будет использоваться для работы с репозиторием
+        :type session: Optional[Session]
+        :return: существующая или созданная заметка
+        :rtype: Optional[AppointmentNoteDTO]
         """
         if not text:
             return None
@@ -1037,10 +1335,28 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             # return self._dto_class.from_orm(note)
             return self.get_dto_out(note)
 
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def create_note_from_file(self, file_path: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
         Создаёт заметку, читая текст из файла.
-        :raises FileNotFoundError, IOError
+
+        :raises FileNotFoundError, IOError: если файл не найден или ошибка чтения
+        :param file_path: путь к файлу, из которого нужно прочитать текст для заметки
+        :type file_path: str
+        :param session: опциональная сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: созданная заметка
+        :rtype: AppointmentNoteDTO
         """
         self.logger.debug(f"Создание заметки из файла: {file_path}")
         try:
@@ -1051,13 +1367,30 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             raise  # пробрасываем дальше
         return self.create_note(text, session=session)      
       
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def cleanup_unused_note(self, note_id: int, session: Session) -> None:
         """
         Удаляет заметку, если на неё больше не ссылаются никакие приёмы.
         Если заметка используется, ничего не делает.
+        :param note_id: ID заметки, которую нужно проверить на использование
+        :type note_id: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Session
         """
+        
         if note_id is None:
             return
+
         # Проверяем, остались ли приёмы с этой заметкой
         remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
         if remaining == 0:
@@ -1065,7 +1398,31 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             note = note_repo.get_by_id(note_id)
             if note:
                 note_repo.delete(note)
-                self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")       
+                self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")   
+
+
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def get_choices(self, session: Optional[Session] = None) -> List[str]:
+        """
+        Возвращает список текстов всех заметок для автодополнения.
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: список текстов заметок
+        :rtype: List[str]
+        """
+        notes = self.get_all(session=session)
+        return [note.text for note in notes]
+
+
 
 class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
     """
@@ -1074,6 +1431,17 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     для предотвращения N+1 запросов.
     """
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def __init__(
         self,
         db: Database,
@@ -1081,6 +1449,19 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         photo_service: Optional['PhotoService'] = None,   
         logger_name: Optional[str] = None
     ):
+        """
+        Инициализирует сервис для работы с приёмами.
+        
+        :param db: База данных
+        :type db: Database
+        :param note_service: сервис для работы с заметками приёмов (необязательный)
+        :type note_service: Optional['NoteService']
+        :param photo_service: сервис для работы с фотографиями приёмов (необязательный)
+        :type photo_service: Optional['PhotoService']
+        :param logger_name: имя для логгера (необязательный)
+        :type logger_name: Optional[str]
+        """
+
         if logger_name is None:
             logger_name = self.__class__.__name__
           
@@ -1101,11 +1482,40 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         if self._note_service is None:
             self._note_service = NoteService(db, logger_name=logger_name + ".NoteService")
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def _not_found_exception(self, entity_id: int) -> Exception:
-        """Возвращает исключение, если приём не найден."""
+        """
+        Возвращает исключение, если приём не найден.
+
+        :param entity_id: идентификатор приёма
+        :type entity_id: int
+        :return: исключение AppointmentNotFoundError
+        :rtype: Exception
+        """
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
         return AppointmentNotFoundError(entity_id)
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_dtos(
             self, 
             item_s:Union[List[AppointmentDTO], AppointmentDTO]  
@@ -1114,6 +1524,10 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         Возвращает список DTO из списка объектов или один DTO из объекта.
         Если получен список объектов, то для каждого объекта пытается создать DTO.
         Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
+        :param item_s: список объектов или один объект
+        :type item_s: Union[List[AppointmentDTO], AppointmentDTO]
+        :return: список DTO или один DTO
+        :rtype: Union[List[AppointmentDTO], AppointmentDTO]
         """
         if isinstance(item_s, list):
             # Если получен список объектов
@@ -1153,22 +1567,98 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 raise e
             
             return dto
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def create(self, dto: AppointmentDTO) -> AppointmentDTO:
         """
-        Создаёт приём. Поле note_text может быть передано в dto как виртуальное.
+        Создаёт приём из переданных данных.
+
+        Метод create_appointment будет вызван для создания приёма.
+        Если поле note_text передано в dto, то оно будет передано в create_appointment.
+        Если поле note_text не передано в dto, то оно будет равно None.
+
+        :param dto: DTO с данными (используются patient_id, date, time, note_id)
+        :type dto: AppointmentDTO
+        :return: созданный приём
+        :rtype: AppointmentDTO
         """
+        # получаем текст заметки из dto
         note_text = getattr(dto, 'note_text', None)
+        # вызываем метод create_appointment для создания приёма
         return self.create_appointment(dto, note_text=note_text)
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def update(self, dto: AppointmentDTO) -> AppointmentDTO:
+        """
+        Обновляет существующий приём.
+
+        Мы используем метод update_appointment для обновления приёма,
+        а параметр note_text мы передаем в него из поля dto,
+        если оно указано.
+        (Поле note_text может быть передано в dto как виртуальное.)
+
+        :param dto: данные приёма
+        :type dto: AppointmentDTO
+        :return: обновленный DTO приёма
+        :rtype: AppointmentDTO
+        :raises AppointmentNotFoundError: если приём с указанным ID не найден
+        :raises ValueError: если ID приёма не указан
+        """
+
+        # получаем текст заметки из поля dto, если он указан
         note_text = getattr(dto, 'note_text', None)
+        # вызываем метод update_appointment для обновления приёма
+        # и передаем параметр note_text в него
         return self.update_appointment(dto, note_text=note_text)
+
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей
     # ----------------------------------------------------------------------
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_all(self, session: Optional[Session] = None) -> List[AppointmentDTO]:
-        """Возвращает все приёмы с подгруженными пациентом и заметкой."""
+        """
+        Возвращает все приёмы с подгруженными пациентом и заметкой.
+
+        1. Создаем сессию для работы в одной транзакции (если не указана).
+        2. Получаем репозиторий для работы с приёмами.
+        3. Вызываем метод get_all_with_relations у репозитория, чтобы получить все приёмы с подгруженными данными.
+        4. Создаем список DTO из полученных записей.
+        5. Возвращаем список DTO.
+        
+        :return: список приёмов с подгруженными данными
+        :rtype: List[AppointmentDTO]
+        """
         self.logger.debug("get_all (with relations)")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
@@ -1191,12 +1681,45 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             #         dto.note_text = item.note.text
             return dtos
         
-    def get_appointments_by_patient(self, patient_id: int, session: Optional[Session] = None) -> List[AppointmentDTO]:
-        """Возвращает приёмы пациента с подгруженными связями."""
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def get_appointments_by_patient(
+        self, 
+        patient_id: int, 
+        session: Optional[Session] = None
+    ) -> List[AppointmentDTO]:
+        """
+        Возвращает приёмы пациента с подгруженными связями.
+
+        :param patient_id: ID пациента, для которого хотим получить приёмы
+        :type patient_id: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: список приёмов пациента с подгруженными связями
+        :rtype: List[AppointmentDTO]
+        """
         self.logger.debug(f"get_appointments_by_patient: patient_id={patient_id}")
+
+        # 1. Создаем сессию для работы в одной транзакции (если не указана)
         with self._session_scope(session) as sess:
+
+            # 2. Получаем репозиторий для работы с приёмами
             repo = self._get_repo(sess)
+
+            # 3. Вызываем метод get_by_patient_with_relations у репозитория, передавая ID пациента
             items = repo.get_by_patient_with_relations(patient_id)
+
+            # 4. Создаем список DTO из полученных записей
             # return [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.model_validate(item) for item in items]
@@ -1204,24 +1727,83 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             # self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
             return dtos
 
-    def get_appointment(self, appointment_id: int, session: Optional[Session] = None) -> AppointmentDTO:
-        """Возвращает один приём по ID с подгруженными связями."""
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def get_appointment(
+        self, 
+        appointment_id: int, 
+        session: Optional[Session] = None
+    ) -> AppointmentDTO:
+        """
+        Возвращает один приём по ID с подгруженными связями (пациентом и заметкой).
+
+        Шаги:
+        1. Создаем сессию для работы в одной транзакции (если не указана)
+        2. Получаем репозиторий (Repository) для работы с приёмами
+        3. Вызываем метод get_by_id_with_relations у репозитория, передавая ID приёма
+        4. Если приём не найден, то вызываем исключение AppointmentNotFoundError
+        5. Создаем DTO из полученной записи
+        6. Возвращаем DTO
+
+        :param appointment_id: ID приёма
+        :type appointment_id: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: приём с подгруженными связями
+        :rtype: AppointmentDTO
+        :raises AppointmentNotFoundError: если приём с указанным ID не существует
+        """
         self.logger.debug(f"get_appointment: id={appointment_id}")
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             item = repo.get_by_id_with_relations(appointment_id)
             if item is None:
                 raise AppointmentNotFoundError(appointment_id)
             # return self._dto_class.from_orm(item)
+            # Создаем DTO из полученной записи
             return  self.get_dtos(item)
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_filtered(
-            self, 
-            filters: List[Dict[str, Any]], 
-            fuzzy_threshold: int = 60,
-            session: Optional[Session] = None,
-        ) -> List[AppointmentDTO]:
-        """Возвращает отфильтрованные приёмы с подгруженными связями."""
+        self, 
+        filters: List[Dict[str, Any]], 
+        fuzzy_threshold: int = 60,
+        session: Optional[Session] = None,
+    ) -> List[AppointmentDTO]:
+        """
+        Возвращает отфильтрованные приёмы с подгруженными связями.
+        
+        :param filters: список фильтров в виде словарей с именами полей и значениями
+        :type filters: List[Dict[str, Any]]
+        :param fuzzy_threshold: порог для фильтрации с нечетким соответствием, в секундах
+        :type fuzzy_threshold: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: список отфильтрованных приёмов в виде объектов AppointmentDTO
+        :rtype: List[AppointmentDTO]
+        """
+
         # from ..utils.filtering import apply_filters, apply_post_filters
 
         self.logger.debug(f"get_filtered (with relations) filters={filters}")
@@ -1241,10 +1823,27 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
     # Методы создания, обновления и удаления (без изменений)
     # ----------------------------------------------------------------------
 
-    def create_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None,
-                           session: Optional[Session] = None) -> AppointmentDTO:
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def create_appointment(
+        self, 
+        dto: AppointmentDTO, 
+        note_text: Optional[str] = None,
+        session: Optional[Session] = None
+    ) -> AppointmentDTO:
         """
         Создаёт новый приём.
+        
         :param dto: DTO с данными (используются patient_id, date, time, note_id).
         :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
                           и её ID автоматически подставлен (заменяет dto.note_id).
@@ -1270,6 +1869,7 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 note_dto = self._note_service.get_or_create_note(note_text, session=sess)
                 note_id = note_dto.id if note_dto else None
 
+            # Создаем приём
             appointment = self._model_class(
                 patient_id=dto.patient_id,
                 date=dto.date,
@@ -1283,12 +1883,36 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             self.logger.info(f"Создан приём id={dto_out.id}")
             return dto_out
 
-    def update_appointment(self, dto: AppointmentDTO, note_text: Optional[str] = None,
-                           session: Optional[Session] = None) -> AppointmentDTO:
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def update_appointment(
+        self, 
+        dto: AppointmentDTO, 
+        note_text: Optional[str] = None,
+        session: Optional[Session] = None
+    ) -> AppointmentDTO:
         """
         Обновляет существующий приём.
         Если передан note_text, заметка будет найдена или создана, и ID старой заметки
         будет заменён на новую. Старая заметка будет удалена, если она больше не используется.
+
+        :param dto: DTO приёма, который нужно обновить
+        :param note_text: текст заметки. Если передан, заметка будет найдена или создана,
+                          и ID старой заметки будет заменён на новую. Старая заметка будет удалена,
+                          если она больше не используется.
+        :param session: опциональная сессия для работы в одной транзакции
+        :return: обновленный DTO приёма
+        :raises AppointmentNotFoundError: если приём с указанным ID не найден
+        :raises ValueError: если ID приёма не указан
         """
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
@@ -1321,18 +1945,29 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             if old_note_id is not None and old_note_id != app.note_id:
                 # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
                 #  self._cleanup_unused_note(old_note_id, sess)
-                 self._note_service.cleanup_unused_note(old_note_id, sess)
+                self._note_service.cleanup_unused_note(old_note_id, sess)
 
             # updated_dto = self._dto_class.from_orm(app)
             updated_dto = self.get_dto_out(app)
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
             return updated_dto   
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def delete_appointment(
-            self, 
-            appointment_id: int, 
-            session: Optional[Session] = None
-        ) -> None:
+        self, 
+        appointment_id: int, 
+        session: Optional[Session] = None
+    ) -> None:
         """
         Удаляет приём и, если заметка больше не используется, удаляет её.
         
@@ -1366,27 +2001,61 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             if note_id is not None:
                 self._note_service.cleanup_unused_note(note_id, sess)
 
-
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_appointments_by_patient_page(
         self, 
         patient_id: int,  # ID пациента, для которого хотим получить страницу приёмов
-        offset: int,  # смещение страницы
-        limit: int,  # размер страницы
-        filters: Optional[List[Dict[str, Any]]] = None,  # фильтры SQL
-        order_by: Optional[List] = None,  # сортировка SQL
+        offset: int,  # смещение страницы (количество записей, которые нужно пропустить)
+        limit: int,  # размер страницы (количество записей, которые нужно вернуть)
+        filters: Optional[List[Dict[str, Any]]] = None,  # фильтры SQL (например: [{'column': 'date', 'operator': '>=', 'value': datetime.date(2022, 1, 1)}])
+        order_by: Optional[List] = None,  # сортировка SQL (например: ['date', 'time'])
         session: Optional[Session] = None  # сессия для работы в одной транзакции
     ) -> Tuple[List[AppointmentDTO], int]:
         """
         Возвращает страницу приёмов пациента с подгруженными связями.
+
+        Шаги:
+
+        1. Создаем сессию для работы в одной транзакции (если не указана)
+        2. Получаем репозиторий (Repository) для работы с приёмами
+        3. Вызываем метод get_page_by_patient у репозитория, передавая ID пациента, смещение, размер страницы, фильтры и сортировку
+        4. Вызываем метод count_by_patient у репозитория, передавая ID пациента и фильтры, чтобы получить общее количество приёмов
+        5. Создаем список DTO из полученных записей
+        6. Возвращаем список DTO и общее количество приёмов
         """
         self.logger.debug(f"Запрос страницы приёмов пациента {patient_id}: offset={offset}, limit={limit}")
+
+        # Создаем сессию для работы в одной транзакции (если не указана)
         with self._session_scope(session) as sess:
             # получаем репозиторий
             repo = self._get_repo(sess)
-            items = repo.get_page_by_patient(patient_id, offset, limit, filters=filters, order_by=order_by)
+            
+            # получаем страницу приёмов для указанного пациента
+            items = repo.get_page_by_patient(
+                patient_id, 
+                offset, 
+                limit, 
+                filters=filters, 
+                order_by=order_by
+            )
+            
+            # получаем общее количество приёмов для указанного пациента
             total = repo.count_by_patient(patient_id, filters=filters)
+            
+            # создаем список DTO из полученных записей
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
+            
+            # возвращаем список DTO и общее количество приёмов
             return dtos, total
 
 class PhotoService(
@@ -1397,6 +2066,18 @@ class PhotoService(
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
     """
 
+
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def __init__(
         self, 
         db: Database, 
@@ -1404,19 +2085,81 @@ class PhotoService(
         logger_name: 
         Optional[str] = None
     ):
+        """
+        Инициализирует сервис для работы с фотографиями приёмов.
+        
+        :param db: объект Database для работы с БД
+        :type db: Database
+        :param photos_storage_path: путь к директории для хранения фотографий
+        :type photos_storage_path: str
+        :param logger_name: имя лога для сервиса
+        :type logger_name: Optional[str]
+        """
+        # Если имя лога не указано, то используем имя класса
         if logger_name is None:
             logger_name = self.__class__.__name__
+
+        # Инициализируем базовый класс
         super().__init__(
-            db=db,
-            repo_class=PhotoRepository,
-            model_class=Photo,
-            dto_class=PhotoDTO,
-            logger_name=logger_name
+            db=db,  # объект Database для работы с БД
+            repo_class=PhotoRepository,  # класс репозитория для работы с фотографиями
+            model_class=Photo,  # класс модели для работы с фотографиями
+            dto_class=PhotoDTO,  # класс DTO для работы с фотографиями
+            logger_name=logger_name  # имя лога для сервиса
         )
+
+        # Устанавливаем путь к директории для хранения фотографий
         self._storage_path = photos_storage_path
+
+        # Создаем директорию для хранения фотографий, если она не существует
         self._ensure_storage_exists()
 
+
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
+        """
+        Возвращает список уникальных значений для указанного столбца.
+        
+        :param column_name: имя столбца для получения уникальных значений
+        :type column_name: str
+        :param session: сессия для работы в рамках внешней транзакции
+        :type session: Optional[Session]
+        :return: список уникальных значений для указанного столбца
+        :rtype: List[Any]
+        """
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            return repo.get_unique_values(column_name)
+
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def _not_found_exception(self, entity_id: int) -> Exception:
+        """
+        Возвращает исключение, если фото с указанным ID не найдено.
+
+        :param entity_id: ID фото
+        :return: исключение, если фото не найдено
+        :rtype: Exception
+        """
         return PhotoNotFoundError(entity_id)
 
     # ----------------------------------------------------------------------
@@ -1457,6 +2200,18 @@ class PhotoService(
     #     ext = os.path.splitext(filename)[1].lower()
     #     return ext in ALLOWED_EXTENSIONS
 
+
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def add_photo_to_appointment(
             self, 
             appointment_id: int, 
@@ -1553,11 +2308,21 @@ class PhotoService(
     #         self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dto_out)} записей")
     #         return dto_out
 
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def get_photos_for_appointment(
-            self, 
-            appointment_id: int, 
-            session: Optional[Session] = None
-        ) -> List[PhotoDTO]:
+        self, 
+        appointment_id: int, 
+        session: Optional[Session] = None
+    ) -> List[PhotoDTO]:
         """
         Возвращает список фотографий для указанного приёма.
 
@@ -1597,7 +2362,21 @@ class PhotoService(
             self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dtos)} записей")
             return dtos
     
-    def delete_photo(self, photo_id: int, session: Optional[Session] = None) -> None:
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def delete_photo(
+        self, 
+        photo_id: int, 
+        session: Optional[Session] = None
+    ) -> None:
         """
         Удаляет фото:
         1. Удаляет запись из БД.
@@ -1605,16 +2384,21 @@ class PhotoService(
         Если файл не удалился, только логирует ошибку (данные уже консистентны).
         """
         self.logger.debug(f"Удаление фото id={photo_id}")
+
+        # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
         with self._session_scope(session) as sess:
+            # 2. Получаем репозиторий фотографий
             repo = self._get_repo(sess)
+            
+            # 3. Получаем фотографию по ID
             photo = repo.get_by_id(photo_id)
             if photo is None:
                 raise PhotoNotFoundError(photo_id)
-            
-            # Запоминаем путь к файлу до удаления записи
+
+            # 4. Запоминаем путь к файлу до удаления записи
             file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
 
-            # Сначала пытаемся удалить файл
+            # 5. Пытаемся удалить файл
             try:
                 if os.path.exists(file_path_to_delete):
                     os.remove(file_path_to_delete)
@@ -1623,15 +2407,31 @@ class PhotoService(
                 self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}")
                 raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
-            # Если файл успешно удалён (или не существовал), удаляем запись
-            repo.delete(photo) # Удаляем запись
+            # 6. Если файл успешно удалён (или не существовал), удаляем запись
+            repo.delete(photo)  # Удаляем запись
             self.logger.info(f"Удалена запись фото id={photo_id}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы (не требуют сессии)
     # ----------------------------------------------------------------------
 
-    def _generate_target_path(self, source_path: str, appointment_id: int, photo_id: int) -> str:
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def _generate_target_path(
+        self, 
+        source_path: str, 
+        appointment_id: int, 
+        photo_id: int
+    ) -> str:
         """
         Генерирует полный путь для сохранения файла на основе appointment_id и photo_id.
 
@@ -1644,15 +2444,37 @@ class PhotoService(
         <name(base_name)> - имя файла без расширения (например, "image")
         <unique_id> - уникальный идентификатор (например, "12345678")
         <ext(base_name)> - расширение файла (например, ".jpg")
+
+        1. Получаем имя файла и его расширение
+        2. Генерируем уникальный идентификатор
+        3. Создаем имя файла для хранения
+        4. Создаем полный путь к файлу
         """
+        # 1. Получаем имя файла и его расширение
         base_name = os.path.basename(source_path)
         name, ext = os.path.splitext(base_name)
+
+        # 2. Генерируем уникальный идентификатор
         unique_id = uuid.uuid4().hex[:8]  # первые 8 символов UUID
+
+        # 3. Создаем имя файла для хранения
         filename = f"{photo_id}_{name}_{unique_id}{ext}"
+
+        # 4. Создаем полный путь к файлу
         app_folder = os.path.join(self._storage_path, f"app_{appointment_id}")
         return os.path.join(app_folder, filename)
 
-
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
     def _ensure_storage_exists(self):
         """Создаёт папку для фото, если её нет."""
         os.makedirs(self._storage_path, exist_ok=True)

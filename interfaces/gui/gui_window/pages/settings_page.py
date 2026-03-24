@@ -6,7 +6,8 @@ from interfaces.gui.gui_window.pages.base_page import BasePage
 from app.config.config_manager.manager import AppConfigManager
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    # QWidget, 
+    QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox
 )
@@ -20,26 +21,47 @@ class SettingsPage(BasePage):
     """
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage.__init__",
+        # description="SettingsPage.__init__",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def __init__(self, parent=None):
+        """
+        Инициализирует страницу настроек.
+        
+        :param parent: родительский виджет
+        :type parent: Optional[QWidget]
+        """
         super().__init__(parent)
-        self.logger = AppLogger.get_instance("gui.SettingsPage")
+
+        self.logger = AppLogger.get_instance(
+            name = 'gui.SettingsPage',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
         self.config_manager = AppConfigManager.get_instance()
         self.first_start = False          # флаг первого запуска
+
         self._setup_ui()
         self._load_settings()
 
+
+
+
+
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage._setup_ui",
+        # description="SettingsPage._setup_ui",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -82,11 +104,14 @@ class SettingsPage(BasePage):
 
         # Папка для бекапов
         self.backup_path_edit = QLineEdit()
+
         self.backup_path_btn = QPushButton("Обзор...")
         self.backup_path_btn.setMaximumWidth(80)
+
         backup_layout = QHBoxLayout()
         backup_layout.addWidget(self.backup_path_edit)
         backup_layout.addWidget(self.backup_path_btn)
+        
         # form_layout.addRow("Папка бекапов:", backup_layout)
         # Вместо "Папка бекапов" напишем "Папка для локальных бекапов БД"
         form_layout.addRow("Папка для локальных бекапов БД:", backup_layout)
@@ -115,56 +140,115 @@ class SettingsPage(BasePage):
         self.save_btn.clicked.connect(self._save_settings)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage._browse_file",
+        # description="SettingsPage._browse_file",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _browse_file(self, line_edit, title, filter_str):
+        """
+        Открывает нажатие на кнопку "Обзреть" для поля ввода и открывает диалоговое окно выбора файла.
+        
+        :param line_edit: Поле ввода для ввода пути к файлу.
+        :type line_edit: QLineEdit
+        :param title: Заголовок диалогового окна.
+        :type title: str
+        :param filter_str: Строка фильтрации для файлов.
+        :type filter_str: str
+        """
         file_path, _ = QFileDialog.getOpenFileName(self, title, "", filter_str)
         if file_path:
             line_edit.setText(file_path)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage._browse_dir",
+        # description="SettingsPage._browse_dir",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _browse_dir(self, line_edit, title):
+        """
+        Открывает нажатие на кнопку "Обзреть" для поля ввода и открывает диалоговое окно выбора папки.
+        
+        :param line_edit: Поле ввода для ввода пути к папке.
+        :type line_edit: QLineEdit
+        :param title: Заголовок диалогового окна.
+        :type title: str
+        """
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
             line_edit.setText(dir_path)
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage._load_settings",
+        # description="SettingsPage._load_settings",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
         )
     )
     def _load_settings(self):
-        """Загружает текущие настройки из менеджера и заполняет поля."""
-        self.db_path_edit.setText(self.config_manager.get('database_local_path', ''))
-        self.photos_path_edit.setText(self.config_manager.get('PHOTOS_STORAGE_PATH', ''))
-        self.token_edit.setText(self.config_manager.get('YANDEX_TOKEN', ''))
-        self.remote_path_edit.setText(self.config_manager.get('database_remote_path', ''))
-        self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))
-        self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
-        self.log_file_check.setChecked(self.config_manager.get('LOG_ENABLED', True))
+        # """Загружает текущие настройки из менеджера и заполняет поля."""
+        """
+        Загружает текущие настройки из менеджера и заполняет поля.
+
+        Заполняет поля:
+        - database_local_path
+        - PHOTOS_STORAGE_PATH
+        - YANDEX_TOKEN
+        - database_remote_path
+        - BACKUP_PATH
+        - BACKUP_COUNT
+        - LOG_ENABLED
+        """
+        self.db_path_edit.setText(
+            self.config_manager.get('database_local_path', '')
+        )
+
+        self.photos_path_edit.setText(
+            self.config_manager.get('PHOTOS_STORAGE_PATH', '')
+        )
+
+        self.token_edit.setText(
+            self.config_manager.get('YANDEX_TOKEN', '')
+        )
+
+        self.remote_path_edit.setText(
+            self.config_manager.get('database_remote_path', '')
+        )
+
+        self.backup_path_edit.setText(
+            self.config_manager.get('BACKUP_PATH', '')
+        )
+
+        self.backup_count_spin.setValue(
+            int(self.config_manager.get('BACKUP_COUNT', 5))
+        )
+
+        self.log_file_check.setChecked(
+            self.config_manager.get('LOG_ENABLED', True)
+        )
+
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage._save_settings",
+        # description="SettingsPage._save_settings",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -194,9 +278,11 @@ class SettingsPage(BasePage):
             self.logger.exception("Ошибка сохранения настроек")
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'SettingsPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        description="SettingsPage.on_enter",
+        # description="SettingsPage.on_enter",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'

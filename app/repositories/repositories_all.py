@@ -105,9 +105,11 @@ class BaseRepository(Generic[ModelType], ABC):
     """Все репозитории должны наследовать этот класс."""
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -122,12 +124,18 @@ class BaseRepository(Generic[ModelType], ABC):
         """
         self._session = session
 
-        self.logger = AppLogger.get_instance(self.__class__.__name__)
+        self.logger = AppLogger.get_instance(
+            name = self.__class__.__name__,
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -150,9 +158,11 @@ class BaseRepository(Generic[ModelType], ABC):
     #     return self._session.get(self.model_class).all()
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -167,9 +177,11 @@ class BaseRepository(Generic[ModelType], ABC):
         return self._session.query(self.model_class).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -189,9 +201,11 @@ class BaseRepository(Generic[ModelType], ABC):
         return entity
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -226,9 +240,11 @@ class BaseRepository(Generic[ModelType], ABC):
         raise NotImplementedError("Подклассы должны определить model_class")
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -259,9 +275,11 @@ class BaseRepository(Generic[ModelType], ABC):
             raise  # пробрасываем исключение, чтобы не скрывать проблемы 
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -300,9 +318,11 @@ class BaseRepository(Generic[ModelType], ABC):
         return query.offset(offset).limit(limit).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -330,9 +350,11 @@ class AppointmentNoteRepository(BaseRepository):
     model_class =  AppointmentNote
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentNoteRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -358,9 +380,11 @@ class AppointmentRepository(BaseRepository):
     
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -377,9 +401,11 @@ class AppointmentRepository(BaseRepository):
         return self._session.query(Appointment).options(joinedload(Appointment.note)).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -399,9 +425,11 @@ class AppointmentRepository(BaseRepository):
         ).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -423,9 +451,11 @@ class AppointmentRepository(BaseRepository):
         ).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -447,9 +477,11 @@ class AppointmentRepository(BaseRepository):
         ).filter(Appointment.id == appointment_id).first()   
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -489,9 +521,11 @@ class AppointmentRepository(BaseRepository):
         return query.offset(offset).limit(limit).all()
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -529,9 +563,11 @@ class AppointmentRepository(BaseRepository):
         return self.get_page(offset, limit, filters=all_filters, order_by=order_by)
     
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'AppointmentRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -552,20 +588,30 @@ class AppointmentRepository(BaseRepository):
         :return: количество приёмов
         :rtype: int
         """
-        base_filters = [{'column': 'patient_id', 'operator': 'eq', 'value': patient_id}]
+        base_filters = [
+            {
+                'column': 'patient_id', 
+                'operator': 'eq', 
+                'value': patient_id
+            }
+        ]
+
         if filters:
             all_filters = base_filters + filters
         else:
             all_filters = base_filters
+
         return self.count(filters=all_filters)
 
 class PhotoRepository(BaseRepository):
     model_class =  Photo
 
     @AppLogger.get_instance(
-            name = 'system'
+        name = 'PhotoRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_db",
+        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'

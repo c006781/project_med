@@ -36,9 +36,9 @@ from app.utils.logger import AppLogger
 from pydantic import BaseModel
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system',
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -60,7 +60,9 @@ def get_db() -> Database:
     
     # Логгирование: информируем о том, какой файл используется для базы данных
     AppLogger.get_instance(
-        name = 'system'
+        name = 'dependencies',
+        enable_file_logging = 'user',
+        use_name_in_filename = 'user',
     ).debug(
         f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
     )
@@ -70,7 +72,6 @@ def get_db() -> Database:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -95,7 +96,7 @@ def get_patient_service() -> PatientService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -118,7 +119,7 @@ def get_appointment_service() -> AppointmentService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -136,7 +137,7 @@ def get_note_service() -> NoteService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -153,7 +154,7 @@ def get_photo_service() -> PhotoService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -168,7 +169,7 @@ def get_sync_service() -> SyncService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -216,7 +217,7 @@ def init_db(
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -272,7 +273,7 @@ def get_text_echo(
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -323,7 +324,7 @@ def get_key_value_dto(
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -372,7 +373,7 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -423,7 +424,7 @@ def create_click_options(dto_class: BaseModel, action='create'):
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    # description="DynamicListPage.get_db",
+    
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'

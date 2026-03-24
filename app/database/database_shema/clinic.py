@@ -195,9 +195,9 @@ class Photo(Base):
 
 # Функция для инициализации БД и создания тестовых данных
 @AppLogger.get_instance(
-        name = 'db'
+    name = 'system',
 ).log_execution_time(
-    description="Содание БД",
+    # description="Содание БД",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -228,7 +228,9 @@ def create_db(
 
     if recreate and os.path.exists(abs_path):
         AppLogger.get_instance(
-            name = 'db'
+            name = 'db',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
         ).debug(
             f"Удаление существующего файла БД: {abs_path}"
             # level = AppLogger._parse_log_level(
@@ -242,7 +244,9 @@ def create_db(
 
     if os.path.exists(abs_path):
         AppLogger.get_instance(
-            name = 'db'
+            name = 'db',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
         ).debug(
             f"Файл БД {abs_path} уже существует. Таблицы будут созданы, если их нет."
             # level = AppLogger._parse_log_level(
@@ -254,7 +258,9 @@ def create_db(
     else:
 
         AppLogger.get_instance(
-            name = 'db'
+            name = 'db',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
         ).debug(
             f"Создание нового файла БД: {abs_path}"
             # level = AppLogger._parse_log_level(
@@ -278,7 +284,9 @@ def create_db(
     Base.metadata.create_all(engine)
 
     AppLogger.get_instance(
-        name = 'db'
+            name = 'db',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
     ).debug(
         f"Таблицы успешно созданы (или уже существовали): {abs_path}"
         # level = AppLogger._parse_log_level(
@@ -292,9 +300,9 @@ def create_db(
     return engine
 
 @AppLogger.get_instance(
-        name = 'db'
+        name = 'system',
 ).log_execution_time(
-    description="Содание и заполнение БД",
+    # description="Содание и заполнение БД",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'

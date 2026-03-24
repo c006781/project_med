@@ -1,23 +1,29 @@
 # interfaces/gui/gui_window/widgets/dynamic_edit_form.py
 
 
+from typing import Dict, Type, List, Union, get_origin, get_args#, Any, Optional
+
+# from datetime import date, time
+import datetime 
+
 from app.utils.logger.logger import AppLogger
+
+from pydantic import BaseModel
 
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QLineEdit, QDateEdit, QTimeEdit,
     QSpinBox, QCheckBox, QComboBox, QTextEdit, QHBoxLayout, QPushButton, QCompleter
 )
 from PySide6.QtCore import QDate, QTime, Signal, Qt#, Slot
-from typing import Dict, Type, List, Union, get_origin, get_args#, Any, Optional
-# from datetime import date, time
-import datetime 
-from pydantic import BaseModel
+
+
 
 
 
 class DynamicEditForm(QWidget):
     """
     Форма, автоматически создающая виджеты для редактирования полей DTO.
+    Использует внешнюю конфигурацию field_configs для настройки.
     """
     fieldChanged = Signal(str, object)  # имя поля, новое значение
 
@@ -37,19 +43,13 @@ class DynamicEditForm(QWidget):
         parent=None,  # родительский виджет
         field_configs: Dict[str, Dict] = None,  # словарь, где ключ - название поля, а значение - словарь с параметрами виджета
         exclude_fields: List[str] = None,  # список полей, исключаемых из формы
-        field_editable: Dict[str, bool] = None,  # словарь, где ключ - название поля, а значение - флаг редактируемости
-        field_choices: Dict[str, List] = None,  # словарь, где ключ - название поля, а значение - список значений для выбора
-        field_rename: Dict[str, str] = None,  # словарь, где ключ - название поля, а значение - новое название поля
+        # field_editable: Dict[str, bool] = None,  # словарь, где ключ - название поля, а значение - флаг редактируемости
+        # field_choices: Dict[str, List] = None,  # словарь, где ключ - название поля, а значение - список значений для выбора
+        # field_rename: Dict[str, str] = None,  # словарь, где ключ - название поля, а значение - новое название поля
+
     ):
         """
         Инициализирует форму редактирования.
-
-        :param dto_class: класс DTO, используемый для создания записи
-        :param parent: родительский виджет
-        :param exclude_fields: список полей, исключаемых из формы
-        :param field_editable: словарь, где ключ - название поля, а значение - флаг редактируемости
-        :param field_choices: словарь, где ключ - название поля, а значение - список значений для выбора
-        :param field_rename: словарь, где ключ - название поля, а значение - новое название поля
         """
         # вызываем родительский конструктор
         super().__init__(parent)
@@ -58,9 +58,9 @@ class DynamicEditForm(QWidget):
         self.dto_class = dto_class
         self.field_configs = field_configs or {}   # внешняя конфигурация
         self.exclude_fields = exclude_fields or []  # список полей, исключаемых из формы
-        self.field_editable = field_editable or {}  # словарь, где ключ - название поля, а значение - флаг редактируемости
-        self.field_choices = field_choices or {}  # словарь, где ключ - название поля, а значение - список значений для выбора
-        self.field_rename = field_rename or {}  # словарь, где ключ - название поля, а значение - новое название поля
+        # self.field_editable = field_editable or {}  # словарь, где ключ - название поля, а значение - флаг редактируемости
+        # self.field_choices = field_choices or {}  # словарь, где ключ - название поля, а значение - список значений для выбора
+        # self.field_rename = field_rename or {}  # словарь, где ключ - название поля, а значение - новое название поля
 
         # создаем словарь для хранения виджетов формы
         self.widgets = {}
@@ -187,37 +187,40 @@ class DynamicEditForm(QWidget):
 
         # Перебираем все поля
         for name, field in fields.items():
-            # Если поле нужно скрыть, то продолжаем
+            # проверка на исключение из формы (полное исключение из обработки
             if name in self.exclude_fields:
                 continue
 
             # Получаем метаинформацию о поле
-            metadata = field.metadata or {}
+            metadata = self.field_configs.get(name, {})
 
-            # Если поле нужно скрыть в форме, то продолжаем
-            if metadata.get('hide_in_form'):
-                continue
+            # проверяем скрытие поля, если указано в конфигурации
+            is_hidden = metadata.get('hidden', False)   
 
-            # Получаем title для поля
-            title = self.field_rename.get(name) or metadata.get('title')
-            # if title is None:
-            #     title = metadata.get('title')
+            # Скрытие поля, если указано в конфигурации
+            if is_hidden:
+                widget = self._create_widget_for_field(field, name, metadata.get('editable', True), metadata)
+                if widget is None:
+                    continue
+                self.widgets[name] = widget
+                continue   # не добавляем в layout
 
+            # Заголовок: из конфигурации, либо из description DTO, либо из имени поля
+            title = metadata.get('title')
             if title is None:
                 title = field.description or name.replace('_', ' ').title()
-            # title = self.field_rename.get(name, field.description or name.replace('_', ' ').title())
 
-            # Получаем флаг, является ли поле редактируемым
-            editable = self.field_editable.get(name, metadata.get('editable', True))
-            # editable = self.field_editable.get(name, True)
+            # Редактируемость: по умолчанию True, переопределяется конфигурацией
+            editable = metadata.get('editable', True)
             
             # Создаем виджет, соответствующий типу поля
-            widget = self._create_widget_for_field(field, name, editable)
+            widget = self._create_widget_for_field(field, name, editable, metadata)
             if widget is None:
                 continue
 
             # Добавляем виджет в форму
             self.widgets[name] = widget
+
             layout.addRow(title + ":", widget)
 
             # Подключаем сигналы изменения для поля
@@ -233,7 +236,7 @@ class DynamicEditForm(QWidget):
             'DEBUG'
         )
     )
-    def _create_widget_for_field(self, field, field_name, editable):
+    def _create_widget_for_field(self, field, field_name, editable, config):
         """
         Создает виджет на основе типа поля с учётом Optional.
         
@@ -249,35 +252,39 @@ class DynamicEditForm(QWidget):
         - bool: QCheckBox
         """
         # Берём настройки из внешнего словаря, если есть
-        metadata = self.field_configs.get(field_name, {})
+        # metadata = config.get(field_name, {})
 
         # metadata = field.metadata or {}
 
         # editable: сначала из конфигурации, потом из переданного флага
-        editable = metadata.get('editable', editable)
+        # editable = metadata.get('editable', editable)
         
         # Виртуальные поля – только для чтения
-        if metadata.get('virtual'):# or not editable:
+        if config.get('virtual') and config.get('compute'):
             # Виртуальное или только для чтения – создаём QLabel
             widget = QLineEdit()
             widget.setReadOnly(True)
             return widget
 
-        widget_type = metadata.get('widget_type', 'text')
+        widget_type = config.get('widget_type', 'text')
 
         # Обработка completer-виджетов
         if widget_type in ('completer', 'completer_with_create', 'completer_with_edit'):
             with_create = (widget_type == 'completer_with_create')
             with_edit = (widget_type == 'completer_with_edit')
-            widget = CompleterEdit(self, with_create=with_create, with_edit=with_edit)
+            widget = CompleterEdit(
+                self, 
+                with_create=with_create, 
+                with_edit=with_edit,
+            )
             widget.setEnabled(editable)
             return widget
 
-        # Статический комбобокс (если есть field_choices)
-        # Если есть предопределённые значения (choices) – делаем комбобокс
-        if field_name in self.field_choices:
+        # Статический комбобокс (если есть choices)
+        choices = config.get('choices')
+        if choices:
             combo = QComboBox()
-            combo.addItems(self.field_choices[field_name])
+            combo.addItems(choices)
             combo.setEditable(False)
             combo.setEnabled(editable)
             return combo
@@ -288,9 +295,9 @@ class DynamicEditForm(QWidget):
         # Определяем по реальному типу
         if real_type == str:
             # if field_name in ('note_text', 'description', 'text'): # Если поле является текстом, то используем QTextEdit с ограничением высоты
-            if metadata.get('widget_type') == 'textarea':
+            if widget_type == 'textarea':
                 w = QTextEdit()
-                w.setMaximumHeight(100)
+                w.setMaximumHeight(200)
             else:
                 # Если поле является строкой, то используем QLineEdit
                 w = QLineEdit()
@@ -543,6 +550,8 @@ class DynamicEditForm(QWidget):
 
         return None
 
+    # --- Публичные методы ---
+
     @AppLogger.get_instance(
         name = 'DynamicEditForm',
         enable_file_logging = 'system',
@@ -624,16 +633,19 @@ class DynamicEditForm(QWidget):
         items – список строк для автодополнения.
         """
         widget = self.widgets.get(field_name)
+
         if not isinstance(widget, CompleterEdit):
             return
+        
         completer = QCompleter(items)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+
         widget.setCompleter(completer)         
 
 
 class CompleterEdit(QWidget):
     """
-    Виджет, содержащий QLineEdit и опциональную кнопку.
+    Виджет с полем ввода и опциональной кнопкой для открытия окна.
     Предназначен для полей с автодополнением.
     """
 
@@ -649,7 +661,12 @@ class CompleterEdit(QWidget):
             'DEBUG'
         )
     )
-    def __init__(self, parent=None, with_create=False, with_edit=False):
+    def __init__(
+        self, 
+        parent=None, 
+        with_create=False, 
+        with_edit=False,
+    ):
         """
         Инициализирует виджет.
 

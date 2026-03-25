@@ -226,6 +226,235 @@ class DynamicEditForm(QWidget):
 
             # Подключаем сигналы изменения для поля
             self._connect_widget_signals(widget, name)
+        
+        # НАСТРОЙКА ВИДЖЕТОВ ФОТО
+        from app.config.config_manager.manager import get_config_env
+        config = get_config_env()
+        storage_path = config.get('PHOTOS_STORAGE_PATH', './photos')
+        for widget in self.widgets.values():
+            if isinstance(widget, PhotoUploaderWidget):
+                widget.set_storage_path(storage_path)
+
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_virtual_compute_widget(self, editable):
+        """
+        Создаёт виджет для виртуального поля с вычислением (только чтение).
+        Виджет - это QLineEdit, который всегда только для чтения.
+        """
+        widget = QLineEdit()
+        widget.setReadOnly(True)
+        return widget
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_photo_uploader_widget(self):
+        """
+        Создаёт виджет для загрузки фото.
+        :return: PhotoUploaderWidget
+        :rtype: PhotoUploaderWidget
+        """
+        return PhotoUploaderWidget(self)
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_completer_edit_widget(
+        self, 
+        widget_type, 
+        editable
+    ):
+        """
+        Создает CompleterEdit с возможностью создания/редактирования.
+
+        :param widget_type: тип виджета, может быть 'completer', 'completer_with_create', 'completer_with_edit'
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: виджет CompleterEdit
+        :rtype: CompleterEdit
+        """
+        with_create = (widget_type == 'completer_with_create')
+        with_edit = (widget_type == 'completer_with_edit')
+        widget = CompleterEdit(self, with_create=with_create, with_edit=with_edit)
+        widget.setEnabled(editable)
+        return widget
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_combobox_widget(
+        self, 
+        choices, 
+        editable
+    ):
+        """
+        Создает QComboBox из списка choices.
+        
+        :param choices: список строк для добавления в QComboBox
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: виджет QComboBox
+        :rtype: QComboBox
+        """
+        combo = QComboBox()
+        combo.addItems(choices)
+        combo.setEditable(False)
+        combo.setEnabled(editable)
+        return combo
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_text_widget(
+        self, 
+        widget_type, 
+        editable
+    ):
+        """
+        Создаёт QLineEdit или QTextEdit в зависимости от widget_type.
+        
+        :param widget_type: тип виджета, который необходимо создать (textarea или text)
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: созданный виджет
+        :rtype: QLineEdit или QTextEdit
+        """
+        if widget_type == 'textarea':
+            w = QTextEdit()
+            w.setMaximumHeight(200)
+        else:
+            w = QLineEdit()
+        w.setEnabled(editable)
+        return w
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_int_widget(self, editable):
+        """
+        Создаёт QSpinBox для целых чисел.
+
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: созданный виджет
+        :rtype: QSpinBox
+        """
+        w = QSpinBox()
+        w.setRange(-999999, 999999)
+        w.setEnabled(editable)
+        return w
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_date_widget(self, editable):
+        """
+        Создаёт QDateEdit.
+
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: созданный виджет
+        :rtype: QDateEdit
+        """
+        w = QDateEdit()
+        w.setCalendarPopup(True)
+        w.setDate(QDate.currentDate())
+        w.setEnabled(editable)
+        return w
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_time_widget(self, editable):
+        """
+        Создаёт QTimeEdit.
+
+        :param editable: флаг, указывающий, является ли поле редактируемым
+        :return: созданный виджет
+        :rtype: QTimeEdit
+        """
+        w = QTimeEdit()
+        w.setTime(QTime.currentTime())
+        w.setEnabled(editable)
+        return w
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_bool_widget(self, editable):
+        """
+        Создаёт QCheckBox.
+
+        :param editable: флаг, указывающий, можно ли редактировать поле
+        :return: QCheckBox
+        """
+        w = QCheckBox()
+        w.setEnabled(editable)
+        return w    
+
+
+
 
     @AppLogger.get_instance(
         name = 'DynamicEditForm',
@@ -252,93 +481,33 @@ class DynamicEditForm(QWidget):
         - datetime.time: QTimeEdit
         - bool: QCheckBox
         """
-        # Берём настройки из внешнего словаря, если есть
-        # metadata = config.get(field_name, {})
-
-        # metadata = field.metadata or {}
-
-        # editable: сначала из конфигурации, потом из переданного флага
-        # editable = metadata.get('editable', editable)
-        
-        # Виртуальные поля – только для чтения
         if config.get('virtual') and config.get('compute'):
-            # Виртуальное или только для чтения – создаём QLabel
-            widget = QLineEdit()
-            widget.setReadOnly(True)
-            return widget
+            return self._create_virtual_compute_widget(editable)
 
         widget_type = config.get('widget_type', 'text')
 
-        # Добавляем ветку для photo_uploader
         if widget_type == 'photo_uploader':
-            widget = PhotoUploaderWidget(self)
-            # Для редактирования загружаем существующие фото
-            # (это будет сделано позже через отдельный метод)
-            return widget
+            return self._create_photo_uploader_widget()
 
-        # Обработка completer-виджетов
         if widget_type in ('completer', 'completer_with_create', 'completer_with_edit'):
-            with_create = (widget_type == 'completer_with_create')
-            with_edit = (widget_type == 'completer_with_edit')
-            widget = CompleterEdit(
-                self, 
-                with_create=with_create, 
-                with_edit=with_edit,
-            )
-            widget.setEnabled(editable)
-            return widget
+            return self._create_completer_edit_widget(widget_type, editable)
 
-        # Статический комбобокс (если есть choices)
         choices = config.get('choices')
         if choices:
-            combo = QComboBox()
-            combo.addItems(choices)
-            combo.setEditable(False)
-            combo.setEnabled(editable)
-            return combo
-        
-        # По типам
+            return self._create_combobox_widget(choices, editable)
+
         real_type = self._get_real_type(field.annotation)
 
-        # Определяем по реальному типу
         if real_type == str:
-            # if field_name in ('note_text', 'description', 'text'): # Если поле является текстом, то используем QTextEdit с ограничением высоты
-            if widget_type == 'textarea':
-                w = QTextEdit()
-                w.setMaximumHeight(200)
-            else:
-                # Если поле является строкой, то используем QLineEdit
-                w = QLineEdit()
-            w.setEnabled(editable)
-            return w
-
+            return self._create_text_widget(widget_type, editable)
         elif real_type == int:
-            # Если поле является целым числом, то используем QSpinBox
-            w = QSpinBox()
-            w.setRange(-999999, 999999)
-            w.setEnabled(editable)
-            return w
-
+            return self._create_int_widget(editable)
         elif real_type == datetime.date:
-            # Если поле является датой, то используем QDateEdit
-            w = QDateEdit()
-            w.setCalendarPopup(True)
-            w.setDate(QDate.currentDate())
-            w.setEnabled(editable)
-            return w
-
+            return self._create_date_widget(editable)
         elif real_type == datetime.time:
-            # Если поле является временем, то используем QTimeEdit
-            w = QTimeEdit()
-            w.setTime(QTime.currentTime())
-            w.setEnabled(editable)
-            return w
-
+            return self._create_time_widget(editable)
         elif real_type == bool:
-            # Если поле является булевым значением, то используем QCheckBox
-            w = QCheckBox()
-            w.setEnabled(editable)
-            return w
+            return self._create_bool_widget(editable)
 
         return None
 

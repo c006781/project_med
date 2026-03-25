@@ -2066,13 +2066,11 @@ class PhotoService(
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
     """
 
-
     @AppLogger.get_instance(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2119,8 +2117,7 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2145,8 +2142,7 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2205,8 +2201,7 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2419,8 +2414,7 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2468,8 +2462,7 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
+    ).log_execution_time(        
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -2479,5 +2472,38 @@ class PhotoService(
         """Создаёт папку для фото, если её нет."""
         os.makedirs(self._storage_path, exist_ok=True)
 
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def update_photos_for_appointment(
+        self,
+        appointment_id: int,
+        pending_photos: List[Tuple[str, str]],  # (file_path, description)
+        deleted_photo_ids: List[int],
+        session: Optional[Session] = None  # опциональная сессия для работы в одной транзакции
+    ) -> None:
+        """
+        Обновляет фото для указанного приёма:
+        - удаляет фото из списка deleted_photo_ids
+        - добавляет новые фото из списка pending_photos
 
+        :param appointment_id: ID приёма
+        :param pending_photos: список кортежей (file_path, description) для добавления
+        :param deleted_photo_ids: список ID фото для удаления
+        :param session: опциональная сессия для работы в одной транзакции
+        """
+        # Создаем сессию для работы в одной транзакции, если она не была передана
+        with self._session_scope(session) as sess:
+            # Удаляем фото из списка deleted_photo_ids
+            for photo_id in deleted_photo_ids:
+                self.delete_photo(photo_id, session=sess)
+            # Добавляем новые фото из списка pending_photos
+            for file_path, description in pending_photos:
+                self.add_photo_to_appointment(
+                    appointment_id, file_path, description, session=sess
+                )
             

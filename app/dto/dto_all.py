@@ -6,7 +6,7 @@ DTO (Data Transfer Objects) на базе Pydantic.
 import datetime
 # from datetime import date
 # from datetime import time as time_datetime_dto_all
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import BaseModel, ConfigDict , Field # pip install pydantic>=2.0
 
@@ -207,5 +207,9 @@ class AppointmentDTO(BaseModel):
         #     'edit_window': 'note_edit'
         # },
         description='Текст заметки',
+    )
+    photos: Optional[List['PhotoDTO']] = Field(
+        None, 
+        description='Фотографии приёма'
     )
     # photos: List[PhotoDTO]

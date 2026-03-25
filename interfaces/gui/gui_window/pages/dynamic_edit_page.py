@@ -1,6 +1,8 @@
 # interfaces/gui/gui_window/pages/dynamic_edit_page.py
 
-import os
+# import os
+
+# from app.config.config_manager.manager import get_config_env
 
 from app.utils.logger.logger import AppLogger
 
@@ -9,11 +11,15 @@ from app.dependencies import (
     get_note_service , 
     get_photo_service ,
 )
+from app.utils.virtual_fields import compute_virtual_fields
 
 
+from interfaces.gui.gui_window.utils.gui_helpers import apply_readonly_to_widgets
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm, CompleterEdit
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
+
+from pydantic import BaseModel
 
 from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox#, QLineEdit, QSpinBox
 from PySide6.QtCore import Slot
@@ -67,7 +73,7 @@ class DynamicEditPage(BasePage):
         )
 
 
-        self.patient_svc = None  # сервис для работы с пациентами (например, для создания приёма)
+        # self.patient_svc = None  # сервис для работы с пациентами (например, для создания приёма)
         
         # сохраняем параметры инициализации страницы
         self.service = service
@@ -97,7 +103,7 @@ class DynamicEditPage(BasePage):
         )
 
         self.photo_service = get_photo_service()
-        self.pending_photos = None   # будет установлен из формы
+        # self.pending_photos = None   # будет установлен из формы
 
         # # настройка интерфейса страницы
         self._setup_ui()
@@ -164,17 +170,15 @@ class DynamicEditPage(BasePage):
         )
     )
     def _apply_readonly(self):
-        # """Применяет readOnly для полей, у которых editable=False."""
         """
         Применяет readOnly для полей, у которых editable=False.
         
         Этот метод необходим для ограничения редактирования полей, которые не должны быть изменены пользователем.
         """
-        for field_name, widget in self.form.widgets.items():
-            config = self.field_configs.get(field_name, {})
-            if not config.get('editable', True):
-                if hasattr(widget, 'setReadOnly'):
-                    widget.setReadOnly(True)
+        apply_readonly_to_widgets(
+            self.form.widgets, 
+            self.field_configs
+        )
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -186,6 +190,43 @@ class DynamicEditPage(BasePage):
             'DEBUG'
         )
     )
+    # def _compute_virtual_fields(self, extra_data=None):
+    #     """
+    #     Вычисляет виртуальные поля формы с помощью функций, заданных в конфигурации.
+        
+    #     :param extra_data: дополнительные данные, которые могут быть использованы в функциях вычисления
+    #     :type extra_data: Optional[Dict[str, Any]]
+    #     """
+    #     for field_name, config in self.field_configs.items():
+    #         compute = config.get('compute')
+    #         if not compute:
+    #             continue
+    #         func = compute.get('func')
+    #         if not callable(func):
+    #             self.logger.warning(f"Поле {field_name}: 'func' не является callable")
+    #             continue
+
+    #         # Собираем позиционные аргументы из полей формы и extra_data
+    #         args = []
+    #         for arg_name in compute.get('args', []):
+    #             if arg_name in self.form.widgets:
+    #                 val = self.form._get_widget_value(self.form.widgets[arg_name])
+    #                 args.append(val)
+    #             elif extra_data and arg_name in extra_data:
+    #                 args.append(extra_data[arg_name])
+    #             else:
+    #                 args.append(None)
+
+    #         kwargs = compute.get('kwargs', {})
+
+    #         try:
+    #             value = func(*args, **kwargs)
+    #             if field_name in self.form.widgets:
+    #                 self.form._set_widget_value(self.form.widgets[field_name], value)
+    #         except Exception as e:
+    #             self.logger.exception(f"Ошибка вычисления поля {field_name}: {e}")
+    #             if field_name in self.form.widgets:
+    #                 self.form._set_widget_value(self.form.widgets[field_name], "Ошибка")  
     def _compute_virtual_fields(self, extra_data=None):
         """
         Вычисляет виртуальные поля формы с помощью функций, заданных в конфигурации.
@@ -193,37 +234,17 @@ class DynamicEditPage(BasePage):
         :param extra_data: дополнительные данные, которые могут быть использованы в функциях вычисления
         :type extra_data: Optional[Dict[str, Any]]
         """
-        for field_name, config in self.field_configs.items():
-            compute = config.get('compute')
-            if not compute:
-                continue
-            func = compute.get('func')
-            if not callable(func):
-                self.logger.warning(f"Поле {field_name}: 'func' не является callable")
-                continue
-
-            # Собираем позиционные аргументы из полей формы и extra_data
-            args = []
-            for arg_name in compute.get('args', []):
-                if arg_name in self.form.widgets:
-                    val = self.form._get_widget_value(self.form.widgets[arg_name])
-                    args.append(val)
-                elif extra_data and arg_name in extra_data:
-                    args.append(extra_data[arg_name])
-                else:
-                    args.append(None)
-
-            kwargs = compute.get('kwargs', {})
-
-            try:
-                value = func(*args, **kwargs)
-                if field_name in self.form.widgets:
+        # Собираем текущие данные из формы
+        data = self.form.get_data()
+        # Вычисляем виртуальные поля
+        computed = compute_virtual_fields(data, self.field_configs, extra_data)
+        # Устанавливаем вычисленные значения в виджеты
+        for field_name, value in computed.items():
+            if field_name in self.form.widgets and value is not None:
+                # Сравниваем с текущим значением, чтобы избежать лишних сигналов
+                current = self.form._get_widget_value(self.form.widgets[field_name])
+                if current != value:
                     self.form._set_widget_value(self.form.widgets[field_name], value)
-            except Exception as e:
-                self.logger.exception(f"Ошибка вычисления поля {field_name}: {e}")
-                if field_name in self.form.widgets:
-                    self.form._set_widget_value(self.form.widgets[field_name], "Ошибка")  
-
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -384,6 +405,88 @@ class DynamicEditPage(BasePage):
                     self.form._set_widget_value(widget, extra_data[field_name])
             # можно добавить другие варианты (например, callable)
 
+
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _load_existing_entity(self, entity_id):
+        """
+        Загружает существующую запись по ID и сопутствующие данные (например, фото).
+        Устанавливает кнопку удаления в активное состояние.
+        """
+        # загружаем данные из БД
+        self._load_entity(entity_id) # загружает DTO и вызывает form.load_data
+
+        # загружаем существующие фото
+        photos = self.photo_service.get_photos_for_appointment(entity_id)
+
+        # преобразуем в список (photo_id, full_path, description)
+        if 'photos' in self.form.widgets:
+            self.form.set_photos_data(photos)   # передаём список PhotoDTO
+        self.delete_btn.setEnabled(True)
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _prepare_new_entity(self):
+        """
+        Подготавливает форму для создания новой записи:
+        очищает форму, отключает кнопку удаления.
+        """
+        self.form.clear()
+        self.delete_btn.setEnabled(False)
+        # здесь можно добавить другую логику для нового объекта, если нужно
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _after_load_or_clear(self, extra_data=None):
+        """
+        Выполняет общие действия после загрузки существующей записи или очистки формы:
+        - заполнение из extra_data
+        - применение readOnly
+        - вычисление виртуальных полей
+        - загрузка данных для автодополнения
+        - подключение сигналов кнопок
+        """
+        # Заполняем из extra_data (после загрузки DTO или после очистки)
+        self._init_from_extra(extra_data)
+
+        # Применяем readOnly (для всех полей, включая существующие)
+        self._apply_readonly()
+
+        # Вычисляем виртуальные поля (например, patient_name)
+        self._compute_virtual_fields(extra_data)
+
+        # Загружаем данные для полей с автодополнением
+        self._load_completer_data()
+
+        # Подключаем сигналы кнопок
+        self._connect_button_signals()
+
+
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         enable_file_logging = 'system',
@@ -398,123 +501,25 @@ class DynamicEditPage(BasePage):
         """
         Вызывается при переходе на страницу.
         extra_data может содержать 'id' и 'patient_id'.
-
         Если передан 'id' – загружаем существующую запись.
         Если передан 'patient_id' и нет 'id' – создаём новый приём для этого пациента.
 
         :param extra_data: словарь с дополнительными данными
         :type extra_data: dict
         """
-        
         # загружаем id, если он передан
-        # current_id - это ID записи, которую мы хотим отредактировать
         self.current_id = extra_data.get('id') if extra_data else None
-        
+
         # для возврата (если страница вызвана как диалог)
         self._return_to_page_id = extra_data.get('return_to_page') if extra_data else None
         self._return_field = extra_data.get('return_field') if extra_data else None
 
-        # если передан id, загружаем существующую запись
         if self.current_id is not None:
-            
-            # загружаем данные из БД
-            self._load_entity(self.current_id)
-
-            
-            # загружаем существующие фото
-            photos = self.photo_service.get_photos_for_appointment(self.current_id)
-            # преобразуем в список (photo_id, full_path, description)
-            # full_path нужно получить, объединив путь хранилища и file_path
-            photo_list = [(p.id, os.path.join(self.photo_service._storage_path, p.file_path), p.description) for p in photos]
-            if 'photos' in self.form.widgets:
-                self.form.set_photos_data(photo_list)
-
-
-            # включаем кнопку удаления
-            self.delete_btn.setEnabled(True)
-
+            self._load_existing_entity(self.current_id)
         else:
-            # если не передан id, чистим форму
-            self.form.clear()
+            self._prepare_new_entity()
 
-            # если не передан id, отключаем кнопку удаления
-            self.delete_btn.setEnabled(False)
-
-            # --- ДОПОЛНЕНИЕ: подстановка patient_name при создании нового приёма ---
-            # если patient_id передан, загружаем patient_name
-            # patient_name - это поле в форме, которое отображает имя пациента
-        
-        # Заполняем из extra_data (после загрузки DTO или после очистки)
-        self._init_from_extra(extra_data)
-
-        # Применяем readOnly (для всех полей, включая существующие)
-        self._apply_readonly()
-
-        # Вычисляем виртуальные поля (например, patient_name)
-        self._compute_virtual_fields(extra_data)
-
-
-        #     if ( 
-        #         self.current_patient_id is not None and 
-        #         # hasattr(self.dto_class, 'patient_name') and 
-        #         'patient_name' in self.dto_class.model_fields and 
-        #         'patient_name' in self.form.widgets
-        #     ):
-        #         if self.patient_svc is None:
-        #             self.patient_svc = get_patient_service()
-        #         try:
-        #             patient = self.patient_svc.get_patient_by_id(self.current_patient_id)
-        #             self.form.widgets['patient_name'].setText(f"{patient.last_name} {patient.first_name}")
-        #         except Exception as e:
-        #             self.logger.exception("Ошибка загрузки пациента")
-        #             self.form.widgets['patient_name'].setText("Пациент не найден")
-
-        # # --- Применение readOnly на основе field_configs ---
-        # for field_name, widget in self.form.widgets.items():
-        #     config = self.field_configs.get(field_name, {})
-        #     if not config.get('editable', True):
-        #         if hasattr(widget, 'setReadOnly'):
-        #             widget.setReadOnly(True)
-
-                # # получаем поле patient_name из модели DTO
-                # field_info = self.dto_class.model_fields.get('patient_name')
-
-                # if field_info:
-                #     # получаем метаданные поля
-                #     metadata = field_info.metadata or {}
-
-                #     # если поле patient_name не помечено как virtual, то 
-                #     # продолжаем
-                #     if not metadata.get('virtual', False):
-                #         self.logger.warning("Поле patient_name не помечено как virtual")
-                #         # можно продолжить, но лучше не полагаться на него
-
-                #     # Ленивая инициализация сервиса пациентов
-                #     if self.patient_svc is None:
-                #         self.patient_svc = get_patient_service()
-
-                #     try:
-                #         # получаем данные пациента из БД
-                #         patient = self.patient_svc.get_patient_by_id(self.current_patient_id)
-
-                #         # подставляем patient_name в форму
-                #         self.form.widgets['patient_name'].setText(f"{patient.last_name} {patient.first_name}")
-
-                #         # Принудительное применение readOnly на основе метаданных
-                #         for field_name, widget in self.form.widgets.items():
-                #             field = self.dto_class.model_fields.get(field_name)
-                #             # ее = field.metadata
-                #             if field and not field.metadata.get('editable', True):
-                #                 if hasattr(widget, 'setReadOnly'):
-                #                     widget.setReadOnly(True)
-                #     except Exception as e:
-                #         self.logger.exception("Ошибка загрузки пациента")
-                #         self.form.widgets['patient_name'].setText("Пациент не найден")
-
-        # Загружаем данные для полей с автодополнением
-        self._load_completer_data()
-        # Подключаем сигналы кнопок
-        self._connect_button_signals()
+        self._after_load_or_clear(extra_data)  
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -551,12 +556,199 @@ class DynamicEditPage(BasePage):
             # Возвращаемся на предыдущую страницу
             self._go_back()
 
+
+    # ------------------------------------------------------------
+    # Вспомогательные методы для сохранения
+    # ------------------------------------------------------------
+
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._save",
+        # description="DynamicEditPage._load_entity",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _collect_form_data(self) -> dict:
+        """
+        Собирает данные из формы и возвращает словарь для создания DTO.
+        Возвращает словарь, содержащий значения из всех виджетов формы.
+        :return: словарь с значениями из виджетов формы
+        :rtype: dict
+        """
+        return self.form.get_data()
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        # description="DynamicEditPage._load_entity",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _create_or_update_entity(self, dto):
+        """
+        Создаёт или обновляет сущность в зависимости от self.current_id.
+        Если self.current_id is None, создает новую запись.
+        Если self.current_id не None, обновляет существующую запись.
+        Возвращает кортеж (saved_dto, appointment_id).
+        saved_dto - обновленный (или созданный) DTO.
+        appointment_id - ID созданной или обновленной записи.
+        """
+        if self.current_id is None:
+            # Создание
+            created = self.service.create(dto)
+            saved_dto = created
+            appointment_id = created.id
+            QMessageBox.information(self, "Успех", f"Запись создана с ID {created.id}")
+            self.logger.info(f"Создана запись ID={created.id}")
+        else:
+            # Обновление
+            dto.id = self.current_id
+            updated = self.service.update(dto)
+            saved_dto = updated
+            appointment_id = self.current_id
+            QMessageBox.information(self, "Успех", f"Запись ID {updated.id} обновлена")
+            self.logger.info(f"Обновлена запись ID={updated.id}")
+        return saved_dto, appointment_id
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        # description="DynamicEditPage._load_entity",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    # def _handle_photos(self, appointment_id: int):
+    #     """
+    #     Удаляет помеченные фото и добавляет новые.
+        
+    #     :param appointment_id: ID приема
+    #     :type appointment_id: int
+    #     """
+    #     # Если виджета 'photos' не существует, то ничего не делаем
+    #     if 'photos' not in self.form.widgets:
+    #         return
+        
+    #     # Получаем виджет 'photos'
+    #     widget = self.form.widgets['photos']
+
+    #      # Если виджет 'photos' не является PhotoUploaderWidget, то ничего не делаем
+    #     if not isinstance(widget, PhotoUploaderWidget):
+    #         return
+        
+    #     # Удаляем помеченные фото
+    #     deleted_photo_ids = widget.get_deleted_photo_ids()
+    #     for photo_id in deleted_photo_ids:
+    #         self.photo_service.delete_photo(photo_id)
+    #         # Логируем удаление фото
+    #         self.logger.info(f"Удалено фото с ID={photo_id}")
+
+    #     # Добавляем новые фото
+    #     for file_path, description in widget.get_pending_photos():
+    #         photo_dto = self.photo_service.add_photo_to_appointment(
+    #             appointment_id, 
+    #             file_path, 
+    #             description
+    #         )
+    #         # Логируем добавление нового фото
+    #         self.logger.info(f"Добавлено новое фото с ID={photo_dto.id}")  
+    def _handle_photos(self, appointment_id: int):
+        """
+        Удаляет помеченные фото и добавляет новые.
+
+        :param appointment_id: ID приема
+        :type appointment_id: int
+        """
+        if 'photos' not in self.form.widgets:
+            return
+        widget = self.form.widgets['photos']
+        if not isinstance(widget, PhotoUploaderWidget):
+            return
+        pending = widget.get_pending_photos()
+        deleted = widget.get_deleted_photo_ids()
+        self.photo_service.update_photos_for_appointment(appointment_id, pending, deleted)
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        # description="DynamicEditPage._load_entity",
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _after_save_navigation(self, saved_dto):
+        """
+        Выполняет навигацию после сохранения данных из формы.
+
+        Если self._return_to_page_id задан, то возвращает на страницу с этим ID,
+        передавая saved_dto в качестве значения для поля self._return_field.
+        Если self._return_to_page_id не задан, то возвращает на список и помечает
+        его на обновление.
+
+        """
+
+        if not self.page_manager:
+            return
+        
+        # Если self._return_to_page_id задан, то возвращает на страницу с этим ID,
+        # передавая saved_dto в качестве значения для поля self._return_field
+        if self._return_to_page_id:
+            # Получаем страницу, на которую мы хотим перейти
+            target_page = self.page_manager._pages.get(self._return_to_page_id)
+            if target_page and hasattr(target_page, 'set_field_value'):
+                # Возвращаемое значение: для заметок – текст, для других – строка DTO
+                value = getattr(saved_dto, 'text', None) or str(saved_dto)
+                # Устанавливаем значение saved_dto в поле self._return_field на target_page
+                target_page.set_field_value(self._return_field, value)
+            # Переходим на target_page
+            self.page_manager.switch_to(self._return_to_page_id)
+        else:
+            # Обычный возврат: помечаем список на обновление
+            if hasattr(self, 'list_page_id'):
+                # Получаем страницу списка
+                list_page = self.page_manager._pages.get(self.list_page_id)
+                if list_page and hasattr(list_page, 'set_needs_refresh'):
+                    # Устанавливаем флаг needs_refresh на True, чтобы список обновился
+                    list_page.set_needs_refresh(True)
+            # Возвращаемся на предыдущую страницу
+            self._go_back()
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _build_dto_from_form_data(self) -> BaseModel:
+        """
+        Собирает данные из формы и создаёт DTO.
+        :return: экземпляр DTO, соответствующий self.dto_class
+        """
+        data = self._collect_form_data()
+        return self.dto_class(**data)
+    
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -564,112 +756,34 @@ class DynamicEditPage(BasePage):
     )
     @Slot()
     def _save(self):
+        # """Сохраняет данные из формы в БД."""
         """
         Сохраняет данные из формы в БД.
 
-        Если создается новый приём, и был передан patient_id, подставляем его.
-        Если приём существует, то обновляем его.
-        Если приём успешно создан или обновлен, то выводим информационное сообщение и возвращаемся к списку приёмов.
+        1. Собирает данные из формы
+        2. Создает или обновляет запись
+        3. Обрабатывает фотографии
+        4. Навигация
+
+        Если возникла ошибка, выводит сообщение об ошибке
         """
         
-        # Получаем данные из формы
-        data = self.form.get_data()
-
-        # # Если создаётся новый приём и был передан patient_id, подставляем его
-        # if self.current_id is None and self.current_patient_id is not None:
-        #     # Если в данных формы нет patient_id (скрытое поле) – добавим
-        #     if 'patient_id' not in data or data['patient_id'] is None:
-        #         # добавляем patient_id в данные формы
-        #         data['patient_id'] = self.current_patient_id
-
         try:
-            # Создаем DTO на основе полученных данных
-            dto = self.dto_class(**data)
+            # 1. Создать DTO из данных формы
+            dto = self._build_dto_from_form_data()
 
-            # Если приём не существует, то создаем его
-            if self.current_id is None:
-                # создаём новую запись в DTO
-                created = self.service.create(dto)
-                saved_dto = created
-                appointment_id = created.id
-                # выводим информационное сообщение
-                QMessageBox.information(self, "Успех", f"Запись создана с ID {created.id}")
-                    # логгируем создания записи
-                self.logger.info(f"Создана запись ID={created.id}")
-            else:
-                # обновляем id в DTO
-                dto.id = self.current_id
-                # обновляем приём
-                updated = self.service.update(dto)
-                saved_dto = updated
-                appointment_id = self.current_id
-                # выводим информационное сообщение
-                QMessageBox.information(self, "Успех", f"Запись ID {updated.id} обновлена")
-                # логгируем обновления записи
-                self.logger.info(f"Обновлена запись ID={updated.id}")
+            # 2. Создать или обновить запись
+            saved_dto, appointment_id = self._create_or_update_entity(dto)
 
-            
-            # Обработка фото (общая для создания и обновления)
-            if 'photos' in self.form.widgets:
-                widget = self.form.widgets['photos']
-                if isinstance(widget, PhotoUploaderWidget):
-                    for photo_id in widget.get_deleted_photo_ids():
-                        self.photo_service.delete_photo(photo_id)
-                    for file_path, description in widget.get_pending_photos():
-                        self.photo_service.add_photo_to_appointment(appointment_id, file_path, description)
+            # 3. Обработать фотографии
+            self._handle_photos(appointment_id)
 
-            # Возвращаемся на предыдущую страницу
-            if self.page_manager and self._return_to_page_id:
-                # получаем страницу, на которую мы хотим перейти
-                target_page = self.page_manager._pages.get(self._return_to_page_id)
-                
-                # если страница существует и имеет метод set_field_value
-                if target_page and hasattr(target_page, 'set_field_value'):
-                    # для заметок передаём текст, для других полей – нужное значение
-                    # Здесь предполагаем, что возвращаемое значение – это текст сохранённой сущности
-                    # (для AppointmentNote это text, для других можно адаптировать)
-                    value = getattr(saved_dto, 'text', None) or str(saved_dto)
-                    target_page.set_field_value(self._return_field, value)
-                # возвращаемся на исходную страницу
-                self.page_manager.switch_to(self._return_to_page_id) # Возвращаемся на исходную страницу
-            else:
-                # Обычный возврат: помечаем список на обновление
-                if self.page_manager and hasattr(self, 'list_page_id'):
-                    list_page = self.page_manager._pages.get(self.list_page_id)
-                    if list_page and hasattr(list_page, 'set_needs_refresh'):
-                        list_page.set_needs_refresh(True)
-                        
-                # возвращаемся к списку приёмов
-                self._go_back()
-            
+            # 4. Навигация
+            self._after_save_navigation(saved_dto)
 
         except Exception as e:
-            # выводим ошибку
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
-            # логгируем ошибку
             self.logger.exception("Ошибка сохранения")
-
-    # @AppLogger.get_instance(
-    #     name = 'DynamicEditPage',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
-    # ).log_execution_time(
-    #     # description="DynamicEditPage.set_field_value",
-    #     level = AppLogger._parse_log_level(
-    #         # 'INFO'
-    #         'DEBUG'
-    #     )
-    # ) 
-    # def set_photos_data(self, photos):
-    #     """
-    #     Устанавливает существующие фотографии для поля формы.
-
-    #     :param photos: список существующих фотографий
-    #     :type photos: List[PhotoDTO]
-    #     """
-    #     widget = self.widgets.get('photos')
-    #     if isinstance(widget, PhotoUploaderWidget):
-    #         widget.set_existing_photos(photos)
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',

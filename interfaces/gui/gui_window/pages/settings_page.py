@@ -31,7 +31,11 @@ class SettingsPage(BasePage):
             'DEBUG'
         )
     )
-    def __init__(self, parent=None):
+    def __init__(
+        self, 
+        parent=None, 
+        page_title="Настройки"
+    ):
         """
         Инициализирует страницу настроек.
         
@@ -46,6 +50,8 @@ class SettingsPage(BasePage):
             use_name_in_filename = 'user',
         )
 
+        self.page_title = page_title
+        
         self.config_manager = AppConfigManager.get_instance()
         self.first_start = False          # флаг первого запуска
 
@@ -272,7 +278,10 @@ class SettingsPage(BasePage):
             
             # Если это был первый запуск, переходим на главную страницу
             if self.first_start:
-                self.main_window.page_manager.switch_to('patient_list')
+                self.main_window.page_manager.switch_to(
+                    'patient_list',
+                    add_to_history=False, # Не добавляем в историю, так как страница пациентов не была активна
+                )
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
             self.logger.exception("Ошибка сохранения настроек")

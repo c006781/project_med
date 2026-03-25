@@ -9,12 +9,28 @@ from typing import Dict, Any
 
 from app.dto.compute_fields import get_patient_full_name
 
+
+
+# title	str	Заголовок поля в форме или таблице
+# editable	bool	Можно ли редактировать поле
+# hidden	bool	Скрыть поле в форме (но виджет остаётся)
+# order	int	Порядок колонки в таблице (сортировка)
+# required	bool	Обязательное ли поле (пока не используется)
+# widget_type	str	Тип виджета: 'date', 'time', 'textarea', 'completer', 'completer_with_edit', 'photo_uploader'
+# virtual	bool	Виртуальное поле, не хранится в БД
+# compute	dict	Настройка вычисления виртуального поля (функция, аргументы)
+# init_from_extra	str/True	Ключ в extra_data, из которого нужно взять значение при переходе на страницу
+# choices	list	Список строк для выпадающего списка
+# choices_provider	str	Имя провайдера для автодополнения (например, 'note_service.get_choices')
+# source	str	(не используется) – для указания источника данных
+
 # Параметр 'widget_type':
 #     'textarea' — создаёт QTextEdit для многострочного текста (вместо обычного QLineEdit).
 #     'date' — используется как подсказка, чтобы создать QDateEdit (хотя тип поля datetime.date сам по себе ведёт к этому, но widget_type может явно указать виджет даты).
 #     'time' — создаёт QTimeEdit для времени.
 #     **'completer', 'completer_with_create', 'completer_with_edit'** — создают составной виджет CompleterEdit, состоящий из QLineEditс автодополнением и опциональной кнопки...`, которая открывает отдельное окно для создания/редактирования связанной сущности (например, заметки).
 #     По умолчанию (widget_type не задан или 'text') создаётся QLineEdit для обычной строки.
+
 
 
 # --- Пациенты ---
@@ -100,6 +116,12 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'title': 'ID заметки', # заголовок колонки
         'editable': False, # редактируемый ли
         'hidden': True, # скрываем ли его объект
+    },
+    'photos': {
+        'title': 'Фотографии',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'photo_uploader',  # кастомный виджет
     },
 }
 

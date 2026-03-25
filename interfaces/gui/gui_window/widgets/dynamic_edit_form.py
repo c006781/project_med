@@ -7,6 +7,7 @@ from typing import Dict, Type, List, Union, get_origin, get_args#, Any, Optional
 import datetime 
 
 from app.utils.logger.logger import AppLogger
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from pydantic import BaseModel
 
@@ -267,6 +268,13 @@ class DynamicEditForm(QWidget):
             return widget
 
         widget_type = config.get('widget_type', 'text')
+
+        # Добавляем ветку для photo_uploader
+        if widget_type == 'photo_uploader':
+            widget = PhotoUploaderWidget(self)
+            # Для редактирования загружаем существующие фото
+            # (это будет сделано позже через отдельный метод)
+            return widget
 
         # Обработка completer-виджетов
         if widget_type in ('completer', 'completer_with_create', 'completer_with_edit'):
@@ -640,7 +648,23 @@ class DynamicEditForm(QWidget):
         completer = QCompleter(items)
         completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
-        widget.setCompleter(completer)         
+        widget.setCompleter(completer)  
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditForm',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def set_photos_data(self, photos):
+        """Устанавливает существующие фотографии для виджета photo_uploader."""
+        widget = self.widgets.get('photos')
+        if isinstance(widget, PhotoUploaderWidget):
+            widget.set_existing_photos(photos)       
 
 
 class CompleterEdit(QWidget):

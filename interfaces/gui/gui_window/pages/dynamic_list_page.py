@@ -64,15 +64,25 @@ class DynamicListPage(BasePage):
         add_action_text="Добавить",  # текст кнопки добавления
         action_button_text=None,  # текст дополнительной кнопки (если задана)
         edit_on_double_click=True,  # True, если редактирование должно быть доступно при двойном нажатии на строке
-        parent=None  # родительский виджет
+        parent=None,  # родительский виджет
     ):
         # """
         # Инициализирует страницу списка.
-
         # """
-  
 
-        
+        """
+        Инициализирует страницу списка.
+
+        :param service: сервис, используемый для редактирования записи
+        :param loader_func: функция, которая возвращает список данных
+        :param dto_class: класс DTO, используемый для создания записи
+        :param field_configs: внешняя конфигурация
+        :param page_title: заголовок страницы
+        :param add_action_text: текст кнопки добавления
+        :param action_button_text: текст дополнительной кнопки (если задана)
+        :param edit_on_double_click: True, если редактирование должно быть доступно при двойном нажатии на строке
+        :param parent: родительский виджет
+        """
         super().__init__(parent)
 
         self.logger = AppLogger.get_instance(

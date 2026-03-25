@@ -187,7 +187,11 @@ class MainWindow(QMainWindow):
         
         config_manager = AppConfigManager.get_instance()
         if not config_manager.config_exists:
-            self.page_manager.switch_to('settings', extra_data={'first_start': True})
+            self.page_manager.switch_to(
+                'settings', 
+                add_to_history=False, # Не добавляем в историю, так как страница пациентов не была активна
+                extra_data={'first_start': True}
+            )
         else:
             self.page_manager.switch_to('patient_list')
 
@@ -841,7 +845,9 @@ class MainWindow(QMainWindow):
         self._set_photo()
 
         # --- Страница настроек (оставляем как есть) ---
-        self.settings_page = SettingsPage()
+        self.settings_page = SettingsPage(
+            page_title="Настройки",
+        )
 
         # Добавляем все страницы в стек
         pages = {
@@ -1485,7 +1491,13 @@ class MainWindow(QMainWindow):
     )
     @Slot(str)
     def _on_upload_error(self, message):
-        """Ошибка загрузки."""
+        # """Ошибка загрузки."""
+        """
+        Обработчик ошибки при загрузке.
+        Вызывается при ошибке загрузки.
+        :param message: сообщение об ошибке
+        :type message: str
+        """
         self.progress_bar.setVisible(False)
         QMessageBox.critical(self, "Ошибка", message)
 
@@ -1505,13 +1517,25 @@ class MainWindow(QMainWindow):
         """
         Слот, вызываемый при изменении навигации.
         Обновляет хлебные крошки и состояние кнопки назад.
+        :param history: список кортежей (id, title) страниц, которые были посещены
+        :param current_page_id: идентификатор текущей страницы
         """
-        # Формируем строку хлебных крошек (можно взять заголовки страниц)
-        # Для простоты используем идентификаторы
-        crumbs = " > ".join(history) if history else "Главная"
+
+
+        # Формируем строку из заголовков
+        titles = [title for _, title in history]
+        # Добавляем заголовок текущей страницы
+        if current_page_id:
+            current_title = self.page_manager._get_page_title(current_page_id)  # или взять из _current_page_title
+            titles.append(current_title)
+
+        # Формируем строку хлебных крошек
+        crumbs = " > ".join(titles) if titles else "Главная"
+        
+        # Установка текста в метке хлебных крошек
         self.breadcrumbs_label.setText(crumbs)
 
-        # Кнопка назад доступна, если есть история
+        # Включение или отключение кнопки назад
         self.back_btn.setEnabled(len(history) > 0)
 
     @AppLogger.get_instance(

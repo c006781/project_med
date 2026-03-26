@@ -1518,7 +1518,7 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             'DEBUG'
         )
     )  
-    def get_dtos(
+    def get_dtos( # ф-ю требуется переделать в динамику
             self, 
             item_s:Union[List[AppointmentDTO], AppointmentDTO]  
     )-> Union[List[AppointmentDTO], AppointmentDTO] : 
@@ -1531,6 +1531,7 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         :return: список DTO или один DTO
         :rtype: Union[List[AppointmentDTO], AppointmentDTO]
         """
+
         if isinstance(item_s, list):
             # Если получен список объектов
             dtos = []  # список DTO
@@ -1549,6 +1550,8 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                 self.logger.error(f"Ошибка валидации для объекта: {item_s}")
                 raise e
             
+            # Заполняем виртуальные поля
+            
             # данные, которые подтягиваем отдельно
             try:
                 # если объект имеет поле patient, то подгружаем его имя
@@ -1565,8 +1568,17 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
                     dto.note_text = item_s.note.text
             except Exception as e:
                 # если нет поля note, то выбрасываем исключение
-                self.logger.error(f"Ошибка валидации для объекта (note): {item_s}")
+                self.logger.error(f"Ошибка валидации для объекта (photos): {item_s}")
                 raise e
+            
+
+            # try:
+            #     if item_s.note
+            #     dto.has_photos = '📷' if item_s.photos and len(item_s.photos) > 0 else '❌'
+            # except Exception as e:
+            #     # если нет поля note, то выбрасываем исключение
+            #     self.logger.error(f"Ошибка валидации для объекта (note): {item_s}")
+            #     raise e
             
             return dto
 

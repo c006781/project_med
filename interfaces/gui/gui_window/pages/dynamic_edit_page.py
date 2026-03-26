@@ -739,6 +739,7 @@ class DynamicEditPage(BasePage):
                     list_page.set_needs_refresh(True)
             # Возвращаемся на предыдущую страницу
             self._go_back()
+            
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         enable_file_logging = 'system',
@@ -880,10 +881,13 @@ class DynamicEditPage(BasePage):
     def _cancel(self):
         """
         Отмена редактирования записи.
-
-        Метод отменяет редактирование записи и возвращает на предыдущую страницу.
-        Он не делает никаких изменений в базе данных.
+        Помечает страницу списка на обновление и возвращается на предыдущую страницу.
         """
+        # Помечаем страницу списка на обновление, если известна
+        if self.page_manager and hasattr(self, 'list_page_id'):
+            list_page = self.page_manager._pages.get(self.list_page_id)
+            if list_page and hasattr(list_page, 'set_needs_refresh'):
+                list_page.set_needs_refresh(True)
         self._go_back()
 
     @AppLogger.get_instance(

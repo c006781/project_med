@@ -115,81 +115,262 @@ from sqlalchemy import event, Index, func
 Base = declarative_base()
 
 class Patient(Base):
+    """
+    Таблица пациентов.
+    Хранит персональные данные пациентов.
+    """
+
     __tablename__ = 'patients'
 
-    id = Column(Integer, primary_key=True)
-    first_name = Column(String(50), nullable=False)
-    last_name = Column(String(50), nullable=False)
-    birth_date = Column(Date, nullable=True)
-    phone = Column(String(20), nullable=True)
-    email = Column(String(100), nullable=True)
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True, 
+        comment='Уникальный идентификатор пациента',
+    )
+    first_name = Column(
+        String(50), 
+        nullable=False,
+        comment='Имя пациента',
+    )
+    last_name = Column(
+        String(50), 
+        nullable=False,
+        comment='Фамилия пациента',
+    )
+    birth_date = Column(
+        Date, 
+        nullable=True,
+        comment='Дата рождения',
+    )
+    phone = Column(
+        String(20), 
+        nullable=True,
+        comment='Номер телефона',
+    )
+    email = Column(
+        String(100), 
+        nullable=True,
+        comment='Электронная почта',
+    )
     # address = Column(String(200), nullable=True)
-    created_at = Column(DateTime, default=datetime.now)
+    created_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Электронная почта',
+    )
 
-    # Отношение к приёмам
-    appointments = relationship("Appointment", back_populates="patient", cascade="all, delete-orphan")
+    # Отношение к приёмам (каскадное удаление)
+    appointments = relationship(
+        "Appointment", 
+        back_populates="patient", 
+        cascade="all, delete-orphan"
+    )
     
     __table_args__ = (
         Index('ix_patient_last_name', 'last_name'),
+        {
+            'comment': 'Таблица пациентов', 
+            'sqlite_autoincrement': True,
+        }
     )
     
     def __repr__(self):
+        """
+        Возвращает строку-representation объекта Patient в виде "<Patient(id=1, name=Ivan Ivanov)>"
+        """
         return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
 
 class AppointmentNote(Base):
+    """
+    Таблица заметок к приёмам.
+    Заметки могут быть общими для нескольких приёмов.
+    """
+
     __tablename__ = 'appointments_notes'
 
-    id = Column(Integer, primary_key=True)
-    text = Column(Text, nullable=False)          # содержимое заметки (рекомендации, описание)
-    created_at = Column(DateTime, default=datetime.now)
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True,
+        comment='Уникальный идентификатор заметки',
+    )
+    
+    text = Column( # содержимое заметки (рекомендации, описание)
+        Text, 
+        nullable=False,
+        comment='Текст заметки',
+    )   
+
+    created_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Дата и время создания заметки',
+    )
 
     # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
-    appointments = relationship("Appointment", back_populates="note")
+    appointments = relationship(
+        "Appointment", 
+        back_populates="note"
+    )
+    
+    __table_args__ = (
+        {
+            'comment': 'Таблица заметок приёмов', 
+            'sqlite_autoincrement': True,
+        }
+    )
 
     def __repr__(self):
+        """
+        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
+        """
         return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
     
 class Appointment(Base):
+    """
+    Таблица приёмов.
+    Связывает пациента с датой, временем и опциональной заметкой.
+    """
+
     __tablename__ = 'appointments'
 
-    id = Column(Integer, primary_key=True)
-    patient_id = Column(Integer, ForeignKey('patients.id'), nullable=False)
-    date = Column(Date, nullable=False)
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True,
+        comment='Уникальный идентификатор приёма',
+    )
+
+    patient_id = Column(
+        Integer, 
+        ForeignKey('patients.id'), 
+        nullable=False,
+        comment='ID пациента (внешний ключ)',
+    )
+
+    date = Column(
+        Date, 
+        nullable=False,
+        comment='Дата приёма',
+    )
+
     # time = Column(Time, nullable=True, default=time.now)  
     # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
-    time = Column(Time, nullable=True, default=func.current_time())
+    time = Column(
+        Time, 
+        nullable=True, 
+        default=func.current_time(),
+        comment='Время приёма',
+    )
     # time = Column(Time, nullable=True, server_default=func.current_time())
-    # notes = Column(Text, nullable=True)      # заметки / рекомендации
-    note_id = Column(Integer, ForeignKey('appointments_notes.id'), nullable=True)   # внешний ключ на заметку
 
-    created_at = Column(DateTime, default=datetime.now)
+    # notes = Column(Text, nullable=True)      # заметки / рекомендации
+    note_id = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True,
+        comment='ID заметки (внешний ключ)',
+    )   # внешний ключ на заметку
+
+    created_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Дата и время создания записи',
+    )
 
 
     # Отношение к пациенту
-    patient = relationship("Patient", back_populates="appointments")
+    patient = relationship(
+        "Patient", 
+        back_populates="appointments",
+        )
 
     # доступ к заметке
-    note = relationship("AppointmentNote", back_populates="appointments")
+    note = relationship(
+        "AppointmentNote", 
+        back_populates="appointments",
+    )
    
     # Отношение к фотографиям
-    photos = relationship("Photo", back_populates="appointment", cascade="all, delete-orphan")
+    photos = relationship(
+        "Photo", 
+        back_populates="appointment", 
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index('ix_appointment_date', 'date'),
+        {
+            'comment': 'Таблица приёмов', 
+            'sqlite_autoincrement': True,
+        }
+    )
 
     def __repr__(self):
+        """
+        Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
+        """
         return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
 
 class Photo(Base):
+    """
+    Таблица фотографий, прикреплённых к приёмам.
+    Файлы хранятся в файловой системе, в таблице хранится путь.
+    """
+
     __tablename__ = 'photos'
 
-    id = Column(Integer, primary_key=True)
-    appointment_id = Column(Integer, ForeignKey('appointments.id'), nullable=False)
-    file_path = Column(String(500), nullable=False)   # путь к файлу на диске
-    description = Column(String(200), nullable=True)
-    uploaded_at = Column(DateTime, default=datetime.now)
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True,
+        comment='Уникальный идентификатор фотографии',
+    )
+
+    appointment_id = Column(
+        Integer, 
+        ForeignKey('appointments.id'), nullable=False,
+        comment='ID приёма, к которому относится фото',
+    )
+
+    file_path = Column( # путь к файлу на диске
+        String(500), 
+        nullable=False,
+        comment='Относительный путь к файлу на диске',
+    )  
+
+    description = Column(
+        String(200), 
+        nullable=True,
+        comment='Описание фотографии',
+    )
+
+    uploaded_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Дата и время загрузки',
+    )
+
 
     # Отношение к приёму
-    appointment = relationship("Appointment", back_populates="photos")
+    appointment = relationship(
+        "Appointment", 
+        back_populates="photos"
+    )
+
+    __table_args__ = (
+        Index('ix_photo_appointment', 'appointment_id'),
+        {
+            'comment': 'Таблица фотографий приёмов', 
+            'sqlite_autoincrement': True,
+        }
+    )
 
     def __repr__(self):
+        """
+        Возвращает строку-representation объекта Photo в виде "<Photo(id=1, appointment_id=1, file=photo.jpg)>"
+        """
         return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
 
 
@@ -197,7 +378,6 @@ class Photo(Base):
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    # description="Содание БД",
     level = AppLogger._parse_log_level(
         # 'INFO'
         'DEBUG'
@@ -215,16 +395,6 @@ def create_db(
     """
 
     abs_path = os.path.abspath(db_path)
-
-    # AppLogger.get_instance(
-    #         name = 'db'
-    # ).debug(
-    #     abs_path,
-    #     # level = AppLogger._parse_log_level(
-    #     #     # 'INFO'
-    #     #     'DEBUG'
-    #     # )
-    # )
 
     if recreate and os.path.exists(abs_path):
         AppLogger.get_instance(
@@ -275,7 +445,9 @@ def create_db(
     engine = create_engine(
         f"sqlite:///{db_path}", 
         echo=False, # echo=True для отладки SQL
-        connect_args={"check_same_thread": False},
+        connect_args={
+            "check_same_thread": False, 
+        },
     )
     # engine = create_engine(f"sqlite:///{abs_path}", echo=False)  # echo=True для отладки SQL
 

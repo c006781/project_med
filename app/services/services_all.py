@@ -2012,6 +2012,33 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             # 'INFO'
             'DEBUG'
         )
+    )           
+    def delete(
+        self, 
+        entity_id: int, 
+        session: Optional[Session] = None
+    ) -> None:
+        """
+        Удаляет приём вместе с фото и заметкой.
+
+        :param entity_id: ID приёма
+        :type entity_id: int
+        :param session: сессия для работы в одной транзакции
+        :type session: Optional[Session]
+        :return: None
+        :raises AppointmentNotFoundError: если приём с указанным ID не существует
+        """
+        self.delete_appointment(entity_id, session=session)
+        
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
     )  
     def get_appointments_by_patient_page(
         self, 
@@ -2442,6 +2469,17 @@ class PhotoService(
                 if os.path.exists(file_path_to_delete):
                     os.remove(file_path_to_delete)
                     self.logger.debug(f"Удалён файл {file_path_to_delete}")
+
+                    # попытка уделения папки для хранения фото от удалённого приёма
+                    # Проверяем, не стала ли родительская папка пустой
+                    parent_dir = os.path.dirname(file_path_to_delete)
+                    if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                        try:
+                            os.rmdir(parent_dir)
+                            self.logger.debug(f"Удалена пустая папка {parent_dir}")
+                        except OSError as e:
+                            self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+                            
             except Exception as e:
                 self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
                 raise PhotoFileError(file_path_to_delete, "удаление", str(e))

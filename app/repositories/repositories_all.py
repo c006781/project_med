@@ -472,11 +472,34 @@ class AppointmentRepository(BaseRepository):
         :return: приём или None, если не найдено
         :rtype: Optional[Appointment]
         """
+        # Получаем приём с подгруженными связями (пациентом и заметкой)
+        # с помощью метода joinedload, который подгруживает связанные таблицы
+        # для получения полного объекта приёма с подгруженными связями
+        # мы используем метод options с параметром joinedload
+        #
+        # В методе joinedload мы указываем связанные таблицы, которые
+        # необходимо подгружить для получения полного объекта приёма
+        # с подгруженными связями
+        # в этом случае, мы подгруживаем таблицы patients и notes
+        #
+        # Затем мы используем метод filter для фильтрации результатов
+        # по ID приёма
+        #
+        # В конце мы используем метод first, чтобы получить первый
+        # результат фильтрации (иначе None, если не найдено)
+        
         self.logger.debug(f"get_by_id_with_relations: appointment_id={appointment_id}")
-        return self._session.query(Appointment).options(
+        
+        # Получаем приём с подгруженными связями
+        return self._session.query(Appointment).options(# Получаем приём с подгруженными связями
             joinedload(Appointment.patient),
-            joinedload(Appointment.note)
-        ).filter(Appointment.id == appointment_id).first()   
+            joinedload(Appointment.note),
+
+            joinedload(Appointment.photos) 
+        ).filter( # Фильтруем результаты по ID приёма
+            Appointment.id == appointment_id
+        ).first()   # Возвращаем первый результат фильтрации (иначе None)
+
 
     @AppLogger.get_instance(
         name = 'AppointmentRepository',

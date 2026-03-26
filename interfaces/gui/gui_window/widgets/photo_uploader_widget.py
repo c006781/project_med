@@ -3,17 +3,18 @@
 import os
 from typing import List, Set, Tuple, Dict
 
+from app.dto import PhotoDTO
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtCore import QEvent, Signal, Qt, QSize
 from PySide6.QtGui import QColor, QPixmap, QFontMetrics, QPainter, QTextOption
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QAbstractItemView, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QDialog, QLabel, QScrollArea, QStyledItemDelegate,
     QStyleOptionViewItem, QTextEdit, QApplication
 )
 
-from app.dto import PhotoDTO
-from app.utils.logger.logger import AppLogger
 
 
 class PhotoDelegate(QStyledItemDelegate):
@@ -775,7 +776,32 @@ class PhotoUploaderWidget(QWidget):
         self.table.setRowCount(0)
         self.logger.debug("Виджет очищен")
 
-
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def set_readonly(self, readonly: bool = True):
+        """
+        Устанавливает режим «только просмотр»: отключает кнопки добавления/удаления.
+        Если нужно, также можно заблокировать редактирование описаний.
+        """
+        self.add_btn.setEnabled(not readonly)
+        self.remove_btn.setEnabled(not readonly)
+        # Если требуется запретить редактирование описаний, можно установить делегату другой режим,
+        # но для простоты оставим как есть (пользователь может кликнуть, но изменения не сохранятся,
+        # так как в режиме просмотра мы не вызываем _save). Однако можно также отключить редактирование ячеек:
+        # self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        if readonly:
+            self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        else:
+            self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+            
     # ----------------------------------------------------------------------
     # Вспомогательные методы для цвета строк
     # ----------------------------------------------------------------------

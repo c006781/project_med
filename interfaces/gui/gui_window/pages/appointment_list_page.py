@@ -8,17 +8,13 @@
 
 from app.utils.logger.logger import AppLogger
 
-# from app.services import AppointmentService, PhotoService
-# from app.dto import AppointmentDTO
-# from app.exceptions import AppointmentNotFoundError
 from app.dependencies import (
     # get_appointment_service, 
     get_photo_service
 )
 
-# from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.pages.dynamic_detail_list_page import DynamicDetailListPage
-# from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
     # QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -26,6 +22,7 @@ from PySide6.QtWidgets import (
     # QLineEdit, 
     QLabel, QTextEdit, QListWidget, QListWidgetItem
 )
+
 from PySide6.QtCore import (
     Qt, 
     # QAbstractTableModel, QModelIndex, 
@@ -33,10 +30,10 @@ from PySide6.QtCore import (
     # QSortFilterProxyModel, 
     QSize
 )
+
 from PySide6.QtGui import QPixmap, QIcon
 
 
-# class AppointmentListPage(BasePage):
 class AppointmentListPage(DynamicDetailListPage):
     """
     Страница со списком приёмов с правой панелью (заметка и фото).
@@ -76,7 +73,6 @@ class AppointmentListPage(DynamicDetailListPage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="AppointmentListPage._setup_detail_panel",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -91,6 +87,7 @@ class AppointmentListPage(DynamicDetailListPage):
         # Создаем виджету с заметкой
 
         self.note_text_edit = QTextEdit()
+
         # Установка режима "только для чтения"
         self.note_text_edit.setReadOnly(True)
 
@@ -98,15 +95,21 @@ class AppointmentListPage(DynamicDetailListPage):
         self.detail_layout.addWidget(QLabel("Заметка:"))
         self.detail_layout.addWidget(self.note_text_edit)
 
-        # Создаем виджету со списком фотографий
-        self.photo_list = QListWidget()
 
-        # Установка размера иконок фотографий
-        self.photo_list.setIconSize(QSize(100, 100))
+
+
+        # # Создаем виджету со списком фотографий
+        # self.photo_list = QListWidget()
+
+        # # Установка размера иконок фотографий
+        # self.photo_list.setIconSize(QSize(100, 100))
+
+        self.photo_widget = PhotoUploaderWidget()
+        self.photo_widget.set_readonly(True)          # режим только просмотр
 
         # Добавляем виджету со списком фотографий в верхнюю часть detail_layout
         self.detail_layout.addWidget(QLabel("Фотографии:"))
-        self.detail_layout.addWidget(self.photo_list)
+        self.detail_layout.addWidget(self.photo_widget)
 
 
     @AppLogger.get_instance(
@@ -114,7 +117,6 @@ class AppointmentListPage(DynamicDetailListPage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="AppointmentListPage.update_details",
         level = AppLogger._parse_log_level(
             # 'INFO'
             'DEBUG'
@@ -132,7 +134,12 @@ class AppointmentListPage(DynamicDetailListPage):
             return
         self.current_appointment_id = dto.id
         self.note_text_edit.setText(dto.note_text or "")
-        self._load_photos(dto.id)
+        # self._load_photos(dto.id)
+        # Обновляем фото
+        if hasattr(dto, 'photos') and dto.photos is not None:
+            self.photo_widget.set_existing_photos(dto.photos)
+        else:
+            self.photo_widget.set_existing_photos([])
 
 
     @AppLogger.get_instance(

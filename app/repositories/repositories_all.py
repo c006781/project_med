@@ -449,7 +449,8 @@ class AppointmentRepository(BaseRepository):
         self.logger.debug(f"get_by_patient_with_relations: patient_id={patient_id}")
         return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
             joinedload(Appointment.patient),
-            joinedload(Appointment.note)
+            joinedload(Appointment.note),
+            joinedload(Appointment.photos),
         ).all()
 
     @AppLogger.get_instance(

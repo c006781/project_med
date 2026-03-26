@@ -122,6 +122,17 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable': True,
         'virtual': True,
         'widget_type': 'photo_uploader',  # кастомный виджет
+        'hidden': True, # скрываем ли его объект
+    },
+    'has_photos': {
+        'title': 'Фото',
+        'editable': False,
+        'virtual': True,
+        'order': 5,                     # порядок в таблице
+        'compute': {
+            'func': lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
+            'args': ['photos'],
+        }
     },
 }
 

@@ -212,4 +212,8 @@ class AppointmentDTO(BaseModel):
         None, 
         description='Фотографии приёма'
     )
+    has_photos: Optional[str] = Field(
+        None, 
+        description='Наличие фото'
+    )
     # photos: List[PhotoDTO]

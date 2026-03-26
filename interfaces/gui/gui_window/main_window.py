@@ -1178,7 +1178,7 @@ class MainWindow(QMainWindow):
                 self.logger.info(f"Удалён пациент ID={dto.id}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления пациента")
+                self.logger.exception(f"Ошибка удаления пациента: {e}")
     
     @AppLogger.get_instance(
         name = 'MainWindow',
@@ -1207,7 +1207,7 @@ class MainWindow(QMainWindow):
                 self.logger.info(f"Удалён приём ID={dto.id}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления приёма")
+                self.logger.exception(f"Ошибка удаления приёма: {e}")
     
     @AppLogger.get_instance(
         name = 'MainWindow',
@@ -1236,7 +1236,7 @@ class MainWindow(QMainWindow):
                 self.logger.info(f"Удалена заметка ID={dto.id}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления заметки")
+                self.logger.exception(f"Ошибка удаления заметки: {e}`")
     
     @AppLogger.get_instance(
         name = 'MainWindow',
@@ -1265,7 +1265,7 @@ class MainWindow(QMainWindow):
                 self.logger.info(f"Удалено фото ID={dto.id}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления фото")
+                self.logger.exception(f"Ошибка удаления фото: {e}")
 
     # ----------------------------------------------------------------------
     # Обработчики навигации и действий

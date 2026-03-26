@@ -19,6 +19,8 @@ from typing import List, Dict, Any, Optional, Callable
 # from datetime import date, time
 import datetime
 
+from app.utils.logger.logger import AppLogger
+
 
 class DynamicTableModel(QAbstractTableModel):
     """
@@ -31,6 +33,13 @@ class DynamicTableModel(QAbstractTableModel):
         :param columns: описание колонок (см. выше)
         """
         super().__init__(parent)
+
+        self.logger = AppLogger.get_instance(
+            name = 'gui.DynamicTableModel',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
         self._data = data
         self._columns = columns
         self._editable_columns = {col['name']: col.get('editable', False) for col in columns}
@@ -106,7 +115,8 @@ class DynamicTableModel(QAbstractTableModel):
                 if target_type == int:
                     try:
                         value = int(value)
-                    except ValueError:
+                    except ValueError as e:
+                        self.logger.error(f"Ошибка преобразования в int {e}")
                         return False
                 elif target_type == datetime.date and isinstance(value, str):
                     # ожидается строка в формате YYYY-MM-DD
@@ -116,7 +126,9 @@ class DynamicTableModel(QAbstractTableModel):
                     # from datetime import time
                     value = datetime.time.fromisoformat(value)
                 # и т.д. – можно расширить
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            
+            self.logger.error(f"Ошибка преобразования типа {e}")
             return False  # не удалось преобразовать
 
         setattr(item, field_name, value)

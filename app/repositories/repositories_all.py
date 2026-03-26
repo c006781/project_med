@@ -262,7 +262,9 @@ class BaseRepository(Generic[ModelType], ABC):
         
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
         if self.model_class is None:
-            raise NotImplementedError("model_class не определён в репозитории")
+            err_ = NotImplementedError("model_class не определён в репозитории")
+            self.logger.exception(err_.message)
+            raise err_
         try:
             column = getattr(self.model_class, column_name, None)
             if column is None:

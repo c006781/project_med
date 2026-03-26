@@ -9,14 +9,17 @@
 import datetime
 from typing import List, Dict, Any, Tuple
 
+
 from difflib import SequenceMatcher
 # Импорты модулей
 
+from app.utils.logger.logger import AppLogger
 
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Query
 from sqlalchemy import Date, Integer, Float, String, Time
+
 
 
 class FilterOperator:
@@ -36,6 +39,14 @@ class FilterOperator:
     IS_NOT_NULL = 'is_not_null' # не NULL
     FUZZY   = 'fuzzy'       # нечеткий поиск (требует пост-обработки)
 
+@AppLogger.get_instance(
+    name = 'system',
+).log_execution_time(
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def _convert_value(column, value: Any) -> Any:
     """
     Преобразует строковое значение в тип, соответствующий колонке SQLAlchemy.
@@ -61,15 +72,32 @@ def _convert_value(column, value: Any) -> Any:
             return value
         try:
             return datetime.time.fromisoformat(value)
-        except AttributeError:
+        except AttributeError as e:            
+            AppLogger.get_instance( name = 'user').error(f"Ошибка преобразования времени {e}")
             h, m = map(int, value.split(':'))
             return datetime.time(h, m)
     return value
 
+@AppLogger.get_instance(
+    name = 'system',
+).log_execution_time(
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def escape_like(value: str, escape_char: str = '\\') -> str:
     """Экранирует спецсимволы % и _ в строке для LIKE."""
     return value.replace(escape_char, escape_char * 2).replace('%', escape_char + '%').replace('_', escape_char + '_')
 
+@AppLogger.get_instance(
+    name = 'system',
+).log_execution_time(
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def apply_filters(
     query: Query,
     model,
@@ -102,6 +130,7 @@ def apply_filters(
 
         # Проверяем, что столбец существует в модели
         if not hasattr(model, column_name):
+            AppLogger.get_instance( name = 'user').exception(f"Столбец {column_name} не найден в модели {model.__name__}")
             raise ValueError(f"Столбец {column_name} не найден в модели {model.__name__}")
 
         column = getattr(model, column_name)
@@ -136,15 +165,25 @@ def apply_filters(
 
         elif op == FilterOperator.IN:
             if not isinstance(value, (list, tuple)):
-                raise ValueError(f"Для оператора IN значение должно быть списком, получено {type(value)}")
+                err_ = f"я оператора IN значение должно быть списком, получено {type(value)}"
+                AppLogger.get_instance( name = 'user').exception(err_)
+                raise ValueError(err_)
+            
             conditions.append(column.in_(value))
         elif op == FilterOperator.NOT_IN:
             if not isinstance(value, (list, tuple)):
-                raise ValueError(f"Для оператора NOT_IN значение должно быть списком")
+                err_ = f"Для оператора NOT_IN значение должно быть списком"
+                AppLogger.get_instance( name = 'user').exception(err_)
+                raise ValueError(err_)
+            
             conditions.append(~column.in_(value))
         elif op == FilterOperator.BETWEEN:
             if not isinstance(value, (list, tuple)) or len(value) != 2:
-                raise ValueError(f"Для оператора BETWEEN значение должно быть списком из двух элементов")
+                # self.logger.exception(err_.message)
+                err_ = f"Для оператора BETWEEN значение должно быть списком из двух элементов"
+                AppLogger.get_instance( name = 'user').exception(err_)
+                raise ValueError(err_)
+
             # Преобразуем оба элемента
             v1 = _convert_value(column, value[0])
             v2 = _convert_value(column, value[1])
@@ -157,7 +196,9 @@ def apply_filters(
             # Нечеткий поиск – сохраняем для пост-обработки
             post_filters.append((column_name, value, fuzzy_threshold))
         else:
-            raise ValueError(f"Неизвестный оператор: {op}")
+            err_ = f"Неизвестный оператор: {op}"
+            AppLogger.get_instance( name = 'user').exception(err_)
+            raise ValueError(err_)
 
     if conditions:
         query = query.filter(*conditions)
@@ -165,6 +206,14 @@ def apply_filters(
     # Возвращаем запрос и список пост-фильтров
     return query, post_filters
 
+@AppLogger.get_instance(
+    name = 'system',
+).log_execution_time(
+    level = AppLogger._parse_log_level(
+        # 'INFO'
+        'DEBUG'
+    )
+)
 def apply_post_filters(items: List[Any], post_filters: List[Tuple], model) -> List[Any]:
     """
     Применяет пост-фильтры (нечеткий поиск) к списку объектов.

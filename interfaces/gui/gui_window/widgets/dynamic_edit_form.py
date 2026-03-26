@@ -700,10 +700,13 @@ class DynamicEditForm(QWidget):
         :rtype: NoneType
         """
 
-        if isinstance(widget, CompleterEdit):
+        if hasattr(widget, 'clear') and callable(widget.clear):
+            widget.clear()
+            
+        elif isinstance(widget, CompleterEdit):
             widget.clear()
 
-        if isinstance(widget, QLineEdit):
+        elif isinstance(widget, QLineEdit):
             widget.clear()
 
         elif isinstance(widget, QTextEdit):

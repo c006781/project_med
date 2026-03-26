@@ -167,4 +167,4 @@ class AppointmentListPage(DynamicDetailListPage):
                 item.setData(Qt.UserRole, photo.id)
                 self.photo_list.addItem(item)
         except Exception as e:
-            self.logger.exception("Ошибка загрузки фото")
+            self.logger.exception(f"Ошибка загрузки фото: {e}")

@@ -1,10 +1,10 @@
 # interfaces/gui/gui_window/widgets/photo_uploader_widget.py
 
 import os
-from typing import List, Tuple, Dict
+from typing import List, Set, Tuple, Dict
 
 from PySide6.QtCore import QEvent, Signal, Qt, QSize
-from PySide6.QtGui import QPixmap, QFontMetrics, QPainter, QTextOption
+from PySide6.QtGui import QColor, QPixmap, QFontMetrics, QPainter, QTextOption
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
@@ -218,13 +218,30 @@ class PhotoUploaderWidget(QWidget):
         # Данные
         self.pending_photos: List[Tuple[str, str]] = []   # (путь, описание)
         self.existing_photos: List[PhotoDTO] = []         # существующие фото
-        self.deleted_photo_ids: List[int] = []            # ID на удаление
+        self.deleted_photo_ids: Set[int] = set()          # ID на удаление
+        self.modified_photo_ids: Set[int] = set()         # ID изменённых фото
+        
         self._storage_path: str = None                    # базовый путь к хранилищу
         self._image_cache: Dict[str, QPixmap] = {}        # кэш изображений
 
         self._setup_ui()
         self._adjust_column_widths()
 
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def get_existing_photos(self) -> List[PhotoDTO]:
+        """Возвращает список существующих фото (актуальные после редактирования описаний)."""
+        return self.existing_photos
+    
     # ----------------------------------------------------------------------
     # Построение интерфейса
     # ----------------------------------------------------------------------
@@ -368,10 +385,12 @@ class PhotoUploaderWidget(QWidget):
             return
 
         new_text = item.text()
-        if row < len(self.existing_photos):
+        if row < len(self.existing_photos): # существующие фото
             photo = self.existing_photos[row]
             if photo.description != new_text:
                 photo.description = new_text
+                self.modified_photo_ids.add(photo.id) # помечаем как изменённое
+                self._update_row_color(row)          # перекрасить в жёлтый
                 self.photosChanged.emit()
                 self.logger.debug(f"Обновлено описание фото ID={photo.id}")
         else:
@@ -380,6 +399,7 @@ class PhotoUploaderWidget(QWidget):
                 file_path, old_desc = self.pending_photos[pending_index]
                 if old_desc != new_text:
                     self.pending_photos[pending_index] = (file_path, new_text)
+                    # Для новых фото цвет уже зелёный, не меняем
                     self.photosChanged.emit()
                     self.logger.debug("Обновлено описание нового фото")
 
@@ -421,18 +441,33 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def _remove_selected(self):
-        selected_rows = set()
-        for item in self.table.selectedItems():
-            selected_rows.add(item.row())
-        if not selected_rows:
-            return
+        """
+        Удаляет выбранные строки таблицы (если они существующие, то помечает их как изменённые).
+        :return: None
+        :rtype: None
+        """
+        try:
+            selected_rows = set()
 
-        for row in sorted(selected_rows, reverse=True):
-            self._remove_row(row)
+            for item in self.table.selectedItems(): # помечаем как удалённые
+                selected_rows.add(item.row())
 
-        self._refresh_table()
-        self.photosChanged.emit()
-        self.logger.info(f"Удалено {len(selected_rows)} фото")
+            if not selected_rows:
+                return
+
+            for row in sorted(selected_rows, reverse=True): # удаляем в обратном порядке
+                self._remove_row(row)
+
+            # Обновляем цвет для помеченных строк
+            for row in selected_rows:
+                self._update_row_color(row)
+
+            self.photosChanged.emit() # сигнал об изменениях
+            self.logger.info(f"Помечено на удаление {len(selected_rows)} фото")
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при удалении фото: {e}")
+            raise e
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -444,16 +479,43 @@ class PhotoUploaderWidget(QWidget):
             'DEBUG'
         )
     )
+    # def _remove_row(self, row: int):
+    #     """Помечает строку на удаление, но не удаляет её из таблицы."""
+    #     if row < len(self.existing_photos):
+    #         photo = self.existing_photos[row]
+    #         if photo.id not in self.deleted_photo_ids:
+    #             self.deleted_photo_ids.add(photo.id)
+    #             # Если фото было изменено, убираем из modified (оно теперь удаляется)
+    #             self.modified_photo_ids.discard(photo.id)
+    #         # Не удаляем из existing_photos – они останутся, но будут удалены при сохранении
+    #     else:
+    #         # Новые фото (pending) – удаляем сразу, так как они ещё не в БД
+    #         pending_index = row - len(self.existing_photos)
+    #         if pending_index < len(self.pending_photos):
+    #             del self.pending_photos[pending_index]
+    #             self._refresh_table()   # перестроим таблицу (новые фото исчезнут)
+    #             self.logger.debug("Удалено новое фото")
+
     def _remove_row(self, row: int):
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
-            self.deleted_photo_ids.append(photo.id)
-            del self.existing_photos[row]
-            self.logger.debug(f"Помечено на удаление фото ID={photo.id}")
+            if photo.id not in self.deleted_photo_ids:
+
+                # добавляем ID в множество удалённых
+                self.deleted_photo_ids.add(photo.id)
+            
+                # если фото было изменено, убираем из modified (оно всё равно удалится)
+                self.modified_photo_ids.discard(photo.id)  # если было изменено, убираем из modified
+
+                # не удаляем из existing_photos, чтобы сохранить возможность отмены
         else:
+            # новые фото (pending) – удаляем сразу
             pending_index = row - len(self.existing_photos)
-            del self.pending_photos[pending_index]
-            self.logger.debug("Удалено новое фото")
+            if pending_index < len(self.pending_photos):
+                del self.pending_photos[pending_index]
+                self._refresh_table()
+                self.logger.debug("Удалено новое фото")
+
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -473,6 +535,7 @@ class PhotoUploaderWidget(QWidget):
             return
         row = next(iter(selected_rows))
 
+        # Определяем путь к файлу (может быть даже для удалённых фото)
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
             full_path = os.path.join(self._storage_path, photo.file_path) if self._storage_path else photo.file_path
@@ -529,6 +592,10 @@ class PhotoUploaderWidget(QWidget):
         for i, (file_path, desc) in enumerate(self.pending_photos):
             row = len(self.existing_photos) + i
             self._set_table_row(row, file_path, desc, is_existing=False)
+
+        # Устанавливаем цвета для всех строк после заполнения
+        for row in range(total_rows):
+            self._set_row_color(row)
 
         self._adjust_row_heights()
         self.table.setUpdatesEnabled(True)
@@ -657,6 +724,8 @@ class PhotoUploaderWidget(QWidget):
     )
     def set_existing_photos(self, photos: List[PhotoDTO]):
         self.existing_photos = photos
+        self.deleted_photo_ids.clear()
+        self.modified_photo_ids.clear()
         self._refresh_table()
         self.logger.debug(f"Установлено {len(photos)} существующих фото")
 
@@ -684,7 +753,8 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def get_deleted_photo_ids(self) -> List[int]:
-        return self.deleted_photo_ids
+        """Возвращает список ID фото, помеченных на удаление."""
+        return list(self.deleted_photo_ids)
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -700,6 +770,81 @@ class PhotoUploaderWidget(QWidget):
         self.pending_photos.clear()
         self.existing_photos.clear()
         self.deleted_photo_ids.clear()
+        self.modified_photo_ids.clear()
         self._image_cache.clear()
         self.table.setRowCount(0)
         self.logger.debug("Виджет очищен")
+
+
+    # ----------------------------------------------------------------------
+    # Вспомогательные методы для цвета строк
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _get_row_state(self, row: int) -> str:
+        """Возвращает состояние строки: 'new', 'modified', 'deleted', 'normal'."""
+        if row < len(self.existing_photos):
+            photo = self.existing_photos[row]
+            if photo.id in self.deleted_photo_ids:
+                return 'deleted'
+            if photo.id in self.modified_photo_ids:
+                return 'modified'
+            return 'normal'
+        else:
+            # Новые фото (pending)
+            return 'new'
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _set_row_color(self, row: int):
+        """Устанавливает цвет фона для всей строки на основе состояния."""
+        state = self._get_row_state(row)
+        color = None
+        if state == 'new':
+            color = QColor(200, 255, 200)  # светло-зелёный
+        elif state == 'modified':
+            color = QColor(255, 255, 180)  # светло-жёлтый
+        elif state == 'deleted':
+            color = QColor(255, 200, 200)  # светло-красный
+        else:
+            color = QColor(255, 255, 255)  # белый
+            pass
+
+        for col in range(self.table.columnCount()):
+            item = self.table.item(row, col) # получаем ячейку
+            if item:
+                item.setBackground(color)
+
+        # Принудительная перерисовка
+        self.table.viewport().update
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
+    def _update_row_color(self, row: int):
+        """Обновляет цвет строки без перестроения таблицы."""
+        self._set_row_color(row)

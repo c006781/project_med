@@ -826,7 +826,7 @@ class BaseAppLogger:
             )
         )
 
-    def exception(self, message: str, exc_info: bool = True) -> None:
+    def exception(self, message: str, exc_info: bool = True) -> str:
         """
         Метод для логирования информации об ошибке в уровне ERROR.
 
@@ -844,6 +844,8 @@ class BaseAppLogger:
                 message = message,   
             ), exc_info=exc_info
         )
+        return message
+        
 
     # --------------------------------------------------------------------------
     # Декоратор для замера времени выполнения

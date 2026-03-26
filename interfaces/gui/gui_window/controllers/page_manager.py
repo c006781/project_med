@@ -56,6 +56,12 @@ class PageManager(QObject):
         # Вызов parent class
         super().__init__()
 
+        self.logger = AppLogger.get_instance(
+            name = 'gui.PageManager',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
         # QStackedWidget, содержащий страницы
         self._stack = stacked_widget
 
@@ -76,6 +82,7 @@ class PageManager(QObject):
                     self._page_to_index[page_id] = idx
                     self._index_to_page[idx] = page_id
                     break
+
         # История посещений (список кортежей (id, title))
         self._history: List[Tuple[str, str]] = []
 
@@ -144,7 +151,9 @@ class PageManager(QObject):
         :param extra_data: дополнительные данные, которые будут переданы в on_enter.
         """
         if page_id not in self._page_to_index:
-            raise ValueError(f"Страница с id '{page_id}' не найдена")
+            err_ = f"Страница с id '{page_id}' не найдена"
+            self.logger.exception(err_)
+            raise ValueError(err_)
 
         # Если это та же страница, просто передаём данные
         if page_id == self._current_page_id:

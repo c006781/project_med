@@ -284,7 +284,7 @@ class SettingsPage(BasePage):
                 )
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
-            self.logger.exception("Ошибка сохранения настроек")
+            self.logger.exception(f"Ошибка сохранения настроек: {e}")
 
     @AppLogger.get_instance(
         name = 'SettingsPage',

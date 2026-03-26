@@ -420,18 +420,21 @@ class DynamicEditPage(BasePage):
     def _load_existing_entity(self, entity_id):
         """
         Загружает существующую запись по ID и сопутствующие данные (например, фото).
+        Очищаем форму перед загрузкой (чтобы сбросить pending_photos).
         Устанавливает кнопку удаления в активное состояние.
         """
-        # загружаем данные из БД
+        
+        # Очищаем форму перед загрузкой (чтобы сбросить pending_photos)
+        self.form.clear()
+
         self._load_entity(entity_id) # загружает DTO и вызывает form.load_data
 
-        # загружаем существующие фото
-        photos = self.photo_service.get_photos_for_appointment(entity_id)
-
+        photos = self.photo_service.get_photos_for_appointment(entity_id) # загружаем существующие фото
         # преобразуем в список (photo_id, full_path, description)
         if 'photos' in self.form.widgets:
-            self.form.set_photos_data(photos)   # передаём список PhotoDTO
-        self.delete_btn.setEnabled(True)
+            self.form.set_photos_data(photos) # передаём список PhotoDTO
+
+        self.delete_btn.setEnabled(True) # включаем кнопку удаления
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -552,7 +555,7 @@ class DynamicEditPage(BasePage):
         except Exception as e:
             # Если запись не найдена, выводим сообщение об ошибке
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
-            self.logger.exception("Ошибка загрузки записи")
+            self.logger.exception(f"Ошибка загрузки записи: {e}")
             # Возвращаемся на предыдущую страницу
             self._go_back()
 
@@ -664,20 +667,30 @@ class DynamicEditPage(BasePage):
     #         # Логируем добавление нового фото
     #         self.logger.info(f"Добавлено новое фото с ID={photo_dto.id}")  
     def _handle_photos(self, appointment_id: int):
+        # Перебираем все виджеты формы
         """
         Удаляет помеченные фото и добавляет новые.
 
         :param appointment_id: ID приема
         :type appointment_id: int
         """
-        if 'photos' not in self.form.widgets:
-            return
-        widget = self.form.widgets['photos']
-        if not isinstance(widget, PhotoUploaderWidget):
-            return
-        pending = widget.get_pending_photos()
-        deleted = widget.get_deleted_photo_ids()
-        self.photo_service.update_photos_for_appointment(appointment_id, pending, deleted)
+        for widget in self.form.widgets.values():
+            if isinstance(widget, PhotoUploaderWidget):
+                # Обрабатываем новый, удалённые и обновлённые описания
+                pending = widget.get_pending_photos() # список (путь к фото, описание)
+                deleted = widget.get_deleted_photo_ids() # список ID на удаление
+                self.photo_service.update_photos_for_appointment( # обновляем фото
+                    appointment_id, 
+                    pending, 
+                    deleted
+                )
+
+                # Обновляем описания существующих фото
+                for photo in widget.get_existing_photos():
+                    if photo.id in deleted:  # если фото помечено на удаление, пропускаем
+                        continue
+
+                    self.photo_service.update_photo_description(photo.id, photo.description)
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -783,7 +796,7 @@ class DynamicEditPage(BasePage):
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
-            self.logger.exception("Ошибка сохранения")
+            self.logger.exception(f"Ошибка сохранения: {e}")
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -850,7 +863,7 @@ class DynamicEditPage(BasePage):
                 self._go_back()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
-                self.logger.exception("Ошибка удаления")
+                self.logger.exception(f"Ошибка удаления: {e}")
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',

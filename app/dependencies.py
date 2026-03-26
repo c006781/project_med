@@ -487,7 +487,9 @@ def collect_dto_from_input(
                     # если тип поля не int, datetime.date, datetime.time, то оставляем строку как есть
                     data[f['name']] = value
                 break
-            except ValueError:
+            except ValueError as e:
                 # выводим сообщение об ошибке
-                click.echo(f"Неверный формат для типа {f['type'].__name__}. Попробуйте снова.")
+                err_ = f"Неверный формат для типа {f['type'].__name__}. Попробуйте снова"
+                AppLogger.get_instance( name = 'user').exception(f"{err_}: {e}")
+                click.echo(f"{err_}.")
     return data

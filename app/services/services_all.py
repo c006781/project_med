@@ -1253,7 +1253,9 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             
             # Если заметка не найдена, выбрасываем исключение
             if note is None:
-                raise AppointmentNoteNotFoundError(note_id)
+                err_ = AppointmentNoteNotFoundError(note_id)
+                self.logger.exception(err_.message)
+                raise err_
             
             # Обновляем текст заметки
             note.text = text
@@ -1363,7 +1365,7 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
         except Exception as e:
-            self.logger.exception(f"Ошибка чтения файла {file_path}")
+            self.logger.exception(f"Ошибка чтения файла {file_path}: {e}")
             raise  # пробрасываем дальше
         return self.create_note(text, session=session)      
       
@@ -2106,13 +2108,45 @@ class PhotoService(
             logger_name=logger_name  # имя лога для сервиса
         )
 
+        self.logger = AppLogger.get_instance(
+            name = 'gui.PhotoService',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
         # Устанавливаем путь к директории для хранения фотографий
         self._storage_path = photos_storage_path
 
         # Создаем директорию для хранения фотографий, если она не существует
         self._ensure_storage_exists()
 
-
+    @AppLogger.get_instance(
+        name = 'PhotoService',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )  
+    def update_photo_description(
+        self, 
+        photo_id: int, 
+        description: str, 
+        session: Optional[Session] = None
+    ) -> None:
+        """Обновляет описание существующего фото."""
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            photo = repo.get_by_id(photo_id)
+            if photo is None:
+                err_ = PhotoNotFoundError(photo_id)
+                self.logger.exception(err_.message)
+                raise err_
+            
+            photo.description = description
+            
     @AppLogger.get_instance(
         name = 'PhotoService',
         enable_file_logging = 'system',
@@ -2156,7 +2190,10 @@ class PhotoService(
         :return: исключение, если фото не найдено
         :rtype: Exception
         """
-        return PhotoNotFoundError(entity_id)
+        err_ = PhotoNotFoundError(entity_id)
+        self.logger.exception(err_.message)
+        # raise err_
+        return err_
 
     # ----------------------------------------------------------------------
     # Специфические методы сервиса
@@ -2256,7 +2293,10 @@ class PhotoService(
             app_repo = AppointmentRepository(sess)
             app = app_repo.get_by_id(appointment_id)
             if app is None:
-                raise AppointmentNotFoundError(appointment_id)
+                err_ = AppointmentNotFoundError(appointment_id)
+                self.logger.exception(err_.message)
+                raise err_
+                # raise AppointmentNotFoundError(appointment_id)
 
             # 1. Создаём запись с временным путём (помечаем как ожидающую)
             photo = self._model_class(
@@ -2275,11 +2315,13 @@ class PhotoService(
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 shutil.copy2(source_file_path, target_path)
                 self.logger.debug(f"Файл скопирован: {source_file_path} -> {target_path}")
+                
             except Exception as e:
                 # Если копирование не удалось — удаляем созданную запись
                 # sess.delete(photo) # ненужен, так как дальше должен быть rollback
                 # sess.commit()  # фиксируем удаление (чтобы не оставлять pending-запись)
-                self.logger.exception(f"Ошибка копирования файла {source_file_path}")
+                self.logger.exception(f"Ошибка копирования файла {source_file_path}: {e}")
+
                 raise PhotoFileError(source_file_path, "копирование", str(e))
 
             # 3. Обновляем путь в записи на реальный относительный путь
@@ -2388,7 +2430,9 @@ class PhotoService(
             # 3. Получаем фотографию по ID
             photo = repo.get_by_id(photo_id)
             if photo is None:
-                raise PhotoNotFoundError(photo_id)
+                err_ = PhotoNotFoundError(photo_id)
+                self.logger.exception(err_.message)
+                raise err_
 
             # 4. Запоминаем путь к файлу до удаления записи
             file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
@@ -2399,7 +2443,7 @@ class PhotoService(
                     os.remove(file_path_to_delete)
                     self.logger.debug(f"Удалён файл {file_path_to_delete}")
             except Exception as e:
-                self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}")
+                self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
                 raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
             # 6. Если файл успешно удалён (или не существовал), удаляем запись

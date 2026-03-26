@@ -527,7 +527,7 @@ class DynamicListPage(BasePage):
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
-            self.logger.exception("Ошибка загрузки данных")
+            self.logger.exception(f"Ошибка загрузки данных: {e}")
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',

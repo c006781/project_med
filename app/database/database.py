@@ -59,6 +59,9 @@
 #         # Если мы в корне — можно оставить None или пустую строку
 #         __package__ = None
 
+
+from app.utils.logger.logger import AppLogger
+
 # try:
 from app.database.database_shema.clinic import Base as Base
 # except ImportError as e:
@@ -86,26 +89,75 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
 
+
 class Database:
     """
     Центральный класс для работы с БД.
     Создаёт движок, фабрику сессий и предоставляет контекстный менеджер для сессий.
     """
+
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def __init__(self, db_url: str):
+        """
+        Инициализирует объект Database.
+
+        :param db_url: URL для подключения к БД (например, 'sqlite:///database.db')
+        """
         self.engine = create_engine(
             db_url, 
             echo=False, 
             future=True,
             connect_args={"check_same_thread": False},
         )
-        self.Session = scoped_session(sessionmaker(bind=self.engine, future=True))
+
+        self.logger = AppLogger.get_instance(
+            name = 'backend.Database',
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
+        self.Session = scoped_session( 
+            sessionmaker(
+                bind=self.engine, 
+                future=True
+            )
+        )
         # Автоматическое создание таблиц (если их нет)
         Base.metadata.create_all(self.engine)
 
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def get_session(self):
         """Возвращает сессию, привязанную к текущему потоку."""
         return self.Session()
 
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     @contextmanager
     def session_scope(self):
         """
@@ -126,7 +178,8 @@ class Database:
             yield session
             # Если в контексте не было ошибок, коммитит сессию
             session.commit()
-        except Exception:
+        except Exception as e:
+            self.logger.exception(f"Ошибка: {e}")
             # Если была ошибка, откатывает сессию
             session.rollback()
             raise
@@ -135,12 +188,30 @@ class Database:
             session.close()
             # session.remove()
 
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def close(self):
         """Закрывает все сессии и удаляет привязку к потокам."""
         self.Session.remove()
 
-
-
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def create_tables(self, recreate: bool = False):
         """
         Создаёт таблицы в БД.
@@ -156,6 +227,16 @@ class Database:
         # Создает новые таблицы в БД, если они не существуют
         Base.metadata.create_all(self.engine)
 
+    @AppLogger.get_instance(
+        name = 'Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level(
+            # 'INFO'
+            'DEBUG'
+        )
+    )
     def fill_test_data(self):
         """
         Заполняет БД тестовыми данными.

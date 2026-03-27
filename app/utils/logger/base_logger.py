@@ -888,7 +888,7 @@ class BaseAppLogger:
             # func_lineno = func.__code__.co_firstlineno
             # func_name = func.__name__
             # is_async = inspect.iscoroutinefunction(func)
-
+        
             # Используем квалифицированное имя (с классом, если это метод)
             func_qualname = func.__qualname__
             try:
@@ -918,6 +918,14 @@ class BaseAppLogger:
                 level - уровень логирования
                 log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
                 """
+
+
+
+                # # Вызываем функцию
+                # result = func(*args, **kwargs)
+                # return result
+        
+        
                 caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
 
                 # Формируем строку с описанием

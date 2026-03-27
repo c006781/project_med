@@ -130,13 +130,21 @@ class AppointmentListPage(DynamicDetailListPage):
         :param dto: данные приёма
         :type dto: AppointmentDTO
         """
+        self.logger.debug(f"dto {dto}")
+
         if not dto:
             return
+        
         self.current_appointment_id = dto.id
+
         self.note_text_edit.setText(dto.note_text or "")
+
         # self._load_photos(dto.id)
+        
         # Обновляем фото
-        if hasattr(dto, 'photos') and dto.photos is not None:
+        self.logger.debug(f"result {hasattr(dto, 'photos') and dto.photos is not None}")
+
+        if hasattr(dto, 'photos') and dto.photos is not None: # нужно переделать в динамику...
             self.photo_widget.set_existing_photos(dto.photos)
         else:
             self.photo_widget.set_existing_photos([])

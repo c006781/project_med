@@ -11,7 +11,7 @@ from app.dependencies import (
     get_note_service , 
     get_photo_service ,
 )
-from app.utils.virtual_fields import compute_virtual_fields
+from app.utils.virtual_fields import compute_virtual_fields, enrich_dto_with_computed_fields
 
 
 from interfaces.gui.gui_window.utils.gui_helpers import apply_readonly_to_widgets
@@ -21,7 +21,7 @@ from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploade
 
 from pydantic import BaseModel
 
-from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox#, QLineEdit, QSpinBox
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox#, QLineEdit, QSpinBox
 from PySide6.QtCore import Slot
 
 
@@ -83,6 +83,10 @@ class DynamicEditPage(BasePage):
         # self.field_choices = field_choices or {}
         # self.field_rename = field_rename or {}
         self.field_configs = field_configs or {}
+
+        self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
+
+        self._loading = False # Блокировка сигналов при загрузке
 
         # ID редактируемой записи
         self.current_id = None
@@ -227,22 +231,65 @@ class DynamicEditPage(BasePage):
     #             self.logger.exception(f"Ошибка вычисления поля {field_name}: {e}")
     #             if field_name in self.form.widgets:
     #                 self.form._set_widget_value(self.form.widgets[field_name], "Ошибка")  
-    def _compute_virtual_fields(self, extra_data=None):
+    def _compute_virtual_fields(
+        self, 
+        extra_data=None
+    ):
         """
         Вычисляет виртуальные поля формы с помощью функций, заданных в конфигурации.
         
         :param extra_data: дополнительные данные, которые могут быть использованы в функциях вычисления
         :type extra_data: Optional[Dict[str, Any]]
         """
+
+        # Проверяем, есть ли виртуальные поля
+        has_virtual = any(config.get('compute') for config in self.field_configs.values())
+
+        # self.logger.debug(f"has_virtual: {has_virtual}")
+        self.logger.debug(f"not has_virtual: {not has_virtual}")
+
+        if not has_virtual:
+            return
+
+        # Объединяем сохранённые данные с переданными
+        combined = (self._computed_extra_data or {}).copy()
+
+        # self.logger.debug(f"combined: {combined} result: {combined is not None}")
+        # self.logger.debug(f"combined is not None: {combined is not None}")
+
+        if extra_data:
+            combined.update(extra_data)
+
+        # self.logger.debug(f"combined: {combined}")
+
         # Собираем текущие данные из формы
         data = self.form.get_data()
+
         # Вычисляем виртуальные поля
-        computed = compute_virtual_fields(data, self.field_configs, extra_data)
+        computed = compute_virtual_fields(
+            data, 
+            self.field_configs, 
+            # extra_data,
+            combined,
+        )
+
+        # self.logger.debug(f"computed: {computed} combined: {combined} data: {data} self.field_configs: {self.field_configs}")
+        self.logger.debug(f"combined: {combined} self.field_configs: {self.field_configs}")
+
         # Устанавливаем вычисленные значения в виджеты
         for field_name, value in computed.items():
+
+            self.logger.debug(
+                f"field_name: {field_name} value: {value} result: {field_name in self.form.widgets and value is not None}"
+            )
             if field_name in self.form.widgets and value is not None:
+
                 # Сравниваем с текущим значением, чтобы избежать лишних сигналов
                 current = self.form._get_widget_value(self.form.widgets[field_name])
+                self.logger.debug(
+                    # f"current: {current} value: {value} result: {current != value}"
+                    f"current: {current} value: {value} result: {current != value}"
+                )
                 if current != value:
                     self.form._set_widget_value(self.form.widgets[field_name], value)
 
@@ -417,24 +464,99 @@ class DynamicEditPage(BasePage):
             'DEBUG'
         )
     )
-    def _load_existing_entity(self, entity_id):
+    def _load_existing_entity(
+        self, 
+        entity_id
+    ):
         """
         Загружает существующую запись по ID и сопутствующие данные (например, фото).
         Очищаем форму перед загрузкой (чтобы сбросить pending_photos).
         Устанавливает кнопку удаления в активное состояние.
         """
-        
+        # self.logger.debug(f"self._loading: {self._loading}")
+        # self._loading = True
+        # try:
         # Очищаем форму перед загрузкой (чтобы сбросить pending_photos)
-        self.form.clear()
 
-        self._load_entity(entity_id) # загружает DTO и вызывает form.load_data
+        self.form._loading = True
+        try:
+            self.form.clear()
+        finally:
+            self.form._loading = False
+        
+        self._computed_extra_data = None
 
-        photos = self.photo_service.get_photos_for_appointment(entity_id) # загружаем существующие фото
-        # преобразуем в список (photo_id, full_path, description)
-        if 'photos' in self.form.widgets:
-            self.form.set_photos_data(photos) # передаём список PhotoDTO
+        self.logger.debug(f"entity_id: {entity_id} self._computed_extra_data: {self._computed_extra_data}")
 
+        # 1. Собираем список связей из field_configs (source_attr)
+        relations = []
+        for config in self.field_configs.values():
+            source_attr = config.get('source_attr')
+
+            self.logger.debug(
+                f"config {config} source_attr: {source_attr} result: {source_attr and source_attr not in relations}"
+            )
+            if source_attr and source_attr not in relations:
+                relations.append(source_attr)
+
+        self.logger.debug(f"relations: {relations} entity_id: {entity_id}")
+
+        # 2. Загружаем ORM-объект с подгруженными связями
+        with self.service._session_scope() as session:
+            repo = self.service._get_repo(session)
+            model_obj = repo.get_with_relations(entity_id, relations)
+
+            self.logger.debug(f"repo: {repo} model_obj: {model_obj}")
+
+            if model_obj is None:
+                
+                self.logger.exception(f"model_obj is None")
+
+                raise self.service._not_found_exception(entity_id)
+
+        # 3. Создаём DTO и обогащаем его (extra_data заполняется автоматически)
+        dto = self.service._dto_class.model_validate(model_obj)
+
+        extra_data = {}
+        
+        self.logger.debug(
+            f"model_obj: {model_obj} dto: {dto} extra_data: {extra_data} self.field_configs: {self.field_configs}"
+        )
+        dto = enrich_dto_with_computed_fields(
+            dto, 
+            model_obj, 
+            self.field_configs, 
+            extra_data
+        )
+
+        # 4. Сохраняем extra_data для будущих вычислений
+        self._computed_extra_data = extra_data
+
+        self.logger.debug(f"dto: {dto} extra_data: {extra_data} self._computed_extra_data: {self._computed_extra_data}")
+        
+        # 5. Загружаем DTO в форму
+        self.form._loading = True   # <-- блокируем сигналы
+        try:
+            self.form.load_data(dto)
+        finally:
+            self.form._loading = False   # <-- снимаем блокировку
+
+        # Принудительное обновление формы
+        self.form.update()
+        self.form.repaint() # принудительная перерисовка после загрузки 
+        QApplication.processEvents()
+
+        # self._load_entity(entity_id) # загружает DTO и вызывает form.load_data
+
+        # photos = self.photo_service.get_photos_for_appointment(entity_id) # загружаем существующие фото
+        # # преобразуем в список (photo_id, full_path, description)
+        # if 'photos' in self.form.widgets:
+        #     self.form.set_photos_data(photos) # передаём список PhotoDTO
+
+        # 6. Включаем кнопку удаления
         self.delete_btn.setEnabled(True) # включаем кнопку удаления
+        # finally:
+        #     self._loading = False
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -451,7 +573,14 @@ class DynamicEditPage(BasePage):
         Подготавливает форму для создания новой записи:
         очищает форму, отключает кнопку удаления.
         """
-        self.form.clear()
+        self.form._loading = True
+        try:
+            self.form.clear()
+        finally:
+            self.form._loading = False
+
+        self._computed_extra_data = None # сбрасываем extra_data
+        
         self.delete_btn.setEnabled(False)
         # здесь можно добавить другую логику для нового объекта, если нужно
 
@@ -473,7 +602,10 @@ class DynamicEditPage(BasePage):
         - вычисление виртуальных полей
         - загрузка данных для автодополнения
         - подключение сигналов кнопок
-        """
+        """ 
+
+        self.logger.debug(f"extra_data: {extra_data}")
+
         # Заполняем из extra_data (после загрузки DTO или после очистки)
         self._init_from_extra(extra_data)
 
@@ -481,13 +613,21 @@ class DynamicEditPage(BasePage):
         self._apply_readonly()
 
         # Вычисляем виртуальные поля (например, patient_name)
-        self._compute_virtual_fields(extra_data)
+        # self._compute_virtual_fields(extra_data)
+        self.form._loading = True
+        try:
+            self._compute_virtual_fields(extra_data)
+        finally:
+            self.form._loading = False
 
         # Загружаем данные для полей с автодополнением
         self._load_completer_data()
 
         # Подключаем сигналы кнопок
         self._connect_button_signals()
+
+        # Обновление после загрузки
+        self.update()
 
 
     @AppLogger.get_instance(
@@ -514,8 +654,18 @@ class DynamicEditPage(BasePage):
         self.current_id = extra_data.get('id') if extra_data else None
 
         # для возврата (если страница вызвана как диалог)
-        self._return_to_page_id = extra_data.get('return_to_page') if extra_data else None
-        self._return_field = extra_data.get('return_field') if extra_data else None
+        try:
+            self._return_to_page_id = extra_data.get('return_to_page') if extra_data else None
+        except Exception as e:
+            self.logger.exception(f"Ошибка в методе on_enter: {e}")
+            raise e
+
+        try:
+            self._return_field = extra_data.get('return_field') if extra_data else None
+        except Exception as e:
+            self.logger.exception(f"Ошибка в методе on_enter: {e}")
+            raise e
+        
 
         if self.current_id is not None:
             self._load_existing_entity(self.current_id)
@@ -756,6 +906,7 @@ class DynamicEditPage(BasePage):
         :return: экземпляр DTO, соответствующий self.dto_class
         """
         data = self._collect_form_data()
+        self.logger.debug(f"data: {data}")
         return self.dto_class(**data)
     
     @AppLogger.get_instance(

@@ -594,7 +594,9 @@ class MainWindow(QMainWindow):
             service=get_patient_service(),
             dto_class=PatientDTO,
             page_title="Редактирование пациента",
-            exclude_fields=['id'],
+            exclude_fields=[
+                'id',
+            ],
             # field_rename={
             #     'first_name': 'Имя',
             #     'last_name': 'Фамилия',
@@ -684,6 +686,8 @@ class MainWindow(QMainWindow):
                 # 'patient_id', # не убираем, так как нужен внос с обьект
                 # 'patient_name', 
                 # 'note_id',  # не убираем, так как нужен внос с обьект
+                'has_photos',
+                # 'photos',
             ],
             # field_choices={},  # можно добавить, например, список пациентов
             # field_rename={
@@ -1164,11 +1168,15 @@ class MainWindow(QMainWindow):
     )
     def _on_patient_delete(self, dto):
         """Удаление пациента с подтверждением."""
+        self.logger.debug(f"dto={dto}")
+
         reply = QMessageBox.question(
             self, "Подтверждение",
             f"Удалить пациента {dto.last_name} {dto.first_name}? Все связанные приёмы и фото также будут удалены.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+
+        self.logger.debug(f"reply={reply} result={reply == QMessageBox.StandardButton.Yes}")
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 service = get_patient_service()
@@ -1193,11 +1201,14 @@ class MainWindow(QMainWindow):
     )
     def _on_appointment_delete(self, dto):
         """Удаление приёма."""
+        self.logger.debug(f"dto={dto}")
+
         reply = QMessageBox.question(
             self, "Подтверждение",
             f"Удалить приём ID {dto.id} от {dto.date}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
+        self.logger.debug(f"reply={reply} result={reply == QMessageBox.StandardButton.Yes}")
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 service = get_appointment_service()
@@ -1554,7 +1565,11 @@ class MainWindow(QMainWindow):
         """Вызывается при входе на страницу. Передаёт extra_data в метод on_enter страницы."""
         page = self.page_manager._pages.get(page_id)
         if page and hasattr(page, 'on_enter'):
-            page.on_enter(extra_data)
+            try:
+                page.on_enter(extra_data)
+            except Exception as e:
+                self.logger.exception(f"Ошибка в методе on_enter страницы {page_id}: {e}")
+                raise e
 
     # Методы для управления прогрессом (могут вызываться из других мест)
 

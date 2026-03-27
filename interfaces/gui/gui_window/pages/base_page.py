@@ -20,10 +20,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent=None):
         """
@@ -44,10 +41,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_main_window(self, main_window):
         # """Устанавливает ссылку на главное окно."""
@@ -68,10 +62,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def on_enter(self):
         """
@@ -85,10 +76,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def on_leave(self):
         """
@@ -102,10 +90,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_page_title(self, title: str):
         """
@@ -121,10 +106,7 @@ class BasePage(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def get_page_title(self) -> str:
         """

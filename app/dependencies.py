@@ -14,10 +14,18 @@ import datetime
 # import inspect
 from typing import Union
 
+from app.utils.logger import AppLogger
+
 # from app.database.database import Database
 from app.database import Database
 # from .controllers.conf.get_config import get_config_env
 from app.config.config_manager.manager import get_config_env
+from app.dto.field_configs import (
+    PATIENT_CONFIG, 
+    APPOINTMENT_CONFIG,
+    NOTE_CONFIG, 
+    PHOTO_CONFIG,
+)
 from app.services import (
     PatientService,
     AppointmentService,
@@ -27,7 +35,6 @@ from app.services import (
 )
 # from .backend.bd.clinic import create_db
 # from .backend.bd.temp_data_bd import generate_test_data
-from app.utils.logger import AppLogger
 
 
 
@@ -38,11 +45,7 @@ from pydantic import BaseModel
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_db() -> Database:
     """
@@ -70,22 +73,15 @@ def get_db() -> Database:
     return Database(db_url)
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_patient_service() -> PatientService:
-    """
-    Возвращает экземпляр PatientService, инициализированный с помощью Database.
-
-    Returns:
-        PatientService: экземпляр PatientService, готовый к работе.
-    """
-
-    return PatientService(get_db())
+    return PatientService(
+        get_db(), 
+        field_configs=PATIENT_CONFIG
+    )
 
 
 # def get_appointment_service() -> AppointmentService:
@@ -94,13 +90,9 @@ def get_patient_service() -> PatientService:
 #     return AppointmentService(db, note_service=note_service)
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_appointment_service() -> AppointmentService:
     """
@@ -114,16 +106,17 @@ def get_appointment_service() -> AppointmentService:
     note_service = get_note_service()
     photo_service = get_photo_service()   
     # Create an instance of AppointmentService with the database, note service, and photo service.
-    return AppointmentService(db, note_service=note_service, photo_service=photo_service)
+    return AppointmentService(
+        db,
+        note_service=note_service,
+        photo_service=photo_service,
+        field_configs=APPOINTMENT_CONFIG
+    )
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_note_service() -> NoteService:
     """
@@ -131,34 +124,39 @@ def get_note_service() -> NoteService:
     Returns:
         NoteService: экземпляр NoteService, готовый к работе.
     """
-    # Create an instance of NoteService with the database.
-    return NoteService(get_db())
+    return NoteService(
+        get_db(), 
+        field_configs=NOTE_CONFIG
+    )
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_photo_service() -> PhotoService:
     """
     Возвращает экземпляр PhotoService, инициализированный с помощью Database и пути к хранилищу фотографий.
     """
     config = get_config_env()
-    photos_path = config.get('PHOTOS_STORAGE_PATH', './photos')
-    return PhotoService(get_db(), photos_path)
+    photos_path = config.get(
+        'PHOTOS_STORAGE_PATH', 
+        # './photos'
+        os.path.join(
+            '.', 
+            'photos'
+        ),
+    ) # поправить на другой, что бы был адоптив 
+    return PhotoService(
+        get_db(), 
+        photos_path, 
+        field_configs=PHOTO_CONFIG
+    )
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_sync_service() -> SyncService:
     """
@@ -169,11 +167,7 @@ def get_sync_service() -> SyncService:
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def init_db(
         recreate: bool = False, 
@@ -215,13 +209,9 @@ def init_db(
 #     return return_
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_text_echo(
     data: dict,  # Pydantic DTO
@@ -271,13 +261,9 @@ def get_text_echo(
     return return_  # возвращаем список текстов для вывода в термінал
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_key_value_dto(
         list_, 
@@ -312,23 +298,22 @@ def get_key_value_dto(
         for k, v in items:
             if exclude_fields and k in exclude_fields:
                 continue
+
             # Применяем переименование, если есть
             if rename_map and k in rename_map:
                 title = rename_map[k]
             else:
                 # Стандартное преобразование: замена подчёркиваний на пробелы и капитализация
                 title = k.replace('_', ' ').title()
+
             data[title] = v
+
         return data
     
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def get_dto_fields(dto_class: BaseModel, exclude: list = None):
     """
@@ -373,11 +358,7 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def create_click_options(dto_class: BaseModel, action='create'):
     """
@@ -419,22 +400,17 @@ def create_click_options(dto_class: BaseModel, action='create'):
             func = decorator_func(func)
         return func
     return decorator
-
     
 @AppLogger.get_instance(
         name = 'system'
 ).log_execution_time(
-    
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level = AppLogger._parse_log_level('DEBUG')
 )
 def collect_dto_from_input(
-        dto_class: BaseModel, 
-        exclude: list = None, 
-        rename_map: dict = None
-    ):
+    dto_class: BaseModel, 
+    exclude: list = None, 
+    rename_map: dict = None
+):
     """
     В интерактивном режиме запрашивает у пользователя значения полей DTO.
     Возвращает словарь {имя_поля: значение} с преобразованными типами.
@@ -493,3 +469,19 @@ def collect_dto_from_input(
                 AppLogger.get_instance( name = 'user').exception(f"{err_}: {e}")
                 click.echo(f"{err_}.")
     return data
+
+@AppLogger.get_instance(
+        name = 'system'
+).log_execution_time(
+    level = AppLogger._parse_log_level('DEBUG')
+)
+def get_appointment_service() -> AppointmentService:
+    db = get_db()
+    note_service = get_note_service()
+    photo_service = get_photo_service()
+    return AppointmentService(
+        db, 
+        note_service=note_service, 
+        photo_service=photo_service,
+        field_configs=APPOINTMENT_CONFIG
+    )

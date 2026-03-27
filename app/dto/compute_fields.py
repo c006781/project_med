@@ -24,6 +24,10 @@ def get_patient_full_name(patient_id: int) -> str:
 
     # Если пациент не указан, то возвращаем пустую строку
     if patient_id is None:
+        AppLogger.get_instance( name = 'user').debug(
+                f"patient_id is None"
+                # f"compute_virtual_fields: вычисление виртуального поля {field_name}: args = {args}, kwargs = {kwargs}, value = {value}"
+        )
         return ""
 
     try:
@@ -39,7 +43,13 @@ def get_patient_full_name(patient_id: int) -> str:
             return f"{patient.last_name} {patient.first_name}"
         else:
             # Если пациент не найден, то возвращаем сообщение об ошибке
+            AppLogger.get_instance( name = 'user').debug(
+                f"Если пациент не найден."
+                )
             return "Пациент не найден"
-    except Exception:
+    except Exception as e:
+        AppLogger.get_instance( name = 'user').debug(
+                f"Ошибка загрузки: {e}"
+        )
         # Если произошла ошибка, то возвращаем сообщение об ошибке
         return "Ошибка загрузки"

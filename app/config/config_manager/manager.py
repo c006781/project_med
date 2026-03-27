@@ -174,7 +174,11 @@ class AppConfigManager(BaseConfigManager):
         'LOG_FILE': './logs/app.log',
         'LOG_MAX_BYTES': str(10 * 1024 * 1024),  # 10 MB
         'LOG_BACKUP_COUNT': '5',
-        'PHOTOS_STORAGE_PATH': './photos',
+        # 'PHOTOS_STORAGE_PATH': './photos',
+        'PHOTOS_STORAGE_PATH': os.path.join(
+            '.', 
+            'photos'
+        ),
         # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
         'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
     }

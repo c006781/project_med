@@ -26,7 +26,13 @@ class DynamicTableModel(QAbstractTableModel):
     """
     Модель для отображения любых DTO-объектов в таблице.
     """
-
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def __init__(self, data: List[Any], columns: List[Dict], parent=None):
         """
         :param data: список DTO (объекты с атрибутами, соответствующими колонкам)
@@ -43,18 +49,50 @@ class DynamicTableModel(QAbstractTableModel):
         self._data = data
         self._columns = columns
         self._editable_columns = {col['name']: col.get('editable', False) for col in columns}
+        
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def rowCount(self, parent=QModelIndex()) -> int:
         return len(self._data)
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._columns)
 
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    def data(
+        self, 
+        index: QModelIndex, 
+        role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
+        # self.logger.debug(f'index: {index}, role: {role}')
+
         if not index.isValid():
             return None
+        
         row = index.row()
         col = index.column()
+
+        # self.logger.debug(f'row: {row}, col: {col} result: {row >= len(self._data)}')
+
         if row >= len(self._data):
             return None
 
@@ -63,41 +101,78 @@ class DynamicTableModel(QAbstractTableModel):
         field_name = col_info['name']
         value = getattr(item, field_name, None)
 
+        # self.logger.debug(
+        #     # f'item: {item}, col_info: {col_info}, field_name: {field_name}, value: {value}, role: {role}'
+        #     f'field_name: {field_name}, value: {value}, role: {role}'
+        # )
+ 
+
         if role == Qt.ItemDataRole.DisplayRole:
+            self.logger.debug(f'Qt.ItemDataRole.DisplayRole result: {value is None}')
+            
             if value is None:
                 return ""
+            
             # Для дат и времени возвращаем строку в стандартном формате
             if isinstance(value, datetime.date):
+                self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.date')
                 return value.isoformat()
+            
             if isinstance(value, datetime.time):
+                self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.time')
                 return value.strftime("%H:%M")
-            return str(value)
+
+            temp = str(value)
+            # self.logger.debug(f'return str(value): {temp}')
+
+            return temp
 
         if role == Qt.ItemDataRole.EditRole:
+            self.logger.debug(f'Qt.ItemDataRole.EditRole')
             # Для редактирования возвращаем сырое значение
             return value
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
+            self.logger.debug(
+                f"Qt.ItemDataRole.TextAlignmentRole result: {col_info.get('type') in (int, float)}"
+            )
             # Числа выравниваем вправо, текст влево
             if col_info.get('type') in (int, float):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
         # Для сортировки используем DisplayRole (уже строка) или можно вернуть значение
         if role == Qt.ItemDataRole.UserRole:
+            self.logger.debug(f'Qt.ItemDataRole.UserRole')
             return value  # для сортировки
-
+            
+        # self.logger.debug(f'role {role} not found')
         return None
 
-    def setData(self, index: QModelIndex, value: Any, role: int = Qt.ItemDataRole.EditRole) -> bool:
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    def setData(
+        self, 
+        index: QModelIndex, 
+        value: Any, 
+        role: int = Qt.ItemDataRole.EditRole
+    ) -> bool:
         """
         Обновляет значение в ячейке (если колонка редактируемая).
         Сигнал dataChanged испускается автоматически.
         """
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
+        
         row = index.row()
         col = index.column()
+
         if row >= len(self._data):
             return False
 
@@ -135,11 +210,25 @@ class DynamicTableModel(QAbstractTableModel):
         self.dataChanged.emit(index, index, [role])
         return True
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self._columns[section]['title']
         return None
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         flags = super().flags(index)
         if index.isValid():
@@ -148,7 +237,18 @@ class DynamicTableModel(QAbstractTableModel):
                 flags |= Qt.ItemFlag.ItemIsEditable
         return flags
 
-    def sort(self, column: int, order: Qt.SortOrder = Qt.SortOrder.AscendingOrder):
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    def sort(
+        self, 
+        column: int, 
+        order: Qt.SortOrder = Qt.SortOrder.AscendingOrder
+    ):
         """
         Сортирует данные по указанной колонке.
         Вызывается прокси-моделью или напрямую, если сортировка включена.
@@ -167,12 +267,26 @@ class DynamicTableModel(QAbstractTableModel):
         self._data.sort(key=key_func, reverse=reverse)
         self.layoutChanged.emit()
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def update_data(self, new_data: List[Any]):
         """Полностью обновляет данные модели."""
         self.beginResetModel()
         self._data = new_data
         self.endResetModel()
 
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def get_item_at_row(self, row: int) -> Optional[Any]:
         """Возвращает DTO по индексу строки."""
         if 0 <= row < len(self._data):

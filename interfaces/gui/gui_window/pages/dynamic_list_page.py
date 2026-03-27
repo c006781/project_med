@@ -565,7 +565,11 @@ class DynamicListPage(BasePage):
             'DEBUG'
         )
     )
-    def _on_selection_changed(self, selected, deselected):
+    def _on_selection_changed(
+        self, 
+        selected, 
+        deselected
+    ):
         """
         Обработка события изменения выбора в таблице.
 
@@ -579,21 +583,27 @@ class DynamicListPage(BasePage):
         :param deselected: список индексов, которые были сняты с выбора
         :type deselected: QItemSelection
         """
+        self.logger.debug(f"selected = {selected}, deselected = {deselected}")
         # Получаем список выбранных индексов
         indexes = selected.indexes()
+        self.logger.debug(f"indexes = {indexes}")
         
         # Если был выбран хоть бы один индекс, то извлекается соответствующий DTO
         # иначе, если не была выбрана ни одна строка, то извлекается None
         if indexes:
             proxy_index = indexes[0]
             source_index = self.proxy_model.mapToSource(proxy_index)
+            self.logger.debug(f" proxy_index = {proxy_index}, source_index = {source_index}")
+
             self.selected_dto = self.source_model.get_item_at_row(source_index.row())
             self.delete_btn.setEnabled(True)
+            self.logger.debug(f"result = {hasattr(self, 'action_btn')}")
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(True)
         else:
             self.selected_dto = None
             self.delete_btn.setEnabled(False)
+            self.logger.debug(f"result = {hasattr(self, 'action_btn')}")
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(False)
 
@@ -618,12 +628,14 @@ class DynamicListPage(BasePage):
         :param index: индекс строки, по которой был произведен двойной клик
         :type index: QModelIndex
         """
+        self.logger.debug(f'index: {index} result: {not self.edit_on_double_click or not index.isValid()}')
         if not self.edit_on_double_click or not index.isValid():
             return
         
         source_index = self.proxy_model.mapToSource(index)
         dto = self.source_model.get_item_at_row(source_index.row())
-        
+
+        self.logger.debug(f'source_index {source_index} dto: {dto} ')
         if dto:
             self.edit_requested.emit(dto)
 

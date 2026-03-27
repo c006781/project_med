@@ -156,6 +156,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import selectinload
 
+from app.utils.virtual_fields import enrich_dto_with_computed_fields
+
 
 
 ModelType = TypeVar('ModelType')
@@ -193,6 +195,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         repo_class: Type[RepoType],
         model_class: Type[ModelType],
         dto_class: Type[DTOType],
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         logger_name: Optional[str] = None
     ):
         """
@@ -208,10 +211,12 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         Attributes:
             logger (AppLogger): логгер для записи событий.
         """
-        self._db            = db
-        self._repo_class    = repo_class
-        self._model_class   = model_class
-        self._dto_class     = dto_class
+
+        self._db            = db 
+        self._repo_class    = repo_class # репозиторий с которым работает сервис 
+        self._model_class   = model_class # ORM-модель для создания экземпляров 
+        self._dto_class     = dto_class # DTO класс для преобразования 
+        self._field_configs = field_configs or {} # конфигурация полей для сервиса (по умолчанию пустой словарь)
 
         # Настройка логгера: если имя не передано, используем имя класса сервиса
         if logger_name is None:
@@ -444,24 +449,27 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         :return: список DTO или один DTO
         :rtype: Union[List, Any]
         """
+        self.logger.debug(f"item_s: {item_s}")
+
         if isinstance(item_s, list):
-            dtos = []  # список DTO
-            for item in item_s:
-                # try:
-                dtos.append(self.get_dtos(item))  # рекурсивно добавляем DTO в список
-                # except Exception as e:
-                #     self.logger.error(f"Ошибка валидации для объекта: {item}")  # логгируем ошибку
-                #     raise e  # выбрасываем исключение
+            # данные из ТБ
+            dtos = [self.get_dtos(item) for item in item_s] # рекурсивно добавляем DTO в список
             self.logger.debug(f"Получено {len(dtos)} записей")  # логгируем количество полученных DTO
+
             return dtos
         else:
             # данные из ТБ
             try:
                 dto = self._dto_class.model_validate(item_s)  # создаем DTO из объекта
             except Exception as e:
-                self.logger.error(f"Ошибка валидации для объекта: {item}")  # логгируем ошибку
+                self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
                 raise e  # выбрасываем исключение
             
+            # Обогащаем, если есть конфигурация
+            if self._field_configs:
+                dto = enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+
+            # self.logger.debug(f"Получена запись: {dto}")  # логгируем полученную DTO
             return dto
     
     @AppLogger.get_instance(
@@ -487,7 +495,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         :return: DTO, созданный из объекта
         :rtype: DTOType
         """
-        return self.get_dtos(item)
+        dto = self.get_dtos(item)
+
+        # self.logger.debug(f"Получена запись: {dto}")
+
+        return dto
     
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -638,7 +650,13 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         
 
 
-class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
+class PatientService(
+    BaseService[
+        Patient, 
+        PatientDTO, 
+        PatientRepository
+    ]
+):
     """
     Сервис для управления пациентами.
     """
@@ -647,16 +665,13 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         name = 'BaseService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
             self, 
-            db: Database, 
+            db: Database,  
+            field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
             logger_name: Optional[str] = None, 
         ):
         """
@@ -665,6 +680,7 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         Parameters:
             db (Database): экземпляр Database для получения сессий.
             logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+            
 
         Attributes:
             logger (AppLogger): логгер для записи событий.
@@ -678,6 +694,7 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             repo_class  = PatientRepository,
             model_class = Patient,
             dto_class   = PatientDTO,
+            field_configs=field_configs,
             logger_name = logger_name,
         )
 
@@ -693,7 +710,11 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             'DEBUG'
         )
     )   
-    def create_patient(self, patient_dto: PatientDTO, session: Optional[Session] = None) -> PatientDTO:
+    def create_patient(
+        self, 
+        patient_dto: PatientDTO, 
+        session: Optional[Session] = None
+    ) -> PatientDTO:
         """
         Создаёт нового пациента. Выполняет валидацию.
 
@@ -704,7 +725,8 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         :return: созданный пациент с id
         :rtype: PatientDTO
         """
-        
+        self.logger.debug(f"patient_dto {patient_dto} session {session} result {session}")
+
         if not patient_dto.first_name or not patient_dto.last_name:
             self.logger.warning("Попытка создания пациента без имени/фамилии")
             raise PatientValidationError("first_name/last_name", "Имя и фамилия обязательны")
@@ -727,6 +749,7 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             # dto_out = self._dto_class.model_validate(patient)
             dto_out = self.get_dto_out(patient)
             self.logger.info(f"Создан пациент с id={dto_out.id}")
+            self.logger.debug(f"dto_out {dto_out}")
             return dto_out
            
     @AppLogger.get_instance(
@@ -734,13 +757,13 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )  
-    def update_patient(self, patient_dto: PatientDTO, session: Optional[Session] = None) -> PatientDTO:
+    def update_patient(
+        self, 
+        patient_dto: PatientDTO, 
+        session: Optional[Session] = None
+    ) -> PatientDTO:
         """
         Обновляет существующего пациента.
 
@@ -755,6 +778,8 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             PatientValidationError: если id не указан.
             PatientNotFoundError: если пациент с указанным id не найден.
         """
+        self.logger.debug(f"patient_dto {patient_dto} session {session} result {session}")
+
         if patient_dto.id is None:
             self.logger.warning("Попытка обновления пациента без id")
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
@@ -778,6 +803,7 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
             # sess.commit()  # Явный коммит
             updated_dto = self.get_dto_out(patient)
             self.logger.info(f"Обновлён пациент id={updated_dto.id}")
+            self.logger.debug(f"updated_dto {updated_dto}") 
             return updated_dto  
         
     @AppLogger.get_instance(
@@ -979,7 +1005,13 @@ class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
         return self.update_patient(dto)
 
 
-class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNoteRepository]):
+class NoteService(
+    BaseService[
+        AppointmentNote, 
+        AppointmentNoteDTO, 
+        AppointmentNoteRepository,
+    ]
+):
     """
     Сервис для работы с заметками приёмов.
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
@@ -995,7 +1027,12 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             'DEBUG'
         )
     )  
-    def __init__(self, db: Database, logger_name: Optional[str] = None):
+    def __init__(
+        self, 
+        db: Database, 
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        logger_name: Optional[str] = None,
+    ):
         """
         Инициализирует сервис для работы с заметками приёмов.
         
@@ -1011,6 +1048,7 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
             repo_class=AppointmentNoteRepository,
             model_class=AppointmentNote,
             dto_class=AppointmentNoteDTO,
+            field_configs=field_configs,
             logger_name=logger_name
         )
 
@@ -1426,7 +1464,13 @@ class NoteService(BaseService[AppointmentNote, AppointmentNoteDTO, AppointmentNo
 
 
 
-class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRepository]):
+class AppointmentService(
+        BaseService[
+            Appointment, 
+            AppointmentDTO, 
+            AppointmentRepository,
+        ]
+    ):
     """
     Сервис для работы с приёмами.
     Все методы, возвращающие DTO, стараются использовать подгрузку связей (patient, note)
@@ -1448,8 +1492,9 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         self,
         db: Database,
         note_service: Optional['NoteService'] = None,  
-        photo_service: Optional['PhotoService'] = None,   
-        logger_name: Optional[str] = None
+        photo_service: Optional['PhotoService'] = None,  
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None, 
+        logger_name: Optional[str] = None,
     ):
         """
         Инициализирует сервис для работы с приёмами.
@@ -1471,10 +1516,11 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
   
         super().__init__(
             db=db,
-            repo_class  = AppointmentRepository,
-            model_class = Appointment,
-            dto_class   = AppointmentDTO,
-            logger_name = logger_name
+            repo_class      = AppointmentRepository,
+            model_class     = Appointment,
+            dto_class       = AppointmentDTO,
+            field_configs   = field_configs,
+            logger_name     = logger_name,
         )
 
         self._note_service = note_service
@@ -1513,74 +1559,87 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )  
-    def get_dtos( # ф-ю требуется переделать в динамику
-            self, 
-            item_s:Union[List[AppointmentDTO], AppointmentDTO]  
-    )-> Union[List[AppointmentDTO], AppointmentDTO] : 
-        """
-        Возвращает список DTO из списка объектов или один DTO из объекта.
-        Если получен список объектов, то для каждого объекта пытается создать DTO.
-        Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
-        :param item_s: список объектов или один объект
-        :type item_s: Union[List[AppointmentDTO], AppointmentDTO]
-        :return: список DTO или один DTO
-        :rtype: Union[List[AppointmentDTO], AppointmentDTO]
-        """
+    # def get_dtos( # ф-ю требуется переделать в динамику
+    #         self, 
+    #         item_s:Union[List[AppointmentDTO], AppointmentDTO]  
+    # )-> Union[List[AppointmentDTO], AppointmentDTO] : 
+    #     """
+    #     Возвращает список DTO из списка объектов или один DTO из объекта.
+    #     Если получен список объектов, то для каждого объекта пытается создать DTO.
+    #     Если объект не может быть конвертирован в DTO, то выбрасывается исключение.
+    #     :param item_s: список объектов или один объект
+    #     :type item_s: Union[List[AppointmentDTO], AppointmentDTO]
+    #     :return: список DTO или один DTO
+    #     :rtype: Union[List[AppointmentDTO], AppointmentDTO]
+    #     """
 
+    #     if isinstance(item_s, list):
+    #         # Если получен список объектов
+    #         dtos = []  # список DTO
+    #         for item in item_s:
+    #             # для каждого объекта пытаемся создать DTO
+    #             dtos.append(self.get_dtos(item))  # рекурсивно добавляем DTO в список
+    #         self.logger.debug(f"Получено {len(dtos)} записей")
+    #         return dtos
+    #     else:
+    #         # данные из ТБ
+    #         try:
+    #             # создаем DTO из объекта
+    #             dto = self._dto_class.model_validate(item_s)  
+    #         except Exception as e:
+    #             # если объект не может быть конвертирован в DTO, то выбрасываем исключение
+    #             self.logger.error(f"Ошибка валидации для объекта: {item_s}")
+    #             raise e
+            
+    #         # Заполняем виртуальные поля
+            
+    #         # данные, которые подтягиваем отдельно
+    #         try:
+    #             # если объект имеет поле patient, то подгружаем его имя
+    #             if item_s.patient:
+    #                 dto.patient_name = f"{item_s.patient.last_name} {item_s.patient.first_name}"
+    #         except Exception as e:
+    #             # если нет поля patient, то выбрасываем исключение
+    #             self.logger.error(f"Ошибка валидации для объекта (patient_name): {item_s}")
+    #             raise e
+            
+    #         try:
+    #             # если объект имеет поле note, то подгружаем текст заметки
+    #             if item_s.note:
+    #                 dto.note_text = item_s.note.text
+    #         except Exception as e:
+    #             # если нет поля note, то выбрасываем исключение
+    #             self.logger.error(f"Ошибка валидации для объекта (photos): {item_s}")
+    #             raise e
+            
+
+    #         # try:
+    #         #     if item_s.note
+    #         #     dto.has_photos = '📷' if item_s.photos and len(item_s.photos) > 0 else '❌'
+    #         # except Exception as e:
+    #         #     # если нет поля note, то выбрасываем исключение
+    #         #     self.logger.error(f"Ошибка валидации для объекта (note): {item_s}")
+    #         #     raise e
+            
+    #         return dto
+    def get_dtos(
+        self, 
+        item_s: Union[List[Appointment], Appointment]
+    ) -> Union[List[AppointmentDTO], AppointmentDTO]:
         if isinstance(item_s, list):
-            # Если получен список объектов
-            dtos = []  # список DTO
-            for item in item_s:
-                # для каждого объекта пытаемся создать DTO
-                dtos.append(self.get_dtos(item))  # рекурсивно добавляем DTO в список
-            self.logger.debug(f"Получено {len(dtos)} записей")
-            return dtos
+            return [self.get_dtos(item) for item in item_s]
         else:
-            # данные из ТБ
             try:
-                # создаем DTO из объекта
-                dto = self._dto_class.model_validate(item_s)  
+                dto = self._dto_class.model_validate(item_s)
             except Exception as e:
-                # если объект не может быть конвертирован в DTO, то выбрасываем исключение
                 self.logger.error(f"Ошибка валидации для объекта: {item_s}")
                 raise e
-            
-            # Заполняем виртуальные поля
-            
-            # данные, которые подтягиваем отдельно
-            try:
-                # если объект имеет поле patient, то подгружаем его имя
-                if item_s.patient:
-                    dto.patient_name = f"{item_s.patient.last_name} {item_s.patient.first_name}"
-            except Exception as e:
-                # если нет поля patient, то выбрасываем исключение
-                self.logger.error(f"Ошибка валидации для объекта (patient_name): {item_s}")
-                raise e
-            
-            try:
-                # если объект имеет поле note, то подгружаем текст заметки
-                if item_s.note:
-                    dto.note_text = item_s.note.text
-            except Exception as e:
-                # если нет поля note, то выбрасываем исключение
-                self.logger.error(f"Ошибка валидации для объекта (photos): {item_s}")
-                raise e
-            
 
-            # try:
-            #     if item_s.note
-            #     dto.has_photos = '📷' if item_s.photos and len(item_s.photos) > 0 else '❌'
-            # except Exception as e:
-            #     # если нет поля note, то выбрасываем исключение
-            #     self.logger.error(f"Ошибка валидации для объекта (note): {item_s}")
-            #     raise e
-            
-            return dto
+            # Обогащаем DTO вычисленными полями
+            return enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -2100,7 +2159,11 @@ class AppointmentService(BaseService[Appointment, AppointmentDTO, AppointmentRep
             return dtos, total
 
 class PhotoService(
-    BaseService[Photo, PhotoDTO, PhotoRepository]
+    BaseService[
+        Photo, 
+        PhotoDTO, 
+        PhotoRepository
+    ]
 ):
     """
     Сервис для работы с фотографиями приёмов.
@@ -2120,7 +2183,8 @@ class PhotoService(
     def __init__(
         self, 
         db: Database, 
-        photos_storage_path: str, 
+        photos_storage_path: str,  
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         logger_name: 
         Optional[str] = None
     ):
@@ -2134,6 +2198,7 @@ class PhotoService(
         :param logger_name: имя лога для сервиса
         :type logger_name: Optional[str]
         """
+
         # Если имя лога не указано, то используем имя класса
         if logger_name is None:
             logger_name = self.__class__.__name__
@@ -2144,6 +2209,7 @@ class PhotoService(
             repo_class=PhotoRepository,  # класс репозитория для работы с фотографиями
             model_class=Photo,  # класс модели для работы с фотографиями
             dto_class=PhotoDTO,  # класс DTO для работы с фотографиями
+            field_configs=field_configs, # словарь конфигурации полей для сервиса (необязательный)
             logger_name=logger_name  # имя лога для сервиса
         )
 
@@ -2592,9 +2658,11 @@ class PhotoService(
         """
         # Создаем сессию для работы в одной транзакции, если она не была передана
         with self._session_scope(session) as sess:
+
             # Удаляем фото из списка deleted_photo_ids
             for photo_id in deleted_photo_ids:
                 self.delete_photo(photo_id, session=sess)
+
             # Добавляем новые фото из списка pending_photos
             for file_path, description in pending_photos:
                 self.add_photo_to_appointment(

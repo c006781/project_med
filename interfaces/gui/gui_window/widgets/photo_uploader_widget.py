@@ -201,12 +201,15 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent=None):
+        """
+        Инициализирует виджет для управления фотографиями приёма.
+
+        :param parent: Родительский виджет
+        :type parent: QWidget
+        """
         super().__init__(parent)
 
         self.logger = AppLogger.get_instance(
@@ -234,10 +237,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def get_existing_photos(self) -> List[PhotoDTO]:
         """Возвращает список существующих фото (актуальные после редактирования описаний)."""
@@ -258,6 +258,10 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def _setup_ui(self):
+        """
+        Построение интерфейса PhotoUploaderWidget: таблица, кнопок добавления/удаления,
+        кнопки просмотра, настройка столбцов, делегатов, сигналов.
+        """
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -316,6 +320,12 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def _adjust_column_widths(self):
+        """
+        Устанавливает ширину столбцов таблицы.
+
+        Ширина столбца 0 составляет 1/3 ширины таблицы.
+        Если ширина таблицы не определена, то ширина столбцов не изменяется.
+        """
         width = self.table.viewport().width()
         if width > 0:
             col0_width = int(width * 0.33)
@@ -327,10 +337,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -352,19 +359,32 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def _on_selection_changed(self):
-        self.view_btn.setEnabled(len(self.table.selectedItems()) > 0)
+        """
+        Обработчик события changes selection в таблице.
+
+        Enables view button if there is at least one selected item.
+        """
+        self.view_btn.setEnabled(
+            len(self.table.selectedItems()) > 0
+        )
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
-    def _on_table_double_clicked(self, item: QTableWidgetItem):
+    def _on_table_double_clicked(
+        self, 
+        item: QTableWidgetItem
+    ):
+        """
+        Обработчик события двой клики по таблице.
+
+        Если двой клик произошел в столбце 0 (фото), то отображает фото.
+        Если двой клик произошел в столбце 1 (описание), то ничего не делает.
+        """
         if item.column() == 0:
             self._view_photo()
         # столбец 1 редактируется автоматически через делегат
@@ -374,12 +394,17 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_item_changed(self, item: QTableWidgetItem):
+        """
+        Обработчик события изменения элемента таблицы.
+
+        Если изменение произошло в столбце 1 (описание), то обновляет описание фото, если оно существует в БД,
+        или обновляет описание нового фото, если оно pending.
+
+        Выводит событие photosChanged, если описание фото было изменено.
+        """
         row = item.row()
         column = item.column()
         if column != 1:
@@ -419,6 +444,22 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def add_photo(self):
+        """
+        Добавляет новое фото в список pending_photos.
+
+        Открывает файл для добавления с помощью QFileDialog.getOpenFileName.
+
+        Если файл не выбран, то ничего не делается.
+
+        Добавляет путь к файлу и пустое описание в список pending_photos.
+
+        Обновляет таблицу с новым фото.
+
+        Вызывает сигнал photosChanged.
+
+        :return: None
+        :rtype: None
+        """
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите изображение", "",
             "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
@@ -436,10 +477,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _remove_selected(self):
         """
@@ -475,10 +513,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     # def _remove_row(self, row: int):
     #     """Помечает строку на удаление, но не удаляет её из таблицы."""
@@ -498,6 +533,15 @@ class PhotoUploaderWidget(QWidget):
     #             self.logger.debug("Удалено новое фото")
 
     def _remove_row(self, row: int):
+        """
+        Помечает строку на удаление, но не удаляет её из таблицы.
+
+        Если строка соответствует существующему фото, то добавляет ID в множество self.deleted_photo_ids.
+        Если фото было изменено, то убираем из множества self.modified_photo_ids.
+
+        Если строка соответствует новому фото (pending), то удаляет его из self.pending_photos и перестраивает таблицу.
+        """
+
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
             if photo.id not in self.deleted_photo_ids:
@@ -523,17 +567,30 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _view_photo(self):
+        """
+        Открывает фото, выбранное в таблице.
+
+        Если фото существует в БД, то берёт путь к файлу из _storage_path.
+        Если фото pending, то берёт путь из pending_photos.
+
+        Если файл не найден, то выводит предупреждение.
+
+        Если файл не удалось загрузить, то выводит предупреждение.
+
+        Создаёт диалог с просмотром фото, если файл существует и можно загрузить.
+        """
+
         selected_rows = set()
+
         for item in self.table.selectedItems():
             selected_rows.add(item.row())
+
         if not selected_rows:
             return
+        
         row = next(iter(selected_rows))
 
         # Определяем путь к файлу (может быть даже для удалённых фото)
@@ -578,12 +635,15 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _refresh_table(self):
+        """
+        Обновляет таблицу с существующими и новыми фото.
+
+        :return: None
+        :rtype: None
+        """
         total_rows = len(self.existing_photos) + len(self.pending_photos)
         self.table.setRowCount(total_rows)
         self.table.setUpdatesEnabled(False)
@@ -607,12 +667,28 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
-    def _set_table_row(self, row: int, file_path: str, description: str, is_existing: bool):
+    def _set_table_row(
+        self, 
+        row: int, 
+        file_path: str, 
+        description: str, 
+        is_existing: bool
+    ):
+        """
+        Устанавливает значения для строки таблицы.
+
+        :param row: Номер строки
+        :type row: int
+        :param file_path: Путь к файлу (может быть дельным для удалённых фото)
+        :type file_path: str
+        :param description: Описание фото
+        :type description: str
+        :param is_existing: True, если фото существует в БД, False, если фото pending
+        :type is_existing: bool
+        """
+
         full_path = file_path
         if is_existing and self._storage_path:
             full_path = os.path.join(self._storage_path, file_path)
@@ -632,12 +708,24 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _adjust_row_heights(self):
+        
+        """
+        Устанавливает высоту строк таблицы на основе ширины столбца 0.
+
+        Если ширина столбца 0 не определена, то ничего не делается.
+
+        Для каждой строки таблицы берется путь к файлу из столбца 0 и ширина столбца 1.
+        Если путь к файлу не определен, то для строки ничего не делается.
+
+        Берется пиксель из файла (если файл существует) и вычисляется соотношение ширины к высоте.
+        Если пиксель не может быть загружен, то используется высота 100.
+
+        Вычисляется максимальная высота для строки, учитывая высоту пикселя и высоту текста.
+        """
+        
         col0_width = self.table.columnWidth(0)
         if col0_width <= 0:
             return
@@ -682,17 +770,28 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _get_pixmap(self, full_path: str) -> QPixmap:
+        """
+        Возвращает QPixmap по полному пути к файлу.
+
+        Если файл находится в кэше изображений, то возвращает кэшированное изображение.
+        Если файл не существует или не удалось загрузить, то возвращает пустой QPixmap.
+
+        :param full_path: путь к файлу
+        :type full_path: str
+        :return: QPixmap по полному пути к файлу
+        :rtype: QPixmap
+        """
         if full_path in self._image_cache:
             return self._image_cache[full_path]
+        
         pixmap = QPixmap(full_path)
+
         if not pixmap.isNull():
             self._image_cache[full_path] = pixmap
+
         return pixmap
 
     # ----------------------------------------------------------------------
@@ -704,12 +803,15 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_storage_path(self, path: str):
+        """
+        Установка пути к хранилищу.
+
+        :param path: Путь к хранилищу
+        :type path: str
+        """
         self._storage_path = path
         self.logger.debug(f"Путь к хранилищу: {path}")
 
@@ -724,10 +826,20 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def set_existing_photos(self, photos: List[PhotoDTO]):
-        self.existing_photos = photos
-        self.deleted_photo_ids.clear()
-        self.modified_photo_ids.clear()
-        self._refresh_table()
+        """
+        Установка существующих фото.
+
+        :param photos: Список существующих фото (PhotoDTO)
+        :type photos: List[PhotoDTO]
+        """
+
+        self.existing_photos = photos # Список существующих фото
+
+        self.deleted_photo_ids.clear() 
+        self.modified_photo_ids.clear() 
+
+        self._refresh_table() # Обновление таблицы
+
         self.logger.debug(f"Установлено {len(photos)} существующих фото")
 
     @AppLogger.get_instance(
@@ -741,6 +853,12 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def get_pending_photos(self) -> List[Tuple[str, str]]:
+        """
+        Возвращает список новых фото (pending) в формате (путь, описание).
+
+        :return: Список новых фото (pending)
+        :rtype: List[Tuple[str, str]]
+        """
         return self.pending_photos
 
     @AppLogger.get_instance(
@@ -754,7 +872,12 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def get_deleted_photo_ids(self) -> List[int]:
-        """Возвращает список ID фото, помеченных на удаление."""
+        """
+        Возвращает список ID фото, помеченных на удаление.
+
+        :return: Список ID фото, помеченных на удаление
+        :rtype: List[int]
+        """
         return list(self.deleted_photo_ids)
 
     @AppLogger.get_instance(
@@ -762,18 +885,19 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def clear(self):
+        """
+        Очищает виджет, удаляя все данные (новые фото, существующие фото, ID на удаление, ID изменённых фото).
+        """
         self.pending_photos.clear()
         self.existing_photos.clear()
         self.deleted_photo_ids.clear()
         self.modified_photo_ids.clear()
         self._image_cache.clear()
-        self.table.setRowCount(0)
+
+        self.table.setRowCount(0) # Очистка таблицы
         self.logger.debug("Виджет очищен")
 
     @AppLogger.get_instance(
@@ -781,22 +905,25 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
-    def set_readonly(self, readonly: bool = True):
+    def set_readonly(
+        self, 
+        readonly: bool = True, # Режим "только просмотр"
+    ):
         """
         Устанавливает режим «только просмотр»: отключает кнопки добавления/удаления.
         Если нужно, также можно заблокировать редактирование описаний.
         """
+
         self.add_btn.setEnabled(not readonly)
         self.remove_btn.setEnabled(not readonly)
+
         # Если требуется запретить редактирование описаний, можно установить делегату другой режим,
         # но для простоты оставим как есть (пользователь может кликнуть, но изменения не сохранятся,
         # так как в режиме просмотра мы не вызываем _save). Однако можно также отключить редактирование ячеек:
         # self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
         if readonly:
             self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         else:
@@ -811,20 +938,28 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _get_row_state(self, row: int) -> str:
-        """Возвращает состояние строки: 'new', 'modified', 'deleted', 'normal'."""
+        """
+        Возвращает состояние строки: 'new', 'modified', 'deleted', 'normal'.
+        
+        Если строка соответствует существующему фото, то возвращает 'deleted', если фото было помечено на удаление, 
+        'modified', если фото было изменено, или 'normal', если фото не было изменено.
+        
+        Если строка соответствует новому фото (pending), то возвращает 'new'.
+        """
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
+
             if photo.id in self.deleted_photo_ids:
                 return 'deleted'
+            
             if photo.id in self.modified_photo_ids:
                 return 'modified'
+            
             return 'normal'
+        
         else:
             # Новые фото (pending)
             return 'new'
@@ -840,7 +975,18 @@ class PhotoUploaderWidget(QWidget):
         )
     )
     def _set_row_color(self, row: int):
-        """Устанавливает цвет фона для всей строки на основе состояния."""
+        """
+        Устанавливает цвет фона для всей строки на основе состояния.
+
+        Состояние строки может быть одним из следующих:
+        - 'new': светло-зелёный (новое фото)
+        - 'modified': светло-жёлтый (изменённое фото)
+        - 'deleted': светло-красный (фото на удаление)
+        - 'normal': белый (не изменённое фото)
+
+        :param row: Номер строки
+        :type row: int
+        """
         state = self._get_row_state(row)
         color = None
         if state == 'new':

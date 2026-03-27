@@ -134,12 +134,50 @@ class BaseRepository(Generic[ModelType], ABC):
         name = 'BaseRepository',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def get_with_relations(
+        self,
+        entity_id: int, 
+        relations: List[str]
+    ):
+        """
+        Возвращает объект по ID с подгруженными связями.
+
+        :param entity_id: ID объекта
+        :type entity_id: int
+        :param relations: список связей, которые нужно подгрузить
+        :type relations: List[str]
+        :return: объект с подгруженными связями
+        :rtype: self.model_class
+        """
+        query = self._session.query(self.model_class)
+
+        self.logger.debug(f"get_with_relations: entity_id {entity_id} query {query} self.model_class {self.model_class}")
+
+        for rel in relations:
+            self.logger.debug(f"get_with_relations: rel {rel}")
+
+            if hasattr(self.model_class, rel):
+                query = query.options(
+                    joinedload(
+                        getattr(self.model_class, rel)
+                    )
+                )   
+                
+                self.logger.debug(f"get_with_relations: rel {rel} query {query}")
         
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        self.logger.debug(f'self.model_class.id {self.model_class.id} entity_id {entity_id}')
+
+        return query.filter(self.model_class.id == entity_id).first()
+
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def get_by_id(self, entity_id: int) -> Optional[ModelType]:
         """
@@ -151,6 +189,7 @@ class BaseRepository(Generic[ModelType], ABC):
         :rtype: Optional[ModelType]
         """
         self.logger.debug(f"get_by_id: {entity_id}")
+        
         return self._session.get(self.model_class, entity_id)
     
     # def get_all(self) -> List[ModelType]:

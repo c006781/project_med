@@ -514,32 +514,36 @@ class DynamicEditPage(BasePage):
 
                 raise self.service._not_found_exception(entity_id)
 
-        # 3. Создаём DTO и обогащаем его (extra_data заполняется автоматически)
-        dto = self.service._dto_class.model_validate(model_obj)
-
-        extra_data = {}
+            # 3. Создаём DTO и обогащаем его (extra_data заполняется автоматически)
+            try:
+                dto = self.service._dto_class.model_validate(model_obj)
+            except Exception as e:
+                self.logger.exception(f" service._dto_class.model_validate(model_obj) - e: {e}")
+                raise e
         
-        self.logger.debug(
-            f"model_obj: {model_obj} dto: {dto} extra_data: {extra_data} self.field_configs: {self.field_configs}"
-        )
-        dto = enrich_dto_with_computed_fields(
-            dto, 
-            model_obj, 
-            self.field_configs, 
-            extra_data
-        )
+            extra_data = {}
+            
+            self.logger.debug(
+                f"model_obj: {model_obj} dto: {dto} extra_data: {extra_data} self.field_configs: {self.field_configs}"
+            )
+            dto = enrich_dto_with_computed_fields(
+                dto, 
+                model_obj, 
+                self.field_configs, 
+                extra_data
+            )
 
-        # 4. Сохраняем extra_data для будущих вычислений
-        self._computed_extra_data = extra_data
+            # 4. Сохраняем extra_data для будущих вычислений
+            self._computed_extra_data = extra_data
 
-        self.logger.debug(f"dto: {dto} extra_data: {extra_data} self._computed_extra_data: {self._computed_extra_data}")
-        
-        # 5. Загружаем DTO в форму
-        self.form._loading = True   # <-- блокируем сигналы
-        try:
-            self.form.load_data(dto)
-        finally:
-            self.form._loading = False   # <-- снимаем блокировку
+            self.logger.debug(f"dto: {dto} extra_data: {extra_data} self._computed_extra_data: {self._computed_extra_data}")
+            
+            # 5. Загружаем DTO в форму
+            self.form._loading = True   # <-- блокируем сигналы
+            try:
+                self.form.load_data(dto)
+            finally:
+                self.form._loading = False   # <-- снимаем блокировку
 
         # Принудительное обновление формы
         self.form.update()

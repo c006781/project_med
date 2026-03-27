@@ -106,20 +106,24 @@ class DynamicTableModel(QAbstractTableModel):
         #     f'field_name: {field_name}, value: {value}, role: {role}'
         # )
  
-
+        # self.logger.debug(
+        #     # f'item: {item}, col_info: {col_info}, field_name: {field_name}, value: {value}, role: {role}'
+        #     # f'field_name: {field_name}, value: {value}, role: {role}'
+        #     f'field_name: {field_name}, value: {value}, role: {role}'
+        # )
         if role == Qt.ItemDataRole.DisplayRole:
-            self.logger.debug(f'Qt.ItemDataRole.DisplayRole result: {value is None}')
+            # self.logger.debug(f'Qt.ItemDataRole.DisplayRole result: {value is None}')
             
             if value is None:
                 return ""
             
             # Для дат и времени возвращаем строку в стандартном формате
             if isinstance(value, datetime.date):
-                self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.date')
+                # self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.date')
                 return value.isoformat()
             
             if isinstance(value, datetime.time):
-                self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.time')
+                # self.logger.debug(f'Qt.ItemDataRole.DisplayRole - datetime.time')
                 return value.strftime("%H:%M")
 
             temp = str(value)
@@ -128,14 +132,14 @@ class DynamicTableModel(QAbstractTableModel):
             return temp
 
         if role == Qt.ItemDataRole.EditRole:
-            self.logger.debug(f'Qt.ItemDataRole.EditRole')
+            # self.logger.debug(f'Qt.ItemDataRole.EditRole')
             # Для редактирования возвращаем сырое значение
             return value
 
         if role == Qt.ItemDataRole.TextAlignmentRole:
-            self.logger.debug(
-                f"Qt.ItemDataRole.TextAlignmentRole result: {col_info.get('type') in (int, float)}"
-            )
+            # self.logger.debug(
+            #     f"Qt.ItemDataRole.TextAlignmentRole result: {col_info.get('type') in (int, float)}"
+            # )
             # Числа выравниваем вправо, текст влево
             if col_info.get('type') in (int, float):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
@@ -144,7 +148,7 @@ class DynamicTableModel(QAbstractTableModel):
 
         # Для сортировки используем DisplayRole (уже строка) или можно вернуть значение
         if role == Qt.ItemDataRole.UserRole:
-            self.logger.debug(f'Qt.ItemDataRole.UserRole')
+            # self.logger.debug(f'Qt.ItemDataRole.UserRole')
             return value  # для сортировки
             
         # self.logger.debug(f'role {role} not found')

@@ -979,7 +979,7 @@ class DynamicEditForm(QWidget):
         Очищает все виджеты формы, присваивая к ним значения по умолчанию.
         """
         for widget in self.widgets.values():
-            self.logger.debug(f"widget: {widget}")
+            # self.logger.debug(f"widget: {widget}")
             self._clear_value(widget)
 
     @AppLogger.get_instance(

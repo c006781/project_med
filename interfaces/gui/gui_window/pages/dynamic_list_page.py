@@ -61,6 +61,7 @@ class DynamicListPage(BasePage):
         action_button_text=None,  # текст дополнительной кнопки (если задана)
         edit_on_double_click=True,  # True, если редактирование должно быть доступно при двойном нажатии на строке
         parent=None,  # родительский виджет
+        exclude_columns=None,
     ):
         # """
         # Инициализирует страницу списка.
@@ -97,6 +98,8 @@ class DynamicListPage(BasePage):
         self.add_action_text = add_action_text
         self.action_button_text = action_button_text
         self.edit_on_double_click = edit_on_double_click
+
+        self.exclude_columns = exclude_columns or []
 
         self.main_layout = QVBoxLayout(self) # сохраним основной layout как атрибут
         self.columns = self._build_columns()   # строим список колонок
@@ -147,6 +150,9 @@ class DynamicListPage(BasePage):
         # for field_name, config in sorted_fields:
         for field_name, config in self.field_configs.items():
             if config.get('hidden', False):  # по умолчанию False # нужно ли скрывать объект
+                continue
+
+            if field_name in self.exclude_columns:
                 continue
 
             # Получаем тип поля из DTO (по умолчанию str, если поля нет)

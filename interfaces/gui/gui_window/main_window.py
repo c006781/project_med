@@ -27,17 +27,25 @@ from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
-from interfaces.gui.gui_window.widgets.log_viewer import LogViewer
+# from interfaces.gui.gui_window.widgets.log_viewer import LogViewer
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
-from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage, DynamicDetailListPage
+from interfaces.gui.gui_window.pages.appointment_list_page import (
+    AppointmentListPage,
+    # DynamicDetailListPage
+)
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
-    QStackedWidget, QFrame, QMessageBox, QSizePolicy
+    QStackedWidget, QFrame, QMessageBox,
+    # QSizePolicy
 )
-from PySide6.QtCore import Signal, Slot, Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import (
+    Signal,
+    Slot,
+    Qt
+)
+# from PySide6.QtGui import QIcon
 
 
 class MainWindow(QMainWindow):
@@ -50,11 +58,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def load_patients(self, extra_data):
         """
@@ -72,11 +76,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def load_appointments(self, extra_data):
         """
@@ -99,11 +99,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def load_notes(self, extra_data):
         """
@@ -121,11 +117,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def load_photos(self,extra_data):
         """
@@ -146,11 +138,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent=None):
         """
@@ -202,11 +190,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._setup_log_viewer",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_log_viewer(self):
         """
@@ -222,11 +206,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_header_frame",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_header_frame(self):
         # --- Шапка (верхняя панель) ---
@@ -247,11 +227,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_action_combo",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_action_combo(self):  
         # Левая часть шапки: выпадающий список с действиями
@@ -273,11 +249,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_settings_btn",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_settings_btn(self):  
         # Кнопка настроек
@@ -295,11 +267,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_breadcrumbs_label",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_breadcrumbs_label(self):  
         # Хлебные крошки (второй уровень шапки)
@@ -317,11 +285,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_back_btn",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_back_btn(self):  
         # Кнопка "Назад"
@@ -340,11 +304,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_progress_bar",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_progress_bar(self):  
          # Прогресс-бар (справа)
@@ -365,11 +325,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_main_layout",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_main_layout(self, central_widget):  
         # Основной вертикальный layout
@@ -391,11 +347,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._set_show_log_btn",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_show_log_btn(self, setVisible):  
          # Кнопка для показа/скрытия логов (добавляем в шапку)
@@ -421,11 +373,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._setup_header",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_header(self, main_layout):
         """
@@ -449,10 +397,10 @@ class MainWindow(QMainWindow):
         self.settings_btn = self._set_settings_btn()
         self.header_layout.addWidget(self.settings_btn)
 
-        # Отступ до начала хлебных крошеков
+        # Отступ до начала хлебных крошек
         self.header_layout.addStretch()
 
-        # Метка хлебных крошеков
+        # Метка хлебных крошек
         self.breadcrumbs_label = self._set_breadcrumbs_label()
         self.header_layout.addWidget(self.breadcrumbs_label)
 
@@ -478,11 +426,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._setup_log_viewer_widget",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_log_viewer_widget(self, main_layout):
         """
@@ -502,17 +446,12 @@ class MainWindow(QMainWindow):
         self.show_log_btn = self._set_show_log_btn(self.log_viewer.setVisible)
         self.header_layout.addWidget(self.show_log_btn)
 
-
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
         """
@@ -547,10 +486,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_patient(self):
         """
@@ -609,17 +545,12 @@ class MainWindow(QMainWindow):
         # Указываем ID списка пациентов, чтобы страница редактирования пациента знала, какой список отображать
         self.patient_edit_page.list_page_id = 'patient_list'
 
-
-
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_appointment(self):
         """
@@ -671,7 +602,11 @@ class MainWindow(QMainWindow):
             dto_class=AppointmentDTO,
             field_configs=APPOINTMENT_CONFIG,
             page_title="Приёмы",
-            add_action_text="Новый приём"
+            add_action_text="Новый приём",
+            exclude_columns = [
+                # 'has_photos',
+                'photos',
+            ],
         )
         
         # Создаём страницу редактирования приёма
@@ -706,16 +641,12 @@ class MainWindow(QMainWindow):
         # знала, какой список отображать
         self.appointment_edit_page.list_page_id = 'appointment_list'
 
-
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_note(self):
         # --- Заметки ---
@@ -762,17 +693,12 @@ class MainWindow(QMainWindow):
         # знала, какой список отображать
         self.note_edit_page.list_page_id = 'note_list'
 
-
-
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_photo(self):
         """
@@ -828,11 +754,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._init_page_manager",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _init_page_manager(self):
         """
@@ -907,11 +829,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_patient_appointments_requested",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_patient_appointments_requested(self, patient_dto):
         """Переход к списку приёмов выбранного пациента."""
@@ -921,18 +839,13 @@ class MainWindow(QMainWindow):
                 'patient_id': patient_dto.id
             }            
         )
-        
 
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_signals",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_signals(self):
         """
@@ -961,19 +874,12 @@ class MainWindow(QMainWindow):
         self.page_manager.navigation_changed.connect(self._on_navigation_changed)
         self.page_manager.page_entered.connect(self._on_page_entered)
 
-
-
-
     @AppLogger.get_instance(
         name = 'MainWindow',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_patient",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_patient(self):
         # Пациенты
@@ -1014,11 +920,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_appointment",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_appointment(self):
         # Приёмы
@@ -1063,11 +965,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_note",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_note(self):
         # Заметки
@@ -1102,11 +1000,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_photo",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_photo(self):
         # Фото
@@ -1140,11 +1034,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._connect_page_signals",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_page_signals(self):
         """Связывает сигналы страниц с методами навигации и удаления."""
@@ -1169,11 +1059,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_patient_delete",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_patient_delete(self, dto):
         """Удаление пациента с подтверждением."""
@@ -1202,11 +1088,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_appointment_delete",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_appointment_delete(self, dto):
         """Удаление приёма."""
@@ -1234,11 +1116,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_note_delete",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_note_delete(self, dto):
         """Удаление заметки."""
@@ -1263,11 +1141,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_photo_delete",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_photo_delete(self, dto):
         """Удаление фотографии."""
@@ -1296,11 +1170,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_back_clicked",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _on_back_clicked(self):
@@ -1312,11 +1182,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_settings_clicked",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _on_settings_clicked(self):
@@ -1351,11 +1217,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._start_download",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _start_download(self):
         """Запуск скачивания БД с сервера."""
@@ -1380,11 +1242,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._update_progress",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int, int)
     def _update_progress(self, current, total):
@@ -1400,11 +1258,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_download_finished",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
     def _on_download_finished(self, code):
@@ -1420,11 +1274,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_download_error",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
     def _on_download_error(self, message):
@@ -1437,11 +1287,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._save_changes",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _save_changes(self):
         """Сохранение изменений в локальной БД."""
@@ -1483,11 +1329,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_upload_finished",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
     def _on_upload_finished(self, code):
@@ -1503,11 +1345,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_upload_error",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
     def _on_upload_error(self, message):
@@ -1526,11 +1364,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_navigation_changed",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(list, str)
     def _on_navigation_changed(self, history, current_page_id):
@@ -1540,7 +1374,6 @@ class MainWindow(QMainWindow):
         :param history: список кортежей (id, title) страниц, которые были посещены
         :param current_page_id: идентификатор текущей страницы
         """
-
 
         # Формируем строку из заголовков
         titles = [title for _, title in history]
@@ -1563,11 +1396,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow._on_page_entered",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str, object)
     def _on_page_entered(self, page_id, extra_data):
@@ -1588,11 +1417,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.show_progress",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def show_progress(self, visible=True):
         """Показать/скрыть прогресс-бар."""
@@ -1603,11 +1428,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.set_progress_range",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_progress_range(self, minimum, maximum):
         """Установить диапазон прогресса."""
@@ -1618,11 +1439,7 @@ class MainWindow(QMainWindow):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="MainWindow.set_progress_value",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_progress_value(self, value):
         """Установить текущее значение прогресса."""

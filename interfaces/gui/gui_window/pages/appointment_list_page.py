@@ -50,7 +50,17 @@ class AppointmentListPage(DynamicDetailListPage):
             'DEBUG'
         )
     )
-    def __init__(self, service, loader_func, dto_class, field_configs, *args, **kwargs):
+    def __init__(
+        self,
+        service,
+        loader_func,
+        dto_class,
+        field_configs,
+
+        # exclude_columns=None,
+        *args,
+        **kwargs
+    ):
         """
         Инициализирует страницу со списком приёмов с правой панелью (заметка и фото).
         """

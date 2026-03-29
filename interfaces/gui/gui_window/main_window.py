@@ -562,8 +562,8 @@ class MainWindow(QMainWindow):
         """
         
         # Создаём список столбцов для приёмов
-        # ID - целое число,不可яемое
-        # Пациент - строка,不可яемое
+        # ID - целое число,
+        # Пациент - строка,
         # Дата - дата, изменяемое
         # Время - время, изменяемое
         # Заметка - строка, изменяемое
@@ -809,6 +809,7 @@ class MainWindow(QMainWindow):
 
         # Передаём ссылку на главное окно каждой странице (если нужно)
         for page in pages.values():
+            self.logger.debug(f"hasattr(page, 'set_main_window)' : {hasattr(page, 'set_main_window')}")
             if hasattr(page, 'set_main_window'):
                 page.set_main_window(self)
 
@@ -1077,6 +1078,7 @@ class MainWindow(QMainWindow):
                 service = get_patient_service()
                 service.delete_patient(dto.id)
                 QMessageBox.information(self, "Успех", "Пациент удалён.")
+
                 self.patient_list_page._load_data()  # обновить список
                 self.logger.info(f"Удалён пациент ID={dto.id}")
             except Exception as e:

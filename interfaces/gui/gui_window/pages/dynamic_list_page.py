@@ -2,7 +2,12 @@
 # -*- coding: utf-8 -*-
 
 
-from typing import List
+from typing import (
+    List,
+    Optional,
+    Callable,
+    Any
+)
 
 from app.utils.logger.logger import AppLogger
 
@@ -38,10 +43,10 @@ class DynamicListPage(BasePage):
     Добавлена опциональная кнопка дополнительных действий (action_button_text),
     которая испускает сигнал action_requested при нажатии.
     """
-    add_requested = Signal()
-    edit_requested = Signal(object)
-    delete_requested = Signal(object)
-    action_requested = Signal(object)  # новый сигнал для дополнительного действия
+    add_requested = Signal() # сигнал для добавления (можно не использовать, если добавляем строку напрямую)
+    edit_requested = Signal(object) # сигнал для открытия формы редактирования
+    delete_requested = Signal(object) # сигнал для удаления (с подтверждением)
+    action_requested = Signal(object)  # дополнительное действие
         
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -113,6 +118,7 @@ class DynamicListPage(BasePage):
 
         # настройка интерфейса страницы
         self._needs_refresh = False  # флаг, который указывает, нужно ли перезагружать данные при следующем входе на страницу
+
         self._setup_ui()
         
         self._load_data() # загрузка данных на страницу
@@ -122,10 +128,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _build_columns(self):
         """
@@ -185,10 +188,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def on_filter_requested(self, column: int, operator: str, value):
         """
@@ -210,11 +210,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.on_filter_clear",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def on_filter_clear(self, column: int):
         """
@@ -229,11 +225,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.get_unique_values_for_column",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def get_unique_values_for_column(self, column: int) -> List[str]:
         """
@@ -258,11 +250,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.set_needs_refresh",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_needs_refresh(self, value=True):
         """
@@ -277,21 +265,18 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_top_panel(self):
         """
         Создаёт верхнюю панель с кнопками и полем поиска.
 
-        Верхняя панель содержит кнопки "Добавить", "Удалить", "Обновить"
+        Верхняя панель содержит кнопки "Добавить", "Удалить", "Обновить" и поле поиска.
         и поле поиска. Кнопка "Добавить" добавляет новый элемент в список,
-        "Удалить" удаляет выбранный элемент из списка, а "Обновить" обновляет
-        список элементов. Поле поиска позволяет искать элементы в списке
-        по тексту, введенному в поле.
+        Кнопки:
+        "Добавить" добавляет новый элемент в список,
+        "Удалить" удаляет выбранный элемент из списка,
+        "Обновить" обновляет  список элементов. Поле поиска позволяет искать элементы в списке по тексту, введенному в поле.
         """
         # Верхняя панель
         top_layout = QHBoxLayout()
@@ -335,11 +320,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_table(self):
         """
@@ -415,18 +396,12 @@ class DynamicListPage(BasePage):
         # # Добавляем таблицу
         # self.main_layout.addWidget(self.table_view)
 
-
-
     @AppLogger.get_instance(
         name = 'DynamicListPage',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
         """
@@ -453,11 +428,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._setup_delegates",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )  
     def _setup_delegates(self):
         """
@@ -477,11 +448,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.showEvent",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def showEvent(self, event):
         """
@@ -492,7 +459,11 @@ class DynamicListPage(BasePage):
         когда пользователь выбирает строку в таблице.
         """
         super().showEvent(event)
-        # Подключаем сигнал selectionChanged к слоту _on_selection_changed, если он не был подключен ранее
+
+        # Подключаем сигнал selectionChanged к слоту _on_selection_changed
+
+        self.logger.debug(f'not self._selection_connected : {not self._selection_connected}')
+
         if not self._selection_connected:
             selection_model = self.table_view.selectionModel()
             if selection_model is not None:
@@ -505,11 +476,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._load_data",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _load_data(self):
         """
@@ -540,11 +507,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._on_search_text_changed",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_search_text_changed(self, text):
         """
@@ -565,11 +528,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._on_selection_changed",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_selection_changed(
         self, 
@@ -604,12 +563,16 @@ class DynamicListPage(BasePage):
             self.selected_dto = self.source_model.get_item_at_row(source_index.row())
             self.delete_btn.setEnabled(True)
             self.logger.debug(f"result = {hasattr(self, 'action_btn')}")
+
+            self.logger.debug(f"hasattr(self, 'action_btn') : {hasattr(self, 'action_btn')}")
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(True)
+
         else:
             self.selected_dto = None
             self.delete_btn.setEnabled(False)
-            self.logger.debug(f"result = {hasattr(self, 'action_btn')}")
+
+            self.logger.debug(f"hasattr(self, 'action_btn') : {hasattr(self, 'action_btn')}")
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(False)
 
@@ -618,11 +581,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage._on_row_double_clicked",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_row_double_clicked(self, index):
         """
@@ -634,6 +593,7 @@ class DynamicListPage(BasePage):
         :param index: индекс строки, по которой был произведен двойной клик
         :type index: QModelIndex
         """
+
         self.logger.debug(f'index: {index} result: {not self.edit_on_double_click or not index.isValid()}')
         if not self.edit_on_double_click or not index.isValid():
             return

@@ -150,6 +150,7 @@ class PageManager(QObject):
         :param add_to_history: добавлять ли текущую страницу в историю.
         :param extra_data: дополнительные данные, которые будут переданы в on_enter.
         """
+
         self.logger.debug(f'page_id not in self._page_to_index : {page_id not in self._page_to_index}')
         if page_id not in self._page_to_index:
             err_ = f"Страница с id '{page_id}' не найдена"

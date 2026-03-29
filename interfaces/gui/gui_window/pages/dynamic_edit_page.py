@@ -36,10 +36,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self,
@@ -60,13 +57,12 @@ class DynamicEditPage(BasePage):
         :param dto_class: класс DTO, используемый для создания записи
         :param page_title: заголовок страницы
         :param exclude_fields: список полей, исключаемых из формы (полное исключение из обработки
-        # :param field_choices: словарь, где ключ - название поля, а значение - список значений для выбора
-        # :param field_rename: словарь, где ключ - название поля, а значение - новое название поля
         :param parent: родительский виджет
         """
+
         super().__init__(parent)
 
-        # логгер страницы
+        # логгер
         self.logger = AppLogger.get_instance(
             name = f"gui.{self.__class__.__name__}",
             enable_file_logging = 'user',
@@ -201,10 +197,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _apply_readonly(self):
         """
@@ -222,10 +215,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     # def _compute_virtual_fields(self, extra_data=None):
     #     """
@@ -331,10 +321,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _get_choices(self, provider_name):
         """
@@ -355,10 +342,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _load_completer_data(self):
         """
@@ -386,17 +370,13 @@ class DynamicEditPage(BasePage):
             if items:
                 self.form.set_completer_data(field_name, items)       
 
-
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
         # description="DynamicEditPage._connect_button_signals",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_button_signals(self):
         """
@@ -413,11 +393,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._on_edit_button_clicked",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_edit_button_clicked(self, field_name):
         """
@@ -449,10 +425,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _init_from_extra(self, extra_data):
         # """Заполняет поля формы значениями из extra_data согласно конфигурации."""
@@ -492,10 +465,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _load_existing_entity(
         self, 
@@ -542,9 +512,7 @@ class DynamicEditPage(BasePage):
             self.logger.debug(f"repo: {repo} model_obj: {model_obj}")
 
             if model_obj is None:
-                
                 self.logger.debug(f"model_obj is None")
-
                 raise self.service._not_found_exception(entity_id)
 
             # 3. Создаём DTO и обогащаем его (extra_data заполняется автоматически)
@@ -610,10 +578,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _prepare_new_entity(self):
         """
@@ -636,10 +601,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _after_load_or_clear(self, extra_data=None):
         """
@@ -693,10 +655,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def on_enter(self, extra_data=None):
         """
@@ -737,11 +696,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._load_entity",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _load_entity(self, entity_id):
         """
@@ -777,11 +732,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._load_entity",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _collect_form_data(self) -> dict:
         """
@@ -797,11 +748,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._load_entity",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _create_or_update_entity(self, dto):
         """
@@ -834,11 +781,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._load_entity",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     # def _handle_photos(self, appointment_id: int):
     #     """
@@ -905,11 +848,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._load_entity",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _after_save_navigation(self, saved_dto):
         """
@@ -953,10 +892,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _build_dto_from_form_data(self) -> BaseModel:
         """
@@ -972,16 +908,13 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _save(self):
         # """Сохраняет данные из формы в БД."""
         """
-        Сохраняет данные из формы в БД.
+        Сохраняет данные из формы в БД в зависимости от режима save_directly.
 
         1. Собирает данные из формы
         2. Создает или обновляет запись
@@ -1013,11 +946,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage.set_field_value",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_field_value(self, field_name: str, value):
         """
@@ -1036,11 +965,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._delete",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _delete(self):
@@ -1080,11 +1005,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._cancel",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _cancel(self):
@@ -1104,11 +1025,7 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._go_back",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _go_back(self):
         """

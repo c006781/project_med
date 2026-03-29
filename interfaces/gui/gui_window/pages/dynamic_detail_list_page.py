@@ -12,13 +12,13 @@ class DynamicDetailListPage(DynamicListPage):
     """
 
     def __init__(
-            self,
-            service,
-            loader_func,
-            dto_class,
-            field_configs,
-            *args,
-            **kwargs
+        self,
+        service,
+        loader_func,
+        dto_class,
+        field_configs,
+        *args,
+        **kwargs
     ):
         """
         Инициализирует страницу с правой панелью для отображения деталей выбранной строки.

@@ -168,10 +168,20 @@ class AppConfigManager(BaseConfigManager):
     # Значения по умолчанию (копия того, что сейчас возвращает get_config_env)
     _defaults = {
         'YANDEX_TOKEN': '----',
-        'database_local_path': './clinic.db',
+        # 'database_local_path': './clinic.db',
+        'database_local_path': os.path.join(
+            '.',
+            'clinic.db'
+        ),
         'database_remote_path': 'Проекты/test/bd/clinic.db',
+        # 'database_remote_path': 'Проекты/test/bd/clinic.db',
         'LOG_LEVEL': 'DEBUG',
-        'LOG_FILE': './logs/app.log',
+        # 'LOG_FILE': './logs/app.log',
+        'LOG_FILE': os.path.join(
+            '.',
+            'logs',
+            'app.log'
+        ),
         'LOG_MAX_BYTES': str(10 * 1024 * 1024),  # 10 MB
         'LOG_BACKUP_COUNT': '5',
         # 'PHOTOS_STORAGE_PATH': './photos',

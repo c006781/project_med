@@ -179,7 +179,17 @@ class Patient(Base):
         """
         Возвращает строку-representation объекта Patient в виде "<Patient(id=1, name=Ivan Ivanov)>"
         """
-        return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
+
+        try:
+            return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='system',
+            ).exception(f'Err: {str(e)}')
+            raise e
+
+        # return result
 
 class AppointmentNote(Base):
     """

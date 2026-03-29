@@ -143,7 +143,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable'      : False,    # редактируемый ли
         'virtual'       : True,     # виртуальное ли поле
         'source_attr'   : 'photos', # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
-        # 'order'       : 5,  # порядок в таблице
+        'order'       : 0,  # порядок в таблице
         'compute': {  # как вычислить
             'func'  : lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
             'args'  : ['photos'],

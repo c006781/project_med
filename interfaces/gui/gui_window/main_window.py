@@ -689,6 +689,9 @@ class MainWindow(QMainWindow):
                 'has_photos',
                 # 'photos',
             ],
+            related_services={
+                'patient': get_patient_service()
+            },
             # field_choices={},  # можно добавить, например, список пациентов
             # field_rename={
             #     'patient_id': 'ID пациента',
@@ -1037,14 +1040,20 @@ class MainWindow(QMainWindow):
                 }
             )
         )
-        self.appointment_list_page.edit_requested.connect(
-            lambda dto: self.page_manager.switch_to(
-                'appointment_edit', 
-                extra_data={
-                    'id': dto.id
-                }
+
+        try:
+            self.appointment_list_page.edit_requested.connect(
+                lambda dto: self.page_manager.switch_to(
+                    'appointment_edit',
+                    extra_data={
+                        'id': dto.id
+                    }
+                )
             )
-        )
+        except Exception as e:
+            self.logger.exception(f'Err: {e}')
+            raise e
+
         self.appointment_list_page.delete_requested.connect(
             self._on_appointment_delete
         )
@@ -1564,6 +1573,7 @@ class MainWindow(QMainWindow):
     def _on_page_entered(self, page_id, extra_data):
         """Вызывается при входе на страницу. Передаёт extra_data в метод on_enter страницы."""
         page = self.page_manager._pages.get(page_id)
+        self.logger.exception(f"page and hasattr(page, 'on_enter') : {page and hasattr(page, 'on_enter')}")
         if page and hasattr(page, 'on_enter'):
             try:
                 page.on_enter(extra_data)

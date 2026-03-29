@@ -1633,12 +1633,28 @@ class AppointmentService(
         else:
             try:
                 dto = self._dto_class.model_validate(item_s)
+                self.logger.debug(f"item_s: type={type(item_s).__name__}, id={getattr(item_s, 'id', None)}")
+                if dto.photos:
+                    self.logger.debug(f"  первый элемент: {type(dto.photos[0])}")
             except Exception as e:
                 self.logger.error(f"Ошибка валидации для объекта: {item_s}")
                 raise e
 
+            # Явное преобразование photos в PhotoDTO
+            if dto.photos:
+                self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
+                from app.dto import PhotoDTO
+                dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
+                self.logger.debug(
+                    f"После преобразования: тип dto.photos = {type(dto.photos)}, первый элемент = {type(dto.photos[0]) if dto.photos else None}"
+                )
+
             # Обогащаем DTO вычисленными полями
-            return enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+            enriched_dto = enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+            self.logger.debug(f"После enrich: тип enriched_dto.photos = {type(enriched_dto.photos)}")
+            if enriched_dto.photos:
+                self.logger.debug(f"  первый элемент: {type(enriched_dto.photos[0])}")
+            return enriched_dto
 
 
     @AppLogger.get_instance(

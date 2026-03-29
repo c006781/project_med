@@ -649,11 +649,19 @@ class PhotoUploaderWidget(QWidget):
         self.table.setUpdatesEnabled(False)
 
         for i, photo in enumerate(self.existing_photos):
-            self._set_table_row(i, photo.file_path, photo.description or "", is_existing=True)
+            try:
+                self._set_table_row(i, photo.file_path, photo.description or "", is_existing=True)
+            except Exception as e:
+                self.logger.exception(f'Err: {e}')
+                raise e
+
         for i, (file_path, desc) in enumerate(self.pending_photos):
             row = len(self.existing_photos) + i
-            self._set_table_row(row, file_path, desc, is_existing=False)
-
+            try:
+                self._set_table_row(row, file_path, desc, is_existing=False)
+            except Exception as e:
+                self.logger.exception(f'Err: {e}')
+                raise e
         # Устанавливаем цвета для всех строк после заполнения
         for row in range(total_rows):
             self._set_row_color(row)
@@ -832,10 +840,25 @@ class PhotoUploaderWidget(QWidget):
         :param photos: Список существующих фото (PhotoDTO)
         :type photos: List[PhotoDTO]
         """
+        self.logger.debug(f"set_existing_photos: photos type = {type(photos)}")
+        if photos:
+            self.logger.debug(f"  первый элемент: {type(photos[0])}")
 
-        self.existing_photos = photos # Список существующих фото
 
-        self.deleted_photo_ids.clear() 
+        # self.existing_photos = photos # Список существующих фото
+
+        if photos and isinstance(photos[0], dict):
+            from app.dto import PhotoDTO
+            self.logger.debug("Обнаружены словари, преобразуем в PhotoDTO")
+            self.existing_photos = [PhotoDTO(**p) for p in photos]
+            self.logger.debug("Преобразование завершено")
+        else:
+            self.logger.debug("Список уже в нужном формате, используем как есть")
+            self.existing_photos = photos
+
+
+        self.deleted_photo_ids.clear()
+
         self.modified_photo_ids.clear() 
 
         self._refresh_table() # Обновление таблицы

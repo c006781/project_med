@@ -51,6 +51,7 @@ class DynamicEditPage(BasePage):
         # field_rename=None,  # словарь, где ключ - название поля, а значение - новое название поля
         parent=None,  # родительский виджет
         field_configs=None,  # внешняя конфигурация
+        related_services=None,
     ):
         """
         Инициализирует страницу редактирования.
@@ -83,6 +84,7 @@ class DynamicEditPage(BasePage):
         # self.field_choices = field_choices or {}
         # self.field_rename = field_rename or {}
         self.field_configs = field_configs or {}
+        self.related_services = related_services or {}
 
         self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
 
@@ -117,11 +119,42 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_related_objects(self, extra_data):
+        """
+        Загружает связанные объекты (например, пациента) по ID из extra_data
+        и добавляет их в extra_data для использования в виртуальных полях.
+        """
+        if not extra_data:
+            return
+
+        for field_name, config in self.field_configs.items():
+            source_attr = config.get('source_attr')
+            if not source_attr:
+                continue
+            # Если объект уже есть в extra_data, пропускаем
+            if source_attr in extra_data:
+                continue
+            # Ищем ключ вида source_attr + '_id'
+            id_key = f"{source_attr}_id"
+            if id_key in extra_data and extra_data[id_key] is not None:
+                service = self.related_services.get(source_attr)
+                if service:
+                    try:
+                        obj = service.get_by_id(extra_data[id_key])
+                        if obj:
+                            extra_data[source_attr] = obj
+                            self.logger.debug(f"Загружен {source_attr} с id={extra_data[id_key]}")
+                    except Exception as e:
+                        self.logger.exception(f"Ошибка загрузки {source_attr} по id {extra_data[id_key]}: {e}")
+
+    @AppLogger.get_instance(
+        name = 'DynamicEditPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
         """
@@ -256,7 +289,7 @@ class DynamicEditPage(BasePage):
 
         # self.logger.debug(f"combined: {combined} result: {combined is not None}")
         # self.logger.debug(f"combined is not None: {combined is not None}")
-
+        self.logger.exception(f'if extra_data : {not(extra_data is None)}')
         if extra_data:
             combined.update(extra_data)
 
@@ -517,6 +550,16 @@ class DynamicEditPage(BasePage):
             # 3. Создаём DTO и обогащаем его (extra_data заполняется автоматически)
             try:
                 dto = self.service._dto_class.model_validate(model_obj)
+                self.logger.debug(f"В _load_existing_entity: dto.photos тип = {type(dto)}")
+
+                if hasattr(dto, 'photos'):
+                    self.logger.debug(f"В _load_existing_entity: dto.photos тип = {type(dto.photos)}")
+                else:
+                    self.logger.debug("В _load_existing_entity: dto не имеет поля photos")
+
+                # if dto.photos:
+                #     self.logger.debug(f"  первый элемент: {type(dto.photos[0])}")
+
             except Exception as e:
                 self.logger.exception(f" service._dto_class.model_validate(model_obj) - e: {e}")
                 raise e
@@ -613,16 +656,27 @@ class DynamicEditPage(BasePage):
         # Заполняем из extra_data (после загрузки DTO или после очистки)
         self._init_from_extra(extra_data)
 
+        # Загружаем связанные объекты (пациента, заметку) для виртуальных полей
+        self._load_related_objects(extra_data)
+
         # Применяем readOnly (для всех полей, включая существующие)
         self._apply_readonly()
 
         # Вычисляем виртуальные поля (например, patient_name)
         # self._compute_virtual_fields(extra_data)
-        self.form._loading = True
-        try:
-            self._compute_virtual_fields(extra_data)
-        finally:
-            self.form._loading = False
+        # self.form._loading = True
+        # try:
+        #     self._compute_virtual_fields(extra_data)
+        # finally:
+        #     self.form._loading = False
+
+        # Вычисляем виртуальные поля только для новой записи
+        if self._computed_extra_data is None:
+            self.form._loading = True
+            try:
+                self._compute_virtual_fields(extra_data)
+            finally:
+                self.form._loading = False
 
         # Загружаем данные для полей с автодополнением
         self._load_completer_data()
@@ -669,8 +723,8 @@ class DynamicEditPage(BasePage):
         except Exception as e:
             self.logger.exception(f"Ошибка в методе on_enter: {e}")
             raise e
-        
 
+        self.logger.exception(f"self.current_id is not None: {self.current_id is not None}")
         if self.current_id is not None:
             self._load_existing_entity(self.current_id)
         else:

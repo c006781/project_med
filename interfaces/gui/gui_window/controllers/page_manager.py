@@ -150,19 +150,23 @@ class PageManager(QObject):
         :param add_to_history: добавлять ли текущую страницу в историю.
         :param extra_data: дополнительные данные, которые будут переданы в on_enter.
         """
+        self.logger.exception(f'page_id not in self._page_to_index : {page_id not in self._page_to_index}')
         if page_id not in self._page_to_index:
             err_ = f"Страница с id '{page_id}' не найдена"
             self.logger.exception(err_)
             raise ValueError(err_)
 
         # Если это та же страница, просто передаём данные
+        self.logger.exception(f'page_id == self._current_page_id : {page_id == self._current_page_id}')
         if page_id == self._current_page_id:
+            self.logger.exception(f'extra_data is not None : {extra_data is not None}')
             if extra_data is not None:
                 self._extra_data = extra_data
                 self.page_entered.emit(page_id, extra_data)
             return
 
         # Если нужно сохранить в историю текущую страницу
+        self.logger.exception(f'add_to_history and self._current_page_id : {add_to_history and self._current_page_id}')
         if add_to_history and self._current_page_id:
             self._history.append((self._current_page_id, self._current_page_title))
 

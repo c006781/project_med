@@ -117,10 +117,7 @@ class AppointmentListPage(DynamicDetailListPage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def update_details(self, dto):
         """
@@ -130,8 +127,8 @@ class AppointmentListPage(DynamicDetailListPage):
         :param dto: данные приёма
         :type dto: AppointmentDTO
         """
-        self.logger.debug(f"dto {dto}")
-
+        # self.logger.debug(f"dto {dto}")
+        self.logger.debug(f"update_details получил dto типа {type(dto)}")
         if not dto:
             return
         
@@ -140,13 +137,16 @@ class AppointmentListPage(DynamicDetailListPage):
         self.note_text_edit.setText(dto.note_text or "")
 
         # self._load_photos(dto.id)
-        
+        self.logger.debug(f"Проверка photos: hasattr={hasattr(dto, 'photos')}, is not None={dto.photos is not None}")
+
         # Обновляем фото
-        self.logger.debug(f"result {hasattr(dto, 'photos') and dto.photos is not None}")
+        # self.logger.debug(f"result {hasattr(dto, 'photos') and dto.photos is not None}")
 
         if hasattr(dto, 'photos') and dto.photos is not None: # нужно переделать в динамику...
+            self.logger.debug(f"dto.photos тип = {type(dto.photos)}")
             self.photo_widget.set_existing_photos(dto.photos)
         else:
+            self.logger.debug("Нет фото, передаём пустой список")
             self.photo_widget.set_existing_photos([])
 
 

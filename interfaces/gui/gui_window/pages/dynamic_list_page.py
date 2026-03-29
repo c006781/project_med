@@ -48,11 +48,7 @@ class DynamicListPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicListPage.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self,
@@ -171,7 +167,11 @@ class DynamicListPage(BasePage):
             cols, 
             key=lambda c: self.field_configs.get(
                 c['name'], {}
-            ).get('order', 0)
+            ).get(
+                'order',
+                len(self.field_configs)
+                # 0
+            )
         )
 
     @AppLogger.get_instance(
@@ -635,7 +635,7 @@ class DynamicListPage(BasePage):
         source_index = self.proxy_model.mapToSource(index)
         dto = self.source_model.get_item_at_row(source_index.row())
 
-        self.logger.debug(f'source_index {source_index} dto: {dto} ')
+        self.logger.debug(f'source_index {source_index} dto: {type(dto)}')
         if dto:
             self.edit_requested.emit(dto)
 

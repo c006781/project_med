@@ -3,8 +3,8 @@
 import os
 from typing import List, Set, Tuple, Dict
 
-from app.dto import PhotoDTO
 from app.utils.logger.logger import AppLogger
+from app.dto import PhotoDTO
 
 from PySide6.QtCore import QEvent, Signal, Qt, QSize
 from PySide6.QtGui import QColor, QPixmap, QFontMetrics, QPainter, QTextOption
@@ -36,6 +36,13 @@ class PhotoDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.photo_widget = photo_widget
 
+        # логгер
+        self.logger = AppLogger.get_instance(
+            name=f"gui.PhotoDelegate",
+            enable_file_logging='user',
+            use_name_in_filename='user',
+        )
+
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
         enable_file_logging = 'system',
@@ -48,11 +55,14 @@ class PhotoDelegate(QStyledItemDelegate):
     )
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
         full_path = index.data(Qt.UserRole)
+        self.logger.debug(f"full_path : {full_path}")
         if not full_path:
             super().paint(painter, option, index)
             return
 
         pixmap = self.photo_widget._get_pixmap(full_path)
+
+        self.logger.debug(f"pixmap : {pixmap.isNull()}")
         if pixmap.isNull():
             super().paint(painter, option, index)
             return
@@ -61,11 +71,13 @@ class PhotoDelegate(QStyledItemDelegate):
         scaled_pixmap = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         x = rect.x() + (rect.width() - scaled_pixmap.width()) // 2
         y = rect.y() + (rect.height() - scaled_pixmap.height()) // 2
+
+        self.logger.debug(f"x, y : {x}, {y}")
         painter.drawPixmap(x, y, scaled_pixmap)
 
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
-        enable_file_logging = 'system',
+        enable_file_logging  = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level(
@@ -697,9 +709,14 @@ class PhotoUploaderWidget(QWidget):
         :type is_existing: bool
         """
 
+        self.logger.debug(f'file_path : {file_path}')
+
         full_path = file_path
+
+        self.logger.debug(f'is_existing and self._storage_path : {is_existing and self._storage_path}')
         if is_existing and self._storage_path:
             full_path = os.path.join(self._storage_path, file_path)
+            self.logger.debug(f"Установка фото: {full_path}, существует: {os.path.exists(full_path)}")
 
         item_icon = QTableWidgetItem()
         item_icon.setData(Qt.UserRole, full_path)
@@ -792,13 +809,21 @@ class PhotoUploaderWidget(QWidget):
         :return: QPixmap по полному пути к файлу
         :rtype: QPixmap
         """
+        self.logger.debug(f'full_path : {full_path}, full_path in self._image_cache : {full_path in self._image_cache}')
         if full_path in self._image_cache:
             return self._image_cache[full_path]
-        
+
+        if not os.path.exists(full_path):
+            self.logger.warning(f"Файл не найден: {full_path}")
+            return QPixmap()
+
         pixmap = QPixmap(full_path)
 
+        self.logger.debug(f'if not pixmap.isNull() : {not pixmap.isNull()}')
         if not pixmap.isNull():
             self._image_cache[full_path] = pixmap
+        else:
+            self.logger.warning(f"Не удалось загрузить изображение: {full_path}")
 
         return pixmap
 

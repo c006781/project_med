@@ -289,7 +289,7 @@ class DynamicEditPage(BasePage):
 
         # self.logger.debug(f"combined: {combined} result: {combined is not None}")
         # self.logger.debug(f"combined is not None: {combined is not None}")
-        self.logger.exception(f'if extra_data : {not(extra_data is None)}')
+        self.logger.debug(f'if extra_data : {not(extra_data is None)}')
         if extra_data:
             combined.update(extra_data)
 
@@ -543,7 +543,7 @@ class DynamicEditPage(BasePage):
 
             if model_obj is None:
                 
-                self.logger.exception(f"model_obj is None")
+                self.logger.debug(f"model_obj is None")
 
                 raise self.service._not_found_exception(entity_id)
 
@@ -724,7 +724,7 @@ class DynamicEditPage(BasePage):
             self.logger.exception(f"Ошибка в методе on_enter: {e}")
             raise e
 
-        self.logger.exception(f"self.current_id is not None: {self.current_id is not None}")
+        self.logger.debug(f"self.current_id is not None: {self.current_id is not None}")
         if self.current_id is not None:
             self._load_existing_entity(self.current_id)
         else:

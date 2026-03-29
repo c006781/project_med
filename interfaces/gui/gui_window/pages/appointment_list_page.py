@@ -5,7 +5,7 @@
 Левая часть - таблица приёмов, правая - детали выбранного приёма (с фото).
 При клике на строку в таблице справа показывается информация.
 """
-
+from app.config.config_manager.manager import get_config_env
 from app.utils.logger.logger import AppLogger
 
 from app.dependencies import (
@@ -105,6 +105,10 @@ class AppointmentListPage(DynamicDetailListPage):
         # self.photo_list.setIconSize(QSize(100, 100))
 
         self.photo_widget = PhotoUploaderWidget()
+        config = get_config_env()
+        storage_path = config.get('PHOTOS_STORAGE_PATH', './photos')
+        self.logger.debug(f'storage_path: {storage_path}')
+        self.photo_widget.set_storage_path(storage_path)
         self.photo_widget.set_readonly(True)          # режим только просмотр
 
         # Добавляем виджету со списком фотографий в верхнюю часть detail_layout
@@ -145,6 +149,9 @@ class AppointmentListPage(DynamicDetailListPage):
         if hasattr(dto, 'photos') and dto.photos is not None: # нужно переделать в динамику...
             self.logger.debug(f"dto.photos тип = {type(dto.photos)}")
             self.photo_widget.set_existing_photos(dto.photos)
+
+            self.photo_widget.update()
+            self.photo_widget.repaint()
         else:
             self.logger.debug("Нет фото, передаём пустой список")
             self.photo_widget.set_existing_photos([])

@@ -23,6 +23,7 @@ from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import Advanc
 
 from PySide6.QtWidgets import (
     # QWidget, 
+    QComboBox,
     QVBoxLayout, 
     QHBoxLayout, 
     QPushButton, 
@@ -326,39 +327,61 @@ class DynamicListPage(BasePage):
         self.edit_mode_btn.toggled.connect(self._on_edit_mode_toggled)
         top_layout.addWidget(self.edit_mode_btn)
 
-        # Кнопка "Добавить" (открыть форму)
-        self.add_btn = QPushButton(self.add_action_text)
-        self.add_btn.clicked.connect(self.add_requested.emit)
-        top_layout.addWidget(self.add_btn)
-
-        # Кнопка "Редактировать" (открыть форму)
-        self.edit_btn = QPushButton("Редактировать")
-        self.edit_btn.clicked.connect(self._on_edit_clicked)
-        self.edit_btn.setEnabled(False)
-        top_layout.addWidget(self.edit_btn)
-
-        # Кнопка "Удалить"
-        self.delete_btn = QPushButton("Удалить")
-        self.delete_btn.clicked.connect(self._on_delete_clicked)
-        self.delete_btn.setEnabled(False)
-        top_layout.addWidget(self.delete_btn)
 
 
-        # Inline-кнопки (показываются только в режиме редактирования)
-        self.inline_add_btn = QPushButton("Добавить строку")
-        self.inline_add_btn.clicked.connect(self._add_inline_row)
-        self.inline_add_btn.setVisible(False)
-        top_layout.addWidget(self.inline_add_btn)
+        # Выпадающий список для действий в обычном режиме
+        self.action_combo = QComboBox()
+        self.action_combo.addItem("▼ Действия с записями")  # заглушка
+        self.action_combo.addItem("Добавить")
+        self.action_combo.addItem("Редактировать")
+        self.action_combo.addItem("Удалить")
+        self.action_combo.addItem("Обновить")
+        self.action_combo.setEditable(False)
+        self.action_combo.setMaximumWidth(170)
 
-        self.inline_delete_btn = QPushButton("Удалить строку")
-        self.inline_delete_btn.clicked.connect(self._mark_selected_for_deletion)
-        self.inline_delete_btn.setVisible(False)
-        top_layout.addWidget(self.inline_delete_btn)
+        # Делаем первый пункт невыбираемым
+        self.action_combo.model().item(0).setEnabled(False)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.setEditable(False)
 
-        # Кнопка сохранения изменений (inline)
+        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+        # Принудительное открытие вниз
+        # self.action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
+
+        top_layout.addWidget(self.action_combo)
+
+
+
+
+        # Выпадающий список для inline-действий (скрыт по умолчанию)
+        self.inline_action_combo = QComboBox()
+        self.inline_action_combo.addItem("▼ Действия со строками")  # заглушка
+        self.inline_action_combo.addItem("Добавить строку")
+        self.inline_action_combo.addItem("Удалить строку")
+        # self.inline_action_combo.addItem("Сохранить изменения")
+
+        # Делаем первый пункт невыбираемым
+        self.action_combo.model().item(0).setEnabled(False)
+        self.inline_action_combo.setCurrentIndex(0)
+        self.inline_action_combo.setEditable(False)
+        self.inline_action_combo.setMaximumWidth(170)
+
+        self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
+        # Принудительное открытие вниз
+        # self.inline_action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
+
+        self.inline_action_combo.setVisible(False)
+        top_layout.addWidget(self.inline_action_combo)
+
+
+
+
+        # Кнопка сохранения (отдельная, показывается в режиме редактирования)
         self.save_changes_btn = QPushButton("Сохранить изменения")
         self.save_changes_btn.clicked.connect(self._save_changes)
         self.save_changes_btn.setEnabled(False)
+        self.save_changes_btn.setVisible(False)
+
         top_layout.addWidget(self.save_changes_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
@@ -368,10 +391,10 @@ class DynamicListPage(BasePage):
             self.action_btn.setEnabled(False)
             top_layout.addWidget(self.action_btn)
 
-        # Кнопка "Обновить"
-        self.refresh_btn = QPushButton("Обновить")
-        self.refresh_btn.clicked.connect(self._load_data)
-        top_layout.addWidget(self.refresh_btn)
+        # # Кнопка "Обновить"
+        # self.refresh_btn = QPushButton("Обновить")
+        # self.refresh_btn.clicked.connect(self._load_data)
+        # top_layout.addWidget(self.refresh_btn)
 
         # Заполнение пустого пространства
         top_layout.addStretch()
@@ -568,52 +591,50 @@ class DynamicListPage(BasePage):
                 # Cancel – остаёмся в режиме редактирования
                 return
 
-
         else:
             self.edit_mode = checked
 
         # Управление видимостью кнопок
         
         if self.edit_mode:
-            # Показываем inline-кнопки
-            self.inline_add_btn.setVisible(True)
-            self.inline_delete_btn.setVisible(True)
+            # Показываем inline-комбобокс, скрываем обычный
+            self.action_combo.setVisible(False)
+            self.inline_action_combo.setVisible(True)
             self.save_changes_btn.setVisible(True)
-            # Скрываем кнопки форм
-            self.add_btn.setVisible(False)
-            self.edit_btn.setVisible(False)
-            self.delete_btn.setVisible(False)
-            # Скрываем кнопку обновления и дополнительную кнопку действия
-            self.refresh_btn.setVisible(False)
+
+            # Скрываем дополнительную кнопку (если есть)
             if hasattr(self, 'action_btn') and self.action_btn:
                 self.action_btn.setVisible(False)
+
             # Включаем редактирование ячеек
             self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
+            
             # Отключаем переход по двойному клику
             self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
         else:
-            # Скрываем inline-кнопки
-            self.inline_add_btn.setVisible(False)
-            self.inline_delete_btn.setVisible(False)
+            # Показываем обычный комбобокс, скрываем inline
+            self.action_combo.setVisible(True)
+
+            self.inline_action_combo.setVisible(False)
+
             self.save_changes_btn.setVisible(False)
-            # Показываем кнопки форм
-            self.add_btn.setVisible(True)
-            self.edit_btn.setVisible(True)
-            self.delete_btn.setVisible(True)
-            # Показываем кнопку обновления и дополнительную кнопку действия
-            self.refresh_btn.setVisible(True)
+
+            # Показываем дополнительную кнопку (если есть)
             if hasattr(self, 'action_btn') and self.action_btn:
                 self.action_btn.setVisible(True)
+                
             # Отключаем редактирование ячеек
             self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
             # Включаем переход по двойному клику
             self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         # Сбрасываем выделение, чтобы избежать путаницы
         self.table_view.clearSelection()
         self.selected_dto = None
-        self.delete_btn.setEnabled(False)
-        self.edit_btn.setEnabled(False)
+        # self.delete_btn.setEnabled(False)
+        # self.edit_btn.setEnabled(False)
+
 
         if hasattr(self, 'action_btn'):
             self.action_btn.setEnabled(False)
@@ -1068,8 +1089,8 @@ class DynamicListPage(BasePage):
 
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
             self.logger.exception(f"Ошибка загрузки данных: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
     
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1114,11 +1135,15 @@ class DynamicListPage(BasePage):
             self.selected_dto = selected_dto
 
             thec = not(selected_dto is None)
-            self.delete_btn.setEnabled(thec)
-            self.edit_btn.setEnabled(thec)
-            self.logger.debug(f"hasattr(self, 'action_btn') : {hasattr(self, 'action_btn')}")
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(thec)
+
+
+            # self.delete_btn.setEnabled(thec)
+            # self.edit_btn.setEnabled(thec)
+            # self.logger.debug(f"hasattr(self, 'action_btn') : {hasattr(self, 'action_btn')}")
+            # if hasattr(self, 'action_btn'):
+            #     self.action_btn.setEnabled(thec)
 
         
         # Если был выбран хоть бы один индекс, то извлекается соответствующий DTO
@@ -1131,10 +1156,23 @@ class DynamicListPage(BasePage):
             _btn(
                 selected_dto = self.source_model.get_item_at_row(source_index.row())
             )
+
+            # Включаем пункты "Редактировать" и "Удалить" в комбобоксе
+            # model = self.action_combo.model()
+            # Индексы: 1 - Добавить, 2 - Редактировать, 3 - Удалить, 4 - Обновить
+            # Редактировать - индекс 2, Удалить - индекс 3
+            # for i in model.
+            # model.item(2).setEnabled(True)
+            # model.item(3).setEnabled(True)     
         else:
             _btn(
                 selected_dto = None
-            )        
+            )     
+
+            # # Отключаем "Редактировать" и "Удалить"
+            # model = self.action_combo.model()
+            # model.item(2).setEnabled(False)
+            # model.item(3).setEnabled(False)  
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1294,3 +1332,67 @@ class DynamicListPage(BasePage):
         )
         if proxy_index.isValid():
             self.table_view.scrollTo(proxy_index)
+
+
+    # ----------------------- слоты для обработки выбора действий -----------------------
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_action_selected(self, index):
+        """Обрабатывает выбор действия в обычном режиме."""
+        if index == 1:  # Добавить
+            self.add_requested.emit()
+        elif index == 2:  # Редактировать
+            if self.selected_dto:
+                self.edit_requested.emit(self.selected_dto)
+            else:
+                QMessageBox.warning(self, "Внимание", "Выберите строку для редактирования.")
+
+        elif index == 3:  # Удалить
+            if self.selected_dto:
+                self.delete_requested.emit(self.selected_dto)
+            else:
+                QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
+        elif index == 4:  # Обновить
+            self._load_data()
+
+
+        # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
+        self.action_combo.blockSignals(True)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.blockSignals(False)
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_inline_action_selected(self, index):
+        """Обрабатывает выбор действия в режиме редактирования."""
+        if index == 1:  # Добавить строку
+            self._add_inline_row()
+        elif index == 2:  # Удалить строку
+            if self.selected_dto:
+                self._mark_selected_for_deletion()
+            else:
+                QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
+        # elif index == 2:  # Сохранить изменения
+        #     self._save_changes()
+
+        # # Сбрасываем выбранный индекс
+        # self.inline_action_combo.setCurrentIndex(-1)
+
+
+        # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
+        self.action_combo.blockSignals(True)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.blockSignals(False)

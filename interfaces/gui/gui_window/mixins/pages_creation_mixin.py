@@ -1,16 +1,19 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/mixins/pages_creation_mixin.py
+
 """
 Миксин для создания динамических страниц приложения.
 Содержит методы инициализации страниц пациентов, приёмов, заметок и фотографий.
 """
 
 from app.utils.logger.logger import AppLogger
+
 from app.dependencies import (
     get_patient_service, get_appointment_service,
     get_note_service, get_photo_service
 )
 from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
 from app.dto.field_configs import PATIENT_CONFIG, APPOINTMENT_CONFIG, NOTE_CONFIG, PHOTO_CONFIG
+
 from interfaces.gui.gui_window.controllers.page_manager import PageManager
 
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
@@ -46,7 +49,8 @@ class PagesCreationMixin:
             field_configs=PATIENT_CONFIG,
             page_title="Пациенты",
             add_action_text="Добавить пациента",
-            action_button_text="Приёмы"              # дополнительная кнопка для просмотра приёмов пациента
+            action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
+            # save_directly=True,   
         )
 
         # Страница редактирования пациента
@@ -55,7 +59,8 @@ class PagesCreationMixin:
             dto_class=PatientDTO,
             page_title="Редактирование пациента",
             exclude_fields=['id'],
-            field_configs=PATIENT_CONFIG
+            field_configs=PATIENT_CONFIG,
+            save_directly=True,   
         )
         # Указываем ID страницы списка, чтобы после сохранения/удаления обновлять список
         self.patient_edit_page.list_page_id = 'patient_list'
@@ -81,7 +86,8 @@ class PagesCreationMixin:
             field_configs=APPOINTMENT_CONFIG,
             page_title="Приёмы",
             add_action_text="Новый приём",
-            exclude_columns=['photos']   # колонка с фото не отображается в таблице
+            exclude_columns=['photos'] ,  # колонка с фото не отображается в таблице
+            # save_directly=True,  
         )
 
         self.appointment_edit_page = DynamicEditPage(
@@ -90,7 +96,8 @@ class PagesCreationMixin:
             page_title="Редактирование приёма",
             exclude_fields=['id', 'has_photos'],  # 'has_photos' – виртуальное поле
             related_services={'patient': get_patient_service()},  # для подгрузки данных пациента
-            field_configs=APPOINTMENT_CONFIG
+            field_configs=APPOINTMENT_CONFIG,
+            save_directly=True,   
         )
         self.appointment_edit_page.list_page_id = 'appointment_list'
 
@@ -114,7 +121,8 @@ class PagesCreationMixin:
             dto_class=AppointmentNoteDTO,
             field_configs=NOTE_CONFIG,
             page_title="Заметки",
-            add_action_text="Создать заметку"
+            add_action_text="Создать заметку",
+            # save_directly=True,  
         )
 
         self.note_edit_page = DynamicEditPage(
@@ -122,7 +130,8 @@ class PagesCreationMixin:
             dto_class=AppointmentNoteDTO,
             page_title="Редактирование заметки",
             exclude_fields=['id'],
-            field_configs=NOTE_CONFIG
+            field_configs=NOTE_CONFIG,
+            save_directly=True,  
         )
         self.note_edit_page.list_page_id = 'note_list'
 
@@ -146,7 +155,8 @@ class PagesCreationMixin:
             dto_class=PhotoDTO,
             field_configs=PHOTO_CONFIG,
             page_title="Фотографии",
-            add_action_text="Добавить фото"
+            add_action_text="Добавить фото",
+            # save_directly=True,  
         )
 
         self.photo_edit_page = DynamicEditPage(
@@ -154,7 +164,8 @@ class PagesCreationMixin:
             dto_class=PhotoDTO,
             page_title="Редактирование фото",
             exclude_fields=['id'],
-            field_configs=PHOTO_CONFIG
+            field_configs=PHOTO_CONFIG,
+            save_directly=True,  
         )
         self.photo_edit_page.list_page_id = 'photo_list'
 

@@ -2,6 +2,8 @@
 
 from typing import Optional, List, Dict, Any
 
+from app.utils.logger.logger import AppLogger
+
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 
@@ -18,10 +20,29 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     Прокси-модель с поддержкой фильтрации по столбцам (текстовый поиск,
     выбор значений из списка) и общим текстовым фильтром.
     """
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
+
+         # логгер
+        self.logger = AppLogger.get_instance(
+            name = f"gui.AdvancedFilterProxyModel",
+            enable_file_logging = 'user',
+            use_name_in_filename = 'user',
+        )
+
         self._column_filters: Dict[int, Dict[str, Any]] = {}   # column -> filter info
         self._global_text_filter: str = ""                     # общий текстовый фильтр
+
+    
+       
 
     # def _setup_table(self):
     #     """
@@ -90,6 +111,14 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     #     """Сброс фильтра для колонки."""
     #     self.proxy_model.clear_column_filter(column)
 
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def set_column_filter(
             self, 
             column: int, 
@@ -124,6 +153,14 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             del self._column_filters[column]
             self.invalidateFilter()
 
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def clear_all_filters(self) -> None:
         """
         Очищает все фильтры (фильтры для столбцов и общий текстовый фильтр).
@@ -132,6 +169,14 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         self._global_text_filter = ""
         self.invalidateFilter()
 
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def set_global_text_filter(self, text: str) -> None:
         """
         Устанавливает общий текстовый фильтр.
@@ -141,6 +186,14 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         self._global_text_filter = text.lower()
         self.invalidateFilter()
 
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         """
         Определяет, проходит ли строка фильтр.
@@ -194,3 +247,36 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
                     return False
 
         return True
+    
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def data(
+        self, 
+        index: QModelIndex, 
+        role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
+        """
+        Возвращает данные из модели-источника или из родительской модели,
+        если роль не равен Qt.ItemDataRole.BackgroundRole.
+        (Пробрасывает цвет фона от исходной модели)
+
+        :param index: индекс ячейки
+        :type index: QModelIndex
+        :param role: роль данных (необязательно)
+        :type role: int
+        :return: данные из модели-источника или из родительской модели
+        :rtype: Any
+        """
+        if role == Qt.ItemDataRole.BackgroundRole:
+            # Пробрасываем цвет фона от исходной модели
+            source_index = self.mapToSource(index)
+
+            if source_index.isValid():
+                return self.sourceModel().data(source_index, role)
+            
+        return super().data(index, role)

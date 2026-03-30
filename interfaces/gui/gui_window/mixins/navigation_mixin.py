@@ -1,11 +1,14 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/mixins/navigation_mixin.py
 """
 Миксин для навигации между страницами и обновления хлебных крошек.
 """
 
 from app.utils.logger.logger import AppLogger
 from PySide6.QtCore import Slot
+from PySide6.QtWidgets import QMessageBox
 
+#  Импортируем DynamicListPage для проверки типа
+from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 
 class NavigationMixin:
     """
@@ -25,7 +28,36 @@ class NavigationMixin:
     )
     @Slot()
     def _on_back_clicked(self):
-        """Возврат на предыдущую страницу через PageManager."""
+        """
+        Возврат на предыдущую страницу с проверкой несохранённых изменений,
+        если текущая страница – список в режиме редактирования.
+        """
+        current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        self.logger.debug(
+            f"if isinstance(current_page, DynamicListPage) and current_page.edit_mode: {isinstance(current_page, DynamicListPage) and current_page.edit_mode}"
+        )
+        # T1 = isinstance(current_page, DynamicListPage)
+        # T2 = current_page.edit_mode
+        # 0==0
+        if isinstance(current_page, DynamicListPage) and current_page.edit_mode:
+            if current_page.modified_rows or current_page.deleted_rows or current_page.new_rows:
+                reply = QMessageBox.question(
+                    self, "Несохранённые изменения",
+                    "Есть несохранённые изменения. Сохранить перед возвратом?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    current_page._save_changes()
+                elif reply == QMessageBox.StandardButton.No:
+                    # Откатываем изменения
+                    current_page._load_data()
+                    current_page.modified_rows.clear()
+                    current_page.deleted_rows.clear()
+                    current_page.new_rows.clear()
+                    current_page._update_save_button_state()
+                else:
+                    # Cancel – не переходим назад
+                    return
         self.page_manager.go_back()
 
     @AppLogger.get_instance(

@@ -26,6 +26,10 @@ class DynamicTableModel(QAbstractTableModel):
     """
     Модель для отображения любых DTO-объектов в таблице.
     """
+
+    # Сигнал, испускаемый при изменении данных в строке (передаётся индекс строки)
+    row_modified = Signal(int)
+
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
     #     enable_file_logging = 'system',
@@ -33,7 +37,12 @@ class DynamicTableModel(QAbstractTableModel):
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
-    def __init__(self, data: List[Any], columns: List[Dict], parent=None):
+    def __init__(
+        self,
+        data: List[Any], 
+        columns: List[Dict], 
+        parent=None
+    ):
         """
         :param data: список DTO (объекты с атрибутами, соответствующими колонкам)
         :param columns: описание колонок (см. выше)
@@ -49,6 +58,8 @@ class DynamicTableModel(QAbstractTableModel):
         self._data = data
         self._columns = columns
         self._editable_columns = {col['name']: col.get('editable', False) for col in columns}
+
+        self._row_colors = {}  # словарь {row: QColor}
         
 
     # @AppLogger.get_instance(
@@ -95,7 +106,10 @@ class DynamicTableModel(QAbstractTableModel):
 
         if row >= len(self._data):
             return None
-
+        
+        if role == Qt.ItemDataRole.BackgroundRole:
+            return self._row_colors.get(row)
+        
         item = self._data[row]
         col_info = self._columns[col]
         field_name = col_info['name']
@@ -150,6 +164,7 @@ class DynamicTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.UserRole:
             # self.logger.debug(f'Qt.ItemDataRole.UserRole')
             return value  # для сортировки
+
             
         # self.logger.debug(f'role {role} not found')
         return None
@@ -171,6 +186,7 @@ class DynamicTableModel(QAbstractTableModel):
         Обновляет значение в ячейке (если колонка редактируемая).
         Сигнал dataChanged испускается автоматически.
         """
+        
         if not index.isValid() or role != Qt.ItemDataRole.EditRole:
             return False
         
@@ -197,22 +213,43 @@ class DynamicTableModel(QAbstractTableModel):
                     except ValueError as e:
                         self.logger.error(f"Ошибка преобразования в int {e}")
                         return False
+                    
                 elif target_type == datetime.date and isinstance(value, str):
                     # ожидается строка в формате YYYY-MM-DD
                     # from datetime import date
                     value = datetime.date.fromisoformat(value)
+
                 elif target_type == datetime.time and isinstance(value, str):
                     # from datetime import time
                     value = datetime.time.fromisoformat(value)
+
                 # и т.д. – можно расширить
-        except (ValueError, TypeError) as e:
-            
+        except (ValueError, TypeError) as e:            
             self.logger.error(f"Ошибка преобразования типа {e}")
             return False  # не удалось преобразовать
 
         setattr(item, field_name, value)
         self.dataChanged.emit(index, index, [role])
+        self.row_modified.emit(row)
+
+        self.logger.debug(f"Изменено поле {field_name} в строке {row}, новое значение: {value}")
         return True
+
+    def set_row_color(self, row: int, color: QColor):
+        """Устанавливает цвет фона для строки."""
+        if 0 <= row < len(self._data):
+            self._row_colors[row] = color
+            top_left = self.index(row, 0)
+            bottom_right = self.index(row, self.columnCount() - 1)
+            self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.BackgroundRole])
+
+    def clear_row_colors(self):
+        """Очищает все установленные цвета строк."""
+        self._row_colors.clear()
+        if self.rowCount() > 0:
+            top_left = self.index(0, 0)
+            bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
+            self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.BackgroundRole])
 
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
@@ -221,9 +258,28 @@ class DynamicTableModel(QAbstractTableModel):
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
+    def headerData(
+        self, 
+        section: int, 
+        orientation: Qt.Orientation, 
+        role: int = Qt.ItemDataRole.DisplayRole
+    ) -> Any:
+        """
+        Возвращает заголовок для секции таблицы.
+
+        :param section: номер секции
+        :type section: int
+        :param orientation: ориентация заголовка (Qt.Orientation.Horizontal или Qt.Orientation.Vertical)
+        :type orientation: Qt.Orientation
+        :param role: роль данных (необязательный, по умолчанию - Qt.ItemDataRole.DisplayRole)
+        :type role: int
+        :return: заголовок для секции, если ориентация - Qt.Orientation.Horizontal и роль - Qt.ItemDataRole.DisplayRole, иначе - None
+        :rtype: Any
+        """
+
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             return self._columns[section]['title']
+        
         return None
 
     # @AppLogger.get_instance(
@@ -234,6 +290,14 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        """
+        Возвращает флаги для ячейки (например, ItemIsEditable, если ячейка является редактируемой).
+        
+        :param index: индекс ячейки
+        :type index: QModelIndex
+        :return: флаги для ячейки
+        :rtype: Qt.ItemFlags
+        """
         flags = super().flags(index)
         if index.isValid():
             col = index.column()
@@ -279,7 +343,13 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def update_data(self, new_data: List[Any]):
-        """Полностью обновляет данные модели."""
+        """
+        Полностью обновляет данные модели.
+        
+        :param new_data: новый список данных
+        :type new_data: List[Any]
+        """
+
         self.beginResetModel()
         self._data = new_data
         self.endResetModel()
@@ -292,7 +362,59 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def get_item_at_row(self, row: int) -> Optional[Any]:
-        """Возвращает DTO по индексу строки."""
+        """
+        Возвращает DTO, соответствующий указанной строке модели. (по индексу строки)
+        
+        :param row: номер строки
+        :type row: int
+        :return: DTO, если строка существует, None иначе
+        :rtype: Optional[Any]
+        """
+
         if 0 <= row < len(self._data):
             return self._data[row]
+        
         return None
+    
+    def add_row(self, dto: Any) -> int:
+        """
+        Добавляет новую строку в конец модели.
+        Возвращает индекс добавленной строки.
+        """
+
+        row = len(self._data)
+        self.beginInsertRows(QModelIndex(), row, row)
+        self._data.append(dto)
+        self.endInsertRows()
+        # Новая строка считается изменённой (для подсветки)
+        self.row_modified.emit(row)
+        return row
+
+    def remove_row(self, row: int) -> Optional[Any]:
+        """
+        Удаляет строку из модели и возвращает удалённый DTO.
+        Используется для временного удаления (без вызова сервиса).
+        """
+
+        if row < 0 or row >= len(self._data):
+            return None
+        
+        self.beginRemoveRows(QModelIndex(), row, row)
+        removed = self._data.pop(row)
+        self.endRemoveRows()
+        return removed
+
+    def update_row(self, row: int, new_dto: Any):
+        """
+        Заменяет DTO в указанной строке на новый.
+        Используется после сохранения изменений.
+        """
+
+        if row < 0 or row >= len(self._data):
+            return
+        
+        self._data[row] = new_dto
+        # Уведомляем об изменении всей строки
+        top_left = self.index(row, 0)
+        bottom_right = self.index(row, self.columnCount() - 1)
+        self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])

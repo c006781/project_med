@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/main_window.py
+
 """
 Главное окно приложения.
 

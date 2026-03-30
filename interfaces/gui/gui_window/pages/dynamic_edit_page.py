@@ -13,7 +13,6 @@ from app.dependencies import (
 )
 from app.utils.virtual_fields import compute_virtual_fields, enrich_dto_with_computed_fields
 
-
 from interfaces.gui.gui_window.utils.gui_helpers import apply_readonly_to_widgets
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm, CompleterEdit
@@ -21,8 +20,21 @@ from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploade
 
 from pydantic import BaseModel
 
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox#, QLineEdit, QSpinBox
-from PySide6.QtCore import Slot
+from PySide6.QtWidgets import (
+    QApplication,
+    QVBoxLayout, 
+    QHBoxLayout, 
+    QPushButton, 
+    QMessageBox,
+    # QMenu, 
+    # QLineEdit, 
+    # QSpinBox,
+)
+from PySide6.QtCore import (
+    Signal, 
+    Slot, 
+    # QAction
+)
 
 
 class DynamicEditPage(BasePage):
@@ -30,6 +42,8 @@ class DynamicEditPage(BasePage):
     Универсальная страница редактирования.
     Поддерживает автоматическую подстановку patient_id при создании приёма.
     """
+
+    data_saved = Signal(object)   # испускается при сохранении, если save_directly=False
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -49,6 +63,7 @@ class DynamicEditPage(BasePage):
         parent=None,  # родительский виджет
         field_configs=None,  # внешняя конфигурация
         related_services=None,
+        save_directly: bool = True,   # если True, сохраняет в БД; если False, возвращает DTO через сигнал
     ):
         """
         Инициализирует страницу редактирования.
@@ -69,7 +84,6 @@ class DynamicEditPage(BasePage):
             use_name_in_filename = 'user',
         )
 
-
         # self.patient_svc = None  # сервис для работы с пациентами (например, для создания приёма)
         
         # сохраняем параметры инициализации страницы
@@ -81,6 +95,7 @@ class DynamicEditPage(BasePage):
         # self.field_rename = field_rename or {}
         self.field_configs = field_configs or {}
         self.related_services = related_services or {}
+        self.save_directly = save_directly
 
         self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
 
@@ -129,9 +144,11 @@ class DynamicEditPage(BasePage):
             source_attr = config.get('source_attr')
             if not source_attr:
                 continue
+
             # Если объект уже есть в extra_data, пропускаем
             if source_attr in extra_data:
                 continue
+
             # Ищем ключ вида source_attr + '_id'
             id_key = f"{source_attr}_id"
             if id_key in extra_data and extra_data[id_key] is not None:
@@ -928,14 +945,18 @@ class DynamicEditPage(BasePage):
             # 1. Создать DTO из данных формы
             dto = self._build_dto_from_form_data()
 
-            # 2. Создать или обновить запись
-            saved_dto, appointment_id = self._create_or_update_entity(dto)
-
-            # 3. Обработать фотографии
-            self._handle_photos(appointment_id)
-
-            # 4. Навигация
-            self._after_save_navigation(saved_dto)
+            self.logger.debug(f"if self.save_directly: {self.save_directly}")
+            if self.save_directly:
+                # Сохраняем или обновляем в БД
+                saved_dto, appointment_id = self._create_or_update_entity(dto)
+                # Обработать фотографии
+                self._handle_photos(appointment_id)
+                # Навигация
+                self._after_save_navigation(saved_dto)
+            else:
+                # Режим без сохранения в БД: возвращаем DTO через сигнал и закрываем форму
+                self.data_saved.emit(dto)
+                self._go_back()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")

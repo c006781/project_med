@@ -18,8 +18,13 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
-from interfaces.gui.gui_window.widgets.combo_box_delegate import ComboBoxDelegate
+from interfaces.gui.gui_window.widgets.delegate.combo_box_delegate import ComboBoxDelegate
 from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import AdvancedFilterProxyModel
+
+from interfaces.gui.gui_window.widgets.delegate.date_delegate import DateDelegate
+from interfaces.gui.gui_window.widgets.delegate.time_delegate import TimeDelegate
+from interfaces.gui.gui_window.widgets.delegate.bool_delegate import BoolDelegate
+from interfaces.gui.gui_window.widgets.delegate.combo_box_delegate import ComboBoxDelegate
 
 from PySide6.QtWidgets import (
     # QWidget, 
@@ -527,20 +532,60 @@ class DynamicListPage(BasePage):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )  
+    # def _setup_delegates(self):
+    #     """
+    #     Устанавливает делегаты для колонок, у которых есть choices.
+        
+    #     Делегат создается для каждой колонки, у которой есть choices.
+    #     Делегат будет использоваться для отображения комбобокса в соответствующей колонке.
+    #     """
+    #     for col_idx, col_info in enumerate(self.columns):
+    #         choices = col_info.get('choices')
+
+    #         self.logger.debug(f'if choices : {not (choices is None)}')    
+    #         if choices:
+    #             delegate = ComboBoxDelegate(self.table_view, choices)
+    #             self.table_view.setItemDelegateForColumn(col_idx, delegate)
+
     def _setup_delegates(self):
         """
-        Устанавливает делегаты для колонок, у которых есть choices.
-        
-        Делегат создается для каждой колонки, у которой есть choices.
-        Делегат будет использоваться для отображения комбобокса в соответствующей колонке.
+        Устанавливает делегаты для колонок на основе типов полей и field_configs.
+        Приоритет: choices > widget_type > тип поля.
         """
         for col_idx, col_info in enumerate(self.columns):
-            choices = col_info.get('choices')
+            field_name = col_info['name']
+            config = self.field_configs.get(field_name, {})
 
-            self.logger.debug(f'if choices : {not (choices is None)}')    
+            choices = config.get('choices')
+            self.logger.debug(f'if choices : {not (choices is None)}')
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
                 self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            widget_type = config.get('widget_type')
+            
+            if widget_type == 'date':
+                delegate = DateDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            elif widget_type == 'time':
+                delegate = TimeDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            field_type = col_info.get('type')
+            if field_type == datetime.date:
+                delegate = DateDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+            elif field_type == datetime.time:
+                delegate = TimeDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+            elif field_type == bool:
+                delegate = BoolDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+            # Для остальных типов используем стандартный редактор (QLineEdit)
 
     # ----------------------- Управление режимом редактирования -----------------------
 

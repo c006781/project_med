@@ -27,10 +27,7 @@ class PhotoDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent, photo_widget):
         super().__init__(parent)
@@ -48,10 +45,7 @@ class PhotoDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
         full_path = index.data(Qt.UserRole)
@@ -80,10 +74,7 @@ class PhotoDelegate(QStyledItemDelegate):
         enable_file_logging  = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def sizeHint(self, option: QStyleOptionViewItem, index):
         return QSize(100, 100)
@@ -100,10 +91,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -113,10 +101,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def createEditor(self, parent, option, index):
         """Создаёт QTextEdit вместо стандартного QLineEdit."""
@@ -133,10 +118,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def setEditorData(self, editor, index):
         """Загружает текущий текст в редактор."""
@@ -149,10 +131,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def setModelData(self, editor, model, index):
         """Сохраняет текст из редактора в модель."""
@@ -163,10 +142,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def updateEditorGeometry(self, editor, option, index):
         """Устанавливает геометрию редактора (растягивается на всю ячейку)."""
@@ -177,10 +153,7 @@ class TextEditDelegate(QStyledItemDelegate):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def eventFilter(self, editor, event):
         """
@@ -264,10 +237,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
         """
@@ -326,10 +296,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _adjust_column_widths(self):
         """
@@ -365,10 +332,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_selection_changed(self):
         """
@@ -450,10 +414,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def add_photo(self):
         """
@@ -853,10 +814,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def set_existing_photos(self, photos: List[PhotoDTO]):
         """
@@ -869,11 +827,11 @@ class PhotoUploaderWidget(QWidget):
         if photos:
             self.logger.debug(f"  первый элемент: {type(photos[0])}")
 
-
+        self.logger.debug(f"set_existing_photos: photos type = {type(photos)}")
         # self.existing_photos = photos # Список существующих фото
 
         if photos and isinstance(photos[0], dict):
-            from app.dto import PhotoDTO
+            # from app.dto import PhotoDTO
             self.logger.debug("Обнаружены словари, преобразуем в PhotoDTO")
             self.existing_photos = [PhotoDTO(**p) for p in photos]
             self.logger.debug("Преобразование завершено")
@@ -1017,10 +975,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_row_color(self, row: int):
         """
@@ -1035,7 +990,12 @@ class PhotoUploaderWidget(QWidget):
         :param row: Номер строки
         :type row: int
         """
-        state = self._get_row_state(row)
+        try:
+            state = self._get_row_state(row)
+        except Exception as e:
+            self.logger.exception(f'Err: {e}')
+            raise e
+
         color = None
         if state == 'new':
             color = QColor(200, 255, 200)  # светло-зелёный
@@ -1060,10 +1020,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _update_row_color(self, row: int):
         """Обновляет цвет строки без перестроения таблицы."""

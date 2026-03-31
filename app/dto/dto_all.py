@@ -4,12 +4,19 @@ DTO (Data Transfer Objects) на базе Pydantic.
 Обеспечивают автоматическую валидацию и сериализацию.
 """
 import datetime
-# from datetime import date
-# from datetime import time as time_datetime_dto_all
-from typing import Optional, List
 
-from pydantic import BaseModel, ConfigDict , Field # pip install pydantic>=2.0
+from typing import (
+    Dict, 
+    Optional, 
+    List, 
+    Tuple
+)
 
+from pydantic import (# pip install pydantic>=2.0
+    BaseModel, 
+    ConfigDict, 
+    Field
+) 
 
 
 class PatientDTO(BaseModel):

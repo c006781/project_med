@@ -25,11 +25,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self, 
@@ -67,11 +63,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage._setup_ui",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
         """Создаёт элементы интерфейса."""
@@ -150,11 +142,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage._browse_file",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _browse_file(self, line_edit, title, filter_str):
         """
@@ -176,11 +164,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage._browse_dir",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _browse_dir(self, line_edit, title):
         """
@@ -200,11 +184,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage._load_settings",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _load_settings(self):
         # """Загружает текущие настройки из менеджера и заполняет поля."""
@@ -254,11 +234,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage._save_settings",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
     def _save_settings(self):
@@ -291,11 +267,7 @@ class SettingsPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="SettingsPage.on_enter",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def on_enter(self, extra_data=None):
         """

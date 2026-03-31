@@ -101,10 +101,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, db_url: str):
         """
@@ -139,10 +136,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_session(self):
         """Возвращает сессию, привязанную к текущему потоку."""
@@ -153,10 +147,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     @contextmanager
     def session_scope(self):
@@ -193,10 +184,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def close(self):
         """Закрывает все сессии и удаляет привязку к потокам."""
@@ -207,10 +195,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def create_tables(self, recreate: bool = False):
         """
@@ -232,10 +217,7 @@ class Database:
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def fill_test_data(self):
         """

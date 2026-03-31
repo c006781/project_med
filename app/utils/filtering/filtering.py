@@ -42,10 +42,7 @@ class FilterOperator:
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def _convert_value(column, value: Any) -> Any:
     """
@@ -81,10 +78,7 @@ def _convert_value(column, value: Any) -> Any:
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def escape_like(value: str, escape_char: str = '\\') -> str:
     """Экранирует спецсимволы % и _ в строке для LIKE."""
@@ -93,10 +87,7 @@ def escape_like(value: str, escape_char: str = '\\') -> str:
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def apply_filters(
     query: Query,
@@ -209,10 +200,7 @@ def apply_filters(
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def apply_post_filters(items: List[Any], post_filters: List[Tuple], model) -> List[Any]:
     """

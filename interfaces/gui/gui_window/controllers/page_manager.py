@@ -33,10 +33,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self, 
@@ -101,10 +98,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _get_page_title(self, page_id: str) -> str:
         """
@@ -133,10 +127,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def switch_to(
         self,
@@ -186,10 +177,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def go_back(self):
         # """Возврат на предыдущую страницу."""
@@ -260,10 +248,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def clear_history(self):
         # """
@@ -282,10 +267,7 @@ class PageManager(QObject):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_current_extra_data(self):
         """

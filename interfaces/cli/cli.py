@@ -292,12 +292,9 @@ import click # pip install click
 # Функция-фабрика, создающая группу команд
 # ----------------------------------------------------------------------
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )  
 def create_cli():
     """

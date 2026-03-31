@@ -389,10 +389,7 @@ class Photo(Base):
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def create_db(
         db_path="clinic.db",
@@ -483,13 +480,10 @@ def create_db(
     return engine
 
 @AppLogger.get_instance(
-        name = 'system',
+    name = 'system',
 ).log_execution_time(
     # description="Содание и заполнение БД",
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def init_db(
     db_path="clinic.db"

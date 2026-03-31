@@ -67,11 +67,7 @@ class AppointmentListPage(DynamicDetailListPage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="AppointmentListPage.__init__",
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self,
@@ -541,10 +537,7 @@ class AppointmentListPage(DynamicDetailListPage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_detail_panel(self):
         """

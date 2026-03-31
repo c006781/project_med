@@ -1,5 +1,9 @@
 # interfaces/gui/gui_window/widgets/advanced_filter_proxy_model.py
 
+"""
+Прокси-модель с поддержкой фильтрации по столбцам (текстовый поиск, выбор значений из списка) и общим текстовым фильтром.
+"""
+
 from typing import Optional, List, Dict, Any
 
 from app.utils.logger.logger import AppLogger

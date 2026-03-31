@@ -392,7 +392,6 @@ class DynamicEditPage(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        # description="DynamicEditPage._connect_button_signals",
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _connect_button_signals(self):

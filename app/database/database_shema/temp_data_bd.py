@@ -98,10 +98,7 @@ from sqlalchemy.orm import sessionmaker
     name = 'system',
 ).log_execution_time(
     # description="Заполняем БД тестовыми данными",
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def populate_test_data(session):
     """
@@ -288,10 +285,7 @@ def populate_test_data(session):
     name = 'system',
 ).log_execution_time(
     # description="Заполнение БД",
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def generate_test_data(db_path:str="clinic.db"):
     """

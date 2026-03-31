@@ -109,11 +109,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, session: Session):
         """
@@ -201,11 +197,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_all(self) -> List[ModelType]:
         """
@@ -220,11 +212,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def add(self, entity: ModelType) -> ModelType:
         """
@@ -244,11 +232,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def delete(self, entity: ModelType) -> None:
         """
@@ -283,11 +267,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_unique_values(self, column_name: str) -> List[Any]:
         """
@@ -320,11 +300,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_page(
         self, 
@@ -363,11 +339,7 @@ class BaseRepository(Generic[ModelType], ABC):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def count(self, filters: Optional[List[Dict[str, Any]]] = None) -> int:
         """
@@ -395,11 +367,7 @@ class AppointmentNoteRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_by_text_exact(self, text: str):
         """
@@ -425,11 +393,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_all_with_note(self):
         """
@@ -446,11 +410,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_all_with_relations(self) -> List[Appointment]:
         """
@@ -470,11 +430,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_by_patient_with_relations(self, patient_id: int) -> List[Appointment]:
         """
@@ -497,11 +453,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_by_id_with_relations(self, appointment_id: int) -> Optional[Appointment]:
         """
@@ -540,17 +492,12 @@ class AppointmentRepository(BaseRepository):
             Appointment.id == appointment_id
         ).first()   # Возвращаем первый результат фильтрации (иначе None)
 
-
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_page(
         self, 
@@ -590,11 +537,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_page_by_patient(
         self, 
@@ -632,11 +575,7 @@ class AppointmentRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def count_by_patient(
         self, 
@@ -676,11 +615,7 @@ class PhotoRepository(BaseRepository):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_by_appointment(self, appointment_id: int) -> List[Photo]:
         

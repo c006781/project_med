@@ -7,10 +7,7 @@ from app.utils.logger.logger import AppLogger
 @AppLogger.get_instance(
     name = 'system',
 ).log_execution_time(
-    level = AppLogger._parse_log_level(
-        # 'INFO'
-        'DEBUG'
-    )
+    level=AppLogger._parse_log_level('DEBUG')
 )
 def get_patient_full_name(patient_id: int) -> str:
     """

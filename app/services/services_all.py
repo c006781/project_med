@@ -184,10 +184,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
         self,
@@ -233,10 +230,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _get_repo(self, session) -> RepoType:
         """
@@ -255,10 +249,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_all(self, session: Optional[Session] = None) -> List[DTOType]:
         """
@@ -283,10 +274,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_by_id(self, entity_id: int, session: Optional[Session] = None) -> DTOType:
         """
@@ -329,11 +317,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def create(self, dto: DTOType) -> DTOType:
         """
@@ -351,11 +335,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def update(self, dto: DTOType) -> DTOType:
         """
@@ -373,11 +353,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def delete(self, entity_id: int, session: Optional[Session] = None) -> None:
         """
@@ -406,11 +382,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
@@ -429,11 +401,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_dtos(
             self, 
@@ -477,15 +445,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_dto_out(
-            self, 
-            item,
+        self, 
+        item,
     ): 
         """
         Возвращает DTO из объекта.
@@ -506,11 +470,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_filtered(
             self, 
@@ -564,11 +524,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     @contextmanager
     def _session_scope(self, session: Optional[Session] = None):
@@ -589,10 +545,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_page(
         self, offset: int, 
@@ -632,10 +585,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
         """
@@ -704,11 +654,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )   
     def create_patient(
         self, 
@@ -811,11 +757,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     # Переопределяем метод для генерации исключения "не найдено"
     def _not_found_exception(self, entity_id: int) -> Exception:
@@ -835,11 +777,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     # Для совместимости с существующим кодом оставляем методы-обёртки,
     # которые вызывают методы базового класса
@@ -860,11 +798,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_patient_by_id(self, patient_id: int, session: Optional[Session] = None) -> PatientDTO:
         """
@@ -888,11 +822,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete_patient(self, patient_id: int, session: Optional[Session] = None) -> None:
         """
@@ -931,11 +861,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_patients_filtered(
         self, 
@@ -969,11 +895,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create(self, dto: PatientDTO) -> PatientDTO:
         """
@@ -991,11 +913,7 @@ class PatientService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def update(self, dto: PatientDTO) -> PatientDTO:
         """
@@ -1022,10 +940,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def __init__(
         self, 
@@ -1057,10 +972,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
@@ -1081,10 +993,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_all(self, session: Optional[Session] = None) -> List[AppointmentNoteDTO]:
         """
@@ -1103,10 +1012,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_by_id(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
@@ -1127,10 +1033,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete(self, note_id: int, session: Optional[Session] = None) -> None:
         """
@@ -1149,10 +1052,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
         """
@@ -1170,10 +1070,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def update(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
         """
@@ -1195,10 +1092,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_note(self, note_id: int, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
@@ -1219,10 +1113,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create_note(self, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
@@ -1314,10 +1205,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete_note(self, note_id: int, session: Optional[Session] = None) -> None:
         """
@@ -1337,10 +1225,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_or_create_note(self, text: str, session: Optional[Session] = None) -> Optional[AppointmentNoteDTO]:
         """
@@ -1381,10 +1266,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create_note_from_file(self, file_path: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
         """
@@ -1413,10 +1295,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def cleanup_unused_note(self, note_id: int, session: Session) -> None:
         """
@@ -1446,10 +1325,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_choices(self, session: Optional[Session] = None) -> List[str]:
         """
@@ -1483,10 +1359,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def __init__(
         self,
@@ -1536,10 +1409,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
@@ -1662,10 +1532,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create(self, dto: AppointmentDTO) -> AppointmentDTO:
         """
@@ -1691,10 +1558,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def update(self, dto: AppointmentDTO) -> AppointmentDTO:
         """
@@ -1729,11 +1593,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_all(self, session: Optional[Session] = None) -> List[AppointmentDTO]:
         """
@@ -1776,11 +1636,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_appointments_by_patient(
         self, 
@@ -1822,11 +1678,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_appointment(
         self, 
@@ -1869,10 +1721,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_filtered(
         self, 
@@ -1918,11 +1767,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def create_appointment(
         self, 
@@ -1978,10 +1823,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def update_appointment(
         self, 
@@ -2047,10 +1889,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete_appointment(
         self, 
@@ -2119,10 +1958,7 @@ class AppointmentService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_appointments_by_patient_page(
         self, 
@@ -2187,11 +2023,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(   
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def __init__(
         self, 
@@ -2242,11 +2075,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(  
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def update_photo_description(
         self, 
@@ -2269,11 +2099,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(    
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
         """
@@ -2294,11 +2121,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time( 
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
@@ -2357,10 +2181,7 @@ class PhotoService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def add_photo_to_appointment(
             self, 
@@ -2468,10 +2289,7 @@ class PhotoService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_photos_for_appointment(
         self, 
@@ -2522,10 +2340,7 @@ class PhotoService(
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete_photo(
         self, 
@@ -2587,11 +2402,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(   
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def _generate_target_path(
         self, 
@@ -2635,11 +2447,8 @@ class PhotoService(
         name = 'PhotoService',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
-    ).log_execution_time(        
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+    ).log_execution_time(      
+        level=AppLogger._parse_log_level('DEBUG')
     )  
     def _ensure_storage_exists(self):
         """Создаёт папку для фото, если её нет."""

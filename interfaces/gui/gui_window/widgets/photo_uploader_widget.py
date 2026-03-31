@@ -858,10 +858,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_pending_photos(self) -> List[Tuple[str, str]]:
         """
@@ -877,10 +874,7 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def get_deleted_photo_ids(self) -> List[int]:
         """

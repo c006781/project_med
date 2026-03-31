@@ -32,7 +32,7 @@ from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploade
 from PySide6.QtWidgets import (
     # QTableView, QPushButton, QHeaderView, QMessageBox,
     # QLineEdit, 
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, 
+    QAbstractItemView, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QScrollArea, QSizePolicy, 
     QSplitter, QTextEdit, 
     QListWidget, QListWidgetItem, 
     QVBoxLayout, QWidget
@@ -92,8 +92,17 @@ class AppointmentListPage(DynamicDetailListPage):
             use_name_in_filename = 'user',
         )
 
+        # Словари для хранения черновиков приёмов
+        self._draft_photos = {}      # appointment_id -> состояние от photo_widget.dump_state()
+        self._draft_note_text = {}   # appointment_id -> str
+
         # Создаём виджеты правой панели (после того как detail_layout создан в родительском _setup_ui)
         self._setup_detail_panel()
+
+
+        self.note_text_edit.textChanged.connect(self._on_draft_changed)
+        self.photo_widget.photosChanged.connect(self._on_draft_changed)
+
 
         self.photo_service = get_photo_service()
         self.patient_service = get_patient_service()
@@ -142,6 +151,45 @@ class AppointmentListPage(DynamicDetailListPage):
     #             self.photo_list.addItem(item)
     #     except Exception as e:
     #         self.logger.exception(f"Ошибка загрузки фото: {e}")
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_selection_changed(self, selected, deselected):
+        """
+        Переопределяем метод для сохранения черновика текущего приёма
+        перед переключением на другой.
+        """
+        # Сохраняем черновик текущего выбранного приёма (если есть)
+        if self.selected_dto:
+            self._save_current_draft()
+        # Вызываем родительский метод, который обновит self.selected_dto и вызовет update_details
+        super()._on_selection_changed(selected, deselected)
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_draft_changed(self):
+        """При любом изменении в правой панели обновляем черновик текущего приёма."""
+        if not self.edit_mode:
+            return
+        
+        if not self.selected_dto or self.selected_dto.id is None:
+            return
+        
+        if self._loading_right_panel:
+            return
+        
+        self._save_current_draft()
+        # Также помечаем строку как изменённую, если ещё не помечена
+        self._mark_current_row_modified()
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -217,6 +265,65 @@ class AppointmentListPage(DynamicDetailListPage):
             }
         """)
 
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _save_current_draft(self) -> None:
+        """Сохраняет текущее состояние правой панели в черновики для выбранного приёма."""
+        if not self.selected_dto or self.selected_dto.id is None:
+            return
+        
+        aid = self.selected_dto.id
+        # Заметка
+        self._draft_note_text[aid] = self.note_text_edit.toPlainText()
+        # Фото
+        self._draft_photos[aid] = self.photo_widget.dump_state()
+        # self.logger.debug(f"Сохранён черновик для приёма {aid}")
+
+        self.logger.debug(f"Сохранён черновик для приёма {aid}: pending={self._draft_photos[aid]['pending_photos']}")
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_draft_for_appointment(self, appointment_id: int, dto) -> None:
+        """
+        Загружает черновики для указанного приёма в правую панель.
+        Если черновиков нет, загружает данные из DTO (БД) и сбрасывает pending/deleted.
+        """
+        self.logger.debug(f"Загрузка черновика для приёма {appointment_id}, есть в _draft_photos: {appointment_id in self._draft_photos}")
+        self._loading_right_panel = True
+        try:
+            # Заметка
+            note_text = self._draft_note_text.get(appointment_id)
+            if note_text is not None:
+                self.note_text_edit.setText(note_text)
+            else:
+                self.note_text_edit.setText(dto.note_text or "")
+
+            # Фото
+            if appointment_id in self._draft_photos:
+                self.logger.debug(f"Загружаем черновик для {appointment_id}: {self._draft_photos[appointment_id]['pending_photos']}")
+                # self.photo_widget.load_state(self._draft_photos[appointment_id])
+                self.photo_widget.blockSignals(True)
+                try:
+                    self.photo_widget.load_state(self._draft_photos[appointment_id])
+                finally:
+                    self.photo_widget.blockSignals(False)
+            else:
+                self.logger.debug(f"Нет черновика для {appointment_id}, загружаем из БД")
+                self.photo_widget.set_existing_photos(dto.photos)
+                self.photo_widget.clear_pending_and_deleted()
+        finally:
+            self._loading_right_panel = False
+
     # ----------------------------------------------------------------------
     # Переопределение построения интерфейса
     # ----------------------------------------------------------------------
@@ -279,6 +386,18 @@ class AppointmentListPage(DynamicDetailListPage):
         self.logger.debug(f"self.height() : {self.height()}")
         if self.height() == 0:
             self.vertical_splitter.setSizes([200, 600])
+
+        # # Принудительно показываем и обновляем правую панель
+        # if hasattr(self, 'detail_widget'):
+        #     self.detail_widget.setVisible(True)
+        #     self.detail_widget.updateGeometry()
+        #     # Если layout был пересоздан в _setup_detail_panel, убедимся, что он активен
+        #     if self.detail_layout:
+        #         self.detail_layout.activate()
+        # # Обновляем весь вертикальный сплиттер
+        # if hasattr(self, 'vertical_splitter'):
+        #     self.vertical_splitter.updateGeometry()
+
 
         self.logger.debug(f"Vertical splitter sizes after setup: {self.vertical_splitter.sizes()}")
 
@@ -545,11 +664,14 @@ class AppointmentListPage(DynamicDetailListPage):
 
         Создает виджету с заметкой и фотографиями приема.
         """
+        
+        # self.detail_layout = QVBoxLayout(self.detail_widget)
 
-        # Создаем виджету с заметкой
+        # Создаем виджету с заметкой        
         self.note_text_edit = QTextEdit()      
         self.note_text_edit.setReadOnly(True) # Установка режима "только для чтения"
-        self.note_text_edit.textChanged.connect(self._on_note_text_changed)
+        # self.note_text_edit.textChanged.connect(self._on_note_text_changed)
+        self.note_text_edit.textChanged.connect(self._on_draft_changed)
 
         # Добавляем виджету с заметкой в верхнюю часть detail_layout
         self.detail_layout.addWidget(QLabel("Заметка:"))
@@ -574,7 +696,8 @@ class AppointmentListPage(DynamicDetailListPage):
         self.logger.debug(f'storage_path: {storage_path}')
         self.photo_widget.set_storage_path(storage_path)
         self.photo_widget.set_readonly(True) # изначально только просмотр
-        self.photo_widget.photosChanged.connect(self._on_photos_changed)
+        # self.photo_widget.photosChanged.connect(self._on_photos_changed)
+        self.photo_widget.photosChanged.connect(self._on_draft_changed)
 
         # Добавляем виджету со списком фотографий в верхнюю часть detail_layout
         self.detail_layout.addWidget(QLabel("Фотографии:"))
@@ -676,21 +799,46 @@ class AppointmentListPage(DynamicDetailListPage):
     )
     def _on_edit_mode_toggled(self, checked: bool):
         """
-        Переопределяем метод для включения/отключения редактирования виджетов правой панели.
+        Переопределяем метод для:
+            - очистки черновиков при отмене
+            - настройки readOnly для правой панели
         """
-        # Вызываем родительский метод для управления кнопками и флагом edit_mode
-        super()._on_edit_mode_toggled(checked)
+        if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
+            reply = QMessageBox.question(
+                self, "Несохранённые изменения",
+                "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._save_changes()
+                # после сохранения выходим из режима
+                super()._on_edit_mode_toggled(checked)
+            elif reply == QMessageBox.StandardButton.No:
+                # Откат: сбросить черновики и перезагрузить данные
+                self._draft_photos.clear()
+                self._draft_note_text.clear()
+                self._load_data()
+                self.modified_rows.clear()
+                self.deleted_rows.clear()
+                self.new_rows.clear()
+                self._update_save_button_state()
+                # выходим из режима редактирования
+                super()._on_edit_mode_toggled(checked)
+            else:
+                # Cancel – остаёмся в режиме редактирования
+                return
+        else:
+            # Переключаем режим через родительский метод (устанавливает self.edit_mode и управляет кнопками)
+            super()._on_edit_mode_toggled(checked)
 
-        # Настраиваем виджеты правой панели в зависимости от режима
+        # Настройка правых виджетов в зависимости от режима
         if self.edit_mode:
-            # Включаем редактирование заметки
             self.note_text_edit.setReadOnly(False)
-            # Включаем редактирование фото
             self.photo_widget.set_readonly(False)
         else:
-            # Запрещаем редактирование
             self.note_text_edit.setReadOnly(True)
             self.photo_widget.set_readonly(True)
+        self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -701,39 +849,92 @@ class AppointmentListPage(DynamicDetailListPage):
     )
     def _save_changes(self):
         """
-        Переопределяем метод сохранения изменений.
-        Сначала вызываем родительский метод, который сохранит все изменения строк (включая заметки),
-        а затем обрабатываем изменения фотографий для текущей строки.
+        Сохраняет все накопленные черновики (заметки и фото) для всех изменённых приёмов.
         """
-        # Сохраняем все изменения строк (заметки, даты, время и т.д.)
-        super()._save_changes()
+        if not (self.modified_rows or self.deleted_rows or self.new_rows):
+            return
 
-        # После сохранения строк обрабатываем фотографии для текущего приёма,
-        # если он был изменён (имеет pending_photos или удалённые фото).
-        if self.selected_dto and self.selected_dto.id:
-            pending = self.photo_widget.get_pending_photos()
-            deleted = self.photo_widget.get_deleted_photo_ids()
-            # Также нужно обработать изменения описаний существующих фото
-            # Для этого мы можем использовать тот же метод update_photos_for_appointment,
-            # который сам обработает всё (он удаляет, добавляет и обновляет описания).
-            if pending or deleted:
-                try:
-                    self.photo_service.update_photos_for_appointment(
-                        self.selected_dto.id,
-                        pending,
-                        deleted
-                    )
-                    self.logger.info(f"Обновлены фото для приёма ID={self.selected_dto.id}")
-                    # После сохранения фото обновляем данные в правой панели
-                    self._refresh_photos()
-                except Exception as e:
-                    self.logger.exception(f"Ошибка сохранения фото: {e}")
-                    # Можно показать сообщение пользователю, но parent может быть не доступен.
-                    # Ограничимся логом.
-            else:
-                self.logger.debug("Нет изменений фото для сохранения")
-        else:
-            self.logger.debug("Нет выбранного приёма для сохранения фото")
+        # Запрашиваем подтверждение
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.table_view.setEnabled(False)
+        self.save_changes_btn.setEnabled(False)
+
+        try:
+            # Сначала сохраняем черновики текущего выбранного приёма (если он есть)
+            self._save_current_draft()
+
+            # Перебираем все строки, помеченные как изменённые (source_row)
+            # Для каждой строки получаем DTO из модели
+            for source_row in list(self.modified_rows):
+                dto = self.source_model.get_item_at_row(source_row)
+                if dto is None:
+                    continue
+                aid = dto.id
+
+                # 1. Обработка заметки
+                note_text = self._draft_note_text.get(aid)
+                if note_text is not None:
+                    # Обновляем DTO (для последующего вызова service.update)
+                    dto.note_text = note_text
+
+                # 2. Обработка фото
+                draft = self._draft_photos.get(aid)
+                if draft:
+                    pending = draft['pending_photos']
+                    deleted = draft['deleted_photo_ids']
+                    # Применяем изменения через сервис
+                    try:
+                        self.photo_service.update_photos_for_appointment(
+                            aid,
+                            pending,
+                            deleted
+                        )
+                        self.logger.info(f"Обновлены фото для приёма ID={self.selected_dto.id}")
+                    except Exception as e:
+                        self.logger.exception(f"Ошибка сохранения фото: {e}")
+                        raise e
+
+                    # Обновляем описания существующих фото
+                    for photo_dto in draft['existing_photos']:
+                        if photo_dto['id'] in draft['modified_photo_ids']:
+                            self.photo_service.update_photo_description(photo_dto['id'], photo_dto['description'])
+
+                    # После сохранения очищаем черновики для этого приёма
+                    self._draft_photos.pop(aid, None)
+                    self._draft_note_text.pop(aid, None)
+
+                # 3. Обновляем основные поля приёма (дата, время) через родительский сервис
+                # Для этого вызываем update сервиса, передавая dto
+                # Но родительский _save_changes уже делает это, поэтому мы должны
+                # вызвать super()._save_changes() только для основных полей, но он обрабатывает все строки.
+                # Чтобы избежать двойной обработки, лучше вызвать service.update вручную.
+                if dto.id is not None:
+                    self.service.update(dto)   # обновляет дату, время и заметку (note_text уже в dto)
+                else:
+                    # Новая запись – создаём
+                    created = self.service.create(dto)
+                    # Обновляем модель
+                    self.source_model.update_row(source_row, created)
+
+            # После обработки всех строк сбрасываем флаги изменений и перезагружаем данные
+            self.modified_rows.clear()
+            self.deleted_rows.clear()
+            self.new_rows.clear()
+            self._load_data()
+            QMessageBox.information(self, "Успех", "Изменения сохранены.")
+        except Exception as e:
+            self.logger.exception(f"Ошибка при сохранении изменений: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+        finally:
+            self.table_view.setEnabled(True)
+            self._update_save_button_state()
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -768,41 +969,21 @@ class AppointmentListPage(DynamicDetailListPage):
     def update_details(self, dto):
         """
         Обновляет правую панель данными выбранного приёма.
-        Вызывается автоматически при выборе строки в таблице.
-
-        :param dto: данные приёма
-        :type dto: AppointmentDTO
+        При переключении с предыдущего приёма сохраняет его черновики.
         """
-
-        # self.logger.debug(f"dto {dto}")
-        self.logger.debug(f"update_details получил dto типа {type(dto)}")
         if not dto:
             return
-        
+
+        # Сохраняем черновики предыдущего приёма (если он был и отличается от нового)
+        if self.selected_dto and self.selected_dto.id != dto.id:
+            self._save_current_draft()
+
         self.current_appointment_id = dto.id
 
+        # Загружаем черновики для нового приёма
+        self._load_draft_for_appointment(dto.id, dto)
 
-        # Блокируем сигналы правой панели, чтобы не триггерить _on_note_text_changed и _on_photos_changed при загрузке
-        self._loading_right_panel = True
-        try:
-            # Загружаем текст заметки
-            self.note_text_edit.setText(dto.note_text or "")
-
-            # Загружаем фото
-
-            self.logger.debug(f"Проверка photos: hasattr={hasattr(dto, 'photos')}, is not None={dto.photos is not None}")
-            if hasattr(dto, 'photos') and dto.photos is not None:
-                self.logger.debug(f"dto.photos тип = {type(dto.photos)}")
-                self.photo_widget.set_existing_photos(dto.photos)
-            else:
-                self.photo_widget.set_existing_photos([])
-        except Exception as e:
-            self.logger.exception(f"Ошибка загрузки данных приёма: {e}")
-        finally:
-            self._loading_right_panel = False
-        
         # Обновляем панель информации о пациенте
-        # Для этого нужно получить данные пациента по patient_id из dto
         try:
             if dto.patient_id:
                 patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
@@ -826,6 +1007,10 @@ class AppointmentListPage(DynamicDetailListPage):
         При входе на страницу обновляем список приёмов.
         Если передан patient_id, показываем панель с информацией о пациенте.
         """
+        # # Сброс черновиков при входе 
+        # self._draft_photos.clear()
+        # self._draft_note_text.clear()
+
         # Запоминаем patient_id для отображения информации
         patient_id = extra_data.get('patient_id') if extra_data else None
         if patient_id:

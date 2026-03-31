@@ -228,6 +228,61 @@ class PhotoUploaderWidget(QWidget):
         """Возвращает список существующих фото (актуальные после редактирования описаний)."""
         return self.existing_photos
     
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def dump_state(self) -> dict:
+        """
+        Возвращает сериализуемое состояние виджета: существующие фото, pending, удалённые, изменённые.
+        Используется для сохранения черновиков при переключении между приёмами.
+        """
+        return {
+            'existing_photos': [p.model_dump() for p in self.existing_photos],
+            'pending_photos': self.pending_photos.copy(),
+            'deleted_photo_ids': list(self.deleted_photo_ids),
+            'modified_photo_ids': list(self.modified_photo_ids)
+        }
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def load_state(self, state: dict) -> None:
+        """
+        Восстанавливает состояние виджета из словаря, полученного от dump_state.
+        Полностью заменяет текущие данные.
+        """
+        self.logger.debug(f"load_state: pending={state.get('pending_photos')}, existing={state.get('existing_photos')}")
+        self.clear()
+        # Восстанавливаем существующие фото
+        self.existing_photos = [PhotoDTO(**p) for p in state['existing_photos']]
+        self.pending_photos = state['pending_photos']
+        self.deleted_photo_ids = set(state['deleted_photo_ids'])
+        self.modified_photo_ids = set(state['modified_photo_ids'])
+        self._refresh_table()
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def clear_pending_and_deleted(self) -> None:
+        """Сбрасывает только pending и deleted, оставляя существующие фото."""
+        self.pending_photos.clear()
+        self.deleted_photo_ids.clear()
+        self.modified_photo_ids.clear()
+        self._refresh_table()
+
+
     # ----------------------------------------------------------------------
     # Построение интерфейса
     # ----------------------------------------------------------------------
@@ -617,6 +672,7 @@ class PhotoUploaderWidget(QWidget):
         :return: None
         :rtype: None
         """
+        self.logger.debug(f"_refresh_table: existing={len(self.existing_photos)}, pending={len(self.pending_photos)}")
         total_rows = len(self.existing_photos) + len(self.pending_photos)
         self.table.setRowCount(total_rows)
         self.table.setUpdatesEnabled(False)

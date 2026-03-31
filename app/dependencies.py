@@ -165,7 +165,7 @@ def get_sync_service() -> SyncService:
     return SyncService()
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -356,7 +356,7 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
 
     
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -402,7 +402,7 @@ def create_click_options(dto_class: BaseModel, action='create'):
     return decorator
     
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -471,7 +471,7 @@ def collect_dto_from_input(
     return data
 
 @AppLogger.get_instance(
-        name = 'system'
+    name = 'system'
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )

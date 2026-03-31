@@ -86,7 +86,11 @@ class PagesCreationMixin:
             field_configs=APPOINTMENT_CONFIG,
             page_title="Приёмы",
             add_action_text="Новый приём",
-            exclude_columns=['photos'] ,  # колонка с фото не отображается в таблице
+            exclude_columns=[
+                'photos',
+                'patient_name',
+                # 'photos',
+            ] ,  # колонка с фото не отображается в таблице
             # save_directly=True,  
         )
 

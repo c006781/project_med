@@ -68,6 +68,7 @@ class DynamicDetailListPage(DynamicListPage):
 
         # Разделитель: слева таблица, справа детали
         splitter = QSplitter(Qt.Horizontal)
+        self.splitter = splitter
 
         # Создаём таблицу (она будет добавлена в splitter, а не в main_layout)
         self._setup_table()

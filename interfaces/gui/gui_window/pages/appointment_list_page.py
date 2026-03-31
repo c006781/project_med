@@ -792,8 +792,6 @@ class AppointmentListPage(DynamicDetailListPage):
         # Блокируем сигналы правой панели, чтобы не триггерить _on_note_text_changed и _on_photos_changed при загрузке
         self._loading_right_panel = True
         try:
-
-
             # Загружаем текст заметки
             self.note_text_edit.setText(dto.note_text or "")
 
@@ -805,6 +803,8 @@ class AppointmentListPage(DynamicDetailListPage):
                 self.photo_widget.set_existing_photos(dto.photos)
             else:
                 self.photo_widget.set_existing_photos([])
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки данных приёма: {e}")
         finally:
             self._loading_right_panel = False
         

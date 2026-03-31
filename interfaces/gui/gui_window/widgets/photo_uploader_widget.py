@@ -636,8 +636,13 @@ class PhotoUploaderWidget(QWidget):
                 self.logger.exception(f'Err: {e}')
                 raise e
         # Устанавливаем цвета для всех строк после заполнения
+
         for row in range(total_rows):
-            self._set_row_color(row)
+            try:
+                self._set_row_color(row)
+            except Exception as e:
+                self.logger.exception(f'row: {row}, Err: {e}')
+                raise e
 
         self._adjust_row_heights()
         self.table.setUpdatesEnabled(True)

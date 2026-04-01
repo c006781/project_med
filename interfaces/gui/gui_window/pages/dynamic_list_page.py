@@ -167,7 +167,24 @@ class ListSelectionMixin:
         
         if self.proxy_model.rowCount() > 0:
             self._set_current_row(0)
-
+            
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _find_row_by_dto_id(self, dto_id: int) -> int:
+        """Возвращает индекс строки в прокси-модели для DTO с указанным ID, или -1."""
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and getattr(dto, 'id', None) == dto_id:
+                source_index = self.source_model.index(row, 0)
+                proxy_index = self.proxy_model.mapFromSource(source_index)
+                if proxy_index.isValid():
+                    return proxy_index.row()
+        return -1
 class ListDataMixin:
     """
     Миксин для работы с данными в таблице.
@@ -186,6 +203,12 @@ class ListDataMixin:
 
         :raises Exception: если не удалось загрузить данные
         """
+
+        # Сохраняем ID выбранного DTO (если есть)
+        selected_id = None
+        if self.selected_dto and hasattr(self.selected_dto, 'id'):
+            selected_id = self.selected_dto.id
+            
         try:
             self.current_data = self.loader_func(self.current_extra)
             self.source_model.update_data(self.current_data)
@@ -197,7 +220,18 @@ class ListDataMixin:
             self.new_rows.clear()
             self.original_data.clear()
             self._update_save_button_state()
-            self.table_view.clearSelection()
+
+            # self.table_view.clearSelection()
+            # Восстанавливаем выделение по ID
+            if selected_id is not None:
+                row = self._find_row_by_dto_id(selected_id)
+                if row >= 0:
+                    self._set_current_row(row)
+                else:
+                    self._select_first_row()
+            else:
+                self._select_first_row()
+                
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки данных: {e}")

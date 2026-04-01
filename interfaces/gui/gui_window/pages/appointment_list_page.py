@@ -243,6 +243,9 @@ class AppointmentListPage(
     )
     def showEvent(self, event): # - оставить
         """Переопределяем showEvent для установки размеров вертикального сплиттера после отображения окна."""
+        if not hasattr(self, 'vertical_splitter'):
+            return
+        
         super().showEvent(event)
         # Откладываем установку размеров на следующий цикл событий, чтобы гарантировать,
         # что геометрия окна уже определена.
@@ -258,9 +261,6 @@ class AppointmentListPage(
     )
     def _fix_splitter_sizes(self):
         """Устанавливает начальные размеры вертикального сплиттера, если они ещё не заданы."""
-
-        if not hasattr(self, 'vertical_splitter'):
-            return
 
         total_height = self.height()
         # Устанавливаем панели высоту, остальное — горизонтальному сплиттеру
@@ -316,6 +316,7 @@ class AppointmentListPage(
     # ----------------------------------------------------------------------
     # Обработка выделения строки
     # ----------------------------------------------------------------------
+     
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -876,17 +877,3 @@ class AppointmentListPage(
                     self.table_view.setCurrentIndex(proxy_index)
                     self.table_view.scrollTo(proxy_index)
                 break
-
-
-
-
-
-
-
-
-
-
-
-
-
-

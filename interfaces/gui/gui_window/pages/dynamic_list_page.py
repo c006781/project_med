@@ -1,5 +1,6 @@
 # interfaces/gui/gui_window/pages/dynamic_list_page.py
 
+from functools import wraps
 from typing import (
     List,
     Optional, 
@@ -46,6 +47,24 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor
 
+def preserve_selection(func):
+    """
+    Декоратор для методов, которые могут изменить данные или режим редактирования.
+    Сохраняет текущую строку перед выполнением и восстанавливает её после.
+    """
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        self._store_current_row()
+        try:
+            result = func(self, *args, **kwargs)
+        except Exception as e:
+            self.logger.exception(f"Ошибка в {func.__name__}: {e}")
+            raise 
+        finally:
+            self._restore_current_row()
+        return result
+    
+    return wrapper
 
 
 class DynamicListPage(BasePage):
@@ -125,7 +144,7 @@ class DynamicListPage(BasePage):
 
         self.exclude_columns = exclude_columns or []
 
-
+        self._saved_row = -1  # сохранённый индекс строки
 
         # Словарь для отслеживания изменённых строк:
         # modified_rows: set of row indices, которые были изменены пользователем (но ещё не сохранены)
@@ -154,6 +173,75 @@ class DynamicListPage(BasePage):
         self._setup_ui()
         
         self._load_data() # загрузка данных на страницу
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_current_row(self) -> int:
+        """Возвращает индекс текущей строки в прокси-модели или -1."""
+        current = self.table_view.currentIndex()
+        return current.row() if current.isValid() else -1
+    
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_current_row(self, row: int) -> None:
+        """Выделяет строку с указанным индексом (в прокси-модели)."""
+        if row < 0 or row >= self.proxy_model.rowCount():
+            return
+        proxy_index = self.proxy_model.index(row, 0)
+        self.table_view.setCurrentIndex(proxy_index)
+        self.table_view.scrollTo(proxy_index)
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _store_current_row(self) -> None:
+        """Сохраняет текущий индекс строки."""
+        self._saved_row = self._get_current_row()
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _restore_current_row(self) -> None:
+        """Восстанавливает сохранённый индекс строки, если он валиден."""
+        if hasattr(self, '_saved_row') and self._saved_row != -1:
+            if self._saved_row < self.proxy_model.rowCount():
+                self._set_current_row(self._saved_row)
+            else:
+                self._select_first_row()
+        else:
+            self._select_first_row()
+
+        self._saved_row = -1
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _select_first_row(self) -> None:
+        """Выделяет первую строку, если есть."""
+        if self.proxy_model.rowCount() > 0:
+            self._set_current_row(0)
+
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -301,6 +389,7 @@ class DynamicListPage(BasePage):
         :param value: True, если данные нужно перезагружать при следующем входе на страницу
         """
         self._needs_refresh = value
+        
     
     # ----------------------- Построение интерфейса -----------------------
 
@@ -596,6 +685,7 @@ class DynamicListPage(BasePage):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )  
+    @preserve_selection # сохранение позиции выбора в ТБ
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """
@@ -899,6 +989,7 @@ class DynamicListPage(BasePage):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    @preserve_selection # сохранение позиции выбора в ТБ
     @Slot()
     def _save_changes(self):
         """

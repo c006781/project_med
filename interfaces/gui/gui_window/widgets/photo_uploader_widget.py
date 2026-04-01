@@ -277,10 +277,18 @@ class PhotoUploaderWidget(QWidget):
     )
     def clear_pending_and_deleted(self) -> None:
         """Сбрасывает только pending и deleted, оставляя существующие фото."""
+        self.logger.debug("clear() — ПОЛНАЯ очистка PhotoUploaderWidget")
+
         self.pending_photos.clear()
+        self.existing_photos.clear()
         self.deleted_photo_ids.clear()
         self.modified_photo_ids.clear()
-        self._refresh_table()
+        self._image_cache.clear()
+
+        self.table.setRowCount(0)
+        self.table.clearContents()   # <-- это важно
+
+        self.logger.debug("PhotoUploaderWidget полностью очищен")
 
 
     # ----------------------------------------------------------------------
@@ -667,42 +675,50 @@ class PhotoUploaderWidget(QWidget):
     )
     def _refresh_table(self):
         """
-        Обновляет таблицу с существующими и новыми фото.
-
-        :return: None
-        :rtype: None
+        Полностью перестраивает таблицу фото и сбрасывает все цвета.
+        Вызывается после set_existing_photos и load_state.
         """
         self.logger.debug(f"_refresh_table: existing={len(self.existing_photos)}, pending={len(self.pending_photos)}")
+
         total_rows = len(self.existing_photos) + len(self.pending_photos)
+
+        self.table.setRowCount(0)
         self.table.setRowCount(total_rows)
         self.table.setUpdatesEnabled(False)
 
+        # Заполняем строки 
         for i, photo in enumerate(self.existing_photos):
-            try:
-                self._set_table_row(i, photo.file_path, photo.description or "", is_existing=True)
-            except Exception as e:
-                self.logger.exception(f'Err: {e}')
-                raise e
+            self._set_table_row(
+                i, 
+                photo.file_path, 
+                photo.description or "", 
+                is_existing=True
+            )
 
         for i, (file_path, desc) in enumerate(self.pending_photos):
             row = len(self.existing_photos) + i
-            try:
-                self._set_table_row(row, file_path, desc, is_existing=False)
-            except Exception as e:
-                self.logger.exception(f'Err: {e}')
-                raise e
-        # Устанавливаем цвета для всех строк после заполнения
+            self._set_table_row(
+                row, 
+                file_path, 
+                desc, 
+                is_existing=False
+            )
 
+        # Принудительно пересчитываем цвет КАЖДОЙ строки
         for row in range(total_rows):
-            try:
-                self._set_row_color(row)
-            except Exception as e:
-                self.logger.exception(f'row: {row}, Err: {e}')
-                raise e
+            self._set_row_color(row)
 
         self._adjust_row_heights()
+
         self.table.setUpdatesEnabled(True)
-        self.logger.debug(f"Таблица обновлена: {total_rows} строк")
+
+        # Максимально агрессивная перерисовка
+        self.table.viewport().update()
+        self.table.repaint()
+        self.table.horizontalHeader().repaint()
+        self.table.verticalHeader().repaint()
+
+        self.logger.debug(f"_refresh_table завершена. Строк в таблице: {total_rows}")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -871,43 +887,47 @@ class PhotoUploaderWidget(QWidget):
         self.logger.debug(f"Путь к хранилищу: {path}")
 
     @AppLogger.get_instance(
-        name = 'PhotoUploaderWidget',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def set_existing_photos(self, photos: List[PhotoDTO]):
         """
-        Установка существующих фото.
-
-        :param photos: Список существующих фото (PhotoDTO)
-        :type photos: List[PhotoDTO]
+        Устанавливает существующие фото из БД после сохранения.
+        Полностью очищает все временные состояния и сбрасывает выделение новых фото.
         """
-        self.logger.debug(f"set_existing_photos: photos type = {type(photos)}")
-        if photos:
-            self.logger.debug(f"  первый элемент: {type(photos[0])}")
+        self.logger.info(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
 
-        self.logger.debug(f"set_existing_photos: photos type = {type(photos)}")
-        # self.existing_photos = photos # Список существующих фото
+        # Полная очистка ВСЕГО состояния виджета
+        self.clear()                    # <-- полный сброс
+        self.pending_photos.clear()
+        self.deleted_photo_ids.clear()
+        self.modified_photo_ids.clear()
+        self._image_cache.clear()
 
         if photos and isinstance(photos[0], dict):
-            # from app.dto import PhotoDTO
-            self.logger.debug("Обнаружены словари, преобразуем в PhotoDTO")
             self.existing_photos = [PhotoDTO(**p) for p in photos]
-            self.logger.debug("Преобразование завершено")
+            self.logger.debug("Фото преобразованы из dict → PhotoDTO")
         else:
-            self.logger.debug("Список уже в нужном формате, используем как есть")
-            self.existing_photos = photos
+            self.existing_photos = list(photos) if photos else []
+
+        self._refresh_table()
+
+        # Принудительно сбрасываем цвета всех строк (убираем зелёный)
+        for row in range(self.table.rowCount()):
+            self._set_row_color(row)
+
+        self.table.viewport().update()      # принудительная перерисовка
+        self.table.repaint()
+
+        self.logger.info(f"set_existing_photos ЗАВЕРШЁН. "
+                        f"existing={len(self.existing_photos)}, "
+                        f"pending={len(self.pending_photos)}, "
+                        f"строк в таблице={self.table.rowCount()}")
 
 
-        self.deleted_photo_ids.clear()
-
-        self.modified_photo_ids.clear() 
-
-        self._refresh_table() # Обновление таблицы
-
-        self.logger.debug(f"Установлено {len(photos)} существующих фото")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -942,24 +962,28 @@ class PhotoUploaderWidget(QWidget):
         return list(self.deleted_photo_ids)
 
     @AppLogger.get_instance(
-        name = 'PhotoUploaderWidget',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def clear(self):
         """
-        Очищает виджет, удаляя все данные (новые фото, существующие фото, ID на удаление, ID изменённых фото).
+        Полная очистка виджета перед загрузкой свежих данных из БД.
         """
+        self.logger.debug("clear() — ПОЛНАЯ очистка PhotoUploaderWidget")
+
         self.pending_photos.clear()
         self.existing_photos.clear()
         self.deleted_photo_ids.clear()
         self.modified_photo_ids.clear()
         self._image_cache.clear()
 
-        self.table.setRowCount(0) # Очистка таблицы
-        self.logger.debug("Виджет очищен")
+        self.table.setRowCount(0)
+        self.table.clearContents()
+
+        self.logger.debug("PhotoUploaderWidget полностью очищен")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1010,8 +1034,15 @@ class PhotoUploaderWidget(QWidget):
         
         Если строка соответствует новому фото (pending), то возвращает 'new'.
         """
+        self.logger.debug(f"_get_row_state(row={row})") 
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
+
+            self.logger.debug(
+                f"""
+                if photo.id in self.deleted_photo_ids = {photo.id in self.deleted_photo_ids}
+                if photo.id in self.modified_photo_ids = {photo.id in self.modified_photo_ids}"""
+            )
 
             if photo.id in self.deleted_photo_ids:
                 return 'deleted'
@@ -1034,41 +1065,38 @@ class PhotoUploaderWidget(QWidget):
     )
     def _set_row_color(self, row: int):
         """
-        Устанавливает цвет фона для всей строки на основе состояния.
+        Устанавливает цвет фона для всей строки на основе текущего состояния.
 
-        Состояние строки может быть одним из следующих:
-        - 'new': светло-зелёный (новое фото)
-        - 'modified': светло-жёлтый (изменённое фото)
-        - 'deleted': светло-красный (фото на удаление)
-        - 'normal': белый (не изменённое фото)
-
-        :param row: Номер строки
-        :type row: int
+        После сохранения все добавленные фото становятся существующими,
+        поэтому зелёный цвет ('new') больше не должен применяться.
         """
         try:
             state = self._get_row_state(row)
+            self.logger.debug(f"_set_row_color: row={row}, state={state}")
         except Exception as e:
-            self.logger.exception(f'Err: {e}')
+            self.logger.exception(f"Ошибка определения состояния строки {row}: {e}")
+            # state = 'normal'
             raise e
 
-        color = None
         if state == 'new':
-            color = QColor(200, 255, 200)  # светло-зелёный
+            color = QColor(200, 255, 200)   # светло-зелёный
         elif state == 'modified':
-            color = QColor(255, 255, 180)  # светло-жёлтый
+            color = QColor(255, 255, 180)   # светло-жёлтый
         elif state == 'deleted':
-            color = QColor(255, 200, 200)  # светло-красный
+            color = QColor(255, 200, 200)   # светло-красный
         else:
-            color = QColor(255, 255, 255)  # белый
-            pass
+            color = QColor(255, 255, 255)   # белый (нормальное состояние)
 
         for col in range(self.table.columnCount()):
-            item = self.table.item(row, col) # получаем ячейку
+            self.logger.debug(f"item = self.table.item(row={row}, col={col}), color={color}") 
+            item = self.table.item(row, col)
             if item:
                 item.setBackground(color)
 
-        # Принудительная перерисовка
-        self.table.viewport().update
+        self.logger.debug(f"Строка {row} окрашена в состояние '{state}'")
+        
+        # # Принудительная перерисовка
+        # self.table.viewport().update
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',

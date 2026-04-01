@@ -904,6 +904,9 @@ class DynamicListPage(BasePage):
         """
         Сохраняет все накопленные изменения (новые, изменённые, удалённые) в БД.
         """
+
+        self.logger.info("=== _save_changes ВЫЗВАН В DynamicListPage ===")
+        self.logger.debug(f"if not (self.modified_rows or self.deleted_rows or self.new_rows): {not (self.modified_rows or self.deleted_rows or self.new_rows)}")
         if not (self.modified_rows or self.deleted_rows or self.new_rows):
             return
 
@@ -925,6 +928,7 @@ class DynamicListPage(BasePage):
             # Собираем ID для удаления, удаляем из модели и из БД
             for row in sorted(self.deleted_rows, reverse=True):
                 dto = self.source_model.get_item_at_row(row)
+                self.logger.debug(f"if dto and hasattr(dto, 'id') and dto.id is not None: {dto and hasattr(dto, 'id') and dto.id is not None}")
 
                 if dto and hasattr(dto, 'id') and dto.id is not None:
                     # Удаляем через сервис
@@ -940,6 +944,8 @@ class DynamicListPage(BasePage):
             for row in self.modified_rows:
                 dto = self.source_model.get_item_at_row(row)
 
+                self.logger.debug(f"row = {row}, if dto and hasattr(dto, 'id') and dto.id is not None: {dto and hasattr(dto, 'id') and dto.id is not None}")
+
                 if dto and hasattr(dto, 'id') and dto.id is not None:
                     # Обновляем существующую запись
                     updated = self.service.update(dto)
@@ -953,6 +959,7 @@ class DynamicListPage(BasePage):
             for row in self.new_rows:
                 dto = self.source_model.get_item_at_row(row)
                 # Это новая запись (добавленная через inline, если реализуем)
+                self.logger.debug(f"row = {row}, if dto: {not(dto is None)}")
                 if dto:
                     created = self.service.create(dto)
                     self.source_model.update_row(row, created)

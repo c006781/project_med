@@ -95,26 +95,43 @@ class AppointmentListPage(DynamicDetailListPage):
         # Словари для хранения черновиков приёмов
         self._draft_photos = {}      # appointment_id -> состояние от photo_widget.dump_state()
         self._draft_note_text = {}   # appointment_id -> str
+        
+        self.photo_service = get_photo_service()
+        self.patient_service = get_patient_service()
 
+        # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
+        self._right_panel_modified = False
+        # Блокируем сигналы при загрузке данных в правую панель
+        self._loading_right_panel = False
+
+        # Создаём правую панель
         # Создаём виджеты правой панели (после того как detail_layout создан в родительском _setup_ui)
         self._setup_detail_panel()
 
-
+        # Подключаем сигналы черновиков
         self.note_text_edit.textChanged.connect(self._on_draft_changed)
         self.photo_widget.photosChanged.connect(self._on_draft_changed)
 
 
-        self.photo_service = get_photo_service()
-        self.patient_service = get_patient_service()
+        
         
         # self.current_appointment_id = None  # хранит id выбранного приёма для отображения 
         # self.current_patient_info = None # хранит DTO пациента для отображения сверху
 
-        # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
-        self._right_panel_modified = False
 
-        # Блокируем сигналы при загрузке данных в правую панель
-        self._loading_right_panel = False
+
+        # Явно подключаем кнопку сохранения к нашему методу
+        if hasattr(self, 'save_changes_btn'):
+            try:
+                self.save_changes_btn.clicked.disconnect()  # отключаем ВСЁ
+            except TypeError as e:
+                self.logger.debug(f"{e}")
+
+                pass  # если не было подключено — нормально
+
+            self.save_changes_btn.clicked.connect(self._save_changes)
+            self.logger.debug("Кнопка save_changes_btn подключена к _save_changes в AppointmentListPage")
+            self.logger.info("Кнопка 'Сохранить изменения' ПРИНУДИТЕЛЬНО подключена к _save_changes в AppointmentListPage")
 
         # # Создаём виджеты правой панели (будет вызвано в _setup_detail_panel)
         # self.note_text_edit = None
@@ -151,6 +168,28 @@ class AppointmentListPage(DynamicDetailListPage):
     #             self.photo_list.addItem(item)
     #     except Exception as e:
     #         self.logger.exception(f"Ошибка загрузки фото: {e}")
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _select_row_by_id(self, entity_id: int):
+        """
+        Находит строку в таблице, соответствующую DTO с заданным ID,
+        и выделяет её.
+        """
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and getattr(dto, 'id', None) == entity_id:
+                proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
+                if proxy_index.isValid():
+                    self.table_view.setCurrentIndex(proxy_index)
+                    self.table_view.scrollTo(proxy_index)
+                break
+
     @AppLogger.get_instance(
         name='AppointmentListPage',
         enable_file_logging='system',
@@ -165,6 +204,7 @@ class AppointmentListPage(DynamicDetailListPage):
         """
         # Сохраняем черновик текущего выбранного приёма (если есть)
         if self.selected_dto:
+            self.logger.debug(f"Сохранение черновика для приёма {self.selected_dto.id} перед переключением")
             self._save_current_draft()
         # Вызываем родительский метод, который обновит self.selected_dto и вызовет update_details
         super()._on_selection_changed(selected, deselected)
@@ -293,35 +333,40 @@ class AppointmentListPage(DynamicDetailListPage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _load_draft_for_appointment(self, appointment_id: int, dto) -> None:
+    def _load_draft_for_appointment(self, appointment_id: int, dto):
         """
-        Загружает черновики для указанного приёма в правую панель.
-        Если черновиков нет, загружает данные из DTO (БД) и сбрасывает pending/deleted.
+        Загружает черновик или свежие данные из БД в правую панель.
         """
-        self.logger.debug(f"Загрузка черновика для приёма {appointment_id}, есть в _draft_photos: {appointment_id in self._draft_photos}")
+        self.logger.info(f"_load_draft_for_appointment для ID={appointment_id}. "
+                        f"Есть черновик: {appointment_id in self._draft_photos}")
+
         self._loading_right_panel = True
         try:
-            # Заметка
+            self.note_text_edit.blockSignals(True)
+            self.photo_widget.blockSignals(True)
+
+            # заметка (остаётся)
             note_text = self._draft_note_text.get(appointment_id)
             if note_text is not None:
                 self.note_text_edit.setText(note_text)
+                self.logger.debug("Загружена заметка из черновика")
             else:
                 self.note_text_edit.setText(dto.note_text or "")
 
-            # Фото
+            # фото
             if appointment_id in self._draft_photos:
-                self.logger.debug(f"Загружаем черновик для {appointment_id}: {self._draft_photos[appointment_id]['pending_photos']}")
-                # self.photo_widget.load_state(self._draft_photos[appointment_id])
-                self.photo_widget.blockSignals(True)
-                try:
-                    self.photo_widget.load_state(self._draft_photos[appointment_id])
-                finally:
-                    self.photo_widget.blockSignals(False)
+                self.logger.info("Загружаем СОСТОЯНИЕ ИЗ ЧЕРНОВИКА")
+                self.photo_widget.load_state(self._draft_photos[appointment_id])
             else:
-                self.logger.debug(f"Нет черновика для {appointment_id}, загружаем из БД")
-                self.photo_widget.set_existing_photos(dto.photos)
-                self.photo_widget.clear_pending_and_deleted()
+                self.logger.info("Черновика нет → загружаем свежие фото из БД через set_existing_photos")
+                self.photo_widget.set_existing_photos(dto.photos or [])
+
+            self.logger.info(f"_load_draft_for_appointment завершён для {appointment_id}. "
+                            f"Строк в таблице фото: {self.photo_widget.table.rowCount() if hasattr(self.photo_widget, 'table') else 'N/A'}")
+
         finally:
+            self.note_text_edit.blockSignals(False)
+            self.photo_widget.blockSignals(False)
             self._loading_right_panel = False
 
     # ----------------------------------------------------------------------
@@ -817,7 +862,9 @@ class AppointmentListPage(DynamicDetailListPage):
                 # Откат: сбросить черновики и перезагрузить данные
                 self._draft_photos.clear()
                 self._draft_note_text.clear()
+                # Перезагружаем данные из БД
                 self._load_data()
+                
                 self.modified_rows.clear()
                 self.deleted_rows.clear()
                 self.new_rows.clear()
@@ -849,92 +896,152 @@ class AppointmentListPage(DynamicDetailListPage):
     )
     def _save_changes(self):
         """
-        Сохраняет все накопленные черновики (заметки и фото) для всех изменённых приёмов.
+        Полностью переопределённый метод сохранения изменений для страницы приёмов.
+
+        Что делает:
+        - Сохраняет черновики заметок и фото в БД.
+        - Выполняет _load_data() для обновления всей таблицы приёмов.
+        - Для активного приёма **принудительно** загружает СВЕЖИЙ список фото напрямую из photo_service (обходит stale DTO.photos).
+        - После update_details делает финальный force-refresh виджета фото.
+
+        param self : (AppointmentListPage) Экземпляр страницы приёмов. Используется для доступа к модели, виджетам, сервисам и черновикам.
+        return : None
         """
+        self.logger.info("=== _save_changes ВЫЗВАН В AppointmentListPage ===")
+
         if not (self.modified_rows or self.deleted_rows or self.new_rows):
+            self.logger.debug("Нет изменений для сохранения")
             return
 
-        # Запрашиваем подтверждение
+        current_id = None
+        if self.selected_dto and getattr(self.selected_dto, 'id', None) is not None:
+            current_id = self.selected_dto.id
+            self.logger.info(f"Текущий выделенный приём: {current_id}")
+
         reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
+            self, "Подтверждение сохранения",
+            "Сохранить все изменения в БД?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
+            self.logger.debug("Сохранение отменено пользователем")
             return
 
         self.table_view.setEnabled(False)
         self.save_changes_btn.setEnabled(False)
 
         try:
-            # Сначала сохраняем черновики текущего выбранного приёма (если он есть)
+            self.logger.info("=== НАЧАЛО СОХРАНЕНИЯ ИЗМЕНЕНИЙ ===")
             self._save_current_draft()
 
-            # Перебираем все строки, помеченные как изменённые (source_row)
-            # Для каждой строки получаем DTO из модели
+            # Сохранение всех изменённых приёмов
             for source_row in list(self.modified_rows):
                 dto = self.source_model.get_item_at_row(source_row)
-                if dto is None:
+                if not dto:
                     continue
-                aid = dto.id
 
-                # 1. Обработка заметки
+                aid = dto.id
+                self.logger.info(f"Сохраняем приём ID={aid} (строка {source_row})")
+
+                # Заметка
                 note_text = self._draft_note_text.get(aid)
                 if note_text is not None:
-                    # Обновляем DTO (для последующего вызова service.update)
                     dto.note_text = note_text
+                    self.logger.debug(f"  → Заметка обновлена для {aid}")
 
-                # 2. Обработка фото
+                # Фото
                 draft = self._draft_photos.get(aid)
                 if draft:
-                    pending = draft['pending_photos']
-                    deleted = draft['deleted_photo_ids']
-                    # Применяем изменения через сервис
-                    try:
-                        self.photo_service.update_photos_for_appointment(
-                            aid,
-                            pending,
-                            deleted
-                        )
-                        self.logger.info(f"Обновлены фото для приёма ID={self.selected_dto.id}")
-                    except Exception as e:
-                        self.logger.exception(f"Ошибка сохранения фото: {e}")
-                        raise e
+                    pending = draft.get('pending_photos', [])
+                    deleted = draft.get('deleted_photo_ids', [])
+                    self.logger.info(f"  → Фото: {len(pending)} новых, {len(deleted)} на удаление")
 
-                    # Обновляем описания существующих фото
-                    for photo_dto in draft['existing_photos']:
-                        if photo_dto['id'] in draft['modified_photo_ids']:
-                            self.photo_service.update_photo_description(photo_dto['id'], photo_dto['description'])
+                    self.photo_service.update_photos_for_appointment(aid, pending, deleted)
 
-                    # После сохранения очищаем черновики для этого приёма
-                    self._draft_photos.pop(aid, None)
-                    self._draft_note_text.pop(aid, None)
+                    # Обновление описаний
+                    for photo_dto in draft.get('existing_photos', []):
+                        if isinstance(photo_dto, dict) and photo_dto.get('id') in draft.get('modified_photo_ids', []):
+                            self.photo_service.update_photo_description(
+                                photo_dto['id'], photo_dto.get('description', '')
+                            )
+                    self.logger.info(f"  → Фото для приёма {aid} успешно сохранены")
 
-                # 3. Обновляем основные поля приёма (дата, время) через родительский сервис
-                # Для этого вызываем update сервиса, передавая dto
-                # Но родительский _save_changes уже делает это, поэтому мы должны
-                # вызвать super()._save_changes() только для основных полей, но он обрабатывает все строки.
-                # Чтобы избежать двойной обработки, лучше вызвать service.update вручную.
+                # Основные поля приёма
                 if dto.id is not None:
-                    self.service.update(dto)   # обновляет дату, время и заметку (note_text уже в dto)
-                else:
-                    # Новая запись – создаём
-                    created = self.service.create(dto)
-                    # Обновляем модель
-                    self.source_model.update_row(source_row, created)
+                    self.service.update(dto)
+                    self.logger.debug(f"  → Основные данные приёма {aid} обновлены")
 
-            # После обработки всех строк сбрасываем флаги изменений и перезагружаем данные
-            self.modified_rows.clear()
-            self.deleted_rows.clear()
-            self.new_rows.clear()
+            # Очистка черновиков
+            self._draft_photos.clear()
+            self._draft_note_text.clear()
+            self.logger.info("Черновики очищены")
+
+            # Перезагрузка данных
+            self.logger.info("Выполняем _load_data()")
             self._load_data()
-            QMessageBox.information(self, "Успех", "Изменения сохранены.")
+            self.source_model.clear_row_colors()
+            self.logger.info("_load_data() завершена")
+
+            # Восстановление выделения + принудительное обновление правой панели
+            if current_id is not None:
+                self.logger.info(f"Восстанавливаем выделение приёма {current_id}")
+                self._select_row_by_id(current_id)
+
+                # === КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: всегда берём свежие фото из сервиса ===
+                fresh_photos = self.photo_service.get_photos_for_appointment(current_id)
+                self.logger.info(f"Загружено {len(fresh_photos)} СВЕЖИХ фото для приёма {current_id}")
+
+                # Поиск fresh_dto
+                fresh_dto = None
+                for r in range(self.source_model.rowCount()):
+                    candidate = self.source_model.get_item_at_row(r)
+                    if candidate and getattr(candidate, 'id', None) == current_id:
+                        fresh_dto = candidate
+                        break
+
+                if fresh_dto:
+                    self.logger.info(f"fresh_dto найден. Выполняем update_details")
+                    self.selected_dto = fresh_dto
+
+                    # Сначала обновляем детали (заметка, пациент)
+                    self.update_details(fresh_dto)
+
+                    # === ФИНАЛЬНЫЙ FORCE-REFRESH ФОТО ВИДЖЕТА ПОСЛЕ ВСЕГО ===
+                    if hasattr(self, 'photo_widget'):
+                        self.logger.info("FINAL FORCE refresh photo widget")
+                        self.photo_widget.clear()
+                        self.photo_widget.set_existing_photos(fresh_photos)
+
+                    # Дополнительная перерисовка через таймер (Qt иногда не успевает)
+                    QTimer.singleShot(50, lambda: self._force_photo_refresh(fresh_photos))
+
+                else:
+                    self.logger.warning(f"fresh_dto для {current_id} НЕ НАЙДЕН!")
+
+            QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
+            self.logger.info("=== СОХРАНЕНИЕ ЗАВЕРШЕНО УСПЕШНО ===")
+
         except Exception as e:
-            self.logger.exception(f"Ошибка при сохранении изменений: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+            self.logger.exception(f"КРИТИЧЕСКАЯ ОШИБКА при сохранении: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения:\n{e}")
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
+            self.logger.debug("_save_changes завершён (finally)")
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _force_photo_refresh(self, fresh_photos):
+        """Дополнительный принудительный refresh фото-виджета после таймера."""
+        if hasattr(self, 'photo_widget'):
+            self.photo_widget.clear()
+            self.photo_widget.set_existing_photos(fresh_photos)
+            self.logger.info("Принудительный _force_photo_refresh выполнен")
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -960,30 +1067,32 @@ class AppointmentListPage(DynamicDetailListPage):
             self.logger.exception(f"Ошибка перезагрузки фото: {e}")
 
     @AppLogger.get_instance(
-        name = 'AppointmentListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
+        level=AppLogger._parse_log_level('DEBUG')
     )
     def update_details(self, dto):
         """
         Обновляет правую панель данными выбранного приёма.
-        При переключении с предыдущего приёма сохраняет его черновики.
         """
         if not dto:
+            self.logger.warning("update_details вызван с dto=None")
             return
 
-        # Сохраняем черновики предыдущего приёма (если он был и отличается от нового)
+        self.logger.info(f"update_details вызван для приёма ID={dto.id}")
+
         if self.selected_dto and self.selected_dto.id != dto.id:
             self._save_current_draft()
 
+        self.selected_dto = dto
         self.current_appointment_id = dto.id
 
-        # Загружаем черновики для нового приёма
+        self.logger.debug("Вызываем _load_draft_for_appointment")
         self._load_draft_for_appointment(dto.id, dto)
 
-        # Обновляем панель информации о пациенте
+        # обновление пациента (остаётся как было)
         try:
             if dto.patient_id:
                 patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
@@ -992,7 +1101,6 @@ class AppointmentListPage(DynamicDetailListPage):
                 self.current_patient_changed.emit(None)
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки пациента: {e}")
-            self.current_patient_changed.emit(None)
 
 
     @AppLogger.get_instance(

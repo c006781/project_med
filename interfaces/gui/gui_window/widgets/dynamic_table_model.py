@@ -352,6 +352,7 @@ class DynamicTableModel(QAbstractTableModel):
 
         self.beginResetModel()
         self._data = new_data
+        self.clear_row_colors()
         self.endResetModel()
 
     # @AppLogger.get_instance(

@@ -9,9 +9,9 @@ from .delete_handlers_mixin import DeleteHandlersMixin
 from .navigation_mixin import NavigationMixin
 from .sync_mixin import SyncMixin
 # 
-from .draft_mixin import DraftMixin
-from .patient_info_mixin import PatientInfoMixin
-from .right_panel_mixin import RightPanelMixin
+# from .draft_mixin import DraftMixin
+# from .patient_info_mixin import PatientInfoMixin
+# from .right_panel_mixin import RightPanelMixin
 
 
 __all__ = [
@@ -20,7 +20,7 @@ __all__ = [
     'DeleteHandlersMixin',
     'NavigationMixin',
     'SyncMixin',
-    'DraftMixin', 
-    'PatientInfoMixin', 
-    'RightPanelMixin',
+    # 'DraftMixin', 
+    # 'PatientInfoMixin', 
+    # 'RightPanelMixin',
 ]

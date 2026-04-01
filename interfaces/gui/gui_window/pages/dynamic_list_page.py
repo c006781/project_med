@@ -47,10 +47,12 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor
 
+
 def preserve_selection(func):
     """
     Декоратор для методов, которые могут изменить данные или режим редактирования.
-    Сохраняет текущую строку перед выполнением и восстанавливает её после.
+    Сохраняет текущую строку перед выполнением и восстанавливает её после. 
+    (работает от DynamicListPage)
     """
     @wraps(func)
     def wrapper(self, *args, **kwargs):
@@ -66,8 +68,805 @@ def preserve_selection(func):
     
     return wrapper
 
+class ListSelectionMixin:
+    """
+    Миксин для управления выделением строк в таблице.
+    """
 
-class DynamicListPage(BasePage):
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_current_row(self) -> int:
+        """
+        Возвращает индекс текущей строки в таблице или -1, если строка не selected.
+        :return: индекс строки или -1
+        :rtype: int
+        """
+        current = self.table_view.currentIndex()
+        return current.row() if current.isValid() else -1
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_current_row(self, row: int) -> None:
+        """
+        Выделяет строку с указанным индексом (в прокси-модели).
+        Если строка не существует, ничего не делает.
+        :param row: индекс строки
+        :type row: int
+        :return: None
+        :rtype: None
+        """
+        if row < 0 or row >= self.proxy_model.rowCount():
+            return
+        proxy_index = self.proxy_model.index(row, 0)
+        self.table_view.setCurrentIndex(proxy_index)
+        self.table_view.scrollTo(proxy_index)
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _store_current_row(self) -> None:
+        """
+        Запоминает текущую строку в прокси-модели.
+
+        :return: None
+        :rtype: None
+        """
+        self._saved_row = self._get_current_row()
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _restore_current_row(self) -> None:
+        """
+        Восстанавливает ранее сохранённую строку.
+        Если сохранённой строки не существует, выбирает первую строку.
+        :return: None
+        :rtype: None
+        """
+        if hasattr(self, '_saved_row') and self._saved_row != -1:
+            if self._saved_row < self.proxy_model.rowCount():
+                self._set_current_row(self._saved_row)
+            else:
+                self._select_first_row()
+        else:
+            self._select_first_row()
+        self._saved_row = -1
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _select_first_row(self) -> None:
+        """
+        Выбирает первую строку в таблице.
+        Если таблица не содержит строк, ничего не делает.
+        :return: None
+        :rtype: None
+        """
+        
+        if self.proxy_model.rowCount() > 0:
+            self._set_current_row(0)
+
+class ListDataMixin:
+    """
+    Миксин для работы с данными в таблице.
+    """
+
+    @AppLogger.get_instance(
+        name = 'ListDataMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_data(self):
+        """
+        Загружает данные из лоадера и обновляет модель и таблицу.
+
+        :raises Exception: если не удалось загрузить данные
+        """
+        try:
+            self.current_data = self.loader_func(self.current_extra)
+            self.source_model.update_data(self.current_data)
+            self.source_model.clear_row_colors()
+
+            # Сбрасываем все отслеживаемые изменения
+            self.modified_rows.clear()
+            self.deleted_rows.clear()
+            self.new_rows.clear()
+            self.original_data.clear()
+            self._update_save_button_state()
+            self.table_view.clearSelection()
+            self.logger.debug(f"Загружено {len(self.current_data)} записей")
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки данных: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
+
+    @AppLogger.get_instance(
+        name = 'ListDataMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_needs_refresh(self, value=True):
+        """
+        Устанавливает флаг, указывающий на необходимость перезагрузки данных.
+        Если флаг установлен в True, то при следующем вызове on_enter данные будут перезагружены.
+        :param value: флаг, указывающий на необходимость перезагрузки
+        :type value: bool
+        :return: None
+        :rtype: None
+        """
+        self._needs_refresh = value
+
+    @AppLogger.get_instance(
+        name = 'ListDataMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def on_enter(self, extra_data=None):
+        """
+        Вызывается при переходе на страницу.
+        extra_data может содержать новый параметр, отличающийся от self.current_extra.
+        Если extra_data не None и отличается от self.current_extra, то self.current_extra обновляется.
+        Если self._needs_refresh установлен в True, то данные перезагружаются.
+        :param extra_data: словарь с дополнительными данными
+        :type extra_data: dict
+        """
+        reload_needed = self._needs_refresh
+        if extra_data is not None and extra_data != self.current_extra:
+            self.current_extra = extra_data
+            reload_needed = True
+        if reload_needed:
+            self._load_data()
+            self._needs_refresh = False         
+
+
+class ListChangesMixin:
+    """
+    Миксин для обработки изменений в таблице.
+    """
+    
+    @AppLogger.get_instance(
+        name = 'ListChangesMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_row_color(self, row: int):
+        """
+        Обновляет цвет строки в таблице в зависимости от статуса строки (новая, изменена, удалена).
+        :param row: индекс строки в таблице
+        :type row: int
+        """
+        proxy_index = self.proxy_model.index(row, 0)
+        if not proxy_index.isValid():
+            return
+        
+        source_row = self.proxy_model.mapToSource(proxy_index).row()
+        if source_row == -1:
+            return
+
+        if row in self.deleted_rows:
+            color = QColor(255, 200, 200)   # красный
+        elif row in self.new_rows:
+            color = QColor(200, 255, 200)   # зелёный
+        elif row in self.modified_rows:
+            color = QColor(255, 255, 180)   # жёлтый
+        else:
+            color = QColor(255, 255, 255)   # белый
+
+        self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
+        self.source_model.set_row_color(source_row, color)
+
+    @AppLogger.get_instance(
+        name = 'ListChangesMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_save_button_state(self):
+        """
+        Обновляет состояние кнопки сохранения изменений.
+        Кнопка будет активна, если есть какие-либо изменения (новые, измененные, удаленные строки).
+        """
+        has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
+        self.save_changes_btn.setEnabled(has_changes)
+
+    @AppLogger.get_instance(
+        name = 'ListChangesMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_row_modified(self, row: int):
+        """
+        Обработчик события изменения строки в таблице.
+        
+        Если строка была удалена, то ничего не делает.
+        Иначе, добавляет строку в список измененных строк и обновляет цвет строки в таблице, а также состояние кнопки сохранения изменений.
+        :param row: индекс строки в таблице
+        :type row: int
+        """
+
+        self.logger.debug(f"Строка {row} изменена")
+
+        # Пропускаем, если строка уже помечена на удаление
+        if row in self.deleted_rows:
+            return
+        
+        self.modified_rows.add(row)
+        self._update_row_color(row)
+        self._update_save_button_state()
+
+
+class ListEditModeMixin:
+    '''
+    Миксин для работы с режимом редактирования.
+    '''
+    @AppLogger.get_instance(
+        name = 'ListEditModeMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @preserve_selection
+    @Slot(bool)
+    def _on_edit_mode_toggled(self, checked: bool):
+        """
+        Вызывается при переключении режима редактирования.
+        Если режим редактирования отключен и есть несохраненные изменения, то выводит предупреждение о необходимости подтверждения.
+        Если пользователь подтвердил удаление, то извлекается соответствующий сигнал.
+        """
+        if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
+            reply = QMessageBox.question(
+                self, "Несохранённые изменения",
+                "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._save_changes()
+                self.edit_mode = False
+            elif reply == QMessageBox.StandardButton.No:
+                self._load_data()
+                self.modified_rows.clear()
+                self.deleted_rows.clear()
+                self.new_rows.clear()
+                self._update_save_button_state()
+                self.edit_mode = False
+            else:
+                return
+        else:
+            self.edit_mode = checked
+
+        # Управление видимостью кнопок
+
+        if self.edit_mode:
+            self.action_combo.setVisible(False)
+            self.inline_action_combo.setVisible(True)
+            self.save_changes_btn.setVisible(True)
+            if hasattr(self, 'action_btn') and self.action_btn:
+                self.action_btn.setVisible(False)
+            self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
+            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
+        else:
+            self.action_combo.setVisible(True)
+            self.inline_action_combo.setVisible(False)
+            self.save_changes_btn.setVisible(False)
+            if hasattr(self, 'action_btn') and self.action_btn:
+                self.action_btn.setVisible(True)
+            self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            self.table_view.doubleClicked.connect(self._on_row_double_clicked)
+
+        self.table_view.clearSelection()
+        self.selected_dto = None
+        if hasattr(self, 'action_btn'):
+            self.action_btn.setEnabled(False)
+
+        self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
+
+class ListSaveMixin:
+    '''
+    Миксин для сохранения изменений в таблице
+    '''
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @preserve_selection
+    @Slot()
+    def _save_changes(self):
+        """
+        Сохраняет все изменения в БД.
+
+        1. Удаление удаленных строк
+        2. Обновление измененных строк
+        3. Создание новых строк
+
+        После сохранения изменений, обновляет данные на странице и восстанавливает кнопку сохранения.
+        """
+        self.logger.info("=== _save_changes ВЫЗВАН В DynamicListPage ===")
+        if not (self.modified_rows or self.deleted_rows or self.new_rows):
+            return
+
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self.table_view.setEnabled(False)
+        self.save_changes_btn.setEnabled(False)
+
+        try:
+            # 1. Удаление
+            for row in sorted(self.deleted_rows, reverse=True):
+                dto = self.source_model.get_item_at_row(row)
+                if dto and hasattr(dto, 'id') and dto.id is not None:
+                    self.service.delete(dto.id)
+                    self.logger.info(f"Удалена запись ID={dto.id}")
+                self.source_model.remove_row(row)
+            self.deleted_rows.clear()
+
+            # 2. Обновление
+            for row in self.modified_rows:
+                dto = self.source_model.get_item_at_row(row)
+                if dto and hasattr(dto, 'id') and dto.id is not None:
+                    updated = self.service.update(dto)
+                    self.source_model.update_row(row, updated)
+                    self.logger.info(f"Обновлена запись ID={updated.id}")
+            self.modified_rows.clear()
+
+            # 3. Новые строки
+            for row in self.new_rows:
+                dto = self.source_model.get_item_at_row(row)
+                if dto:
+                    created = self.service.create(dto)
+                    self.source_model.update_row(row, created)
+                    self.logger.info(f"Создана новая запись ID={created.id}")
+            self.new_rows.clear()
+
+            self._load_data()
+            QMessageBox.information(self, "Успех", "Изменения сохранены.")
+        except Exception as e:
+            self.logger.exception(f"Ошибка при сохранении изменений: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+        finally:
+            self.table_view.setEnabled(True)
+            self._update_save_button_state()
+
+class ListUIMixin:
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_ui(self):
+        """
+        Установка UI для страницы со списком записей.
+
+        1. Установка верхней панели
+        2. Установка таблицы
+        3. Добавление таблицы в основной верстке
+        4. Установка делегатов
+        """
+        # Основной макет
+        self._setup_top_panel() # Верхняя панель
+        self._setup_table() # Добавляем основной макет
+        # Добавляем таблицу в основной layout
+        self.main_layout.addWidget(self.table_view)
+        self._setup_delegates() # Устанавливаем делегаты для колонок с выпадающими списками
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_top_panel(self):
+        """
+        Установка верхней панели для страницы со списком записей.
+
+        Создает горизонтальный layout и добавляет в него:
+        - кнопку "Режим редактирования"
+        - комбо-бокс действия
+        - кнопку "Сохранить изменения"
+        - комбо-бокс inline-действ
+        - кнопку "Действие"
+        - поле поиска
+
+        :return: None
+        :rtype: None
+        """
+        # Верхняя панель
+        top_layout = QHBoxLayout()
+        
+        # Кнопка переключения режима редактирования (переключатель) (переключатель)     
+        self.edit_mode_btn = QPushButton("Режим редактирования")
+        self.edit_mode_btn.setCheckable(True)
+        self.edit_mode_btn.toggled.connect(self._on_edit_mode_toggled)
+        top_layout.addWidget(self.edit_mode_btn)
+        
+        # Выпадающий список для действий в обычном режиме
+        self.action_combo = QComboBox()
+        self.action_combo.addItem("▼ Действия с записями")
+        self.action_combo.addItem("Добавить")
+        self.action_combo.addItem("Редактировать")
+        self.action_combo.addItem("Удалить")
+        self.action_combo.addItem("Обновить")
+        self.action_combo.setEditable(False)
+        self.action_combo.setMaximumWidth(170)
+        # Делаем первый пункт невыбираемым
+        self.action_combo.model().item(0).setEnabled(False)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+        # Принудительное открытие вниз
+        # self.action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
+        top_layout.addWidget(self.action_combo)
+
+        # Выпадающий список для inline-действий (скрыт по умолчанию)
+        self.inline_action_combo = QComboBox()
+        self.inline_action_combo.addItem("▼ Действия со строками")
+        self.inline_action_combo.addItem("Добавить строку")
+        self.inline_action_combo.addItem("Удалить строку")
+        self.inline_action_combo.setEditable(False)
+        self.inline_action_combo.setMaximumWidth(170)
+        # Делаем первый пункт невыбираемым
+        self.inline_action_combo.model().item(0).setEnabled(False)
+        self.inline_action_combo.setCurrentIndex(0)
+        self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
+        self.inline_action_combo.setVisible(False)
+        top_layout.addWidget(self.inline_action_combo)
+
+        # Кнопка сохранения (отдельная, показывается в режиме редактирования)
+        self.save_changes_btn = QPushButton("Сохранить изменения")
+        self.save_changes_btn.clicked.connect(self._save_changes)
+        self.save_changes_btn.setEnabled(False)
+        self.save_changes_btn.setVisible(False)
+        top_layout.addWidget(self.save_changes_btn)
+
+        # Кнопка "Действие" (если она была указана) (например, "Приёмы")
+        if self.action_button_text:
+            self.action_btn = QPushButton(self.action_button_text)
+            self.action_btn.clicked.connect(self._on_action_clicked)
+            self.action_btn.setEnabled(False)
+            top_layout.addWidget(self.action_btn)
+
+        # Заполнение пустого пространства
+        top_layout.addStretch()
+
+        # Поле поиска
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск...")
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
+        top_layout.addWidget(self.search_edit)
+
+        self.main_layout.addLayout(top_layout)
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_table(self):
+        """
+        Установка таблицы для страницы со списком записей.
+
+        Создает экземпляр класса FilterTableView, который является таблицей с возможностью сортировки.
+        Устанавливает настройки для таблицы: сортировку по любому из столбцов, выбор строк в таблице,
+        отключает редактирование ячеек и двойной клик на строке.
+
+        Создает экземпляр класса DynamicTableModel, который является моделью данных для таблицы.
+        Модель данных содержит список self.current_data, который является текущим списком данных, отображаемым
+        в таблице. Затем создается экземпляр класса AdvancedFilterProxyModel, который является проксирующим моделью данных.
+        Он получает модель данных self.source_model и позволяет фильтровать данные по любому из столбцов.
+
+        Наконец, для таблицы self.table_view устанавливаются моделью данных self.proxy_model и настройки
+        заголовка столбцов.
+        """
+        # Добавляем основной макет
+
+        # Таблица
+        self.table_view = FilterTableView()
+        self.table_view.setSortingEnabled(True)
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
+        self.table_view.doubleClicked.connect(self._on_row_double_clicked)
+
+        # Модель таблицы
+        self.source_model = DynamicTableModel(self.current_data, self.columns)
+        self.source_model.row_modified.connect(self._on_row_modified) # Подключаем сигнал изменения строки для отслеживания изменений
+
+        # Прокси-модель
+        self.proxy_model = AdvancedFilterProxyModel()
+        self.proxy_model.setSourceModel(self.source_model)
+        self.table_view.setModel(self.proxy_model)
+
+        # Настройка заголовка таблицы
+        header = self.table_view.horizontalHeader()
+        if hasattr(header, 'set_get_unique_values_func'):
+            header.set_get_unique_values_func(self.get_unique_values_for_column)
+            header.filter_requested.connect(self.on_filter_requested)
+            header.filter_clear_requested.connect(self.on_filter_clear)
+
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_delegates(self):
+        """
+        Устанавливает делегаты для колонок на основе типов полей и field_configs.
+        Приоритет: choices > widget_type > тип поля.
+        """
+        for col_idx, col_info in enumerate(self.columns):
+            field_name = col_info['name']
+            config = self.field_configs.get(field_name, {})
+
+            choices = config.get('choices')
+            if choices:
+                delegate = ComboBoxDelegate(self.table_view, choices)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            widget_type = config.get('widget_type')
+            if widget_type == 'date':
+                delegate = DateDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+            elif widget_type == 'time':
+                delegate = TimeDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            field_type = col_info.get('type')
+            if field_type == datetime.date:
+                delegate = DateDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+            elif field_type == datetime.time:
+                delegate = TimeDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+            elif field_type == bool:
+                delegate = BoolDelegate(self.table_view)
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+
+class ListFilterMixin:
+
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def on_filter_requested(self, column: int, operator: str, value):
+        """
+        Обработка сигнала фильтрации от заголовка.
+
+        :param column: номер столбца, для которого нужно установить фильтр
+        :param operator: оператор фильтрации (eq, like, fuzzy, in)
+        :param value: значение для сравнения (зависит от оператора)
+        """
+        if operator == 'in':
+            self.proxy_model.set_column_filter(column, selected_values=value)
+        elif operator == 'contains':
+            self.proxy_model.set_column_filter(column, filter_text=value)
+        elif operator == 'clear':
+            self.proxy_model.clear_column_filter(column)
+
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def on_filter_clear(self, column: int):
+        """
+        Очищает фильтр для столбца.
+
+        :param column: номер столбца, для которого нужно очистить фильтр
+        """
+        self.proxy_model.clear_column_filter(column)
+
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def get_unique_values_for_column(self, column: int) -> List[str]:
+        """
+        Возвращает список уникальных значений для указанного столбца.
+        
+        :param column: номер столбца
+        :return: список уникальных значений для указанного столбца
+        :rtype: List[str]
+        """
+        if self.service is None:
+            return []
+        
+        col_name = self.columns[column]['name']
+        values = self.service.get_unique_values(col_name)
+
+        # Преобразуем в строки (могут быть даты, числа)
+        return [str(v) for v in values]
+
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_search_text_changed(self, text):
+        """
+        Обработка сигнала о изменении текста общего текстового фильтра.
+        
+        :param text: текст для поиска (необязательно)
+        """
+        self.proxy_model.set_global_text_filter(text)
+
+class ListInlineOpsMixin:
+    
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _add_inline_row(self):
+        defaults = {}
+        for col_info in self.columns:
+            field_name = col_info['name']
+            config = self.field_configs.get(field_name, {})
+            if config.get('virtual', False) or config.get('hidden', False):
+                continue
+            field_info = self.dto_class.model_fields.get(field_name)
+            if field_info is None:
+                continue
+
+            field_type = field_info.annotation
+            origin = get_origin(field_type)
+            if origin is Union:
+                args = get_args(field_type)
+                field_type = next((arg for arg in args if arg is not type(None)), None)
+
+            if field_type is None:
+                defaults[field_name] = None
+            elif field_type == str:
+                defaults[field_name] = ""
+            elif field_type == int:
+                defaults[field_name] = 0
+            elif field_type == datetime.date:
+                defaults[field_name] = datetime.date.today()
+            elif field_type == datetime.time:
+                defaults[field_name] = datetime.time(0, 0)
+            elif field_type == bool:
+                defaults[field_name] = False
+            else:
+                defaults[field_name] = None
+
+        if self.current_extra:
+            for key, value in self.current_extra.items():
+                if key in self.dto_class.model_fields and key not in defaults:
+                    defaults[key] = value
+
+        try:
+            new_dto = self.dto_class(**defaults)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать новую строку: {e}")
+            self.logger.exception(f"Ошибка создания пустого DTO: {e}")
+            return
+
+        row = self.source_model.add_row(new_dto)
+        self.new_rows.add(row)
+        self._update_row_color(row)
+        self._update_save_button_state()
+
+        proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
+        if proxy_index.isValid():
+            self.table_view.scrollTo(proxy_index)
+
+        self.logger.info(f"Добавлена новая строка (индекс {row})")
+
+    @Slot()
+    def _mark_selected_for_deletion(self):
+        if not self.selected_dto:
+            return
+        proxy_index = self.table_view.currentIndex()
+        if not proxy_index.isValid():
+            return
+        
+        row = proxy_index.row()
+        if row in self.deleted_rows:
+            return
+        
+        # Добавляем в множество удалённых
+        self.deleted_rows.add(row)
+        # Если строка была изменена или новая, убираем из соответствующих множеств
+        self.modified_rows.discard(row)
+        self.new_rows.discard(row)
+        self._update_row_color(row)
+        self._update_save_button_state()
+
+        self.table_view.clearSelection()
+        self.selected_dto = None
+        # if hasattr(self, 'delete_btn'):
+        #     self.delete_btn.setEnabled(False)
+        if hasattr(self, 'action_btn'):
+            self.action_btn.setEnabled(False)
+
+        self.logger.info(f"Строка {row} помечена на удаление")
+
+
+
+
+
+
+
+
+
+class DynamicListPage(
+    ListSelectionMixin,
+    ListDataMixin,
+    ListChangesMixin,
+    ListEditModeMixin,
+    ListSaveMixin,
+    ListUIMixin,
+    ListFilterMixin,
+    ListInlineOpsMixin,
+    BasePage,
+):
     """
     Универсальная страница списка с поддержкой inline-редактирования.
     Добавлена возможность отложенного сохранения изменений через кнопку «Сохранить изменения».
@@ -155,16 +954,16 @@ class DynamicListPage(BasePage):
         self.new_rows: Set[int] = set()
         # Сопоставление индекса строки с исходным DTO для восстановления при отмене (опционально)
         self.original_data: Dict[int, Any] = {}
+        # Режим редактирования (по умолчанию выключен)
+        self.edit_mode: bool = False #
 
-        self.edit_mode: bool = False # Режим редактирования (по умолчанию выключен)
-
-        self.main_layout = QVBoxLayout(self) # сохраним основной layout как атрибут
-        self.columns = self._build_columns()   # строим список колонок
-
+        # сохраним основной layout как атрибут
+        self.main_layout = QVBoxLayout(self) 
+        # строим список колонок
+        self.columns = self._build_columns()   
         self.current_data = []  # список данных, которые сейчас отображаются на странице  # список DTO
         self.selected_dto = None  # выбранный DTO (объект с атрибутами, соответствующими колонкам)
         self._selection_connected = False  # флаг, который указывает, является ли соединение между сигналами selectionChanged и слотом _on_selection_changed установленным
-
         self.current_extra = None  # запоминаем последние переданные параметры
 
         # настройка интерфейса страницы
@@ -174,73 +973,6 @@ class DynamicListPage(BasePage):
         
         self._load_data() # загрузка данных на страницу
 
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _get_current_row(self) -> int:
-        """Возвращает индекс текущей строки в прокси-модели или -1."""
-        current = self.table_view.currentIndex()
-        return current.row() if current.isValid() else -1
-    
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _set_current_row(self, row: int) -> None:
-        """Выделяет строку с указанным индексом (в прокси-модели)."""
-        if row < 0 or row >= self.proxy_model.rowCount():
-            return
-        proxy_index = self.proxy_model.index(row, 0)
-        self.table_view.setCurrentIndex(proxy_index)
-        self.table_view.scrollTo(proxy_index)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _store_current_row(self) -> None:
-        """Сохраняет текущий индекс строки."""
-        self._saved_row = self._get_current_row()
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _restore_current_row(self) -> None:
-        """Восстанавливает сохранённый индекс строки, если он валиден."""
-        if hasattr(self, '_saved_row') and self._saved_row != -1:
-            if self._saved_row < self.proxy_model.rowCount():
-                self._set_current_row(self._saved_row)
-            else:
-                self._select_first_row()
-        else:
-            self._select_first_row()
-
-        self._saved_row = -1
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _select_first_row(self) -> None:
-        """Выделяет первую строку, если есть."""
-        if self.proxy_model.rowCount() > 0:
-            self._set_current_row(0)
 
 
     @AppLogger.get_instance(
@@ -290,7 +1022,6 @@ class DynamicListPage(BasePage):
                 'editable': config.get('editable', False),
                 'choices': config.get('choices'),
             })
-        # return cols
         # Сортировка по order
         return sorted(
             cols, 
@@ -303,790 +1034,8 @@ class DynamicListPage(BasePage):
             )
         )
 
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def on_filter_requested(
-        self, 
-        column: int, 
-        operator: str, 
-        value
-    ):
-        """
-        Обработка сигнала фильтрации от заголовка.
-
-        :param column: номер столбца, для которого нужно установить фильтр
-        :param operator: оператор фильтрации (eq, like, fuzzy, in)
-        :param value: значение для сравнения (зависит от оператора)
-        """
-
-        if operator == 'in':
-            self.proxy_model.set_column_filter(column, selected_values=value)
-
-        elif operator == 'contains':
-            self.proxy_model.set_column_filter(column, filter_text=value)
-
-        elif operator == 'clear':
-            self.proxy_model.clear_column_filter(column)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def on_filter_clear(self, column: int):
-        """
-        Сброс фильтра для колонки.
-
-        :param column: номер столбца
-        """
-
-        self.proxy_model.clear_column_filter(column)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def get_unique_values_for_column(self, column: int) -> List[str]:
-        """
-        Возвращает список уникальных значений для указанного столбца.
-
-        :param column: индекс столбца, для которого необходимо получить список уникальных значений
-        :type column: int
-        :return: список уникальных значений в виде строкового представления
-        :rtype: List[str]
-        """
-
-        if self.service is None:
-            return []
-        
-        col_name = self.columns[column]['name']
-        values = self.service.get_unique_values(col_name)
-        
-        # Преобразуем в строки (могут быть даты, числа)
-        return [str(v) for v in values]
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def set_needs_refresh(self, value=True):
-        """
-        Устанавливает флаг _needs_refresh.
-
-        :param value: True, если данные нужно перезагружать при следующем входе на страницу
-        """
-        self._needs_refresh = value
-        
-    
-    # ----------------------- Построение интерфейса -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _setup_top_panel(self):
-        """
-        Создаёт верхнюю панель с кнопками и полем поиска.
-
-        Верхняя панель содержит кнопки "Добавить", "Удалить", "Обновить" и поле поиска.
-        и поле поиска. Кнопка "Добавить" добавляет новый элемент в список,
-        Кнопки:
-        "Добавить" добавляет новый элемент в список,
-        "Удалить" удаляет выбранный элемент из списка,
-        "Обновить" обновляет  список элементов. Поле поиска позволяет искать элементы в списке по тексту, введенному в поле.
-        """
-
-        # Верхняя панель
-        top_layout = QHBoxLayout()
-
-        # Кнопка переключения режима редактирования (переключатель)
-        self.edit_mode_btn = QPushButton("Режим редактирования")
-        self.edit_mode_btn.setCheckable(True)
-        self.edit_mode_btn.toggled.connect(self._on_edit_mode_toggled)
-        top_layout.addWidget(self.edit_mode_btn)
-
-
-
-        # Выпадающий список для действий в обычном режиме
-        self.action_combo = QComboBox()
-        self.action_combo.addItem("▼ Действия с записями")  # заглушка
-        self.action_combo.addItem("Добавить")
-        self.action_combo.addItem("Редактировать")
-        self.action_combo.addItem("Удалить")
-        self.action_combo.addItem("Обновить")
-        self.action_combo.setEditable(False)
-        self.action_combo.setMaximumWidth(170)
-
-        # Делаем первый пункт невыбираемым
-        self.action_combo.model().item(0).setEnabled(False)
-        self.action_combo.setCurrentIndex(0)
-        self.action_combo.setEditable(False)
-
-        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
-        # Принудительное открытие вниз
-        # self.action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
-
-        top_layout.addWidget(self.action_combo)
-
-
-
-
-        # Выпадающий список для inline-действий (скрыт по умолчанию)
-        self.inline_action_combo = QComboBox()
-        self.inline_action_combo.addItem("▼ Действия со строками")  # заглушка
-        self.inline_action_combo.addItem("Добавить строку")
-        self.inline_action_combo.addItem("Удалить строку")
-        # self.inline_action_combo.addItem("Сохранить изменения")
-
-        # Делаем первый пункт невыбираемым
-        self.action_combo.model().item(0).setEnabled(False)
-        self.inline_action_combo.setCurrentIndex(0)
-        self.inline_action_combo.setEditable(False)
-        self.inline_action_combo.setMaximumWidth(170)
-
-        self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
-        # Принудительное открытие вниз
-        # self.inline_action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
-
-        self.inline_action_combo.setVisible(False)
-        top_layout.addWidget(self.inline_action_combo)
-
-
-
-
-        # Кнопка сохранения (отдельная, показывается в режиме редактирования)
-        self.save_changes_btn = QPushButton("Сохранить изменения")
-        self.save_changes_btn.clicked.connect(self._save_changes)
-        self.save_changes_btn.setEnabled(False)
-        self.save_changes_btn.setVisible(False)
-
-        top_layout.addWidget(self.save_changes_btn)
-
-        # Кнопка "Действие" (если она была указана) (например, "Приёмы")
-        if self.action_button_text:
-            self.action_btn = QPushButton(self.action_button_text)
-            self.action_btn.clicked.connect(self._on_action_clicked)
-            self.action_btn.setEnabled(False)
-            top_layout.addWidget(self.action_btn)
-
-        # # Кнопка "Обновить"
-        # self.refresh_btn = QPushButton("Обновить")
-        # self.refresh_btn.clicked.connect(self._load_data)
-        # top_layout.addWidget(self.refresh_btn)
-
-        # Заполнение пустого пространства
-        top_layout.addStretch()
-
-        # Поле поиска
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Поиск...")
-        self.search_edit.textChanged.connect(self._on_search_text_changed)
-        top_layout.addWidget(self.search_edit)
-
-        self.main_layout.addLayout(top_layout)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _setup_table(self):
-        """
-        Создает таблицу с настройками сортировки и фильтрации.
-
-        Создает таблицу с возможностью сортировки и фильтрации.
-        Таблица отображает данные из списка self.current_data, а также
-        позволяет сортировать данные по любому из столбцов.
-
-        Сначала создается экземпляр класса FilterTableView, который является
-        таблицей с возможностью сортировки и фильтрации. Затем
-        для таблицы устанавливаются настройки: сортировка по любому из столбцов,
-        выбор строк в таблице, а также обработка двойного нажатия на строке.
-
-        Далее создается экземпляр класса DynamicTableModel, который
-        является моделью данных для таблицы. Модель данных содержит список
-        self.current_data, который является текущим списком данных, отображаемых
-        в таблице. Затем создается экземпляр класса QSortFilterProxyModel,
-        который является проксирующим моделью данных. Он получает модель
-        данных self.source_model и позволяет фильтровать данные по любому из столбцов.
-
-        Наконец, для таблицы self.table_view устанавливаются моделью данных
-        self.proxy_model и настройки заголовка столбцов.
-        """
-
-        # Добавляем основной макет
-
-        # Таблица
-        self.table_view = FilterTableView()
-        self.table_view.setSortingEnabled(True)
-        self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-
-        # Изначально двойной клик не редактирует ячейки (режим не редактирования)
-        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.table_view.doubleClicked.connect(self._on_row_double_clicked)
-
-        # Модель таблицы
-        self.source_model = DynamicTableModel(self.current_data, self.columns)
-        # Подключаем сигнал изменения строки для отслеживания изменений
-        self.source_model.row_modified.connect(self._on_row_modified)
-
-        # Прокси-модель
-        self.proxy_model = AdvancedFilterProxyModel()
-        self.proxy_model.setSourceModel(self.source_model)
-        
-        self.table_view.setModel(self.proxy_model)
-
-
-
-        # # Обработка события изменения выбора в таблице
-        # self.table_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
-        # self.proxy_model = AdvancedFilterProxyModel()
-        # self.proxy_model.setSourceModel(self.source_model)
-        # self.table_view.setModel(self.proxy_model)
-
-        # Настройка заголовка таблицы
-        header = self.table_view.horizontalHeader()
-        if hasattr(header, 'set_get_unique_values_func'):
-            header.set_get_unique_values_func(self.get_unique_values_for_column)
-            header.filter_requested.connect(self.on_filter_requested)
-            header.filter_clear_requested.connect(self.on_filter_clear)
-
-
-        # # Прокси-модель
-        # self.proxy_model = QSortFilterProxyModel()
-        # self.proxy_model.setSourceModel(self.source_model)
-        # self.proxy_model.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        # self.proxy_model.setFilterKeyColumn(-1)
-        # self.table_view.setModel(self.proxy_model)
-
-        # # Шапка заголовка
-        # header = self.table_view.horizontalHeader()
-
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-
-        # # Добавляем таблицу
-        # self.main_layout.addWidget(self.table_view)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _setup_ui(self):
-        """
-        Устанавливает интерфейс страницы.
-
-        Создаёт форму верхней панели с кнопками "Добавить", "Удалить" и "Обновить".
-        Создаёт дополнительную кнопку (если задана).
-        Создаёт поле поиска.
-        Создаёт таблицу с возможностью сортировки и выделения строк.
-        """
-        # Основной макет
-        # self.main_layout = QVBoxLayout(self)
-
-        self._setup_top_panel() # Верхняя панель
-        self._setup_table() # Добавляем основной макет
-
-        # Добавляем таблицу в основной layout
-        self.main_layout.addWidget(self.table_view)
-
-        self._setup_delegates() # Устанавливаем делегаты для колонок с выпадающими списками
-      
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )  
-    # def _setup_delegates(self):
-    #     """
-    #     Устанавливает делегаты для колонок, у которых есть choices.
-        
-    #     Делегат создается для каждой колонки, у которой есть choices.
-    #     Делегат будет использоваться для отображения комбобокса в соответствующей колонке.
-    #     """
-    #     for col_idx, col_info in enumerate(self.columns):
-    #         choices = col_info.get('choices')
-
-    #         self.logger.debug(f'if choices : {not (choices is None)}')    
-    #         if choices:
-    #             delegate = ComboBoxDelegate(self.table_view, choices)
-    #             self.table_view.setItemDelegateForColumn(col_idx, delegate)
-
-    def _setup_delegates(self):
-        """
-        Устанавливает делегаты для колонок на основе типов полей и field_configs.
-        Приоритет: choices > widget_type > тип поля.
-        """
-        for col_idx, col_info in enumerate(self.columns):
-            field_name = col_info['name']
-            config = self.field_configs.get(field_name, {})
-
-            choices = config.get('choices')
-            self.logger.debug(f'if choices : {not (choices is None)}')
-            if choices:
-                delegate = ComboBoxDelegate(self.table_view, choices)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
-
-            widget_type = config.get('widget_type')
-            
-            if widget_type == 'date':
-                delegate = DateDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
-
-            elif widget_type == 'time':
-                delegate = TimeDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
-
-            field_type = col_info.get('type')
-            if field_type == datetime.date:
-                delegate = DateDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-            elif field_type == datetime.time:
-                delegate = TimeDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-            elif field_type == bool:
-                delegate = BoolDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-            # Для остальных типов используем стандартный редактор (QLineEdit)
-
-    # ----------------------- Управление режимом редактирования -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )  
-    @preserve_selection # сохранение позиции выбора в ТБ
-    @Slot(bool)
-    def _on_edit_mode_toggled(self, checked: bool):
-        """
-        Обработчик переключения режима редактирования.
-        При включении режима:
-            - показываем inline-кнопки
-            - скрываем кнопки форм (добавить, редактировать, удалить)
-            - разрешаем редактирование ячеек по двойному клику
-            - двойной клик больше не вызывает переход на другой фрейм
-        При выключении режима:
-            - если есть несохранённые изменения, спрашиваем, сохранить ли их
-            - после ответа скрываем inline-кнопки и показываем кнопки форм
-            - отключаем редактирование ячеек
-            - двойной клик снова вызывает переход на другой фрейм
-        """
-                
-        if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
-            # Есть несохранённые изменения – спрашиваем
-            reply = QMessageBox.question(
-                self, "Несохранённые изменения",
-                "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._save_changes()
-                # После сохранения выходим из режима
-                self.edit_mode = False
-            elif reply == QMessageBox.StandardButton.No:
-                # Откатываем изменения: перезагружаем данные
-                self._load_data()
-                # Сбрасываем флаги
-                self.modified_rows.clear()
-                self.deleted_rows.clear()
-                self.new_rows.clear()
-                self._update_save_button_state()
-                self.edit_mode = False
-            else:
-                # Cancel – остаёмся в режиме редактирования
-                return
-
-        else:
-            self.edit_mode = checked
-
-        # Управление видимостью кнопок
-        
-        if self.edit_mode:
-            # Показываем inline-комбобокс, скрываем обычный
-            self.action_combo.setVisible(False)
-            self.inline_action_combo.setVisible(True)
-            self.save_changes_btn.setVisible(True)
-
-            # Скрываем дополнительную кнопку (если есть)
-            if hasattr(self, 'action_btn') and self.action_btn:
-                self.action_btn.setVisible(False)
-
-            # Включаем редактирование ячеек
-            self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
-            
-            # Отключаем переход по двойному клику
-            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
-        else:
-            # Показываем обычный комбобокс, скрываем inline
-            self.action_combo.setVisible(True)
-
-            self.inline_action_combo.setVisible(False)
-
-            self.save_changes_btn.setVisible(False)
-
-            # Показываем дополнительную кнопку (если есть)
-            if hasattr(self, 'action_btn') and self.action_btn:
-                self.action_btn.setVisible(True)
-                
-            # Отключаем редактирование ячеек
-            self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
-            # Включаем переход по двойному клику
-            self.table_view.doubleClicked.connect(self._on_row_double_clicked)
-
-        # Сбрасываем выделение, чтобы избежать путаницы
-        self.table_view.clearSelection()
-        self.selected_dto = None
-        # self.delete_btn.setEnabled(False)
-        # self.edit_btn.setEnabled(False)
-
-
-        if hasattr(self, 'action_btn'):
-            self.action_btn.setEnabled(False)
-
-        self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
-
-    # ----------------------- Обработка изменений строк -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    @Slot(int)
-    def _on_row_modified(self, row: int):
-        """
-        Слот, вызываемый при изменении данных в строке модели.
-        Помечает строку как изменённую и обновляет цвет.
-        """
-
-        self.logger.debug(f"Строка {row} изменена")
-
-        # Пропускаем, если строка уже помечена на удаление
-        if row in self.deleted_rows:
-            return
-            
-        self.modified_rows.add(row)
-        self._update_row_color(row)
-        self._update_save_button_state()
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _update_row_color(self, row: int):
-        """
-        Устанавливает цвет фона для строки в зависимости от статуса:
-        - новая: светло-зелёный
-        - изменённая: светло-жёлтый
-        - удалённая: светло-красный
-        - обычная: белый
-        """
-        self.logger.debug(f"Обновление цвета строки {row}")
-        # source_row = self.proxy_model.mapToSource(self.proxy_model.index(row, 0)).row()
-        # Получаем индекс в исходной модели
-        proxy_index = self.proxy_model.index(row, 0)
-        self.logger.debug(f"if not proxy_index.isValid() {not proxy_index.isValid()}")
-        if not proxy_index.isValid():
-            return
-        
-        source_row = self.proxy_model.mapToSource(proxy_index).row()
-        self.logger.debug(f"if source_row == -1 {source_row == -1}")
-        if source_row == -1:
-            return
-
-        if row in self.deleted_rows:
-            color = QColor(255, 200, 200)   # красный
-        elif row in self.new_rows:
-            color = QColor(200, 255, 200)   # зелёный
-        elif row in self.modified_rows:
-            color = QColor(255, 255, 180)   # жёлтый
-        else:
-            color = QColor(255, 255, 255)   # белый
-
-        
-        self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
-
-        # # Применяем цвет ко всем ячейкам строки
-        # for col in range(self.table_view.model().columnCount()):
-        #     idx = self.table_view.model().index(row, col)
-        #     self.logger.debug(f"Обновление цвета ячейки {row},{idx.column()} - {color.name()}")
-        #     self.table_view.model().setData(idx, color, Qt.ItemDataRole.BackgroundRole)
-        self.source_model.set_row_color(source_row, color)
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _update_save_button_state(self):
-        """Включает/отключает кнопку сохранения в зависимости от наличия изменений."""
-        has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
-        self.save_changes_btn.setEnabled(has_changes)
-
-    # ----------------------- Inline-операции -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    @Slot()
-    def _add_inline_row(self):
-        """
-        Добавляет новую строку в таблицу для inline-создания.
-        Создаёт DTO с начальными значениями для полей, отображаемых в таблице,
-        а также подставляет значения из current_extra, если они есть.
-        """
-        defaults = {}
-        # Перебираем колонки, которые отображаются в таблице
-        for col_info in self.columns:
-            field_name = col_info['name']
-            config = self.field_configs.get(field_name, {})
-            # Пропускаем виртуальные и скрытые поля
-            if config.get('virtual', False) or config.get('hidden', False):
-                continue
-
-            field_info = self.dto_class.model_fields.get(field_name)
-            if field_info is None:
-                continue
-
-            # Определяем реальный тип поля (с учётом Optional)
-            field_type = field_info.annotation
-            origin = get_origin(field_type)
-            if origin is Union:
-                args = get_args(field_type)
-                field_type = next((arg for arg in args if arg is not type(None)), None)
-
-            # Устанавливаем значение по умолчанию в зависимости от типа
-            if field_type is None:
-                defaults[field_name] = None
-            elif field_type == str:
-                defaults[field_name] = ""
-            elif field_type == int:
-                defaults[field_name] = 0
-            elif field_type == datetime.date:
-                defaults[field_name] = datetime.date.today()
-            elif field_type == datetime.time:
-                defaults[field_name] = datetime.time(0, 0)
-            elif field_type == bool:
-                defaults[field_name] = False
-            else:
-                defaults[field_name] = None
-
-        # Дополнительно подставляем значения из current_extra, если они есть и соответствуют полям DTO
-        if self.current_extra:
-            for key, value in self.current_extra.items():
-                if key in self.dto_class.model_fields and key not in defaults:
-                    defaults[key] = value
-
-        try:
-            new_dto = self.dto_class(**defaults)
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось создать новую строку: {e}")
-            self.logger.exception(f"Ошибка создания пустого DTO: {e}")
-            return
-
-        row = self.source_model.add_row(new_dto)
-        self.new_rows.add(row)
-        self._update_row_color(row)
-        self._update_save_button_state()
-
-        proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
-        if proxy_index.isValid():
-            self.table_view.scrollTo(proxy_index)
-
-        self.logger.info(f"Добавлена новая строка (индекс {row})")
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    @Slot()
-    def _mark_selected_for_deletion(self):
-        """
-        Помечает выбранную строку на удаление (inline-удаление).
-        Строка становится красной, будет удалена при сохранении.
-        """
-        if not self.selected_dto:
-            return
-
-        proxy_index = self.table_view.currentIndex()
-        if not proxy_index.isValid():
-            return
-        
-        row = proxy_index.row()
-
-        if row in self.deleted_rows:
-            return
-
-        # Добавляем в множество удалённых
-        self.deleted_rows.add(row)
-        # Если строка была изменена или новая, убираем из соответствующих множеств
-        self.modified_rows.discard(row)
-        self.new_rows.discard(row)
-        self._update_row_color(row)
-        self._update_save_button_state()
-
-        # Очищаем выделение
-        self.table_view.clearSelection()
-        self.selected_dto = None
-        self.delete_btn.setEnabled(False)
-        if hasattr(self, 'action_btn'):
-            self.action_btn.setEnabled(False)
-
-        self.logger.info(f"Строка {row} помечена на удаление")
-
-
-    # ----------------------- Сохранение изменений -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    @preserve_selection # сохранение позиции выбора в ТБ
-    @Slot()
-    def _save_changes(self):
-        """
-        Сохраняет все накопленные изменения (новые, изменённые, удалённые) в БД.
-        """
-
-        self.logger.info("=== _save_changes ВЫЗВАН В DynamicListPage ===")
-        self.logger.debug(f"if not (self.modified_rows or self.deleted_rows or self.new_rows): {not (self.modified_rows or self.deleted_rows or self.new_rows)}")
-        if not (self.modified_rows or self.deleted_rows or self.new_rows):
-            return
-
-        # Запрашиваем подтверждение
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-
-        # Блокируем таблицу на время сохранения
-        self.table_view.setEnabled(False)
-        self.save_changes_btn.setEnabled(False)
-
-        try:
-            # 1. Удаление помеченных строк
-            # Собираем ID для удаления, удаляем из модели и из БД
-            for row in sorted(self.deleted_rows, reverse=True):
-                dto = self.source_model.get_item_at_row(row)
-                self.logger.debug(f"if dto and hasattr(dto, 'id') and dto.id is not None: {dto and hasattr(dto, 'id') and dto.id is not None}")
-
-                if dto and hasattr(dto, 'id') and dto.id is not None:
-                    # Удаляем через сервис
-                    self.service.delete(dto.id)
-                    self.logger.info(f"Удалена запись ID={dto.id}")
-                    
-                # Удаляем строку из модели
-                self.source_model.remove_row(row),
-            
-            self.deleted_rows.clear()
-
-            # 2. Обновление изменённых строк
-            for row in self.modified_rows:
-                dto = self.source_model.get_item_at_row(row)
-
-                self.logger.debug(f"row = {row}, if dto and hasattr(dto, 'id') and dto.id is not None: {dto and hasattr(dto, 'id') and dto.id is not None}")
-
-                if dto and hasattr(dto, 'id') and dto.id is not None:
-                    # Обновляем существующую запись
-                    updated = self.service.update(dto)
-                    # Заменяем DTO в модели на обновлённый (на случай, если сервис вернул новый объект)
-                    self.source_model.update_row(row, updated)
-                    self.logger.info(f"Обновлена запись ID={updated.id}"),
-                
-            self.modified_rows.clear()
-
-            # 3. Обработка новых строк
-            for row in self.new_rows:
-                dto = self.source_model.get_item_at_row(row)
-                # Это новая запись (добавленная через inline, если реализуем)
-                self.logger.debug(f"row = {row}, if dto: {not(dto is None)}")
-                if dto:
-                    created = self.service.create(dto)
-                    self.source_model.update_row(row, created)
-                    self.logger.info(f"Создана новая запись ID={created.id}")
-
-            self.new_rows.clear()
-
-            # 4. Перезагружаем данные, чтобы синхронизировать с БД (на случай изменений, сделанных сервисом)
-            self._load_data()
-
-            QMessageBox.information(self, "Успех", "Изменения сохранены.")
-        except Exception as e:
-            self.logger.exception(f"Ошибка при сохранении изменений: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
-        finally:
-            self.table_view.setEnabled(True)
-            self._update_save_button_state()
 
     # ----------------------- Действия с выделенной строкой (формы) -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    @Slot()
-    def _on_action_clicked(self):
-        """
-        Обработка нажатия дополнительной кнопки.
-
-        Если была выбрана строка, то извлекается соответствующий сигнал.
-        """
-        if self.selected_dto:
-            self.action_requested.emit(self.selected_dto)
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1109,75 +1058,20 @@ class DynamicListPage(BasePage):
         level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
-    # def _on_delete_clicked(self):
-    #     """
-    #     Обработка нажатия кнопки "Удалить".
-
-    #     Если была выбрана строка, то выводит предупреждение о необходимости подтверждения.
-    #     Если пользователь подтвердил удаление, то извлекается соответствующий сигнал.
-
-    #     Удаление выбранной записи происходит в соответствующем слоте
-    #     """
-
-    #     # Проверяем, выбрана ли строка
-    #     if not self.selected_dto:
-    #         return
-
-    #     # Выводим предупреждение о необходимости подтверждения
-    #     reply = QMessageBox.question(
-    #         self, 
-    #         "Подтверждение",
-    #         "Удалить выбранную запись? Она будет помечена на удаление и удалена после сохранения.",
-    #         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-    #     )
-
-    #     # Если пользователь подтвердил удаление, то извлекается соответствующий сигнал
-    #     if reply == QMessageBox.StandardButton.Yes:
-    #         self.delete_requested.emit(self.selected_dto)
-
-    #     # Находим индекс строки в прокси-модели
-    #     proxy_index = self.table_view.currentIndex()
-    #     if not proxy_index.isValid():
-    #         return
-        
-    #     row = proxy_index.row()
-    #     # Если строка уже удалена, ничего не делаем
-    #     if row in self.deleted_rows:
-    #         return
-
-    #     # Добавляем в множество удалённых
-    #     self.deleted_rows.add(row)
-    #     # Если строка была изменена или новая, убираем из соответствующих множеств
-    #     self.modified_rows.discard(row)
-    #     self.new_rows.discard(row)
-    #     # Обновляем цвет строки
-    #     self._update_row_color(row)
-    #     self._update_save_button_state()
-    #     # Очищаем выделение
-    #     self.table_view.clearSelection()
-    #     self.selected_dto = None
-    #     self.delete_btn.setEnabled(False)
-        
-    #     if hasattr(self, 'action_btn'):
-    #         self.action_btn.setEnabled(False)
-
-    #     self.logger.info(f"Строка {row} помечена на удаление")
     def _on_delete_clicked(self):
         """
         Удаление через форму (с подтверждением). Используется, когда режим редактирования выключен.
         """
 
-        if not self.selected_dto:
-            return
-        
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Удалить выбранную запись?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        if self.selected_dto:   
+            reply = QMessageBox.question(
+                self, "Подтверждение",
+                "Удалить выбранную запись?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
 
-        if reply == QMessageBox.StandardButton.Yes:
-            self.delete_requested.emit(self.selected_dto)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.delete_requested.emit(self.selected_dto)
       
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1194,46 +1088,6 @@ class DynamicListPage(BasePage):
             self.action_requested.emit(self.selected_dto)
 
     # ----------------------- Загрузка данных и обработка выделения -----------------------
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _load_data(self):
-        """
-        Загружает данные из базы данных с помощью функции loader_func.
-
-        Функция loader_func должна возвращать список данных, которые будут отображаться в таблице.
-
-        Если функция loader_func не может загрузить данные (например, если база данных не доступна),
-        то выводим сообщение об ошибке и записываем в журнал ошибка.
-
-        :param self: экземпляр класса
-        :type self: DynamicListPage
-        """
-        try:
-            self.current_data = self.loader_func(self.current_extra)
-            # self.current_data = self.service.get_all()
-            self.source_model.update_data(self.current_data)
-
-            self.source_model.clear_row_colors()
-
-            # Сбрасываем все отслеживаемые изменения
-            self.modified_rows.clear()
-            self.deleted_rows.clear()
-            self.new_rows.clear()
-            self.original_data.clear()
-            self._update_save_button_state()
-
-            self.table_view.clearSelection()
-
-            self.logger.debug(f"Загружено {len(self.current_data)} записей")
-        except Exception as e:
-            self.logger.exception(f"Ошибка загрузки данных: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
     
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1280,14 +1134,6 @@ class DynamicListPage(BasePage):
             thec = not(selected_dto is None)
             if hasattr(self, 'action_btn'):
                 self.action_btn.setEnabled(thec)
-
-
-            # self.delete_btn.setEnabled(thec)
-            # self.edit_btn.setEnabled(thec)
-            # self.logger.debug(f"hasattr(self, 'action_btn') : {hasattr(self, 'action_btn')}")
-            # if hasattr(self, 'action_btn'):
-            #     self.action_btn.setEnabled(thec)
-
         
         # Если был выбран хоть бы один индекс, то извлекается соответствующий DTO
         # иначе, если не была выбрана ни одна строка, то извлекается None
@@ -1297,25 +1143,16 @@ class DynamicListPage(BasePage):
             # self.logger.debug(f" proxy_index = {proxy_index}, source_index = {source_index}")
 
             _btn(
+                # Включаем пункты "Редактировать" и "Удалить" в комбобоксе
+                # Индексы: 1 - Добавить, 2 - Редактировать, 3 - Удалить, 4 - Обновить
+                # Редактировать - индекс 2, Удалить - индекс 3
                 selected_dto = self.source_model.get_item_at_row(source_index.row())
             )
-
-            # Включаем пункты "Редактировать" и "Удалить" в комбобоксе
-            # model = self.action_combo.model()
-            # Индексы: 1 - Добавить, 2 - Редактировать, 3 - Удалить, 4 - Обновить
-            # Редактировать - индекс 2, Удалить - индекс 3
-            # for i in model.
-            # model.item(2).setEnabled(True)
-            # model.item(3).setEnabled(True)     
         else:
-            _btn(
+            _btn( # Отключаем "Редактировать" и "Удалить"
                 selected_dto = None
             )     
 
-            # # Отключаем "Редактировать" и "Удалить"
-            # model = self.action_combo.model()
-            # model.item(2).setEnabled(False)
-            # model.item(3).setEnabled(False)  
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1325,30 +1162,6 @@ class DynamicListPage(BasePage):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_row_double_clicked(self, index):
-        # """
-        # Обработка двойного нажатия на строку в таблице.
-
-        # Если была выбрана строка, то извлекается DTO, соответствующий выбранной строке,
-        # иначе, если не была выбрана ни одна строка, то не происходит ничего.
-
-        # :param index: индекс строки, по которой был произведен двойной клик
-        # :type index: QModelIndex
-        # """
-
-        # self.logger.debug(
-        #     f'index: {index} result: {not self.edit_on_double_click or not index.isValid()}'
-        # )
-        # # if not self.edit_on_double_click or not index.isValid():
-        # if  not index.isValid():
-        #     return
-        
-        # source_index = self.proxy_model.mapToSource(index)
-        # dto = self.source_model.get_item_at_row(source_index.row())
-
-        # self.logger.debug(f'source_index {source_index} dto: {type(dto)}')
-        # if dto:
-        #     # self.edit_requested.emit(dto)
-        #     self.detail_requested.emit(dto)
         """
         Обработка двойного клика в обычном режиме (не редактирование).
         Вызывает action_requested для перехода на следующий фрейм.
@@ -1359,26 +1172,6 @@ class DynamicListPage(BasePage):
             if dto:
                 self.action_requested.emit(dto)
                 
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _on_search_text_changed(self, text):
-        """
-        Обработка события изменения текста в поле поиска.
-
-        Обновляет фильтр поиска в модели proxy_model.
-
-        :param self: экземпляр класса
-        :type self: DynamicListPage
-        :param text: текст, который был введен в поле поиска
-        :type text: str
-        """
-        # self.proxy_model.setFilterFixedString(text)
-        self.proxy_model.set_global_text_filter(text)
     
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1409,40 +1202,6 @@ class DynamicListPage(BasePage):
                 # Подключаем сигнал selectionChanged к слоту _on_selection_changed
                 selection_model.selectionChanged.connect(self._on_selection_changed)
                 self._selection_connected = True
-
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def on_enter(self, extra_data=None):
-        """
-        Определяем, нужно ли перезагружать данные при входе на страницу.
-        
-        Если self._needs_refresh == True, то перезагружаем данные.
-        self._needs_refresh - это флаг, который указывает, нужно ли перезагружать данные при следующем входе на страницу.
-        Он может быть установлен в True в других местах кода, если возникла необходимость перезагрузки данных.
-        
-        Если передан extra_data и он отличается от self.current_extra, то перезагружаем данные.
-        self.current_extra - это словарь, который хранит дополнительные данные, необходимые для работы страницы.
-        """
-        reload_needed = self._needs_refresh
-        
-        self.logger.debug(
-            f'if extra_data is not None and extra_data != self.current_extra : {extra_data is not None and extra_data != self.current_extra}'
-        )
-        if extra_data is not None and extra_data != self.current_extra:
-            self.current_extra = extra_data
-            reload_needed = True
-
-        self.logger.debug(
-            f'if reload_needed : {not (reload_needed is None)}'
-        )
-        if reload_needed:
-            self._load_data()
-            self._needs_refresh = False
 
     # ----------------------- Вспомогательные методы для inline-добавления (опционально) -----------------------
 
@@ -1528,14 +1287,8 @@ class DynamicListPage(BasePage):
                 self._mark_selected_for_deletion()
             else:
                 QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
-        # elif index == 2:  # Сохранить изменения
-        #     self._save_changes()
-
-        # # Сбрасываем выбранный индекс
-        # self.inline_action_combo.setCurrentIndex(-1)
-
 
         # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
-        self.action_combo.blockSignals(True)
-        self.action_combo.setCurrentIndex(0)
-        self.action_combo.blockSignals(False)
+        self.inline_action_combo.blockSignals(True)
+        self.inline_action_combo.setCurrentIndex(0)
+        self.inline_action_combo.blockSignals(False)

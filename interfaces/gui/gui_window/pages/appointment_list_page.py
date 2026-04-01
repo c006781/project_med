@@ -26,10 +26,11 @@ from app.dependencies import (
     get_photo_service
 )
 
-from interfaces.gui.gui_window.mixins.draft_mixin import DraftMixin
-from interfaces.gui.gui_window.mixins.patient_info_mixin import PatientInfoMixin
-from interfaces.gui.gui_window.mixins.right_panel_mixin import RightPanelMixin
-from interfaces.gui.gui_window.pages.dynamic_detail_list_page import DynamicDetailListPage
+# from interfaces.gui.gui_window.mixins.draft_mixin import DraftMixin
+# from interfaces.gui.gui_window.mixins.patient_info_mixin import PatientInfoMixin
+# from interfaces.gui.gui_window.mixins.right_panel_mixin import RightPanelMixin
+# from interfaces.gui.gui_window.pages.dynamic_detail_list_page import DynamicDetailListPage
+from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
@@ -53,6 +54,326 @@ from PySide6.QtCore import (
 )
 
 from PySide6.QtGui import QPixmap, QIcon
+
+class DynamicDetailListPage(DynamicListPage):
+    """
+    Расширение DynamicListPage с правой панелью для отображения деталей выбранной строки.
+    """
+
+    def __init__(
+        self,
+        service,
+        loader_func,
+        dto_class,
+        field_configs,
+        *args,
+        **kwargs
+    ):
+        """
+        Инициализирует страницу с правой панелью для отображения деталей выбранной строки.
+        
+        :param service: сервис, используемый для редактирования записи
+        :param loader_func: функция, которая возвращает список данных
+        :param dto_class: класс DTO, используемый для создания записи
+        :param field_configs: конфигурация полей
+        :param *args: дополнительные параметры
+        :param **kwargs: дополнительные параметры
+        """
+        super().__init__(service, loader_func, dto_class, field_configs, *args, **kwargs)
+        # self.detail_widget = None
+        # self.detail_layout = None
+
+
+    def _clear_layout(self, layout):
+        """
+        Очищает заданный layout, удаляя все его элементы.
+        
+        :param layout: макет, который нужно очистить
+        :type layout: PySide6.QtWidgets.QLayout
+        """
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+
+            if widget:
+                widget.deleteLater()
+                
+            elif item.layout():
+                self._clear_layout(item.layout())
+                
+    def _setup_ui(self):
+        """
+        Создаёт интерфейс с разделителем и правой панелью.
+        
+        Создаёт вертикальную панель с кнопками и поиском, разделитель для таблицы и правой панели,
+        таблицу, правую панель и настраивает начальные пропорции для комбобоксов.
+        """
+        # self.main_layout = QVBoxLayout(self)
+        # Очищаем текущий layout (удаляем всё, что добавил родитель)
+        self._clear_layout(self.main_layout)
+        
+        # Верхняя панель (кнопки, поиск)
+        self._setup_top_panel()
+
+        # Разделитель: слева таблица, справа детали
+        splitter = QSplitter(Qt.Horizontal)
+        self.splitter = splitter
+
+        # Создаём таблицу (она будет добавлена в splitter, а не в main_layout)
+        self._setup_table()
+        splitter.addWidget(self.table_view)
+
+        # Правая панель
+        self.detail_widget = QWidget()
+        self.detail_layout = QVBoxLayout(self.detail_widget)
+        splitter.addWidget(self.detail_widget)
+
+        # Настраиваем начальные пропорции
+        splitter.setSizes([400, 600])
+
+        self.main_layout.addWidget(splitter)
+
+        # Делегаты для комбобоксов (если нужны)
+        self._setup_delegates()
+        
+    def _on_selection_changed(self, selected, deselected):
+        """
+        Обработка события изменения выбора строки в таблице.
+        
+        Если строка выбрана, то обновляет правую панель с деталями выбранной строки.
+        """
+        super()._on_selection_changed(selected, deselected)
+        if self.selected_dto:
+            self.update_details(self.selected_dto)
+
+
+class DraftMixin:
+    """
+    Содержит логику сохранения и восстановления черновиков для приёмов.
+    Атрибуты (должны быть определены в классе-наследнике):
+        _draft_photos: dict[int, dict]   # черновики фото
+        _draft_note_text: dict[int, str] # черновики заметок
+        _loading_right_panel: bool       # блокировка сигналов при загрузке
+        note_text_edit                   # QTextEdit
+        photo_widget                     # PhotoUploaderWidget
+        selected_dto                     # текущий выбранный DTO
+        logger                           # AppLogger
+    """
+
+    def _save_current_draft(self) -> None:
+        """Сохраняет текущее состояние правой панели в черновики для выбранного приёма."""
+        if not self.selected_dto or self.selected_dto.id is None:
+            return
+
+        aid = self.selected_dto.id
+        # Заметка
+        self._draft_note_text[aid] = self.note_text_edit.toPlainText()
+        # Фото
+        self._draft_photos[aid] = self.photo_widget.dump_state()
+        self.logger.debug(f"Сохранён черновик для приёма {aid}: pending={self._draft_photos[aid]['pending_photos']}")
+
+    def _load_draft_for_appointment(self, appointment_id: int, dto) -> None:
+        """
+        Загружает черновик или свежие данные из БД в правую панель.
+        """
+        self.logger.info(f"_load_draft_for_appointment для ID={appointment_id}. "
+                         f"Есть черновик: {appointment_id in self._draft_photos}")
+
+        self._loading_right_panel = True
+        try:
+            self.note_text_edit.blockSignals(True)
+            self.photo_widget.blockSignals(True)
+
+            # заметка
+            note_text = self._draft_note_text.get(appointment_id)
+            if note_text is not None:
+                self.note_text_edit.setText(note_text)
+                self.logger.debug("Загружена заметка из черновика")
+            else:
+                self.note_text_edit.setText(dto.note_text or "")
+
+            # фото
+            if appointment_id in self._draft_photos:
+                self.logger.info("Загружаем СОСТОЯНИЕ ИЗ ЧЕРНОВИКА")
+                self.photo_widget.load_state(self._draft_photos[appointment_id])
+            else:
+                self.logger.info("Черновика нет → загружаем свежие фото из БД через set_existing_photos")
+                self.photo_widget.set_existing_photos(dto.photos or [])
+
+            self.logger.info(f"_load_draft_for_appointment завершён для {appointment_id}. "
+                             f"Строк в таблице фото: {self.photo_widget.table.rowCount() if hasattr(self.photo_widget, 'table') else 'N/A'}")
+
+        finally:
+            self.note_text_edit.blockSignals(False)
+            self.photo_widget.blockSignals(False)
+            self._loading_right_panel = False
+
+    def _on_draft_changed(self):
+        """При любом изменении в правой панели обновляем черновик текущего приёма."""
+        if not self.edit_mode:
+            return
+        if not self.selected_dto or self.selected_dto.id is None:
+            return
+        if self._loading_right_panel:
+            return
+
+        self._save_current_draft()
+        self._mark_current_row_modified()
+
+    def _clear_drafts(self):
+        """Полностью очищает все черновики."""
+        self._draft_photos.clear()
+        self._draft_note_text.clear()
+        self.logger.debug("Черновики очищены")
+
+
+class PatientInfoMixin:
+    """
+    Создаёт и управляет панелью с данными пациента.
+    Атрибуты (должны быть определены в классе-наследнике):
+        patient_info_frame: QFrame
+        info_value_widgets: dict[str, QLabel]
+        current_patient_changed: Signal
+        logger: AppLogger
+        vertical_splitter: QSplitter (для обновления геометрии)
+    """
+
+    def _setup_patient_info_panel(self):
+        """Создаёт панель с информацией о пациенте на основе PATIENT_CONFIG."""
+        self.patient_info_frame = QFrame()
+        self.patient_info_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.patient_info_frame.setMinimumHeight(70)   # минимальная высота
+        self.patient_info_frame.setVisible(False)
+
+        layout = QGridLayout(self.patient_info_frame)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Область прокрутки
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        scroll.setMinimumHeight(10)
+        layout.addWidget(scroll)
+
+        content_widget = QWidget()
+        scroll.setWidget(content_widget)
+
+        grid = QGridLayout(content_widget)
+        grid.setSpacing(5)
+
+        self.info_value_widgets = {}
+        row = 0
+
+        for field_name, config in PATIENT_CONFIG.items():
+            if config.get('hidden', False) or field_name == 'id':
+                continue
+
+            title = config.get('title', field_name.replace('_', ' ').title())
+
+            label_title = QLabel(f"{title}:")
+            label_title.setStyleSheet("font-weight: bold;")
+            label_title.setAlignment(Qt.AlignTop)
+
+            label_value = QLabel()
+            label_value.setWordWrap(True)
+            label_value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+            grid.addWidget(label_title, row, 0, alignment=Qt.AlignTop)
+            grid.addWidget(label_value, row, 1, alignment=Qt.AlignTop)
+
+            self.info_value_widgets[field_name] = label_value
+            row += 1
+
+        grid.setColumnStretch(1, 1)
+        grid.setRowStretch(row, 1)
+
+        # Подключаем сигнал изменения пациента (сигнал должен быть определён в основном классе)
+        self.current_patient_changed.connect(self._update_patient_info)
+
+    def _update_patient_info(self, patient_dto):
+        """
+        Обновляет содержимое панели на основе DTO пациента.
+        """
+        self.logger.debug(f"_update_patient_info called, patient_dto: {patient_dto is not None}")
+        if patient_dto:
+            data = patient_dto.model_dump(exclude_none=True)
+            for field_name, label in self.info_value_widgets.items():
+                value = data.get(field_name)
+                if value is None:
+                    label.setText("—")
+                else:
+                    if isinstance(value, datetime.date):
+                        label.setText(value.isoformat())
+                    elif isinstance(value, datetime.time):
+                        label.setText(value.strftime("%H:%M"))
+                    else:
+                        label.setText(str(value))
+            self.patient_info_frame.setVisible(True)
+            # Обновляем вертикальный сплиттер
+            if hasattr(self, 'vertical_splitter'):
+                self.vertical_splitter.update()
+        else:
+            # Очищаем все поля
+            for label in self.info_value_widgets.values():
+                label.setText("—")
+            self.patient_info_frame.setVisible(False)
+
+
+class RightPanelMixin:
+    """
+    Создаёт и управляет правой панелью: заметка и фотографии.
+    Атрибуты (должны быть определены в классе-наследнике):
+        detail_widget: QWidget
+        detail_layout: QVBoxLayout
+        note_text_edit: QTextEdit
+        photo_widget: PhotoUploaderWidget
+        _loading_right_panel: bool
+        edit_mode: bool
+        selected_dto: Any
+        logger: AppLogger
+    """
+
+    def _setup_detail_panel(self):
+        """Создаёт виджеты правой панели и подключает сигналы."""
+        # Заметка
+        self.note_text_edit = QTextEdit()
+        self.note_text_edit.setReadOnly(True)  # изначально только просмотр
+        self.note_text_edit.textChanged.connect(self._on_draft_changed)
+
+        self.detail_layout.addWidget(QLabel("Заметка:"))
+        self.detail_layout.addWidget(self.note_text_edit)
+
+        # Фотографии
+        self.photo_widget = PhotoUploaderWidget()
+        config = get_config_env()
+        storage_path = config.get(
+            'PHOTOS_STORAGE_PATH',
+            os.path.join('.', 'photos')
+        )
+        self.logger.debug(f'storage_path: {storage_path}')
+        self.photo_widget.set_storage_path(storage_path)
+        self.photo_widget.set_readonly(True)
+        self.photo_widget.photosChanged.connect(self._on_draft_changed)
+
+        self.detail_layout.addWidget(QLabel("Фотографии:"))
+        self.detail_layout.addWidget(self.photo_widget)
+
+        self._loading_right_panel = False
+
+    def _on_note_text_changed(self):
+        """
+        Обработчик изменения текста заметки (может быть вызван напрямую,
+        но мы уже используем _on_draft_changed, поэтому этот метод можно
+        оставить как заглушку или вообще убрать.
+        """
+        pass
+
+    def _on_photos_changed(self):
+        """
+        Обработчик изменения списка фото (используется _on_draft_changed).
+        """
+        pass
 
 
 class AppointmentListPage(

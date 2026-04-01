@@ -259,6 +259,9 @@ class AppointmentListPage(
     def _fix_splitter_sizes(self):
         """Устанавливает начальные размеры вертикального сплиттера, если они ещё не заданы."""
 
+        if not hasattr(self, 'vertical_splitter'):
+            return
+
         total_height = self.height()
         # Устанавливаем панели высоту, остальное — горизонтальному сплиттеру
         panel_height = self._patient_info_frame_setMinimumHeight
@@ -313,7 +316,6 @@ class AppointmentListPage(
     # ----------------------------------------------------------------------
     # Обработка выделения строки
     # ----------------------------------------------------------------------
-     
 
     @AppLogger.get_instance(
         name='AppointmentListPage',

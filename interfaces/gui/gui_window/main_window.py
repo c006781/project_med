@@ -572,6 +572,7 @@ class NavigationMixin:
                 )
                 if reply == QMessageBox.StandardButton.Yes:
                     current_page._save_changes()
+                    # current_page._exit_edit_mode()
                 elif reply == QMessageBox.StandardButton.No:
                     # Откатываем изменения
                     current_page._load_data()
@@ -579,9 +580,14 @@ class NavigationMixin:
                     current_page.deleted_rows.clear()
                     current_page.new_rows.clear()
                     current_page._update_save_button_state()
+                    # current_page._exit_edit_mode()
                 else:
                     # Cancel – не переходим назад
                     return
+            else:
+                pass
+                # current_page._exit_edit_mode()
+        
         self.page_manager.go_back()
 
     @AppLogger.get_instance(

@@ -61,6 +61,18 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._row_colors = {}  # словарь {row: QColor}
         
+    def clear_row_color(self, row: int):
+        """
+        Очищает цвет строки в таблице.
+        Если строка имела цвет, то он будет удален.
+        :param row: индекс строки в таблице
+        :type row: int
+        """
+        if row in self._row_colors:
+            del self._row_colors[row]
+            top_left = self.index(row, 0)
+            bottom_right = self.index(row, self.columnCount() - 1)
+            self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.BackgroundRole])
 
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',

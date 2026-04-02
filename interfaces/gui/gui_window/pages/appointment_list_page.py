@@ -228,17 +228,17 @@ class DraftMixin:
         if not self.selected_dto:
             return
 
-        aid = self.selected_dto.id
+        aid = self.selected_dto.id   # может быть отрицательным временным ID
 
-        if aid is None:
-            # Для новых строк используем ключ None
-            # Сохраняем состояние заметки для новой строки
-            self._draft_note_text[None] = self.note_text_edit.toPlainText()
-            # Сохраняем состояние фото для новой строки
-            self._draft_photos[None] = self.photo_widget.dump_state()
+        # if aid is None:
+        #     # Для новых строк используем ключ None
+        #     # Сохраняем состояние заметки для новой строки
+        #     self._draft_note_text[None] = self.note_text_edit.toPlainText()
+        #     # Сохраняем состояние фото для новой строки
+        #     self._draft_photos[None] = self.photo_widget.dump_state()
 
-            self.logger.debug(f"Сохранён черновик для нового приёма")
-            return
+        #     self.logger.debug(f"Сохранён черновик для нового приёма")
+        #     return
         
         # Для существующих
 
@@ -262,25 +262,29 @@ class DraftMixin:
         """
         Загружает черновик или свежие данные из БД в правую панель.
         """
+        # appointment_id может быть отрицательны
+
         self.logger.info(
             f"_load_draft_for_appointment для ID={appointment_id}. "
             f"Есть черновик: {appointment_id in self._draft_photos}"
         )
 
-        if appointment_id is None:
-            # Новая строка – загружаем черновик, если есть
-            note_text = self._draft_note_text.get(None)
-            self.note_text_edit.setText(note_text if note_text is not None else "")
+        # if appointment_id is None:
+        #     # Новая строка – загружаем черновик, если есть
+            
+        #     note_text = self._draft_note_text.get(None)
+        #     self.note_text_edit.setText(note_text if note_text is not None else "")
 
-            # Загружаем состояние фото из черновика
-            draft_state = self._draft_photos.get(None)
-            if draft_state:
-                self.photo_widget.load_state(draft_state)
-            else:
-                self.photo_widget.clear()
-            return
+        #     # Загружаем состояние фото из черновика
+        #     draft_state = self._draft_photos.get(None)
+        #     if draft_state:
+        #         self.photo_widget.load_state(draft_state)
+        #     else:
+        #         self.photo_widget.clear()
+        #     return
 
         # заметка
+        
         note_text = self._draft_note_text.get(appointment_id)
         if note_text is not None:
             self.note_text_edit.setText(note_text)
@@ -613,7 +617,48 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _mark_selected_for_deletion(self):
+        """Переопределяем для очистки правой панели, если после удаления строк не осталось."""
+        super()._mark_selected_for_deletion()
+        # Если после удаления строк не осталось, очищаем правую панель
+        if self.source_model.rowCount() == 0:
+            self._clear_right_panel()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_data(self):
+        """Переопределяем для очистки правой панели, если данных нет."""
+        super()._load_data()
+        # После загрузки, если нет строк, очищаем правую панель
+        if self.source_model.rowCount() == 0:
+            self._clear_right_panel()
+
+
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_right_panel(self):
+        """Очищает правую панель (заметку и фото) и сбрасывает выбранный DTO."""
+        self.note_text_edit.clear()
+        self.photo_widget.clear()
+        self.selected_dto = None
+        self.current_patient_changed.emit(None)
 
 
     @AppLogger.get_instance(
@@ -627,8 +672,21 @@ class AppointmentListPage(
         """Сохраняет изменения в существующих приёмах (modified_rows)."""
         for source_row in list(self.modified_rows):
             dto = self.source_model.get_item_at_row(source_row)
-            if dto and dto.id is not None:
+            if dto and (dto.id is not None) and (dto.id > 0):
                 self._save_single_appointment(dto, source_row)
+
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_draft_to_new_dto(self, dto):
+        if dto.id is not None and dto.id < 0:
+            note_text = self._draft_note_text.get(dto.id)
+            if note_text is not None:
+                dto.note_text = note_text
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -642,9 +700,10 @@ class AppointmentListPage(
         newly_created_id = None
         for row in list(self.new_rows):
             dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id is None:
+            if dto and (dto.id is not None) and (dto.id < 0):
+                temp_id = dto.id
                 # Заметка из черновика
-                note_text = self._draft_note_text.get(None)
+                note_text = self._draft_note_text.get(temp_id)
                 if note_text is not None:
                     dto.note_text = note_text
 
@@ -655,7 +714,7 @@ class AppointmentListPage(
                 newly_created_id = created.id
 
                 # Обрабатываем фото для новой строки
-                draft = self._draft_photos.get(None)
+                draft = self._draft_photos.get(temp_id)
                 if draft and created.id is not None:
                     pending = draft.get('pending_photos', [])
                     if pending:
@@ -669,11 +728,17 @@ class AppointmentListPage(
                         for photo_dto in draft.get('existing_photos', []):
                             if isinstance(photo_dto, dict) and photo_dto.get('id') in draft.get('modified_photo_ids', []):
                                 self.photo_service.update_photo_description(
-                                    photo_dto['id'], photo_dto.get('description', '')
+                                    photo_dto['id'], 
+                                    photo_dto.get('description', '')
                                 )
                         self.logger.info(f"Добавлено {len(pending)} фото для нового приёма {created.id}")
                 elif draft:
                     self.logger.warning(f"Не удалось сохранить фото для нового приёма: created.id = {created.id}")
+
+                # Очищаем черновики для этого временного ID
+                self._draft_photos.pop(temp_id, None)
+                self._draft_note_text.pop(temp_id, None)
+
         return newly_created_id
 
     @AppLogger.get_instance(
@@ -686,10 +751,17 @@ class AppointmentListPage(
     def _save_deleted_appointments(self):
         """Удаляет помеченные приёмы (если есть такая функциональность)."""
         for row in sorted(self.deleted_rows, reverse=True):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id is not None:
-                self.service.delete_appointment(dto.id)
-                self.logger.info(f"Удалён приём ID={dto.id}")
+            dto = self.source_model.get_item_at_row(row) 
+            if dto:
+                if dto.id is not None and dto.id > 0:
+                    # Существующий приём – удаляем через сервис
+                    self.service.delete_appointment(dto.id)
+                    self.logger.info(f"Удалён приём ID={dto.id}")
+                else:
+                    # Новая строка (временный ID) – просто удаляем из модели
+                    self.logger.info(f"Удалена новая строка с временным ID={dto.id}")
+                # Удаляем строку из модели
+                self.source_model.remove_row(row)
         self.deleted_rows.clear()
         # pass
 
@@ -1177,15 +1249,17 @@ class AppointmentListPage(
             self.logger.info("=== НАЧАЛО СОХРАНЕНИЯ ИЗМЕНЕНИЙ ===")
             self._save_current_draft()   # сохраняем последние правки перед сохранением
 
-            # 1. Удаление помеченных приёмов
-            self._save_deleted_appointments()
 
-            # 2. Сохраняем новые приёмы
+            # 1. Сохраняем новые приёмы
             newly_created_id = self._save_new_appointments()
             self.new_rows.clear()
 
-            # 3. Сохраняем изменённые приёмы
+
+            # 2. Сохраняем изменённые приёмы
             self._save_modified_appointments()
+
+            # 3. Удаление помеченных приёмов
+            self._save_deleted_appointments()
 
             # # 3. Удаляем (если есть)
             # self._save_deleted_appointments()
@@ -1199,8 +1273,7 @@ class AppointmentListPage(
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
 
             # Выходим из режима редактирования, если он был включён
-            if self.edit_mode:
-                self.edit_mode_btn.setChecked(False)
+            self._exit_edit_mode()
 
         except Exception as e:
             self.logger.exception(f"Ошибка сохранения: {e}")
@@ -1285,6 +1358,9 @@ class AppointmentListPage(
         # # Сброс черновиков при входе 
         # self._draft_photos.clear()
         # self._draft_note_text.clear()
+        # Сбрасываем черновики, если это не возврат после сохранения с select_id
+        if not (extra_data and 'select_id' in extra_data):
+            self._clear_drafts()
 
         # Запоминаем patient_id для отображения информации
         patient_id = extra_data.get('patient_id') if extra_data else None

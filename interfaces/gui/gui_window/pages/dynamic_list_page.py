@@ -203,6 +203,7 @@ class ListSelectionMixin:
                 if proxy_index.isValid():
                     return proxy_index.row()
         return -1
+    
 class ListDataMixin:
     """
     Миксин для работы с данными в таблице.
@@ -319,7 +320,9 @@ class ListDataMixin:
         # if reload_needed:
         #     self._load_data()
         #     self._needs_refresh = False         
-
+    def _apply_draft_to_new_dto(self, dto):
+        """Переопределяется в наследниках для применения черновиков к новому DTO перед созданием."""
+        pass
 
 class ListChangesMixin:
     """
@@ -396,6 +399,12 @@ class ListChangesMixin:
 
         # Пропускаем, если строка уже помечена на удаление
         if row in self.deleted_rows:
+            return
+
+        dto = self.source_model.get_item_at_row(row)
+        # Если это новая строка (отрицательный ID или None) — не добавляем в modified_rows
+        if dto and (dto.id is None or (hasattr(dto, 'id') and dto.id < 0)):
+            self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_rows")
             return
         
         self.modified_rows.add(row)
@@ -476,6 +485,37 @@ class ListEditModeMixin:
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
 class ListSaveMixin:
+
+
+    def _save_deleted(self):
+        for row in sorted(self.deleted_rows, reverse=True):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and dto.id is not None:
+                self.service.delete(dto.id)
+                self.logger.info(f"Удалена запись ID={dto.id}")
+            self.source_model.remove_row(row)
+        self.deleted_rows.clear()
+
+    def _save_modified(self):
+        for row in list(self.modified_rows):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and dto.id is not None and dto.id > 0:
+                updated = self.service.update(dto)
+                self.source_model.update_row(row, updated)
+                self.logger.info(f"Обновлена запись ID={updated.id}")
+        self.modified_rows.clear()
+
+    def _save_new(self):
+        for row in list(self.new_rows):
+            dto = self.source_model.get_item_at_row(row)
+            if dto:
+                self._apply_draft_to_new_dto(dto)
+                created = self.service.create(dto)
+                self.source_model.update_row(row, created)
+                self.logger.info(f"Создана новая запись ID={created.id}")
+        self.new_rows.clear()
+
+
     '''
     Миксин для сохранения изменений в таблице
     '''
@@ -515,40 +555,32 @@ class ListSaveMixin:
 
         try:
             # 1. Удаление
-            for row in sorted(self.deleted_rows, reverse=True):
-                dto = self.source_model.get_item_at_row(row)
-                if dto and hasattr(dto, 'id') and dto.id is not None:
-                    self.service.delete(dto.id)
-                    self.logger.info(f"Удалена запись ID={dto.id}")
-                self.source_model.remove_row(row)
-            self.deleted_rows.clear()
+            self._save_deleted()
 
             # 2. Обновление
-            for row in self.modified_rows:
-                dto = self.source_model.get_item_at_row(row)
-                if dto and hasattr(dto, 'id') and dto.id is not None:
-                    updated = self.service.update(dto)
-                    self.source_model.update_row(row, updated)
-                    self.logger.info(f"Обновлена запись ID={updated.id}")
-            self.modified_rows.clear()
+            self._save_modified()
 
             # 3. Новые строки
-            for row in self.new_rows:
-                dto = self.source_model.get_item_at_row(row)
-                if dto:
-                    created = self.service.create(dto)
-                    self.source_model.update_row(row, created)
-                    self.logger.info(f"Создана новая запись ID={created.id}")
-            self.new_rows.clear()
+            self._save_new()
 
             self._load_data()
+
             QMessageBox.information(self, "Успех", "Изменения сохранены.")
+
+            # Выходим из режима редактирования, если он был включён
+            self._exit_edit_mode()
+
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранении изменений: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
+
+    def _exit_edit_mode(self):
+        """Выходит из режима редактирования, если он активен."""
+        if self.edit_mode:
+            self.edit_mode_btn.setChecked(False)
 
 class ListUIMixin:
 
@@ -834,7 +866,7 @@ class ListFilterMixin:
         :param text: текст для поиска (необязательно)
         """
         self.proxy_model.set_global_text_filter(text)
-
+    
 class ListInlineOpsMixin:
     
     @AppLogger.get_instance(
@@ -888,6 +920,9 @@ class ListInlineOpsMixin:
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать новую строку: {e}")
             self.logger.exception(f"Ошибка создания пустого DTO: {e}")
             return
+        
+        new_dto.id = self._next_temp_id
+        self._next_temp_id -= 1
 
         row = self.source_model.add_row(new_dto)
         self.new_rows.add(row)
@@ -913,7 +948,22 @@ class ListInlineOpsMixin:
         if row in self.deleted_rows:
             return
         
-        # Добавляем в множество удалённых
+        # dto = self.selected_dto
+        # # Если это новая строка (отрицательный ID) – удаляем локально
+        # if dto.id is not None and dto.id < 0:
+        #     self.source_model.remove_row(row)
+        #     self.new_rows.discard(row)
+        #     # Обновляем выделение
+        #     if self.source_model.rowCount() == 0:
+        #         if hasattr(self, '_clear_right_panel'):
+        #             self._clear_right_panel()
+        #     else:
+        #         self._select_first_row()
+        #     self._update_save_button_state()
+        #     self.logger.info(f"Новая строка {row} удалена без обращения к БД")
+        #     return
+        
+        # Помечаем строку на удаление (для любых строк – и новых, и существующих)
         self.deleted_rows.add(row)
         # Если строка была изменена или новая, убираем из соответствующих множеств
         self.modified_rows.discard(row)
@@ -1018,6 +1068,8 @@ class DynamicListPage(
         self.exclude_columns = exclude_columns or []
 
         self._saved_row = -1  # сохранённый индекс строки
+
+        self._next_temp_id = -1 # генерация временных ID для новых строк
 
         # Словарь для отслеживания изменённых строк:
         # modified_rows: set of row indices, которые были изменены пользователем (но ещё не сохранены)

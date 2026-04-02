@@ -80,6 +80,21 @@ class ListSelectionMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _select_by_id(self, entity_id: int) -> bool:
+        """Выделяет строку по ID сущности. Возвращает True, если строка найдена."""
+        row = self._find_row_by_dto_id(entity_id)
+        if row >= 0:
+            self._set_current_row(row)
+            return True
+        return False
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _get_current_row(self) -> int:
         """
         Возвращает индекс текущей строки в таблице или -1, если строка не selected.
@@ -278,12 +293,32 @@ class ListDataMixin:
         :type extra_data: dict
         """
         reload_needed = self._needs_refresh
-        if extra_data is not None and extra_data != self.current_extra:
-            self.current_extra = extra_data
-            reload_needed = True
+        select_id = None
+
+        if extra_data is not None:
+            # Запоминаем ID для выделения
+            select_id = extra_data.get('select_id')
+            # Если extra_data отличается от текущего, обновляем и помечаем необходимость перезагрузки
+            if extra_data != self.current_extra:
+                self.current_extra = extra_data
+                reload_needed = True
         if reload_needed:
             self._load_data()
-            self._needs_refresh = False         
+            self._needs_refresh = False
+            # После загрузки выделяем строку, если указан select_id
+            if select_id is not None:
+                self._select_by_id(select_id)
+        elif select_id is not None:
+            # Если перезагрузка не требуется, но нужно выделить строку (например, при возврате без обновления)
+            self._select_by_id(select_id)
+
+        
+        # if extra_data is not None and extra_data != self.current_extra:
+        #     self.current_extra = extra_data
+        #     reload_needed = True
+        # if reload_needed:
+        #     self._load_data()
+        #     self._needs_refresh = False         
 
 
 class ListChangesMixin:

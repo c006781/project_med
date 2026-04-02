@@ -896,12 +896,18 @@ class DynamicEditPage(BasePage):
             # Обычный возврат: помечаем список на обновление
             if hasattr(self, 'list_page_id'):
                 # Получаем страницу списка
-                list_page = self.page_manager._pages.get(self.list_page_id)
-                if list_page and hasattr(list_page, 'set_needs_refresh'):
-                    # Устанавливаем флаг needs_refresh на True, чтобы список обновился
-                    list_page.set_needs_refresh(True)
+                # list_page = self.page_manager._pages.get(self.list_page_id)
+                # if list_page and hasattr(list_page, 'set_needs_refresh'):
+                #     # Устанавливаем флаг needs_refresh на True, чтобы список обновился
+                #     list_page.set_needs_refresh(True)
+
+                # Переходим на список и передаём ID созданной/обновлённой записи для выделения
+                self.page_manager.switch_to(
+                    self.list_page_id,
+                    extra_data={'select_id': saved_dto.id}
+                )
             # Возвращаемся на предыдущую страницу
-            self._go_back()
+            # self._go_back()
             
     @AppLogger.get_instance(
         name = 'DynamicEditPage',

@@ -231,7 +231,7 @@ class ListDataMixin:
                     self._select_first_row()
             else:
                 self._select_first_row()
-                
+
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки данных: {e}")
@@ -849,6 +849,7 @@ class ListInlineOpsMixin:
 
         proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
         if proxy_index.isValid():
+            self.table_view.setCurrentIndex(proxy_index)
             self.table_view.scrollTo(proxy_index)
 
         self.logger.info(f"Добавлена новая строка (индекс {row})")

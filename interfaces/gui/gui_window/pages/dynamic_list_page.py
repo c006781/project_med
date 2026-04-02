@@ -150,6 +150,9 @@ class ListSelectionMixin:
             self._select_first_row()
         self._saved_row = -1
 
+        # Обновляем состояние кнопок на основе текущего выделения
+        self._update_selection_state()
+
     @AppLogger.get_instance(
         name = 'ListSelectionMixin',
         enable_file_logging = 'system',
@@ -232,6 +235,9 @@ class ListDataMixin:
             else:
                 self._select_first_row()
 
+            # Обновляем состояние кнопок на основе текущего выделения
+            self._update_selection_state()
+        
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки данных: {e}")
@@ -380,6 +386,8 @@ class ListEditModeMixin:
         Вызывается при переключении режима редактирования.
         Если режим редактирования отключен и есть несохраненные изменения, то выводит предупреждение о необходимости подтверждения.
         Если пользователь подтвердил удаление, то извлекается соответствующий сигнал.
+
+        Если включён и таблица пуста, автоматически добавляет новую строку
         """
         if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
             reply = QMessageBox.question(
@@ -400,6 +408,10 @@ class ListEditModeMixin:
             else:
                 return
         else:
+            # При включении режима редактирования, если таблица пуста, создаём новую строку
+            if checked and self.source_model.rowCount() == 0:
+                self._add_inline_row()
+                
             self.edit_mode = checked
 
         # Управление видимостью кнопок
@@ -883,14 +895,6 @@ class ListInlineOpsMixin:
 
         self.logger.info(f"Строка {row} помечена на удаление")
 
-
-
-
-
-
-
-
-
 class DynamicListPage(
     ListSelectionMixin,
     ListDataMixin,
@@ -1008,8 +1012,6 @@ class DynamicListPage(
         
         self._load_data() # загрузка данных на страницу
 
-
-
     @AppLogger.get_instance(
         name = 'DynamicListPage',
         enable_file_logging = 'system',
@@ -1123,6 +1125,31 @@ class DynamicListPage(
             self.action_requested.emit(self.selected_dto)
 
     # ----------------------- Загрузка данных и обработка выделения -----------------------
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_selection_state(self):
+        """Обновляет состояние выбранного DTO и кнопок на основе текущего выделения в таблице."""
+        selection_model = self.table_view.selectionModel()
+        if selection_model:
+            indexes = selection_model.selectedIndexes()
+            if indexes:
+                proxy_index = indexes[0]
+                source_index = self.proxy_model.mapToSource(proxy_index)
+                self.selected_dto = self.source_model.get_item_at_row(source_index.row())
+            else:
+                self.selected_dto = None
+        else:
+            self.selected_dto = None
+
+        # Обновляем состояние дополнительной кнопки, если она есть
+        if hasattr(self, 'action_btn') and self.action_btn:
+            self.action_btn.setEnabled(self.selected_dto is not None)
     
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1149,45 +1176,7 @@ class DynamicListPage(
         :param deselected: список индексов, которые были сняты с выбора
         :type deselected: QItemSelection
         """
-        # self.logger.debug(f"selected = {selected}, deselected = {deselected}")
-        # Получаем список выбранных индексов
-        indexes = selected.indexes()
-        self.logger.debug(f"indexes = {indexes}")
-
-        def _btn(selected_dto):
-            """
-            Устанавливает доступность кнопок "Удалить", "Редактировать" и "Действие" в зависимости от наличия выбранной строки.
-
-            Если была выбрана строка, то кнопки становятся доступными, иначе - недоступными.
-
-            :param selected_dto: выбранный DTO или None, если не была выбрана строка
-            :type selected_dto: DTO or None
-            """
-
-            self.selected_dto = selected_dto
-
-            thec = not(selected_dto is None)
-            if hasattr(self, 'action_btn'):
-                self.action_btn.setEnabled(thec)
-        
-        # Если был выбран хоть бы один индекс, то извлекается соответствующий DTO
-        # иначе, если не была выбрана ни одна строка, то извлекается None
-        if indexes:
-            proxy_index = indexes[0]
-            source_index = self.proxy_model.mapToSource(proxy_index)
-            # self.logger.debug(f" proxy_index = {proxy_index}, source_index = {source_index}")
-
-            _btn(
-                # Включаем пункты "Редактировать" и "Удалить" в комбобоксе
-                # Индексы: 1 - Добавить, 2 - Редактировать, 3 - Удалить, 4 - Обновить
-                # Редактировать - индекс 2, Удалить - индекс 3
-                selected_dto = self.source_model.get_item_at_row(source_index.row())
-            )
-        else:
-            _btn( # Отключаем "Редактировать" и "Удалить"
-                selected_dto = None
-            )     
-
+        self._update_selection_state()
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',

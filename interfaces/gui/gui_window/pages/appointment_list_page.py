@@ -31,11 +31,14 @@ from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
-    # QTableView, QPushButton, QHeaderView, QMessageBox,
+    # QTableView, QPushButton, QHeaderView, 
     # QLineEdit, 
-    QAbstractItemView, QFrame, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QScrollArea, QSizePolicy, 
+    # QAbstractItemView, 
+    QFrame, QGridLayout, 
+    # QHBoxLayout,
+    QLabel, QMessageBox, QScrollArea, QSizePolicy, 
     QSplitter, QTextEdit, 
-    QListWidget, QListWidgetItem, 
+    # QListWidget, QListWidgetItem, 
     QVBoxLayout, QWidget
 )
 
@@ -50,7 +53,7 @@ from PySide6.QtCore import (
     Signal
 )
 
-from PySide6.QtGui import QPixmap, QIcon
+# from PySide6.QtGui import QPixmap, QIcon
 
 
 def preserve_right_panel_state(func):
@@ -682,8 +685,13 @@ class AppointmentListPage(
     )
     def _save_deleted_appointments(self):
         """Удаляет помеченные приёмы (если есть такая функциональность)."""
-        # Здесь можно добавить обработку self.deleted_rows, если потребуется
-        pass
+        for row in sorted(self.deleted_rows, reverse=True):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and dto.id is not None:
+                self.service.delete_appointment(dto.id)
+                self.logger.info(f"Удалён приём ID={dto.id}")
+        self.deleted_rows.clear()
+        # pass
 
     # ----------------------------------------------------------------------
     # Переопределение построения интерфейса
@@ -1169,16 +1177,18 @@ class AppointmentListPage(
             self.logger.info("=== НАЧАЛО СОХРАНЕНИЯ ИЗМЕНЕНИЙ ===")
             self._save_current_draft()   # сохраняем последние правки перед сохранением
 
+            # 1. Удаление помеченных приёмов
+            self._save_deleted_appointments()
 
-            # 1. Сохраняем новые приёмы
+            # 2. Сохраняем новые приёмы
             newly_created_id = self._save_new_appointments()
             self.new_rows.clear()
 
-            # 2. Сохраняем изменённые приёмы
+            # 3. Сохраняем изменённые приёмы
             self._save_modified_appointments()
 
-            # 3. Удаляем (если есть)
-            self._save_deleted_appointments()
+            # # 3. Удаляем (если есть)
+            # self._save_deleted_appointments()
 
             # Очистка черновиков
             self._clear_drafts()
@@ -1187,6 +1197,11 @@ class AppointmentListPage(
             self._finalize_after_save(newly_created_id if newly_created_id is not None else current_id)
 
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
+
+            # Выходим из режима редактирования, если он был включён
+            if self.edit_mode:
+                self.edit_mode_btn.setChecked(False)
+
         except Exception as e:
             self.logger.exception(f"Ошибка сохранения: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения:\n{e}")

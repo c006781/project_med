@@ -9,27 +9,866 @@
 """
 
 import sys
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QProgressBar, QComboBox,
-    QStackedWidget, QFrame
-)
-from PySide6.QtCore import Qt
 
 from app.utils.logger.logger import AppLogger
+
+from app.config.config_manager.manager import AppConfigManager
+from app.network.thread_network import DownloadThread, UploadThread
 from app.dependencies import (
     get_patient_service, get_appointment_service,
     get_note_service, get_photo_service
 )
+
+from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
+from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
+
+from interfaces.gui.gui_window.controllers.page_manager import PageManager
+from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
+from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
+from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
+from interfaces.gui.gui_window.pages.settings_page import SettingsPage
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
 
 # Импорт миксинов
-from interfaces.gui.gui_window.mixins.pages_creation_mixin import PagesCreationMixin
-from interfaces.gui.gui_window.mixins.connections_mixin import ConnectionsMixin
-from interfaces.gui.gui_window.mixins.delete_handlers_mixin import DeleteHandlersMixin
-from interfaces.gui.gui_window.mixins.navigation_mixin import NavigationMixin
-from interfaces.gui.gui_window.mixins.sync_mixin import SyncMixin
+# from interfaces.gui.gui_window.mixins.pages_creation_mixin import PagesCreationMixin
+# from interfaces.gui.gui_window.mixins.connections_mixin import ConnectionsMixin
+# from interfaces.gui.gui_window.mixins.delete_handlers_mixin import DeleteHandlersMixin
+# from interfaces.gui.gui_window.mixins.navigation_mixin import NavigationMixin
+# from interfaces.gui.gui_window.mixins.sync_mixin import SyncMixin
 
+from PySide6.QtWidgets import (
+    QMainWindow, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QProgressBar, QComboBox,
+    QStackedWidget, QFrame
+)
+from PySide6.QtCore import Qt, Slot
+
+
+class PagesCreationMixin:
+    """
+    Миксин, предоставляющий методы для создания всех страниц GUI.
+    """
+
+    @AppLogger.get_instance(
+        name='PagesCreationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_patient(self):
+        """
+        Создаёт страницу списка пациентов и страницу редактирования пациента.
+        Устанавливает атрибуты:
+            - self.patient_list_page (DynamicListPage)
+            - self.patient_edit_page (DynamicEditPage)
+        """
+        # Страница со списком пациентов
+        self.patient_list_page = DynamicListPage(
+            service=get_patient_service(),
+            loader_func=self.load_patients,          # функция загрузки данных
+            dto_class=PatientDTO,
+            field_configs=PATIENT_CONFIG,
+            page_title="Пациенты",
+            add_action_text="Добавить пациента",
+            action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
+            # save_directly=True,   
+        )
+
+        # Страница редактирования пациента
+        self.patient_edit_page = DynamicEditPage(
+            service=get_patient_service(),
+            dto_class=PatientDTO,
+            page_title="Редактирование пациента",
+            exclude_fields=['id'],
+            field_configs=PATIENT_CONFIG,
+            save_directly=True,   
+        )
+        # Указываем ID страницы списка, чтобы после сохранения/удаления обновлять список
+        self.patient_edit_page.list_page_id = 'patient_list'
+
+    @AppLogger.get_instance(
+        name='PagesCreationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_appointment(self):
+        """
+        Создаёт страницу списка приёмов и страницу редактирования приёма.
+        Устанавливает атрибуты:
+            - self.appointment_list_page (AppointmentListPage)
+            - self.appointment_edit_page (DynamicEditPage)
+        """
+        self.appointment_list_page = AppointmentListPage(
+            service=get_appointment_service(),
+            loader_func=self.load_appointments,
+            dto_class=AppointmentDTO,
+            field_configs=APPOINTMENT_CONFIG,
+            page_title="Приёмы",
+            add_action_text="Новый приём",
+            exclude_columns=[
+                'photos',
+                'patient_name',
+                # 'photos',
+            ] ,  # колонка с фото не отображается в таблице
+            # save_directly=True,  
+        )
+
+        self.appointment_edit_page = DynamicEditPage(
+            service=get_appointment_service(),
+            dto_class=AppointmentDTO,
+            page_title="Редактирование приёма",
+            exclude_fields=['id', 'has_photos'],  # 'has_photos' – виртуальное поле
+            related_services={'patient': get_patient_service()},  # для подгрузки данных пациента
+            field_configs=APPOINTMENT_CONFIG,
+            save_directly=True,   
+        )
+        self.appointment_edit_page.list_page_id = 'appointment_list'
+
+    @AppLogger.get_instance(
+        name='PagesCreationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_note(self):
+        """
+        Создаёт страницу списка заметок и страницу редактирования заметки.
+        Устанавливает атрибуты:
+            - self.note_list_page (DynamicListPage)
+            - self.note_edit_page (DynamicEditPage)
+        """
+        self.note_list_page = DynamicListPage(
+            service=get_note_service(),
+            loader_func=self.load_notes,
+            dto_class=AppointmentNoteDTO,
+            field_configs=NOTE_CONFIG,
+            page_title="Заметки",
+            add_action_text="Создать заметку",
+            # save_directly=True,  
+        )
+
+        self.note_edit_page = DynamicEditPage(
+            service=get_note_service(),
+            dto_class=AppointmentNoteDTO,
+            page_title="Редактирование заметки",
+            exclude_fields=['id'],
+            field_configs=NOTE_CONFIG,
+            save_directly=True,  
+        )
+        self.note_edit_page.list_page_id = 'note_list'
+
+    @AppLogger.get_instance(
+        name='PagesCreationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_photo(self):
+        """
+        Создаёт страницу списка фотографий и страницу редактирования фото.
+        Устанавливает атрибуты:
+            - self.photo_list_page (DynamicListPage)
+            - self.photo_edit_page (DynamicEditPage)
+        """
+        self.photo_list_page = DynamicListPage(
+            service=get_photo_service(),
+            loader_func=self.load_photos,
+            dto_class=PhotoDTO,
+            field_configs=PHOTO_CONFIG,
+            page_title="Фотографии",
+            add_action_text="Добавить фото",
+            # save_directly=True,  
+        )
+
+        self.photo_edit_page = DynamicEditPage(
+            service=get_photo_service(),
+            dto_class=PhotoDTO,
+            page_title="Редактирование фото",
+            exclude_fields=['id'],
+            field_configs=PHOTO_CONFIG,
+            save_directly=True,  
+        )
+        self.photo_edit_page.list_page_id = 'photo_list'
+
+    @AppLogger.get_instance(
+        name='PagesCreationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _init_page_manager(self):
+        """
+        Инициализирует менеджер страниц.
+        Сначала создаёт все страницы (пациенты, приёмы, заметки, фото),
+        затем собирает их в словарь, добавляет в QStackedWidget,
+        создаёт PageManager и подключает сигналы страниц.
+        """
+        # Создаём все страницы (важно: порядок не имеет значения, но все должны быть созданы)
+        self._set_patient()
+        self._set_appointment()
+        self._set_note()
+        self._set_photo()
+
+        # Страница настроек (создаётся отдельно, так как она не использует динамические шаблоны)
+        self.settings_page = SettingsPage(page_title="Настройки")
+
+        # Словарь всех страниц с их идентификаторами
+        pages = {
+            'patient_list': self.patient_list_page,
+            'patient_edit': self.patient_edit_page,
+            'appointment_list': self.appointment_list_page,
+            'appointment_edit': self.appointment_edit_page,
+            'note_list': self.note_list_page,
+            'note_edit': self.note_edit_page,
+            'photo_list': self.photo_list_page,
+            'photo_edit': self.photo_edit_page,
+            'settings': self.settings_page,
+        }
+
+        # Добавляем каждую страницу в стековый виджет
+        for page in pages.values():
+            self.stacked_widget.addWidget(page)
+
+        # Создаём менеджер страниц (управляет историей и переключениями)
+        self.page_manager = PageManager(self.stacked_widget, pages)
+
+        # Передаём ссылку на главное окно каждой странице (для доступа к page_manager и др.)
+        for page in pages.values():
+            if hasattr(page, 'set_main_window'):
+                page.set_main_window(self)
+
+        # Подключаем сигналы, генерируемые страницами (добавление, редактирование, удаление)
+        self._connect_page_signals()
+        
+class ConnectionsMixin:
+    """
+    Миксин, содержащий методы для связывания сигналов страниц с действиями.
+    """
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_signals(self):
+        """
+        Подключает основные сигналы главного окна:
+            - кнопка "Назад"
+            - кнопка "Настройки"
+            - выбор действия в комбобоксе
+            - сигналы менеджера страниц (навигация, вход на страницу)
+        """
+        # Кнопка возврата на предыдущую страницу
+        self.back_btn.clicked.connect(self._on_back_clicked)
+
+        # Кнопка открытия страницы настроек
+        self.settings_btn.clicked.connect(self._on_settings_clicked)
+
+        # Выбор действия из выпадающего списка (скачать, сохранить, отправить)
+        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+
+        # Сигналы от менеджера страниц
+        self.page_manager.navigation_changed.connect(self._on_navigation_changed)
+        self.page_manager.page_entered.connect(self._on_page_entered)
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_page_signals(self):
+        """
+        Связывает сигналы всех страниц (списков и редактирования) с методами-обработчиками.
+        """
+        self._connect_patient()
+        self._connect_appointment()
+        self._connect_note()
+        self._connect_photo()
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_patient(self):
+        """
+        Подключает сигналы страницы списка пациентов:
+            - add_requested → переход на страницу создания пациента
+            - edit_requested → переход на страницу редактирования с переданным DTO
+            - delete_requested → вызов обработчика удаления
+            - action_requested → переход к списку приёмов выбранного пациента
+        """
+        # Добавление нового пациента
+        self.patient_list_page.add_requested.connect(
+            lambda: self.page_manager.switch_to('patient_edit', extra_data=None)
+        )
+        # Редактирование существующего пациента
+        self.patient_list_page.edit_requested.connect(
+            lambda dto: self.page_manager.switch_to(
+                'patient_edit',
+                extra_data={'id': dto.id}
+            )
+        )
+        # Удаление пациента
+        self.patient_list_page.delete_requested.connect(self._on_patient_delete)
+        # Дополнительное действие: показать приёмы пациента
+        self.patient_list_page.action_requested.connect(self._on_patient_appointments_requested)
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_appointment(self):
+        """
+        Подключает сигналы страницы списка приёмов:
+            - add_requested → переход на страницу создания приёма (с patient_id, если есть)
+            - edit_requested → переход на страницу редактирования
+            - delete_requested → вызов обработчика удаления
+        """
+        # Добавление нового приёма (если в extra_data есть patient_id, он будет передан)
+        self.appointment_list_page.add_requested.connect(
+            lambda: self.page_manager.switch_to(
+                'appointment_edit',
+                extra_data={
+                    'patient_id': self.appointment_list_page.current_extra.get('patient_id')
+                    if self.appointment_list_page.current_extra else None
+                }
+            )
+        )
+        # Редактирование приёма
+        self.appointment_list_page.edit_requested.connect(
+            lambda dto: self.page_manager.switch_to(
+                'appointment_edit',
+                extra_data={'id': dto.id}
+            )
+        )
+        # Удаление приёма
+        self.appointment_list_page.delete_requested.connect(self._on_appointment_delete)
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_note(self):
+        """
+        Подключает сигналы страницы списка заметок:
+            - add_requested → переход на страницу создания заметки
+            - edit_requested → переход на страницу редактирования
+            - delete_requested → вызов обработчика удаления
+        """
+        self.note_list_page.add_requested.connect(
+            lambda: self.page_manager.switch_to('note_edit', extra_data=None)
+        )
+        self.note_list_page.edit_requested.connect(
+            lambda dto: self.page_manager.switch_to(
+                'note_edit',
+                extra_data={'id': dto.id}
+            )
+        )
+        self.note_list_page.delete_requested.connect(self._on_note_delete)
+
+    @AppLogger.get_instance(
+        name='ConnectionsMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_photo(self):
+        """
+        Подключает сигналы страницы списка фотографий:
+            - add_requested → переход на страницу создания фото
+            - edit_requested → переход на страницу редактирования
+            - delete_requested → вызов обработчика удаления
+        """
+        self.photo_list_page.add_requested.connect(
+            lambda: self.page_manager.switch_to('photo_edit', extra_data=None)
+        )
+        self.photo_list_page.edit_requested.connect(
+            lambda dto: self.page_manager.switch_to(
+                'photo_edit',
+                extra_data={'id': dto.id}
+            )
+        )
+        self.photo_list_page.delete_requested.connect(self._on_photo_delete)
+
+class DeleteHandlersMixin:
+    """
+    Миксин, содержащий слоты для удаления сущностей с подтверждением.
+    """
+
+    @AppLogger.get_instance(
+        name='DeleteHandlersMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_patient_delete(self, dto):
+        """
+        Удаление пациента после подтверждения пользователя.
+        Удаляются также все связанные приёмы и фотографии (каскадно).
+        """
+        # Запрашиваем подтверждение
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Удалить пациента {dto.last_name} {dto.first_name}? "
+            "Все связанные приёмы и фото также будут удалены.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            service = get_patient_service()
+            service.delete_patient(dto.id)
+            QMessageBox.information(self, "Успех", "Пациент удалён.")
+            self.patient_list_page._load_data()      # обновляем список
+            self.logger.info(f"Удалён пациент ID={dto.id}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+            self.logger.exception(f"Ошибка удаления пациента: {e}")
+
+    @AppLogger.get_instance(
+        name='DeleteHandlersMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_appointment_delete(self, dto):
+        """
+        Удаление приёма после подтверждения.
+        """
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Удалить приём ID {dto.id} от {dto.date}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            service = get_appointment_service()
+            service.delete_appointment(dto.id)
+            QMessageBox.information(self, "Успех", "Приём удалён.")
+            self.appointment_list_page._load_data()   # обновляем список
+            self.logger.info(f"Удалён приём ID={dto.id}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+            self.logger.exception(f"Ошибка удаления приёма: {e}")
+
+    @AppLogger.get_instance(
+        name='DeleteHandlersMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_note_delete(self, dto):
+        """
+        Удаление заметки после подтверждения.
+        """
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Удалить заметку ID {dto.id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            service = get_note_service()
+            service.delete_note(dto.id)
+            QMessageBox.information(self, "Успех", "Заметка удалена.")
+            self.note_list_page._load_data()         # обновляем список
+            self.logger.info(f"Удалена заметка ID={dto.id}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+            self.logger.exception(f"Ошибка удаления заметки: {e}")
+
+    @AppLogger.get_instance(
+        name='DeleteHandlersMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_photo_delete(self, dto):
+        """
+        Удаление фотографии (запись в БД и физический файл) после подтверждения.
+        """
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Удалить фото ID {dto.id}? Файл будет удалён с диска.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            service = get_photo_service()
+            service.delete_photo(dto.id)
+            QMessageBox.information(self, "Успех", "Фото удалено.")
+            self.photo_list_page._load_data()        # обновляем список
+            self.logger.info(f"Удалено фото ID={dto.id}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить: {e}")
+            self.logger.exception(f"Ошибка удаления фото: {e}")
+
+class NavigationMixin:
+    """
+    Миксин, отвечающий за обработку навигационных действий:
+        - кнопка "Назад"
+        - кнопка "Настройки"
+        - переход к списку приёмов пациента
+        - обновление хлебных крошек и состояния кнопки "Назад"
+    """
+
+    @AppLogger.get_instance(
+        name='NavigationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _on_back_clicked(self):
+        """
+        Возврат на предыдущую страницу с проверкой несохранённых изменений,
+        если текущая страница – список в режиме редактирования.
+        """
+        current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        self.logger.debug(
+            f"if isinstance(current_page, DynamicListPage) and current_page.edit_mode: {isinstance(current_page, DynamicListPage) and current_page.edit_mode}"
+        )
+        # T1 = isinstance(current_page, DynamicListPage)
+        # T2 = current_page.edit_mode
+        # 0==0
+        if isinstance(current_page, DynamicListPage) and current_page.edit_mode:
+            if current_page.modified_rows or current_page.deleted_rows or current_page.new_rows:
+                reply = QMessageBox.question(
+                    self, "Несохранённые изменения",
+                    "Есть несохранённые изменения. Сохранить перед возвратом?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    current_page._save_changes()
+                elif reply == QMessageBox.StandardButton.No:
+                    # Откатываем изменения
+                    current_page._load_data()
+                    current_page.modified_rows.clear()
+                    current_page.deleted_rows.clear()
+                    current_page.new_rows.clear()
+                    current_page._update_save_button_state()
+                else:
+                    # Cancel – не переходим назад
+                    return
+        self.page_manager.go_back()
+
+    @AppLogger.get_instance(
+        name='NavigationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _on_settings_clicked(self):
+        """Переход на страницу настроек."""
+        self.page_manager.switch_to('settings')
+
+    @AppLogger.get_instance(
+        name='NavigationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_patient_appointments_requested(self, patient_dto):
+        """
+        Переход к списку приёмов выбранного пациента.
+        Передаётся patient_id в extra_data для фильтрации списка.
+        """
+        self.page_manager.switch_to(
+            'appointment_list',
+            extra_data={'patient_id': patient_dto.id}
+        )
+
+    @AppLogger.get_instance(
+        name='NavigationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(list, str)
+    def _on_navigation_changed(self, history, current_page_id):
+        """
+        Обновляет хлебные крошки и состояние кнопки "Назад" при изменении навигации.
+        """
+        # Собираем заголовки страниц из истории
+        titles = [title for _, title in history]
+        # Добавляем заголовок текущей страницы
+        if current_page_id:
+            current_title = self.page_manager._get_page_title(current_page_id)
+            titles.append(current_title)
+
+        # Формируем строку с разделителем " > "
+        crumbs = " > ".join(titles) if titles else "Главная"
+        self.breadcrumbs_label.setText(crumbs)
+
+        # Кнопка "Назад" активна, только если есть история
+        self.back_btn.setEnabled(len(history) > 0)
+
+    @AppLogger.get_instance(
+        name='NavigationMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str, object)
+    def _on_page_entered(self, page_id, extra_data):
+        """
+        Вызывается при входе на страницу. Передаёт extra_data в метод on_enter страницы.
+        """
+        page = self.page_manager._pages.get(page_id)
+        if page and hasattr(page, 'on_enter'):
+            try:
+                page.on_enter(extra_data)
+            except Exception as e:
+                self.logger.exception(f"Ошибка в on_enter страницы {page_id}: {e}")
+                raise e
+
+class SyncMixin:
+    """
+    Миксин, реализующий асинхронную загрузку и выгрузку БД с Яндекс.Диска.
+    Использует отдельные потоки (QThread) для неблокирующей работы.
+    """
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_action_selected(self, index):
+        """
+        Обработчик выбора действия в комбобоксе.
+            index 0 → скачать БД
+            index 1 → сохранить изменения (пока заглушка)
+            index 2 → отправить БД на сервер
+        """
+        if index == 0:
+            self._start_download()
+        elif index == 1:
+            self._save_changes()
+        elif index == 2:
+            self._start_upload()
+        # Сбрасываем выбранный индекс, чтобы можно было повторно выбрать то же действие
+        self.action_combo.setCurrentIndex(-1)
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _start_download(self):
+        """
+        Запускает поток скачивания файла БД с Яндекс.Диска.
+        Перед запуском проверяет наличие токена.
+        """
+        config = AppConfigManager.get_instance()
+        token = config.get('YANDEX_TOKEN')
+        remote = config.get('database_remote_path')
+        local = config.get('database_local_path')
+
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+            return
+
+        # Создаём и настраиваем поток загрузки
+        self.download_thread = DownloadThread(token, remote, local)
+        self.download_thread.progress.connect(self._update_progress)
+        self.download_thread.finished.connect(self._on_download_finished)
+        self.download_thread.error.connect(self._on_download_error)
+
+        # Показываем прогресс-бар (бесконечный режим до получения размера)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        self.download_thread.start()
+        self.logger.info("Запущен поток скачивания БД")
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _start_upload(self):
+        """
+        Запускает поток загрузки локального файла БД на Яндекс.Диск.
+        """
+        config = AppConfigManager.get_instance()
+        token = config.get('YANDEX_TOKEN')
+        remote = config.get('database_remote_path')
+        local = config.get('database_local_path')
+
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+            return
+
+        self.upload_thread = UploadThread(token, local, remote)
+        self.upload_thread.progress.connect(self._update_progress)
+        self.upload_thread.finished.connect(self._on_upload_finished)
+        self.upload_thread.error.connect(self._on_upload_error)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        self.upload_thread.start()
+        self.logger.info("Запущен поток загрузки БД")
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int, int)
+    def _update_progress(self, current, total):
+        """
+        Обновляет прогресс-бар в соответствии с текущим и общим размером.
+        Если total == 0, переводим бар в режим "безлимитного" прогресса.
+        """
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(current)
+        else:
+            self.progress_bar.setRange(0, 0)   # бесконечная анимация
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_download_finished(self, code):
+        """
+        Обработчик завершения скачивания.
+        Скрывает прогресс-бар и выводит сообщение об успехе или ошибке.
+        """
+        self.progress_bar.setVisible(False)
+        if code == 0:
+            QMessageBox.information(self, "Успех", "База данных успешно скачана.")
+            # После скачивания можно обновить текущие страницы, если нужно
+        else:
+            QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str)
+    def _on_download_error(self, message):
+        """
+        Обработчик ошибки в потоке скачивания.
+        """
+        self.progress_bar.setVisible(False)
+        QMessageBox.critical(self, "Ошибка", message)
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_upload_finished(self, code):
+        """
+        Обработчик завершения загрузки на диск.
+        """
+        self.progress_bar.setVisible(False)
+        if code == 0:
+            QMessageBox.information(self, "Успех", "База данных успешно загружена.")
+        else:
+            QMessageBox.critical(self, "Ошибка", f"Загрузка завершилась с кодом {code}")
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str)
+    def _on_upload_error(self, message):
+        """
+        Обработчик ошибки в потоке загрузки.
+        """
+        self.progress_bar.setVisible(False)
+        QMessageBox.critical(self, "Ошибка", message)
+
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _save_changes(self):
+        """
+        Заглушка для сохранения изменений в локальной БД.
+        В текущей версии не реализовано.
+        """
+        self.logger.info("Сохранение изменений (заглушка)")
+        QMessageBox.information(self, "Информация", "Функция сохранения изменений пока не реализована.")
+
+    # Вспомогательные методы управления прогресс-баром (могут вызываться извне)
+    def show_progress(self, visible=True):
+        """Показать или скрыть прогресс-бар."""
+        self.progress_bar.setVisible(visible)
+
+    def set_progress_range(self, minimum, maximum):
+        """Установить диапазон значений прогресс-бара."""
+        self.progress_bar.setRange(minimum, maximum)
+
+    def set_progress_value(self, value):
+        """Установить текущее значение прогресса."""
+        self.progress_bar.setValue(value)
+        
 
 class MainWindow(
     QMainWindow,

@@ -919,7 +919,7 @@ class BaseAppLogger:
                 log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
                 """
 
-
+                
 
                 # # Вызываем функцию
                 # result = func(*args, **kwargs)
@@ -968,9 +968,14 @@ class BaseAppLogger:
 
                 # Получаем время начала выполнения
                 start_time = time.time()
-
+                
+                err = None
                 # Вызываем функцию
-                result = func(*args, **kwargs)
+                try:
+                    result = func(*args, **kwargs)
+                except Exception as e:
+                    err = e
+                    # raise
 
                 # Получаем время окончания выполнения
                 execution_time = time.time() - start_time
@@ -978,12 +983,20 @@ class BaseAppLogger:
                 # Формируем строку с информацией о времени выполнения
                 end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
 
+                # Если есть ошибка, добавляем ее в конце сообщения
+                if err:
+                    end_msg += f": {err}"
+
                 # Формируем полное сообщение
                 formatted_end = logger_instance._format_message(caller_info, end_msg)
 
                 # Логируем сообщение
                 logger_instance.logger.log(level, formatted_end)
 
+                # Возвращаем ошибку если она есть
+                if err:
+                    raise err
+                
                 return result
 
             @wraps(func)
@@ -1040,20 +1053,32 @@ class BaseAppLogger:
                 # Получаем время начала выполнения
                 start_time = time.time()
 
+                err = None
                 # Вызываем функцию
-                result = await func(*args, **kwargs)
-
+                try:
+                    result = await func(*args, **kwargs)
+                except Exception as e:
+                    err = e
+                
                 # Получаем время окончания выполнения
                 execution_time = time.time() - start_time
 
                 # Формируем строку с информацией о времени выполнения
                 end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+                
+                # Если есть ошибка, добавляем ее в конце сообщения
+                if err:
+                    end_msg += f": {err}"
 
                 # Формируем полное сообщение
                 formatted_end = logger_instance._format_message(caller_info, end_msg)
 
                 # Логируем сообщение
                 logger_instance.logger.log(level, formatted_end)
+
+                # Возвращаем ошибку если она есть
+                if err:
+                    raise err
 
                 return result
 

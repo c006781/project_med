@@ -176,6 +176,7 @@ class AppConfigManager(BaseConfigManager):
         'database_remote_path': 'Проекты/test/bd/clinic.db',
         # 'database_remote_path': 'Проекты/test/bd/clinic.db',
         'LOG_LEVEL': 'DEBUG',
+        # 'LOG_LEVEL': 'INFO',
         # 'LOG_FILE': './logs/app.log',
         'LOG_FILE': os.path.join(
             '.',

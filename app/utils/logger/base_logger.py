@@ -889,6 +889,10 @@ class BaseAppLogger:
             # func_name = func.__name__
             # is_async = inspect.iscoroutinefunction(func)
         
+                    # Если указанный уровень логирования не активен, возвращаем исходную функцию без обёртки
+            if not logger_instance.logger.isEnabledFor(level):
+                return func
+
             # Используем квалифицированное имя (с классом, если это метод)
             func_qualname = func.__qualname__
             try:

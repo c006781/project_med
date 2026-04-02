@@ -1310,13 +1310,14 @@ class AppointmentListPage(
     )
     def _select_row_by_id(self, entity_id: int):
         """
-        Находит строку в таблице, соответствующую DTO с заданным ID,
-        и выделяет её.
+        Находит строку в таблице, соответствующую DTO с заданным ID и выделяет её.
         """
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
             if dto and getattr(dto, 'id', None) == entity_id:
-                proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
+                proxy_index = self.proxy_model.mapFromSource(
+                    self.source_model.index(row, 0)
+                )
                 if proxy_index.isValid():
                     self.table_view.setCurrentIndex(proxy_index)
                     self.table_view.scrollTo(proxy_index)

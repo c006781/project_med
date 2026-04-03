@@ -538,7 +538,7 @@ class ListSaveMixin:
 
         После сохранения изменений, обновляет данные на странице и восстанавливает кнопку сохранения.
         """
-        self.logger.info("=== _save_changes ВЫЗВАН В DynamicListPage ===")
+        self.logger.info("=== _save_changes ВЫЗВАН ИЗ ListSaveMixin ===")
         if not (self.modified_rows or self.deleted_rows or self.new_rows):
             return
 
@@ -1001,7 +1001,7 @@ class DynamicListPage(
           «Добавить строку», «Удалить строку», «Сохранить изменения», двойной клик начинает редактирование ячейки.
     """
 
-
+ 
     add_requested = Signal() # сигнал для добавления (можно не использовать, если добавляем строку напрямую)
     edit_requested = Signal(object) # сигнал для открытия формы редактирования
     delete_requested = Signal(object) # сигнал для удаления (с подтверждением)
@@ -1098,6 +1098,27 @@ class DynamicListPage(
         self._setup_ui()
         
         self._load_data() # загрузка данных на страницу
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def on_leave(self):
+        """
+        Вызывается при уходе со страницы.
+        Дополнительные действия, такие как очистка черновиков, если нужно.
+        """
+        super().on_leave()
+        
+        # Выход из режима редактирования
+        if self.edit_mode:
+            self._exit_edit_mode()
+
+        # Дополнительные действия, например, очистка черновиков, если нужно
+        # self._clear_drafts()  # если требуется    
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',

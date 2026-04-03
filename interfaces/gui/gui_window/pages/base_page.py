@@ -83,6 +83,8 @@ class BasePage(QWidget):
         Вызывается при уходе со страницы.
         Можно переопределить для сохранения состояния и т.п.
         """
+        # if self.edit_mode:
+        #     self._exit_edit_mode()        
         pass
 
     @AppLogger.get_instance(

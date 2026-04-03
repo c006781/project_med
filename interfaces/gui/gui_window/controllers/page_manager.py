@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/controllers/page_manager.py
 """
 Менеджер навигации между страницами.
 Хранит историю посещений (с заголовками), управляет переключением в QStackedWidget,
@@ -156,6 +156,11 @@ class PageManager(QObject):
                 self._extra_data = extra_data
                 self.page_entered.emit(page_id, extra_data)
             return
+        
+        # Вызываем on_leave у текущей страницы перед уходом
+        current_page = self._pages.get(self._current_page_id)
+        if current_page and hasattr(current_page, 'on_leave'):
+            current_page.on_leave()
 
         # Если нужно сохранить в историю текущую страницу
         self.logger.debug(f'add_to_history and self._current_page_id : {add_to_history and self._current_page_id}')
@@ -191,6 +196,11 @@ class PageManager(QObject):
         """
         if not self._history:
             return
+
+        # Вызываем on_leave у текущей страницы перед уходом
+        current_page = self._pages.get(self._current_page_id)
+        if current_page and hasattr(current_page, 'on_leave'):
+            current_page.on_leave()
 
         # Извлекаем последний элемент истории
         prev_page_id, prev_page_title = self._history.pop()

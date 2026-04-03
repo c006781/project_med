@@ -319,11 +319,14 @@ class DraftMixin:
             return
         # if not self.selected_dto:
         #     return
+
         if self._loading_right_panel > 0:
             return
 
         self._save_current_draft()
+        self._check_and_clear_modified_if_unchanged()
         self._mark_current_row_modified()
+        self._sync_draft_to_model()
 
     @AppLogger.get_instance(
         name='DraftMixin',
@@ -397,6 +400,8 @@ class PatientInfoMixin:
             label_value = QLabel()
             label_value.setWordWrap(True)
             label_value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)   # добавить
+            # label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
             grid.addWidget(label_title, row, 0, alignment=Qt.AlignTop)
             grid.addWidget(label_value, row, 1, alignment=Qt.AlignTop)
@@ -617,6 +622,88 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _check_and_clear_modified_if_unchanged(self):
+        if not self.selected_dto:
+            return
+        source_row = None
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and dto.id == self.selected_dto.id:
+                source_row = row
+                break
+        if source_row is None:
+            return
+        original = self.original_data.get(source_row)
+        if original and self.selected_dto.model_dump() == original.model_dump():
+            if source_row in self.modified_rows:
+                self.modified_rows.discard(source_row)
+                self._set_row_color_by_source_row(source_row)
+                self._update_save_button_state()
+
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _sync_draft_to_model(self):
+        """
+        Синхронизирует черновики приёма (draft) с моделью (source_model).
+        Если выбранная строка (self.selected_dto) не существует в модели, ничего не делает.
+        Если в черновике (self._draft_note_text) есть текст для заметки приёма с id, равным id выбранной строки, обновляет поле note_text в DTO из черновика.
+        """
+        if not self.selected_dto:
+            return
+        
+        # Найти строку в модели
+        source_row = None
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and dto.id == self.selected_dto.id:
+                source_row = row
+                break
+
+        if source_row is None:
+            return
+        
+        # Обновить поле note_text в DTO из черновика
+        note_text = self._draft_note_text.get(self.selected_dto.id)
+        if note_text is not None and self.selected_dto.note_text != note_text:
+            self.selected_dto.note_text = note_text
+            col_idx = self._get_column_index('note_text')
+            if col_idx >= 0:
+                index = self.source_model.index(source_row, col_idx)
+                self.source_model.setData(index, note_text, Qt.EditRole)
+        
+        # после возможного обновления проверить, не стал ли DTO равным оригиналу
+        self._check_and_clear_modified_if_unchanged()
+
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_column_index(self, field_name: str) -> int:
+        """
+        Возвращает индекс колонки в таблице, соответствующей полю с именем field_name.
+        Если не найдено, возвращает -1.
+        """
+        for i, col in enumerate(self.columns):
+            if col['name'] == field_name:
+                return i
+        return -1
+
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
         enable_file_logging = 'system',
@@ -626,7 +713,18 @@ class AppointmentListPage(
     )
     def _mark_selected_for_deletion(self):
         """Переопределяем для очистки правой панели, если после удаления строк не осталось."""
+        # Сохраняем ID перед удалением (для очистки черновиков)
+        temp_id = None
+        if self.selected_dto and self.selected_dto.id is not None and self.selected_dto.id < 0:
+            temp_id = self.selected_dto.id
+
         super()._mark_selected_for_deletion()
+
+        # Очищаем черновики для новой строки (если она была)
+        if temp_id is not None:
+            self._draft_photos.pop(temp_id, None)
+            self._draft_note_text.pop(temp_id, None)
+
         # Если после удаления строк не осталось, очищаем правую панель
         if self.source_model.rowCount() == 0:
             self._clear_right_panel()
@@ -645,7 +743,6 @@ class AppointmentListPage(
         if self.source_model.rowCount() == 0:
             self._clear_right_panel()
 
-
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
         enable_file_logging = 'system',
@@ -660,7 +757,6 @@ class AppointmentListPage(
         self.selected_dto = None
         self.current_patient_changed.emit(None)
 
-
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
         enable_file_logging = 'system',
@@ -673,6 +769,12 @@ class AppointmentListPage(
         for source_row in list(self.modified_rows):
             dto = self.source_model.get_item_at_row(source_row)
             if dto and (dto.id is not None) and (dto.id > 0):
+                original = self.original_data.get(source_row)
+                if original and dto.model_dump() == original.model_dump():
+                    self.modified_rows.discard(source_row)
+                    self._set_row_color_by_source_row(source_row)   # добавить
+                    self._update_save_button_state()
+                    continue
                 self._save_single_appointment(dto, source_row)
 
     @AppLogger.get_instance(
@@ -761,7 +863,7 @@ class AppointmentListPage(
                     # Новая строка (временный ID) – просто удаляем из модели
                     self.logger.info(f"Удалена новая строка с временным ID={dto.id}")
                 # Удаляем строку из модели
-                self.source_model.remove_row(row)
+                # self.source_model.remove_row(row)
         self.deleted_rows.clear()
         # pass
 
@@ -979,7 +1081,8 @@ class AppointmentListPage(
         # Если строка ещё не помечена как modified, добавляем
         if source_row not in self.modified_rows:
             self.modified_rows.add(source_row)
-            self._update_row_color(source_row)   # обновляем цвет строки
+            # self._update_row_color(source_row)   # обновляем цвет строки
+            self._set_row_color_by_source_row(source_row)   # обновляем цвет строки
             self._update_save_button_state()    # активируем кнопку сохранения
 
 
@@ -1043,10 +1146,6 @@ class AppointmentListPage(
     # ----------------------------------------------------------------------
     # Сохранение изменений
     # ----------------------------------------------------------------------
-
-
-
-
 
     # --- Вспомогательные методы для сохранения одного приёма ---
     @AppLogger.get_instance(
@@ -1327,6 +1426,9 @@ class AppointmentListPage(
 
         self.logger.debug("Вызываем _load_draft_for_appointment")
         self._load_draft_for_appointment(dto.id, dto)
+        if self.edit_mode:
+            self._sync_draft_to_model()
+        # self._sync_draft_to_model()
 
         # обновление пациента (остаётся как было)
         try:

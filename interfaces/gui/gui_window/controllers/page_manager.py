@@ -152,11 +152,12 @@ class PageManager(QObject):
         self.logger.debug(f'page_id == self._current_page_id : {page_id == self._current_page_id}')
         if page_id == self._current_page_id:
             self.logger.debug(f'extra_data is not None : {extra_data is not None}')
-            if extra_data is not None:
-                self._extra_data = extra_data
-                self.page_entered.emit(page_id, extra_data)
+            # if extra_data is not None:
+            # Всегда испускаем сигнал, чтобы страница могла обновиться
+            self._extra_data = extra_data
+            self.page_entered.emit(page_id, extra_data)
             return
-        
+            
         # Вызываем on_leave у текущей страницы перед уходом
         current_page = self._pages.get(self._current_page_id)
         if current_page and hasattr(current_page, 'on_leave'):

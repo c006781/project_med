@@ -13,6 +13,7 @@ from typing import (
     get_origin
 )
 import datetime 
+from copy import deepcopy
 
 from app.utils.logger.logger import AppLogger
 
@@ -231,13 +232,17 @@ class ListDataMixin:
         try:
             self.current_data = self.loader_func(self.current_extra)
             self.source_model.update_data(self.current_data)
+            # self.original_data = {i: dto for i, dto in enumerate(self.current_data)}
+            self.original_data = {i: deepcopy(dto) for i, dto in enumerate(self.current_data)}
+
             self.source_model.clear_row_colors()
 
             # Сбрасываем все отслеживаемые изменения
             self.modified_rows.clear()
             self.deleted_rows.clear()
             self.new_rows.clear()
-            self.original_data.clear()
+            # self.original_data.clear()
+            
             self._update_save_button_state()
 
             # self.table_view.clearSelection()
@@ -253,7 +258,8 @@ class ListDataMixin:
 
             # Обновляем состояние кнопок на основе текущего выделения
             self._update_selection_state()
-        
+            
+            self._data_loaded = True
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки данных: {e}")
@@ -303,9 +309,14 @@ class ListDataMixin:
             if extra_data != self.current_extra:
                 self.current_extra = extra_data
                 reload_needed = True
-        if reload_needed:
+
+        # Загружаем данные, если:
+        # - требуется перезагрузка (reload_needed)
+        # - или данные ещё не загружены (self._data_loaded == False)     
+        if reload_needed or not self._data_loaded: 
             self._load_data()
             self._needs_refresh = False
+            self._data_loaded = True
             # После загрузки выделяем строку, если указан select_id
             if select_id is not None:
                 self._select_by_id(select_id)
@@ -329,6 +340,39 @@ class ListChangesMixin:
     Миксин для обработки изменений в таблице.
     """
     
+    # @AppLogger.get_instance(
+    #     name = 'ListChangesMixin',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _update_row_color(self, row: int):
+    #     """
+    #     Обновляет цвет строки в таблице в зависимости от статуса строки (новая, изменена, удалена).
+    #     :param row: индекс строки в таблице
+    #     :type row: int
+    #     """
+    #     proxy_index = self.proxy_model.index(row, 0)
+    #     if not proxy_index.isValid():
+    #         return
+        
+    #     source_row = self.proxy_model.mapToSource(proxy_index).row()
+    #     if source_row == -1:
+    #         return
+
+    #     if row in self.deleted_rows:
+    #         color = QColor(255, 200, 200)   # красный
+    #     elif row in self.new_rows:
+    #         color = QColor(200, 255, 200)   # зелёный
+    #     elif row in self.modified_rows:
+    #         color = QColor(255, 255, 180)   # жёлтый
+    #     else:
+    #         color = QColor(255, 255, 255)   # белый
+
+    #     self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
+    #     self.source_model.set_row_color(source_row, color)
+
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
         enable_file_logging = 'system',
@@ -336,31 +380,26 @@ class ListChangesMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _update_row_color(self, row: int):
-        """
-        Обновляет цвет строки в таблице в зависимости от статуса строки (новая, изменена, удалена).
-        :param row: индекс строки в таблице
-        :type row: int
-        """
-        proxy_index = self.proxy_model.index(row, 0)
-        if not proxy_index.isValid():
-            return
-        
-        source_row = self.proxy_model.mapToSource(proxy_index).row()
-        if source_row == -1:
-            return
+    def _set_row_color_by_source_row(self, source_row: int):
+        """Устанавливает цвет строки в исходной модели по её индексу."""
 
-        if row in self.deleted_rows:
+        self.logger.debug(f"_set_row_color_by_source_row: source_row={source_row}, modified_rows={self.modified_rows}, new_rows={self.new_rows}, deleted_rows={self.deleted_rows}")
+        if source_row < 0 or source_row >= self.source_model.rowCount():
+            self.logger.warning(f"source_row {source_row} вне диапазона (0-{self.source_model.rowCount()-1})")
+            
+        if source_row in self.deleted_rows:
             color = QColor(255, 200, 200)   # красный
-        elif row in self.new_rows:
+        elif source_row in self.new_rows:
             color = QColor(200, 255, 200)   # зелёный
-        elif row in self.modified_rows:
+        elif source_row in self.modified_rows:
             color = QColor(255, 255, 180)   # жёлтый
         else:
             color = QColor(255, 255, 255)   # белый
 
-        self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
+
+        self.logger.debug(f"Обновление цвета строки {source_row} - {color.name()}")
         self.source_model.set_row_color(source_row, color)
+        self.table_view.viewport().update()   # принудительная перерисовка
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
@@ -394,8 +433,8 @@ class ListChangesMixin:
         :param row: индекс строки в таблице
         :type row: int
         """
-
-        self.logger.debug(f"Строка {row} изменена")
+        self.logger.debug(f"_on_row_modified вызван для row={row}, modified_rows={self.modified_rows}")
+        # self.logger.debug(f"Строка {row} изменена")
 
         # Пропускаем, если строка уже помечена на удаление
         if row in self.deleted_rows:
@@ -407,10 +446,56 @@ class ListChangesMixin:
             self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_rows")
             return
         
-        self.modified_rows.add(row)
-        self._update_row_color(row)
-        self._update_save_button_state()
 
+        # Проверяем, не вернулось ли значение к исходному
+        original = self.original_data.get(row)
+
+        self.logger.debug(f"if original is not None : {original is not None}")
+        if original is not None:
+            # Сравниваем сериализованные данные (исключаем поля, которые могут меняться)
+            current_dict = dto.model_dump()
+            original_dict = original.model_dump()
+            self.logger.debug(f"if current_dict == original_dict : {current_dict == original_dict}")
+            if current_dict == original_dict:
+                # Значение совпадает с исходным – убираем из modified_rows
+                self.logger.debug(f"if row in self.modified_rows : {row in self.modified_rows}")
+                if row in self.modified_rows:
+                    self.modified_rows.discard(row)
+                    self.logger.debug(f"Вызов _set_row_color_by_source_row для row={row}")
+                    self._set_row_color_by_source_row(row)   # обновляем цвет
+                    self._update_save_button_state()
+                return
+        
+        
+        # Иначе добавляем в modified_row
+
+        self.logger.debug(f"if row not in self.modified_rows : {row not in self.modified_rows}")
+        if row not in self.modified_rows:
+            self.modified_rows.add(row)
+            # self._update_row_color(row)
+            self._set_row_color_by_source_row(row)
+            self._update_save_button_state()
+
+    # @AppLogger.get_instance(
+    #     name = 'ListChangesMixin',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _update_row_color_by_source_row(self, source_row: int):
+    #     """Обновляет цвет строки в таблице по индексу исходной модели."""
+    #     # Находим соответствующий индекс в прокси-модели
+    #     source_index = self.source_model.index(source_row, 0)
+    #     if not source_index.isValid():
+    #         return
+        
+    #     proxy_index = self.proxy_model.mapFromSource(source_index)
+    #     if not proxy_index.isValid():
+    #         return
+        
+    #     proxy_row = proxy_index.row()
+    #     self._update_row_color(proxy_row)   # используем существующий метод
 
 class ListEditModeMixin:
     '''
@@ -493,13 +578,18 @@ class ListSaveMixin:
             if dto and dto.id is not None:
                 self.service.delete(dto.id)
                 self.logger.info(f"Удалена запись ID={dto.id}")
-            self.source_model.remove_row(row)
+            # self.source_model.remove_row(row)
         self.deleted_rows.clear()
 
     def _save_modified(self):
         for row in list(self.modified_rows):
             dto = self.source_model.get_item_at_row(row)
             if dto and dto.id is not None and dto.id > 0:
+                original = self.original_data.get(row)
+                if original and dto.model_dump() == original.model_dump():
+                    # Ничего не изменилось, снимаем пометку
+                    self.modified_rows.discard(row)
+                    continue
                 updated = self.service.update(dto)
                 self.source_model.update_row(row, updated)
                 self.logger.info(f"Обновлена запись ID={updated.id}")
@@ -554,14 +644,16 @@ class ListSaveMixin:
         self.save_changes_btn.setEnabled(False)
 
         try:
-            # 1. Удаление
-            self._save_deleted()
+            # Новые строки
+            self._save_new()
 
-            # 2. Обновление
+            # Обновление
             self._save_modified()
 
-            # 3. Новые строки
-            self._save_new()
+            # Удаление
+            self._save_deleted()
+
+
 
             self._load_data()
 
@@ -926,7 +1018,8 @@ class ListInlineOpsMixin:
 
         row = self.source_model.add_row(new_dto)
         self.new_rows.add(row)
-        self._update_row_color(row)
+        # self._update_row_color(row)
+        self._set_row_color_by_source_row(row)
         self._update_save_button_state()
 
         proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
@@ -940,11 +1033,16 @@ class ListInlineOpsMixin:
     def _mark_selected_for_deletion(self):
         if not self.selected_dto:
             return
+        
         proxy_index = self.table_view.currentIndex()
         if not proxy_index.isValid():
             return
         
-        row = proxy_index.row()
+        row = self.proxy_model.mapToSource(proxy_index).row()   # исходный индекс
+        if row == -1:
+            return
+
+        # row = proxy_index.row()
         if row in self.deleted_rows:
             return
         
@@ -968,7 +1066,8 @@ class ListInlineOpsMixin:
         # Если строка была изменена или новая, убираем из соответствующих множеств
         self.modified_rows.discard(row)
         self.new_rows.discard(row)
-        self._update_row_color(row)
+        # self._update_row_color(row)
+        self._set_row_color_by_source_row(row)
         self._update_save_button_state()
 
         self.table_view.clearSelection()
@@ -1095,9 +1194,10 @@ class DynamicListPage(
         # настройка интерфейса страницы
         self._needs_refresh = False  # флаг, который указывает, нужно ли перезагружать данные при следующем входе на страницу
 
+        self._data_loaded = False   # флаг, что данные ещё не загружены
         self._setup_ui()
         
-        self._load_data() # загрузка данных на страницу
+        # self._load_data() # загрузка данных на страницу
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',
@@ -1355,7 +1455,8 @@ class DynamicListPage(
 
         row = self.source_model.add_row(dto)
         self.new_rows.add(row)
-        self._update_row_color(row)
+        # self._update_row_color(row)
+        self._set_row_color_by_source_row(row)
         self._update_save_button_state()
 
         # Прокручиваем к новой строке
@@ -1394,6 +1495,7 @@ class DynamicListPage(
             else:
                 QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
         elif index == 4:  # Обновить
+            # self._data_loaded = True
             self._load_data()
 
 

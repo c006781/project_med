@@ -215,6 +215,11 @@ class DynamicTableModel(QAbstractTableModel):
         field_name = col_info['name']
         item = self._data[row]
 
+        # првкерка на изменение значения
+        old_value = getattr(item, field_name, None)
+        if old_value == value:
+            return True   # ничего не меняем, сигнал не испускаем
+
         # Преобразование типа (если нужно)
         try:
             target_type = col_info.get('type')

@@ -456,6 +456,7 @@ class PhotoUploaderWidget(QWidget):
         if row < len(self.existing_photos): # существующие фото
             photo = self.existing_photos[row]
             if photo.description != new_text:
+                # Значение изменилось
                 photo.description = new_text
                 self.modified_photo_ids.add(photo.id) # помечаем как изменённое
                 self._update_row_color(row)          # перекрасить в жёлтый
@@ -905,12 +906,13 @@ class PhotoUploaderWidget(QWidget):
         self.logger.info(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
 
         # Полная очистка ВСЕГО состояния виджета
-        self.clear()                    # <-- полный сброс
+        self.clear()#  полный сброс
         self.pending_photos.clear()
         self.deleted_photo_ids.clear()
         self.modified_photo_ids.clear()
         self._image_cache.clear()
 
+        # Заполняем новыми данными
         if photos and isinstance(photos[0], dict):
             self.existing_photos = [PhotoDTO(**p) for p in photos]
             self.logger.debug("Фото преобразованы из dict → PhotoDTO")

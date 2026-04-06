@@ -316,12 +316,16 @@ class DraftMixin:
     def _on_draft_changed(self):
         """При любом изменении в правой панели обновляем черновик текущего приёма."""
         if not self.edit_mode:
+            self.logger.debug("_on_draft_changed: пропуск (не в режиме редактирования)")
             return
         # if not self.selected_dto:
         #     return
 
         if self._loading_right_panel > 0:
+            self.logger.debug(f"_on_draft_changed: пропуск, _loading_right_panel={self._loading_right_panel}")
             return
+
+        self.logger.debug("_on_draft_changed: начало обработки")
 
         self._save_current_draft()
         self._check_and_clear_modified_if_unchanged() #  проверяем, не вернулось ли всё к исходному
@@ -632,14 +636,18 @@ class AppointmentListPage(
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _check_and_clear_modified_if_unchanged(self):
+        """Проверяет, не вернулась ли текущая строка к исходному состоянию, и если да – снимает пометку modified."""
         if not self.selected_dto:
             return
+        
         source_row = None
+
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
             if dto and dto.id == self.selected_dto.id:
                 source_row = row
                 break
+
         if source_row is None:
             return
         
@@ -1069,6 +1077,7 @@ class AppointmentListPage(
         Если строка уже в modified_rows, ничего не делает.
         """
         if not self.selected_dto:
+            self.logger.debug("_mark_current_row_modified: selected_dto is None")
             return
 
         # Находим индекс строки в модели
@@ -1086,7 +1095,9 @@ class AppointmentListPage(
             # self._update_row_color(source_row)   # обновляем цвет строки
             self._set_row_color_by_source_row(source_row)   # обновляем цвет строки
             self._update_save_button_state()    # активируем кнопку сохранения
-
+            self.logger.debug(f"_mark_current_row_modified: строка {source_row} помечена как изменённая")
+        else:
+            self.logger.debug(f"_mark_current_row_modified: строка {source_row} уже изменена")
 
     # ----------------------------------------------------------------------
     # Режим редактирования

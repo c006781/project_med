@@ -399,7 +399,8 @@ class ListChangesMixin:
 
         self.logger.debug(f"Обновление цвета строки {source_row} - {color.name()}")
         self.source_model.set_row_color(source_row, color)
-        self.table_view.viewport().update()   # принудительная перерисовка
+        self.table_view.viewport().update()   # перерисовка видимой области
+        # self.table_view.update()              # перерисовка всей таблицы
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',

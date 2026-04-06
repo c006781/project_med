@@ -324,9 +324,10 @@ class DraftMixin:
             return
 
         self._save_current_draft()
-        self._check_and_clear_modified_if_unchanged()
-        self._mark_current_row_modified()
-        self._sync_draft_to_model()
+        self._check_and_clear_modified_if_unchanged() #  проверяем, не вернулось ли всё к исходному
+        self._mark_current_row_modified() # помечаем
+        self._sync_draft_to_model() # синхронизируем с моделью
+
 
     @AppLogger.get_instance(
         name='DraftMixin',
@@ -641,6 +642,7 @@ class AppointmentListPage(
                 break
         if source_row is None:
             return
+        
         original = self.original_data.get(source_row)
         if original and self.selected_dto.model_dump() == original.model_dump():
             if source_row in self.modified_rows:

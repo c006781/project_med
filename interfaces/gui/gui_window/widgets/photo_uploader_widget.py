@@ -260,7 +260,9 @@ class PhotoUploaderWidget(QWidget):
         Полностью заменяет текущие данные.
         """
         self.logger.debug(f"load_state: pending={state.get('pending_photos')}, existing={state.get('existing_photos')}")
+        
         self.clear()
+
         # Восстанавливаем существующие фото
         self.existing_photos = [PhotoDTO(**p) for p in state['existing_photos']]
         self.pending_photos = state['pending_photos']
@@ -450,6 +452,7 @@ class PhotoUploaderWidget(QWidget):
             return
 
         new_text = item.text()
+
         if row < len(self.existing_photos): # существующие фото
             photo = self.existing_photos[row]
             if photo.description != new_text:
@@ -459,6 +462,7 @@ class PhotoUploaderWidget(QWidget):
                 self.photosChanged.emit()
                 self.logger.debug(f"Обновлено описание фото ID={photo.id}")
         else:
+            # Обработка новых фото (pending) – без исходного описания
             pending_index = row - len(self.existing_photos)
             if pending_index < len(self.pending_photos):
                 file_path, old_desc = self.pending_photos[pending_index]
@@ -1097,6 +1101,8 @@ class PhotoUploaderWidget(QWidget):
         
         # # Принудительная перерисовка
         # self.table.viewport().update
+        # self.table_view.viewport().update()   # перерисовка видимой области
+        # self.table_view.update()              # перерисовка всей таблицы
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',

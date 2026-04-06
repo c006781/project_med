@@ -439,20 +439,30 @@ class PhotoUploaderWidget(QWidget):
     )
     def _on_item_changed(self, item: QTableWidgetItem):
         """
-        Обработчик события изменения элемента таблицы.
+        Обработчик изменения описания фото в таблице.
 
-        Если изменение произошло в столбце 1 (описание), то обновляет описание фото, если оно существует в БД,
-        или обновляет описание нового фото, если оно pending.
+        Что делает:
+        - Для существующих фото: сравнивает новое описание с оригинальным.
+          Если отличается — помечает в modified_photo_ids и красит строку в жёлтый.
+          Если вернули точно к оригиналу — снимает пометку modified_photo_ids и красит в белый.
+        - Для новых фото (pending): просто обновляет описание.
+        - В любом случае изменений вызывает photosChanged, чтобы AppointmentListPage
+          мог синхронизировать состояние и обновить выделение строки приёма.
 
-        Выводит событие photosChanged, если описание фото было изменено.
+        :param item: Изменённый QTableWidgetItem (столбец описания)
+        :type item: QTableWidgetItem
         """
+
         row = item.row()
         column = item.column()
+
+        self.logger.debug(f"if rcolumn != 1 = {column != 1}")  
         if column != 1:
             return
 
-        new_text = item.text()
+        new_text = item.text() # .strip() НЕ используем — пользователь может хотеть пробелы
 
+        self.logger.debug(f"if row < len(self.existing_photos) = {row < len(self.existing_photos)}")  
         if row < len(self.existing_photos): # существующие фото
             photo = self.existing_photos[row]
             if photo.description != new_text:
@@ -465,6 +475,8 @@ class PhotoUploaderWidget(QWidget):
         else:
             # Обработка новых фото (pending) – без исходного описания
             pending_index = row - len(self.existing_photos)
+
+            self.logger.debug(f"if pending_index < len(self.pending_photos) = {pending_index < len(self.pending_photos)}")  
             if pending_index < len(self.pending_photos):
                 file_path, old_desc = self.pending_photos[pending_index]
                 if old_desc != new_text:

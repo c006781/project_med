@@ -318,6 +318,7 @@ class DraftMixin:
         if not self.edit_mode:
             self.logger.debug("_on_draft_changed: пропуск (не в режиме редактирования)")
             return
+        
         # if not self.selected_dto:
         #     return
 
@@ -642,21 +643,26 @@ class AppointmentListPage(
         
         source_row = None
 
+        self.logger.debug(f"_check_and_clear_modified_if_unchanged: selected_dto = {self.selected_dto}")
+
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
             if dto and dto.id == self.selected_dto.id:
                 source_row = row
                 break
 
+        self.logger.debug(f"_check_and_clear_modified_if_unchanged: source_row = {source_row}")
         if source_row is None:
             return
         
         original = self.original_data.get(source_row)
         if original and self.selected_dto.model_dump() == original.model_dump():
+            self.logger.debug(f"if source_row in self.modified_rows = {source_row in self.modified_rows}")
             if source_row in self.modified_rows:
                 self.modified_rows.discard(source_row)
                 self._set_row_color_by_source_row(source_row)
                 self._update_save_button_state()
+                self.logger.debug(f"_check_and_clear... : строка {source_row} возвращена к оригиналу — выделение СНЯТО")
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',

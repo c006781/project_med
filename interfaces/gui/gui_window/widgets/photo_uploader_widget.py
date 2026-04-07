@@ -605,8 +605,9 @@ class PhotoUploaderWidget(QWidget):
                 f"new_text = {new_text}, "
                 f"original_desc != new_text = {original_desc != new_text}"
             )  
-
+            self.logger.debug(f"_on_item_changed: row={row}, col={column}, new_text='{new_text}', old_desc='{original_desc}'")
             if original_desc != new_text:
+                self.logger.debug("  → описание изменилось, эмитируем photosChanged")
                 # Значение изменилось
                 photo.description = new_text
                 was_modified = photo.id not in self.modified_photo_ids
@@ -618,6 +619,8 @@ class PhotoUploaderWidget(QWidget):
                 if was_modified:
                     self.logger.debug(f"  → Фото ID={photo.id} ПОМЕЧЕНО как modified")
             else:
+                self.logger.debug("  → описание НЕ изменилось, сигнал не будет отправлен")
+                self.logger.debug(f"if photo.id in self.modified_photo_ids  = {photo.id in self.modified_photo_ids}")
                 # Вернули к исходному значению
                 if photo.id in self.modified_photo_ids:
                     self.modified_photo_ids.discard(photo.id)

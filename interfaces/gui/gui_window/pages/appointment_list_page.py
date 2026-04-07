@@ -314,7 +314,19 @@ class DraftMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _on_draft_changed(self):
-        """При любом изменении в правой панели обновляем черновик текущего приёма."""
+        """
+        При любом изменении в правой панели (заметка или фото) обновляем черновик текущего приёма.
+
+        Что делает:
+        - Сохраняет черновик.
+        - Синхронизирует состояние фото в selected_dto.
+        - Принудительно помечает строку приёма как изменённую (force-mark).
+        - Проверяет, не вернулось ли всё к оригиналу (снимает пометку только если действительно ничего не изменилось).
+        - Синхронизирует с моделью.
+
+        :return: None
+        """
+
         if not self.edit_mode:
             self.logger.debug("_on_draft_changed: пропуск (не в режиме редактирования)")
             return
@@ -329,9 +341,18 @@ class DraftMixin:
         self.logger.debug("_on_draft_changed: начало обработки")
 
         self._save_current_draft()
-        self._check_and_clear_modified_if_unchanged() #  проверяем, не вернулось ли всё к исходному
-        self._mark_current_row_modified() # помечаем
+        self._sync_draft_to_selected_dto()# обновляем selected_dto.photos
+        
+        self._mark_current_row_modified() # принудительно помечаем строку приёма
+        self._check_and_clear_modified_if_unchanged()# снимаем только если вернулось к оригиналу
+        
         self._sync_draft_to_model() # синхронизируем с моделью
+
+        self.logger.info(
+            f"_on_draft_changed завершён. "
+            f"modified_rows = {len(self.modified_rows)}, "
+            f"selected_dto.id = {getattr(self.selected_dto, 'id', None)}"
+        )
 
 
     @AppLogger.get_instance(
@@ -628,6 +649,32 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _sync_draft_to_selected_dto(self) -> None:
+        """
+        Синхронизирует актуальное состояние photo_widget обратно в selected_dto.photos
+        перед проверкой _check_and_clear_modified_if_unchanged.
+        Без этого сравнение model_dump() не видит изменения описаний.
+        """
+        if not self.selected_dto :
+            return
+        
+        if not hasattr(self.photo_widget, 'existing_photos'):
+            self.logger.warning("_sync_draft_to_selected_dto: photo_widget не имеет метода get_existing_photos")
+            return
+
+        # existing_photos уже обновляются по ссылке в _on_item_changed
+        self.selected_dto.photos = self.photo_widget.get_existing_photos()[:] # Копируем список, чтобы не было проблем с ссылками
+
+        self.logger.debug(
+            f"_sync_draft_to_selected_dto: synced {len(self.selected_dto.photos)} photos to selected_dto"
+        )
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -656,11 +703,23 @@ class AppointmentListPage(
             return
         
         original = self.original_data.get(source_row)
+        self.logger.debug(
+            f"_check_and_clear_modified_if_unchanged: original = {original} ,"
+            f" self.selected_dto.model_dump() == original.model_dump() = {self.selected_dto.model_dump() == original.model_dump()}"
+
+        )
+        # if original and self.selected_dto.model_dump() == original.model_dump():
+        #     if source_row in self.modified_rows:
+        #         self.modified_rows.discard(source_row)
+        #         self._set_row_color_by_source_row(source_row)
+        #         self._update_save_button_state()
+
+
         if original and self.selected_dto.model_dump() == original.model_dump():
             self.logger.debug(f"if source_row in self.modified_rows = {source_row in self.modified_rows}")
             if source_row in self.modified_rows:
                 self.modified_rows.discard(source_row)
-                self._set_row_color_by_source_row(source_row)
+                self._set_row_color_by_source_row(source_row)  
                 self._update_save_button_state()
                 self.logger.debug(f"_check_and_clear... : строка {source_row} возвращена к оригиналу — выделение СНЯТО")
 
@@ -1081,18 +1140,32 @@ class AppointmentListPage(
         """
         Помечает текущую строку (self.selected_dto) как изменённую в модели.
         Если строка уже в modified_rows, ничего не делает.
+
+        :return: None
         """
         if not self.selected_dto:
             self.logger.debug("_mark_current_row_modified: selected_dto is None")
             return
 
-        # Находим индекс строки в модели
-        proxy_index = self.table_view.currentIndex()
-        if not proxy_index.isValid():
-            return
+        # # Находим индекс строки в модели
+        # proxy_index = self.table_view.currentIndex()
+        # if not proxy_index.isValid():
+        #     return
 
-        source_row = self.proxy_model.mapToSource(proxy_index).row()
-        if source_row == -1:
+        # source_row = self.proxy_model.mapToSource(proxy_index).row()
+        # if source_row == -1:
+        #     return
+
+        # Ищем source_row по id (самый надёжный способ)
+        source_row = None
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and getattr(dto, 'id', None) == self.selected_dto.id:
+                source_row = row
+                break
+
+        if source_row is None:
+            self.logger.warning(f"_mark_current_row_modified: не найдена строка для id={self.selected_dto.id}")
             return
 
         # Если строка ещё не помечена как modified, добавляем

@@ -80,10 +80,120 @@ class PhotoDelegate(QStyledItemDelegate):
         return QSize(100, 100)
 
 
+# class TextEditDelegate(QStyledItemDelegate):
+#     """
+#     Делегат для редактирования текста в ячейке с помощью многострочного QTextEdit.
+#     Поддерживает перенос строк, автоматический перенос при наборе и ручной ввод Shift+Enter.
+#     """
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def createEditor(self, parent, option, index):
+#         """Создаёт QTextEdit вместо стандартного QLineEdit."""
+#         editor = QTextEdit(parent)
+#         editor.setAcceptRichText(False)  # только обычный текст
+#         editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)  # перенос по словам
+#         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+#         # Устанавливаем высоту около 100 пикселей для удобства
+#         editor.setMinimumHeight(80)
+#         return editor
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def setEditorData(self, editor, index):
+#         """Загружает текущий текст в редактор."""
+#         value = index.model().data(index, Qt.EditRole)
+#         if value is not None:
+#             editor.setPlainText(str(value))
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def setModelData(self, editor, model, index):
+#         """Сохраняет текст из редактора в модель."""
+#         model.setData(index, editor.toPlainText(), Qt.EditRole)
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def updateEditorGeometry(self, editor, option, index):
+#         """Устанавливает геометрию редактора (растягивается на всю ячейку)."""
+#         editor.setGeometry(option.rect)
+
+#     @AppLogger.get_instance(
+#         name = 'TextEditDelegate',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = 'system',
+#     ).log_execution_time(
+#         level = AppLogger._parse_log_level('DEBUG')
+#     )
+#     def eventFilter(self, editor, event):
+#         """
+#         Обрабатывает нажатия клавиш в редакторе.
+#         Enter завершает редактирование, Shift+Enter вставляет перенос строки.
+#         """
+#         if event.type() == QEvent.KeyPress:
+#             if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
+#                 if event.modifiers() == Qt.ShiftModifier:
+#                     # Shift+Enter: вставляем перенос строки (стандартное поведение QTextEdit)
+#                     return False  # пусть обрабатывает QTextEdit
+#                 else:
+#                     # Enter без Shift: завершаем редактирование
+#                     self.commitData.emit(editor)
+#                     self.closeEditor.emit(editor, QStyledItemDelegate.NoHint)
+#                     return True
+#         return super().eventFilter(editor, event)
+
+
 class TextEditDelegate(QStyledItemDelegate):
     """
     Делегат для редактирования текста в ячейке с помощью многострочного QTextEdit.
-    Поддерживает перенос строк, автоматический перенос при наборе и ручной ввод Shift+Enter.
+
+    Что это (кратко):
+        Позволяет редактировать описание фото с переносами строк (Shift+Enter — новая строка, Enter — завершить редактирование).
+
+    Что это (максимально подробно):
+        Стандартный QStyledItemDelegate заменяется на QTextEdit для поддержки многострочного текста.
+        Поддерживает автоматический перенос по словам, вертикальную прокрутку и специальную обработку клавиш.
+        После завершения редактирования **принудительно** вызывает _on_item_changed родительского PhotoUploaderWidget,
+        чтобы гарантировать срабатывание photosChanged даже если Qt не сгенерировал itemChanged.
+
+    Как работает:
+        1. createEditor — создаёт QTextEdit.
+        2. setEditorData / setModelData — загружает/сохраняет текст.
+        3. eventFilter — обрабатывает Enter / Shift+Enter.
+        4. После commitData вручную вызывает метод photo_widget._on_item_changed.
+
+    param parent : (QWidget) Родительский виджет (обычно таблица).
+    param photo_widget : (PhotoUploaderWidget) Ссылка на основной виджет, чтобы вызвать _on_item_changed.
     """
 
     @AppLogger.get_instance(
@@ -93,8 +203,15 @@ class TextEditDelegate(QStyledItemDelegate):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, photo_widget=None):
         super().__init__(parent)
+        self.photo_widget = photo_widget  # <-- главное исправление
+        self.logger = AppLogger.get_instance(
+            name='gui.TextEditDelegate',
+            enable_file_logging='user',
+            use_name_in_filename='user',
+        )
+        self.logger.debug("TextEditDelegate инициализирован")
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
@@ -106,11 +223,11 @@ class TextEditDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         """Создаёт QTextEdit вместо стандартного QLineEdit."""
         editor = QTextEdit(parent)
-        editor.setAcceptRichText(False)  # только обычный текст
-        editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)  # перенос по словам
+        editor.setAcceptRichText(False)
+        editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # Устанавливаем высоту около 100 пикселей для удобства
         editor.setMinimumHeight(80)
+        self.logger.debug(f"createEditor: создан QTextEdit для строки {index.row()}")
         return editor
 
     @AppLogger.get_instance(
@@ -125,6 +242,7 @@ class TextEditDelegate(QStyledItemDelegate):
         value = index.model().data(index, Qt.EditRole)
         if value is not None:
             editor.setPlainText(str(value))
+            self.logger.debug(f"setEditorData: загружен текст для строки {index.row()}")
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
@@ -135,7 +253,20 @@ class TextEditDelegate(QStyledItemDelegate):
     )
     def setModelData(self, editor, model, index):
         """Сохраняет текст из редактора в модель."""
-        model.setData(index, editor.toPlainText(), Qt.EditRole)
+        new_text = editor.toPlainText()
+        model.setData(index, new_text, Qt.EditRole)
+        self.logger.debug(f"setModelData: сохранён текст '{new_text[:50]}...' для строки {index.row()}")
+
+        # Принудительно вызываем обработчик изменений в PhotoUploaderWidget
+        if self.photo_widget and hasattr(self.photo_widget, '_on_item_changed'):
+            item = self.photo_widget.table.item(index.row(), index.column())
+            if item:
+                self.photo_widget._on_item_changed(item)
+                self.logger.debug("setModelData: ПРИНУДИТЕЛЬНО вызван _on_item_changed → photosChanged")
+            else:
+                self.logger.warning("setModelData: item не найден")
+        else:
+            self.logger.warning("setModelData: photo_widget отсутствует или нет метода _on_item_changed")
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
@@ -163,10 +294,10 @@ class TextEditDelegate(QStyledItemDelegate):
         if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
                 if event.modifiers() == Qt.ShiftModifier:
-                    # Shift+Enter: вставляем перенос строки (стандартное поведение QTextEdit)
-                    return False  # пусть обрабатывает QTextEdit
+                    self.logger.debug("eventFilter: Shift+Enter — перенос строки")
+                    return False
                 else:
-                    # Enter без Shift: завершаем редактирование
+                    self.logger.debug("eventFilter: Enter — завершение редактирования")
                     self.commitData.emit(editor)
                     self.closeEditor.emit(editor, QStyledItemDelegate.NoHint)
                     return True
@@ -329,7 +460,8 @@ class PhotoUploaderWidget(QWidget):
         photo_delegate = PhotoDelegate(self.table, self)
         self.table.setItemDelegateForColumn(0, photo_delegate)
 
-        text_delegate = TextEditDelegate(self.table)
+        # text_delegate = TextEditDelegate(self.table)
+        text_delegate = TextEditDelegate(self.table, self)  # <-- передаём self (PhotoUploaderWidget)
         self.table.setItemDelegateForColumn(1, text_delegate)
 
         # Сигналы
@@ -465,15 +597,37 @@ class PhotoUploaderWidget(QWidget):
         self.logger.debug(f"if row < len(self.existing_photos) = {row < len(self.existing_photos)}")  
         if row < len(self.existing_photos): # существующие фото
             photo = self.existing_photos[row]
-            if photo.description != new_text:
+            original_desc = photo.description or "" 
+
+            self.logger.debug(
+                f"photo.description = {photo.description}, "
+                f"original_desc = {original_desc}, "
+                f"new_text = {new_text}, "
+                f"original_desc != new_text = {original_desc != new_text}"
+            )  
+
+            if original_desc != new_text:
                 # Значение изменилось
                 photo.description = new_text
+                was_modified = photo.id not in self.modified_photo_ids
                 self.modified_photo_ids.add(photo.id) # помечаем как изменённое
                 self._update_row_color(row)          # перекрасить в жёлтый
                 self.photosChanged.emit()
-                self.logger.debug(f"Обновлено описание фото ID={photo.id}")
+
+                self.logger.debug(f"if was_modified {was_modified }")
+                if was_modified:
+                    self.logger.debug(f"  → Фото ID={photo.id} ПОМЕЧЕНО как modified")
+            else:
+                # Вернули к исходному значению
+                if photo.id in self.modified_photo_ids:
+                    self.modified_photo_ids.discard(photo.id)
+                    self._update_row_color(row)
+                    self.photosChanged.emit()
+                    self.logger.debug(f"  → Фото ID={photo.id} — описание вернулось к оригиналу, modified СНЯТ")
+                else:
+                    self.logger.debug(f"  → Фото ID={photo.id} не было modified — ничего не делаем")
         else:
-            # Обработка новых фото (pending) – без исходного описания
+            # Обработка новых фото (pending) 
             pending_index = row - len(self.existing_photos)
 
             self.logger.debug(f"if pending_index < len(self.pending_photos) = {pending_index < len(self.pending_photos)}")  
@@ -523,7 +677,7 @@ class PhotoUploaderWidget(QWidget):
         self.pending_photos.append((file_path, ""))
         self._refresh_table()
         self.photosChanged.emit()
-        self.logger.info(f"Добавлено фото: {file_path}")
+        self.logger.debug(f"Добавлено фото: {file_path}")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -555,7 +709,7 @@ class PhotoUploaderWidget(QWidget):
                 self._update_row_color(row)
 
             self.photosChanged.emit() # сигнал об изменениях
-            self.logger.info(f"Помечено на удаление {len(selected_rows)} фото")
+            self.logger.debug(f"Помечено на удаление {len(selected_rows)} фото")
 
         except Exception as e:
             self.logger.exception(f"Ошибка при удалении фото: {e}")
@@ -915,7 +1069,7 @@ class PhotoUploaderWidget(QWidget):
         Устанавливает существующие фото из БД после сохранения.
         Полностью очищает все временные состояния и сбрасывает выделение новых фото.
         """
-        self.logger.info(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
+        self.logger.debug(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
 
         # Полная очистка ВСЕГО состояния виджета
         self.clear()#  полный сброс
@@ -940,7 +1094,7 @@ class PhotoUploaderWidget(QWidget):
         self.table.viewport().update()      # принудительная перерисовка
         self.table.repaint()
 
-        self.logger.info(f"set_existing_photos ЗАВЕРШЁН. "
+        self.logger.debug(f"set_existing_photos ЗАВЕРШЁН. "
                         f"existing={len(self.existing_photos)}, "
                         f"pending={len(self.pending_photos)}, "
                         f"строк в таблице={self.table.rowCount()}")

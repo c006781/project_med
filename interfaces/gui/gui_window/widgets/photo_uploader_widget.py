@@ -1246,6 +1246,7 @@ class PhotoUploaderWidget(QWidget):
         После сохранения все добавленные фото становятся существующими,
         поэтому зелёный цвет ('new') больше не должен применяться.
         """
+        self.logger.debug(f"_set_row_color: НАЧАЛО, row={row}")
         try:
             state = self._get_row_state(row)
             self.logger.debug(f"_set_row_color: row={row}, state={state}")

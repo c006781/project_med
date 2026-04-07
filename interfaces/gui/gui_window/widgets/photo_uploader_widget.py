@@ -1217,15 +1217,19 @@ class PhotoUploaderWidget(QWidget):
             )
 
             if photo.id in self.deleted_photo_ids:
+                self.logger.debug(f"{row}    → состояние: deleted (красный)")
                 return 'deleted'
             
             if photo.id in self.modified_photo_ids:
+                self.logger.debug(f"{row}     → состояние: modified (жёлтый)")
                 return 'modified'
             
+            self.logger.debug(f"{row}     → состояние: normal (белый)")
             return 'normal'
         
         else:
             # Новые фото (pending)
+            self.logger.debug(f"{row}     → pending photo → состояние: new (зелёный)")
             return 'new'
 
     @AppLogger.get_instance(
@@ -1259,6 +1263,7 @@ class PhotoUploaderWidget(QWidget):
         else:
             color = QColor(255, 255, 255)   # белый (нормальное состояние)
 
+        self.logger.debug(f"    → выбран цвет для '{state}': {color.name()}")
         for col in range(self.table.columnCount()):
             self.logger.debug(f"item = self.table.item(row={row}, col={col}), color={color}") 
             item = self.table.item(row, col)
@@ -1271,6 +1276,7 @@ class PhotoUploaderWidget(QWidget):
         # self.table.viewport().update
         # self.table_view.viewport().update()   # перерисовка видимой области
         # self.table_view.update()              # перерисовка всей таблицы
+        self.logger.debug(f"Строка {row} окрашена в состояние '{state}' и перерисована")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',

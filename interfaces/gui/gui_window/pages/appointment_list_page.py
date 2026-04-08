@@ -1342,8 +1342,20 @@ class AppointmentListPage(
         # Добавляем проверку черновиков для текущего выбранного приёма
         if self.selected_dto:
             appointment_id = self.selected_dto.id
-            if appointment_id in self._draft_note_text or appointment_id in self._draft_photos:
-                return True
+
+            # if appointment_id in self._draft_note_text:
+            #     return True
+            
+            if appointment_id in self._draft_photos:
+                return (
+                    len(self._draft_photos[appointment_id]['pending_photos'])>0 
+                )or(
+                    len(self._draft_photos[appointment_id]['deleted_photo_ids'])>0 
+                )or(
+                    len(self._draft_photos[appointment_id]['modified_photo_ids'])>0
+                )
+                
+                # return True
 
         return False
 

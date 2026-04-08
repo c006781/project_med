@@ -206,13 +206,13 @@ class DraftMixin:
     """
     Содержит логику сохранения и восстановления черновиков для приёмов.
     Атрибуты (должны быть определены в классе-наследнике):
-        _draft_photos: dict[int, dict]   # черновики фото
-        _draft_note_text: dict[int, str] # черновики заметок
-        _loading_right_panel: bool       # блокировка сигналов при загрузке
-        note_text_edit                   # QTextEdit
-        photo_widget                     # PhotoUploaderWidget
-        selected_dto                     # текущий выбранный DTO
-        logger                           # AppLogger
+        _draft_photos: dict[int, dict]      # черновики фото
+        _draft_note_current: dict[int, str] # черновики заметок
+        _loading_right_panel: bool          # блокировка сигналов при загрузке
+        note_text_edit                      # QTextEdit
+        photo_widget                        # PhotoUploaderWidget
+        selected_dto                        # текущий выбранный DTO
+        logger                              # AppLogger
     """
 
     @AppLogger.get_instance(
@@ -229,21 +229,27 @@ class DraftMixin:
             return
 
         aid = self.selected_dto.id   # может быть отрицательным временным ID
-
-        # if aid is None:
-        #     # Для новых строк используем ключ None
-        #     # Сохраняем состояние заметки для новой строки
-        #     self._draft_note_text[None] = self.note_text_edit.toPlainText()
-        #     # Сохраняем состояние фото для новой строки
-        #     self._draft_photos[None] = self.photo_widget.dump_state()
-
-        #     self.logger.debug(f"Сохранён черновик для нового приёма")
-        #     return
-        
+       
         # Для существующих
 
         # Заметка
-        self._draft_note_text[aid] = self.note_text_edit.toPlainText()
+        current_text = self.note_text_edit.toPlainText()
+
+        # Если черновика для этого приёма ещё нет – создаём с оригиналом из БД
+        if aid not in self._draft_note_original:
+            # Оригинал берём из selected_dto (он загружен из БД или из черновика)
+            original = self.selected_dto.note_text or ""
+            self._draft_note_original[aid] = original
+            self._draft_note_current[aid] = original
+
+        # Если текущий текст отличается от оригинального – обновляем current
+        if current_text != self._draft_note_original[aid]:
+            self._draft_note_current[aid] = current_text
+        else:
+            # Если вернулось к оригиналу – удаляем запись current (чтобы не хранить лишнее)
+            if aid in self._draft_note_current:
+                del self._draft_note_current[aid]
+
         # Фото
         self._draft_photos[aid] = self.photo_widget.dump_state()
 
@@ -269,28 +275,20 @@ class DraftMixin:
             f"Есть черновик: {appointment_id in self._draft_photos}"
         )
 
-        # if appointment_id is None:
-        #     # Новая строка – загружаем черновик, если есть
-            
-        #     note_text = self._draft_note_text.get(None)
-        #     self.note_text_edit.setText(note_text if note_text is not None else "")
-
-        #     # Загружаем состояние фото из черновика
-        #     draft_state = self._draft_photos.get(None)
-        #     if draft_state:
-        #         self.photo_widget.load_state(draft_state)
-        #     else:
-        #         self.photo_widget.clear()
-        #     return
-
-        # заметка
-        
-        note_text = self._draft_note_text.get(appointment_id)
-        if note_text is not None:
-            self.note_text_edit.setText(note_text)
-            self.logger.debug("Загружена заметка из черновика")
+        # Заметка
+        if appointment_id in self._draft_note_current:
+            # Есть изменённый текст – показываем его
+            self.note_text_edit.setText(self._draft_note_current[appointment_id])
+            self.logger.debug("Загружена заметка из черновика (изменённая)")
+        elif appointment_id in self._draft_note_original:
+            # Есть оригинал, но нет current – значит без изменений
+            self.note_text_edit.setText(self._draft_note_original[appointment_id])
+            self.logger.debug("Загружена заметка из черновика (оригинал)")
         else:
+            # Нет черновика – берём из БД
             self.note_text_edit.setText(dto.note_text or "")
+            # Сохраняем оригинал для будущих сравнений (без пометки modified)
+            self._draft_note_original[appointment_id] = dto.note_text or ""
 
         # фото
         if appointment_id in self._draft_photos:
@@ -354,7 +352,6 @@ class DraftMixin:
             f"selected_dto.id = {getattr(self.selected_dto, 'id', None)}"
         )
 
-
     @AppLogger.get_instance(
         name='DraftMixin',
         enable_file_logging='system',
@@ -362,11 +359,35 @@ class DraftMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _clear_drafts(self):
-        """Полностью очищает все черновики."""
-        self._draft_photos.clear()
-        self._draft_note_text.clear()
-        self.logger.debug("Черновики очищены")
+    def _clear_drafts(
+        self, 
+        appointment_id:int=None
+    ):
+        """
+        Очищает черновики для указанного приёма.
+
+        Если appointment_id не указан, то очищаются все черновики.
+        Черновики для каждого приёма хранятся в следующих словарях:
+            - _draft_photos: черновики для фотографий
+            - _draft_note_original: оригинальные тексты заметок
+            - _draft_note_current: текущие тексты заметок
+
+        :param appointment_id: ID приёма, для которого очищаются черновики.
+        :type appointment_id: int
+
+        :return: None
+        """
+        if appointment_id is None:
+            self._draft_photos.clear()
+            self._draft_note_original.clear()
+            self._draft_note_current.clear()
+            self.logger.debug("Все черновики очищены")
+        else:
+            # Удаляем черновики для приёма appointment_id
+            self._draft_photos.pop(appointment_id, None)
+            self._draft_note_original.pop(appointment_id, None)
+            self._draft_note_current.pop(appointment_id, None)
+            self.logger.debug(f"Черновики очищены для приёма {appointment_id}")
 
 
 class PatientInfoMixin:
@@ -602,7 +623,8 @@ class AppointmentListPage(
 
         # Словари для хранения черновиков приёмов
         self._draft_photos = {}      # appointment_id -> состояние от photo_widget.dump_state()
-        self._draft_note_text = {}   # appointment_id -> str
+        self._draft_note_original = {}   # appointment_id -> оригинальный текст
+        self._draft_note_current = {}    # appointment_id -> текущий текст (если изменён)
 
         # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
         self._right_panel_modified = False
@@ -666,6 +688,8 @@ class AppointmentListPage(
                 return row
         return -1
 
+
+
     @AppLogger.get_instance(
         name='AppointmentListPage',
         enable_file_logging='system',
@@ -683,11 +707,13 @@ class AppointmentListPage(
             return
 
         appointment_id = self.selected_dto.id
+
+
         self.logger.debug(f"Сброс приёма {appointment_id} из БД")
 
         # 1. Удаляем черновики для этого приёма
-        self._draft_photos.pop(appointment_id, None)
-        self._draft_note_text.pop(appointment_id, None)
+        self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
+        
 
         # 2. Загружаем свежие данные из БД
         try:
@@ -797,31 +823,38 @@ class AppointmentListPage(
         """
         Синхронизирует черновики приёма (draft) с моделью (source_model).
         Если выбранная строка (self.selected_dto) не существует в модели, ничего не делает.
-        Если в черновике (self._draft_note_text) есть текст для заметки приёма с id, равным id выбранной строки, обновляет поле note_text в DTO из черновика.
+        Если в черновике (self._draft_note_current) есть текст для заметки приёма с id, равным id выбранной строки, обновляет поле note_text в DTO из черновика.
         """
         if not self.selected_dto:
             return
         
+        aid = self.selected_dto.id
+
         # Найти строку в модели
         source_row = None
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id == self.selected_dto.id:
+            if dto and dto.id == aid:
                 source_row = row
                 break
 
         if source_row is None:
             return
-        
-        # Обновить поле note_text в DTO из черновика
-        note_text = self._draft_note_text.get(self.selected_dto.id)
-        if note_text is not None and self.selected_dto.note_text != note_text:
-            self.selected_dto.note_text = note_text
-            col_idx = self._get_column_index('note_text')
-            if col_idx >= 0:
-                index = self.source_model.index(source_row, col_idx)
-                self.source_model.setData(index, note_text, Qt.EditRole)
-        
+       
+        # Заметка
+        if aid in self._draft_note_current:
+            new_text = self._draft_note_current[aid]
+            if self.selected_dto.note_text != new_text:
+                self.selected_dto.note_text = new_text
+                # Обновить в модели
+                source_row = self._find_source_row_by_id(aid)
+                if source_row != -1:
+                    col_idx = self._get_column_index('note_text')
+                    if col_idx >= 0:
+                        index = self.source_model.index(source_row, col_idx)
+                        self.source_model.setData(index, new_text, Qt.EditRole)
+        # Фото уже синхронизировано через _sync_draft_to_selected_dto
+        self._sync_draft_to_selected_dto()
         # после возможного обновления проверить, не стал ли DTO равным оригиналу
         self._check_and_clear_modified_if_unchanged()
 
@@ -860,8 +893,7 @@ class AppointmentListPage(
 
         # Очищаем черновики для новой строки (если она была)
         if temp_id is not None:
-            self._draft_photos.pop(temp_id, None)
-            self._draft_note_text.pop(temp_id, None)
+            self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
 
         # Если после удаления строк не осталось, очищаем правую панель
         if self.source_model.rowCount() == 0:
@@ -954,9 +986,10 @@ class AppointmentListPage(
     )
     def _apply_draft_to_new_dto(self, dto):
         if dto.id is not None and dto.id < 0:
-            note_text = self._draft_note_text.get(dto.id)
-            if note_text is not None:
-                dto.note_text = note_text
+            if dto.id in self._draft_note_current:
+                note_text = self._draft_note_current.get(dto.id)
+                if note_text is not None:
+                    dto.note_text = note_text
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -973,7 +1006,7 @@ class AppointmentListPage(
             if dto and (dto.id is not None) and (dto.id < 0):
                 temp_id = dto.id
                 # Заметка из черновика
-                note_text = self._draft_note_text.get(temp_id)
+                note_text = self._draft_note_current.get(temp_id)
                 if note_text is not None:
                     dto.note_text = note_text
 
@@ -1006,8 +1039,7 @@ class AppointmentListPage(
                     self.logger.warning(f"Не удалось сохранить фото для нового приёма: created.id = {created.id}")
 
                 # Очищаем черновики для этого временного ID
-                self._draft_photos.pop(temp_id, None)
-                self._draft_note_text.pop(temp_id, None)
+                self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
 
         return newly_created_id
 
@@ -1301,6 +1333,7 @@ class AppointmentListPage(
         if reply == QMessageBox.StandardButton.Yes:
             self._save_changes()
             return True
+        
         elif reply == QMessageBox.StandardButton.No:
             # Откат: сбросить черновики, перезагрузить данные, очистить множества строк
             self._clear_drafts() # очищаем черновики
@@ -1308,6 +1341,7 @@ class AppointmentListPage(
             self.modified_rows.clear()
             self.deleted_rows.clear()
             self.new_rows.clear()
+            
             self._update_save_button_state()
             # Сбросить правую панель для текущего приёма (если есть)
             if self.selected_dto:
@@ -1343,16 +1377,19 @@ class AppointmentListPage(
         if self.selected_dto:
             appointment_id = self.selected_dto.id
 
-            # if appointment_id in self._draft_note_text:
-            #     return True
-            
+            # Заметка изменена?
+            if appointment_id in self._draft_note_current:
+                if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
+                    return True
+
+
             if appointment_id in self._draft_photos:
                 return (
-                    len(self._draft_photos[appointment_id]['pending_photos'])>0 
-                )or(
-                    len(self._draft_photos[appointment_id]['deleted_photo_ids'])>0 
-                )or(
-                    len(self._draft_photos[appointment_id]['modified_photo_ids'])>0
+                    len(self._draft_photos[appointment_id].get('pending_photos', []))>0 
+                ) or(
+                    len(self._draft_photos[appointment_id].get('deleted_photo_ids', []))>0 
+                ) or(
+                    len(self._draft_photos[appointment_id].get('modified_photo_ids', []))>0
                 )
                 
                 # return True
@@ -1422,10 +1459,9 @@ class AppointmentListPage(
     )
     def _update_appointment_note(self, dto, appointment_id):
         """Обновляет заметку приёма из черновика."""
-        note_text = self._draft_note_text.get(appointment_id)
-        if note_text is not None:
-            dto.note_text = note_text
-            self.logger.debug(f"  → Заметка обновлена для {appointment_id}")
+        if appointment_id in self._draft_note_current:
+            dto.note_text = self._draft_note_current[appointment_id]
+            self.logger.debug(f"  → Заметка обновлена из черновика для {appointment_id}")
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -1486,6 +1522,9 @@ class AppointmentListPage(
         # Основные поля приёма
         self._update_appointment_basic_fields(dto)
         self.logger.debug(f"  → Основные данные приёма {appointment_id} обновлены")
+
+         # После успешного сохранения очищаем черновики для этого приёма
+        self._clear_drafts(appointment_id) # Удаляем черновики для этого приёма
 
 
     # --- Финальные действия после сохранения ---
@@ -1722,9 +1761,7 @@ class AppointmentListPage(
         При входе на страницу обновляем список приёмов.
         Если передан patient_id, показываем панель с информацией о пациенте.
         """
-        # # Сброс черновиков при входе 
-        # self._draft_photos.clear()
-        # self._draft_note_text.clear()
+        
         # Сбрасываем черновики, если это не возврат после сохранения с select_id
         if not (extra_data and 'select_id' in extra_data):
             self._clear_drafts()

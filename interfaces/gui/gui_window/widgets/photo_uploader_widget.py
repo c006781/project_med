@@ -48,6 +48,13 @@ class PhotoDelegate(QStyledItemDelegate):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        """
+        Переопределяет метод для отрисовки масштабированной иконки в ячейке таблицы.
+        
+        :param painter: QPainter - объект для отрисовки
+        :param option: QStyleOptionViewItem - параметры для отрисовки
+        :param index: QModelIndex - индекс элемента в таблице
+        """
         full_path = index.data(Qt.UserRole)
         self.logger.debug(f"full_path : {full_path}")
         if not full_path:
@@ -374,6 +381,7 @@ class PhotoUploaderWidget(QWidget):
         """
         return {
             'existing_photos': [p.model_dump() for p in self.existing_photos],
+            'original_descriptions': self.original_descriptions.copy(),
             'pending_photos': self.pending_photos.copy(),
             'deleted_photo_ids': list(self.deleted_photo_ids),
             'modified_photo_ids': list(self.modified_photo_ids)
@@ -398,9 +406,14 @@ class PhotoUploaderWidget(QWidget):
         # Восстанавливаем существующие фото
         self.existing_photos = [PhotoDTO(**p) for p in state['existing_photos']]
         
-        # Восстанавливаем оригинальные описания из загруженного состояния
-        for photo in self.existing_photos:
-            self.original_descriptions[photo.id] = photo.description or ""
+        # Восстанавливаем оригинальные описания из сохранённого состояния
+        self.original_descriptions = state.get('original_descriptions', {}).copy()
+
+        # Для обратной совместимости: если в state нет original_descriptions, заполняем из current description
+        if not self.original_descriptions:
+            # Восстанавливаем оригинальные описания из загруженного состояния
+            for photo in self.existing_photos:
+                self.original_descriptions[photo.id] = photo.description or ""
 
         self.pending_photos = state['pending_photos']
         self.deleted_photo_ids = set(state['deleted_photo_ids'])
@@ -941,7 +954,7 @@ class PhotoUploaderWidget(QWidget):
                 photo.description or "", 
                 is_existing=True
             )
-
+        
         for i, (file_path, desc) in enumerate(self.pending_photos):
             row = len(self.existing_photos) + i
             self._set_table_row(
@@ -1352,9 +1365,9 @@ class PhotoUploaderWidget(QWidget):
         # Блокируем сигналы таблицы, чтобы setBackground не вызывал itemChanged
         self.table.blockSignals(True)
         try:
-            for col in range(self.table.columnCount()):
+            for col in range(self.table.columnCount()): # перебираем все столбцы
                 self.logger.debug(f"item = self.table.item(row={row}, col={col}), color={color}") 
-                item = self.table.item(row, col)
+                item = self.table.item(row, col) # получаем item по координатам строки и столбца
                 if item:
                     item.setBackground(color)
         finally:

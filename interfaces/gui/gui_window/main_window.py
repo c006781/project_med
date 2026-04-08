@@ -556,37 +556,50 @@ class NavigationMixin:
         Возврат на предыдущую страницу с проверкой несохранённых изменений,
         если текущая страница – список в режиме редактирования.
         """
+
         current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+
         self.logger.debug(
             f"if isinstance(current_page, DynamicListPage) and current_page.edit_mode: {isinstance(current_page, DynamicListPage) and current_page.edit_mode}"
         )
         # T1 = isinstance(current_page, DynamicListPage)
         # T2 = current_page.edit_mode
         # 0==0
-        if isinstance(current_page, DynamicListPage) and current_page.edit_mode:
-            if current_page.modified_rows or current_page.deleted_rows or current_page.new_rows:
-                reply = QMessageBox.question(
-                    self, "Несохранённые изменения",
-                    "Есть несохранённые изменения. Сохранить перед возвратом?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
-                )
-                if reply == QMessageBox.StandardButton.Yes:
-                    current_page._save_changes()
-                    # current_page._exit_edit_mode()
-                elif reply == QMessageBox.StandardButton.No:
-                    # Откатываем изменения
-                    current_page._load_data() # обновляем список
-                    current_page.modified_rows.clear()
-                    current_page.deleted_rows.clear()
-                    current_page.new_rows.clear()
-                    current_page._update_save_button_state()  # обновляем состояние кнопки
-                    # current_page._exit_edit_mode()
+
+        # Если страница умеет отменять изменения – используем её метод
+        if hasattr(current_page, 'cancel_changes_and_leave'):
+            if not current_page.cancel_changes_and_leave():
+                return  # пользователь нажал Cancel
+        else:
+
+            if isinstance(current_page, DynamicListPage) and current_page.edit_mode:
+                # Проверяем наличие несохранённых изменений
+                if current_page.modified_rows or current_page.deleted_rows or current_page.new_rows:
+                    reply = QMessageBox.question(
+                        self, "Несохранённые изменения",
+                        "Есть несохранённые изменения. Сохранить перед возвратом?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        current_page._save_changes()
+                        # current_page._exit_edit_mode()
+                    elif reply == QMessageBox.StandardButton.No:
+                        # Откатываем изменения
+                        current_page._load_data() # обновляем список
+                        current_page.modified_rows.clear()
+                        current_page.deleted_rows.clear()
+                        current_page.new_rows.clear()
+                        current_page._update_save_button_state()  # обновляем состояние кнопки
+                        # current_page._exit_edit_mode()
+                        # Если страница умеет сбрасывать свою правую панель из БД — вызываем
+                        if hasattr(current_page, 'reset_current_appointment_from_db'):
+                            current_page.reset_current_appointment_from_db()
+                    else:
+                        # Cancel – не переходим назад
+                        return
                 else:
-                    # Cancel – не переходим назад
-                    return
-            else:
-                pass
-                # current_page._exit_edit_mode()
+                    pass
+                    # current_page._exit_edit_mode()
         
         self.page_manager.go_back()
 

@@ -649,6 +649,69 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _find_source_row_by_id(self, entity_id: int) -> int:
+        """Возвращает индекс строки в source_model по ID сущности, или -1."""
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and getattr(dto, 'id', None) == entity_id:
+                return row
+        return -1
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def reset_current_appointment_from_db(self):
+        """
+        Сбрасывает черновики текущего приёма и перезагружает его данные из БД в правую панель.
+        Используется при отмене изменений (кнопка "Назад" без сохранения).
+        """
+        if not self.selected_dto:
+            self.logger.debug("reset_current_appointment_from_db: нет выбранного приёма")
+            return
+
+        appointment_id = self.selected_dto.id
+        self.logger.debug(f"Сброс приёма {appointment_id} из БД")
+
+        # 1. Удаляем черновики для этого приёма
+        self._draft_photos.pop(appointment_id, None)
+        self._draft_note_text.pop(appointment_id, None)
+
+        # 2. Загружаем свежие данные из БД
+        try:
+            fresh_dto = self.service.get_appointment(appointment_id)
+            fresh_photos = self.photo_service.get_photos_for_appointment(appointment_id)
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки свежих данных для приёма {appointment_id}: {e}")
+            return
+
+        # 3. Обновляем DTO в модели (если он там есть)
+        source_row = self._find_source_row_by_id(appointment_id)
+        if source_row != -1:
+            self.source_model.update_row(source_row, fresh_dto)
+            self.original_data[source_row] = fresh_dto
+            # Снимаем пометку modified
+            if source_row in self.modified_rows:
+                self.modified_rows.discard(source_row)
+                self._set_row_color_by_source_row(source_row)
+                self._update_save_button_state()
+
+        # 4. Обновляем правую панель (блокируем сигналы, чтобы не вызывать лишние изменения)
+        self.update_details(fresh_dto)
+
+
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
         enable_file_logging = 'system',
@@ -813,11 +876,40 @@ class AppointmentListPage(
     )
     def _load_data(self):
         """Переопределяем для очистки правой панели, если данных нет."""
+
+        # Запоминаем ID текущего выделенного приёма (если есть)
+        current_id = self.selected_dto.id if self.selected_dto else None
+        
         super()._load_data()
         # После загрузки, если нет строк, очищаем правую панель
         self.logger.debug(f"_load_data... : строк в таблице: {self.source_model.rowCount()}")
         if self.source_model.rowCount() == 0:
             self._clear_right_panel()
+
+
+        # Если был выделен какой-то приём – пытаемся восстановить выделение и обновить детали
+        if current_id is not None:
+            # Ищем DTO с таким же ID в новых данных
+            new_dto = None
+            for row in range(self.source_model.rowCount()):
+                dto = self.source_model.get_item_at_row(row)
+                if dto and dto.id == current_id:
+                    new_dto = dto
+                    break
+
+            if new_dto:
+                # Обновляем выделение (без генерации лишних сигналов)
+                self.selected_dto = new_dto
+                # Принудительно обновляем правую панель
+                self.update_details(new_dto)
+                # Восстанавливаем выделение строки в таблице
+                self._select_row_by_id(current_id)
+            else:
+                # Если приём больше не существует – очищаем правую панель
+                self._clear_right_panel()
+        else:
+            # Если не было выделения – просто выбираем первую строку (если есть)
+            self._select_first_row()
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -1183,6 +1275,78 @@ class AppointmentListPage(
     # Режим редактирования
     # ----------------------------------------------------------------------
 
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def cancel_changes_and_leave(self) -> bool:
+        """
+        Отменяет все несохранённые изменения, очищает черновики,
+        перезагружает данные из БД и возвращает True, если можно уходить со страницы.
+        Если пользователь отменил операцию (Cancel), возвращает False.
+        """
+        if not self._has_unsaved_changes():
+            return True
+
+        reply = QMessageBox.question(
+            self, "Несохранённые изменения",
+            "Есть несохранённые изменения. Сохранить перед выходом?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self._save_changes()
+            return True
+        elif reply == QMessageBox.StandardButton.No:
+            # Откат: сбросить черновики, перезагрузить данные, очистить множества строк
+            self._clear_drafts() # очищаем черновики
+            self._load_data() # перезагружаем данные
+            self.modified_rows.clear()
+            self.deleted_rows.clear()
+            self.new_rows.clear()
+            self._update_save_button_state()
+            # Сбросить правую панель для текущего приёма (если есть)
+            if self.selected_dto:
+                self.reset_current_appointment_from_db()
+            # Выйти из режима редактирования (без повторного диалога)
+            if self.edit_mode:
+                self._exit_edit_mode()
+            return True
+        else:
+            # Cancel
+            return False
+
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _has_unsaved_changes(self) -> bool:
+        """
+        Возвращает True, если есть несохранённые изменения:
+        - изменённые/удалённые/новые строки в таблице приёмов
+        - черновики заметки или фото для текущего приёма
+        """
+        
+        # Определяем, есть ли изменения
+        if self.modified_rows or self.deleted_rows or self.new_rows:
+            return True
+        
+        # Добавляем проверку черновиков для текущего выбранного приёма
+        if self.selected_dto:
+            appointment_id = self.selected_dto.id
+            if appointment_id in self._draft_note_text or appointment_id in self._draft_photos:
+                return True
+
+        return False
+
     @AppLogger.get_instance(
         name='AppointmentListPage',
         enable_file_logging='system',
@@ -1196,35 +1360,14 @@ class AppointmentListPage(
             - очистки черновиков при отмене
             - настройки readOnly для правой панели
         """
-        if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
-            reply = QMessageBox.question(
-                self, "Несохранённые изменения",
-                "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._save_changes()
-                # после сохранения выходим из режима
-                super()._on_edit_mode_toggled(checked)
-            elif reply == QMessageBox.StandardButton.No:
-                # Откат: сбросить черновики и перезагрузить данные
-                self._clear_drafts() # очищаем черновики
-                # Перезагружаем данные из БД
-                self._load_data() # перезагружаем данные
-                
-                self.modified_rows.clear()
-                self.deleted_rows.clear()
-                self.new_rows.clear()
-                self._update_save_button_state()
-                
-                # выходим из режима редактирования
-                super()._on_edit_mode_toggled(checked)
-            else:
-                # Cancel – остаёмся в режиме редактирования
+
+        if not checked:
+            # Выход из режима редактирования – предложить сохранить или отменить
+            if not self.cancel_changes_and_leave():
+                # Если пользователь нажал Cancel, остаёмся в режиме редактирования
+                self.edit_mode_btn.setChecked(True)
                 return
-        else:
-            # Переключаем режим через родительский метод (устанавливает self.edit_mode и управляет кнопками)
-            super()._on_edit_mode_toggled(checked)
+        super()._on_edit_mode_toggled(checked)
 
         # Настройка правых виджетов в зависимости от режима
         if self.edit_mode:

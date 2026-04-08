@@ -257,16 +257,16 @@ class TextEditDelegate(QStyledItemDelegate):
         model.setData(index, new_text, Qt.EditRole)
         self.logger.debug(f"setModelData: сохранён текст '{new_text[:50]}...' для строки {index.row()}")
 
-        # Принудительно вызываем обработчик изменений в PhotoUploaderWidget
-        if self.photo_widget and hasattr(self.photo_widget, '_on_item_changed'):
-            item = self.photo_widget.table.item(index.row(), index.column())
-            if item:
-                self.photo_widget._on_item_changed(item)
-                self.logger.debug("setModelData: ПРИНУДИТЕЛЬНО вызван _on_item_changed → photosChanged")
-            else:
-                self.logger.warning("setModelData: item не найден")
-        else:
-            self.logger.warning("setModelData: photo_widget отсутствует или нет метода _on_item_changed")
+        # # Принудительно вызываем обработчик изменений в PhotoUploaderWidget
+        # if self.photo_widget and hasattr(self.photo_widget, '_on_item_changed'):
+        #     item = self.photo_widget.table.item(index.row(), index.column())
+        #     if item:
+        #         self.photo_widget._on_item_changed(item)
+        #         self.logger.debug("setModelData: ПРИНУДИТЕЛЬНО вызван _on_item_changed → photosChanged")
+        #     else:
+        #         self.logger.warning("setModelData: item не найден")
+        # else:
+        #     self.logger.warning("setModelData: photo_widget отсутствует или нет метода _on_item_changed")
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
@@ -338,6 +338,7 @@ class PhotoUploaderWidget(QWidget):
         # Данные
         self.pending_photos: List[Tuple[str, str]] = []   # (путь, описание)
         self.existing_photos: List[PhotoDTO] = []         # существующие фото
+        self.original_descriptions: Dict[int, str] = {}   # начальные данные из БД
         self.deleted_photo_ids: Set[int] = set()          # ID на удаление
         self.modified_photo_ids: Set[int] = set()         # ID изменённых фото
         
@@ -396,6 +397,11 @@ class PhotoUploaderWidget(QWidget):
 
         # Восстанавливаем существующие фото
         self.existing_photos = [PhotoDTO(**p) for p in state['existing_photos']]
+        
+        # Восстанавливаем оригинальные описания из загруженного состояния
+        for photo in self.existing_photos:
+            self.original_descriptions[photo.id] = photo.description or ""
+
         self.pending_photos = state['pending_photos']
         self.deleted_photo_ids = set(state['deleted_photo_ids'])
         self.modified_photo_ids = set(state['modified_photo_ids'])
@@ -562,6 +568,86 @@ class PhotoUploaderWidget(QWidget):
             self._view_photo()
         # столбец 1 редактируется автоматически через делегат
 
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _row_work_modified_photo(
+        self, 
+        row,
+        new_text
+    ):
+        photo = self.existing_photos[row]
+        # original_desc = photo.description or "" 
+        original_desc = self.original_descriptions.get(photo.id, "")
+
+        self.logger.debug(
+            f"photo.description = {photo.description}, "
+            f"original_desc = {original_desc}, "
+            f"new_text = {new_text}, "
+            f"original_desc != new_text = {original_desc != new_text}"
+        )  
+
+        self.logger.debug(
+            f"_on_item_changed: "
+            f"row={row}, : "
+            # f"col={column}, : "
+            f"new_text='{new_text}', : "
+            f"old_desc='{original_desc}'"
+        )
+            
+        
+        photo.description = new_text # указываем новое значение
+
+        if original_desc != new_text:
+            # Действительно изменилось относительно оригинала
+            if photo.id not in self.modified_photo_ids:
+                self.logger.debug("  → описание изменилось, эмитируем photosChanged")
+                self.modified_photo_ids.add(photo.id) # помечаем как изменённое
+
+                return True
+        else:  
+            if photo.id in self.modified_photo_ids: # если вернулось, то удаляем из модификации  
+                self.logger.debug("  → описание как в БД")
+                self.modified_photo_ids.discard(photo.id) # удаляем из изменённое   
+                return True
+            else:
+                self.logger.debug(f"  → Фото ID={photo.id} не было modified — ничего не делаем")    
+
+        return False                                 
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _row_work_create_photo(
+        self, 
+        row,
+        new_text
+    ):
+        # Обработка новых фото (pending) 
+        pending_index = row - len(self.existing_photos)
+
+        self.logger.debug(f"if pending_index < len(self.pending_photos) = {pending_index < len(self.pending_photos)}")  
+        if pending_index < len(self.pending_photos):
+            file_path, old_desc = self.pending_photos[pending_index]
+            if old_desc != new_text:
+                self.pending_photos[pending_index] = (file_path, new_text)
+                # Для новых фото цвет уже зелёный, не меняем
+                # self.photosChanged.emit()
+                self.logger.debug("Обновлено описание нового фото")
+                return True
+            
+        return False
+    
+
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
@@ -585,62 +671,49 @@ class PhotoUploaderWidget(QWidget):
         :type item: QTableWidgetItem
         """
 
+        if not item:
+            self.logger.warning("_on_item_changed: item is None")
+            # return
+
         row = item.row()
         column = item.column()
 
         self.logger.debug(f"if rcolumn != 1 = {column != 1}")  
+
         if column != 1:
+            self.logger.debug(f"_on_item_changed: пропуск — изменение не в столбце описания (column={column})")
             return
 
         new_text = item.text() # .strip() НЕ используем — пользователь может хотеть пробелы
 
+        self.logger.debug(f"_on_item_changed: new_text = '{new_text[:60]}...'")
+
         self.logger.debug(f"if row < len(self.existing_photos) = {row < len(self.existing_photos)}")  
+
+
+        thec = False
         if row < len(self.existing_photos): # существующие фото
-            photo = self.existing_photos[row]
-            original_desc = photo.description or "" 
-
-            self.logger.debug(
-                f"photo.description = {photo.description}, "
-                f"original_desc = {original_desc}, "
-                f"new_text = {new_text}, "
-                f"original_desc != new_text = {original_desc != new_text}"
-            )  
-            self.logger.debug(f"_on_item_changed: row={row}, col={column}, new_text='{new_text}', old_desc='{original_desc}'")
-            if original_desc != new_text:
-                self.logger.debug("  → описание изменилось, эмитируем photosChanged")
-                # Значение изменилось
-                photo.description = new_text
-                was_modified = photo.id not in self.modified_photo_ids
-                self.modified_photo_ids.add(photo.id) # помечаем как изменённое
-                self._update_row_color(row)          # перекрасить в жёлтый
-                self.photosChanged.emit()
-
-                self.logger.debug(f"if was_modified {was_modified }")
-                if was_modified:
-                    self.logger.debug(f"  → Фото ID={photo.id} ПОМЕЧЕНО как modified")
-            else:
-                self.logger.debug("  → описание НЕ изменилось, сигнал не будет отправлен")
-                self.logger.debug(f"if photo.id in self.modified_photo_ids  = {photo.id in self.modified_photo_ids}")
-                # Вернули к исходному значению
-                if photo.id in self.modified_photo_ids:
-                    self.modified_photo_ids.discard(photo.id)
-                    self._update_row_color(row)
-                    self.photosChanged.emit()
-                    self.logger.debug(f"  → Фото ID={photo.id} — описание вернулось к оригиналу, modified СНЯТ")
-                else:
-                    self.logger.debug(f"  → Фото ID={photo.id} не было modified — ничего не делаем")
+            thec = self._row_work_modified_photo( # работа с покраской строки в можифицированно или нет
+                row=row,
+                new_text = new_text
+            )
+           
+            if thec:
+                self._update_row_color(row)          # перекрасить
+                # self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приёма
+            
         else:
             # Обработка новых фото (pending) 
-            pending_index = row - len(self.existing_photos)
+            thec = self._row_work_create_photo( # Обработка новых фото
+                row=row,
+                new_text = new_text
+            )
 
-            self.logger.debug(f"if pending_index < len(self.pending_photos) = {pending_index < len(self.pending_photos)}")  
-            if pending_index < len(self.pending_photos):
-                file_path, old_desc = self.pending_photos[pending_index]
-                if old_desc != new_text:
-                    self.pending_photos[pending_index] = (file_path, new_text)
-                    # Для новых фото цвет уже зелёный, не меняем
-                    self.photosChanged.emit()
-                    self.logger.debug("Обновлено описание нового фото")
+        if thec:
+            # self._update_row_color(row)          # перекрасить
+            self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приёма
+
+        0==0
 
     # ----------------------------------------------------------------------
     # Действия с фотографиями
@@ -679,7 +752,7 @@ class PhotoUploaderWidget(QWidget):
 
         self.pending_photos.append((file_path, ""))
         self._refresh_table()
-        self.photosChanged.emit()
+        self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приём
         self.logger.debug(f"Добавлено фото: {file_path}")
 
     @AppLogger.get_instance(
@@ -1082,11 +1155,17 @@ class PhotoUploaderWidget(QWidget):
         self._image_cache.clear()
 
         # Заполняем новыми данными
+        # self.existing_photos = list(photos) if photos else []
         if photos and isinstance(photos[0], dict):
             self.existing_photos = [PhotoDTO(**p) for p in photos]
             self.logger.debug("Фото преобразованы из dict → PhotoDTO")
         else:
             self.existing_photos = list(photos) if photos else []
+
+        # Сохраняем оригинальные описания
+        self.original_descriptions.clear()
+        for photo in self.existing_photos:
+            self.original_descriptions[photo.id] = photo.description or ""
 
         self._refresh_table()
 
@@ -1151,6 +1230,7 @@ class PhotoUploaderWidget(QWidget):
 
         self.pending_photos.clear()
         self.existing_photos.clear()
+        self.original_descriptions.clear()
         self.deleted_photo_ids.clear()
         self.modified_photo_ids.clear()
         self._image_cache.clear()
@@ -1268,13 +1348,21 @@ class PhotoUploaderWidget(QWidget):
             color = QColor(255, 255, 255)   # белый (нормальное состояние)
 
         self.logger.debug(f"    → выбран цвет для '{state}': {color.name()}")
-        for col in range(self.table.columnCount()):
-            self.logger.debug(f"item = self.table.item(row={row}, col={col}), color={color}") 
-            item = self.table.item(row, col)
-            if item:
-                item.setBackground(color)
 
-        self.logger.debug(f"Строка {row} окрашена в состояние '{state}'")
+        # Блокируем сигналы таблицы, чтобы setBackground не вызывал itemChanged
+        self.table.blockSignals(True)
+        try:
+            for col in range(self.table.columnCount()):
+                self.logger.debug(f"item = self.table.item(row={row}, col={col}), color={color}") 
+                item = self.table.item(row, col)
+                if item:
+                    item.setBackground(color)
+        finally:
+            self.table.blockSignals(False)
+
+        # # Принудительная перерисовка (опционально)
+        # self.table.viewport().update()
+        # self.logger.debug(f"Строка {row} окрашена в состояние '{state}'")
         
         # # Принудительная перерисовка
         # self.table.viewport().update

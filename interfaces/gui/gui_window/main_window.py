@@ -575,11 +575,11 @@ class NavigationMixin:
                     # current_page._exit_edit_mode()
                 elif reply == QMessageBox.StandardButton.No:
                     # Откатываем изменения
-                    current_page._load_data()
+                    current_page._load_data() # обновляем список
                     current_page.modified_rows.clear()
                     current_page.deleted_rows.clear()
                     current_page.new_rows.clear()
-                    current_page._update_save_button_state()
+                    current_page._update_save_button_state()  # обновляем состояние кнопки
                     # current_page._exit_edit_mode()
                 else:
                     # Cancel – не переходим назад

@@ -815,6 +815,7 @@ class AppointmentListPage(
         """Переопределяем для очистки правой панели, если данных нет."""
         super()._load_data()
         # После загрузки, если нет строк, очищаем правую панель
+        self.logger.debug(f"_load_data... : строк в таблице: {self.source_model.rowCount()}")
         if self.source_model.rowCount() == 0:
             self._clear_right_panel()
 
@@ -1207,9 +1208,9 @@ class AppointmentListPage(
                 super()._on_edit_mode_toggled(checked)
             elif reply == QMessageBox.StandardButton.No:
                 # Откат: сбросить черновики и перезагрузить данные
-                self._clear_drafts()
+                self._clear_drafts() # очищаем черновики
                 # Перезагружаем данные из БД
-                self._load_data()
+                self._load_data() # перезагружаем данные
                 
                 self.modified_rows.clear()
                 self.deleted_rows.clear()

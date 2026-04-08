@@ -1347,6 +1347,27 @@ class AppointmentListPage(
 
         return False
 
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _edit_mode_note_text_photo_edit(
+        self,
+        edit_mode: bool,
+    ):
+        """
+        Устанавливает режим редактирования для правой панели:
+        - для заметки (note_text_edit)
+        - для фото (photo_widget)
+        :param edit_mode: True - включить режим редактирования, False - выключить
+        """
+        self.note_text_edit.setReadOnly(edit_mode)
+        self.photo_widget.set_readonly(edit_mode)
+
     @AppLogger.get_instance(
         name='AppointmentListPage',
         enable_file_logging='system',
@@ -1370,12 +1391,8 @@ class AppointmentListPage(
         super()._on_edit_mode_toggled(checked)
 
         # Настройка правых виджетов в зависимости от режима
-        if self.edit_mode:
-            self.note_text_edit.setReadOnly(False)
-            self.photo_widget.set_readonly(False)
-        else:
-            self.note_text_edit.setReadOnly(True)
-            self.photo_widget.set_readonly(True)
+        self._edit_mode_note_text_photo_edit(self.edit_mode)
+
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
 

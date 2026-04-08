@@ -1403,7 +1403,7 @@ class AppointmentListPage(
         super()._on_edit_mode_toggled(checked)
 
         # Настройка правых виджетов в зависимости от режима
-        self._edit_mode_note_text_photo_edit(self.edit_mode)
+        self._edit_mode_note_text_photo_edit(not self.edit_mode)
 
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 

@@ -230,7 +230,7 @@ class ListDataMixin:
             selected_id = self.selected_dto.id
             
         try:
-            self.current_data = self.loader_func(self.current_extra)
+            self.current_data = self.loader_func(self.current_extra) # Загружаем данные
             self.source_model.update_data(self.current_data)
             # self.original_data = {i: dto for i, dto in enumerate(self.current_data)}
             self.original_data = {i: deepcopy(dto) for i, dto in enumerate(self.current_data)}

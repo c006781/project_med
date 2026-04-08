@@ -1367,6 +1367,9 @@ class AppointmentListPage(
         Возвращает True, если есть несохранённые изменения:
         - изменённые/удалённые/новые строки в таблице приёмов
         - черновики заметки или фото для текущего приёма
+
+        :return: True, если есть несохранённые изменения, False - иначе
+        :rtype: bool
         """
         
         # Определяем, есть ли изменения
@@ -1382,18 +1385,20 @@ class AppointmentListPage(
                 if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
                     return True
 
-
+            # Или фото изменены?
             if appointment_id in self._draft_photos:
-                return (
-                    len(self._draft_photos[appointment_id].get('pending_photos', []))>0 
-                ) or(
-                    len(self._draft_photos[appointment_id].get('deleted_photo_ids', []))>0 
-                ) or(
-                    len(self._draft_photos[appointment_id].get('modified_photo_ids', []))>0
-                )
+                # Если есть ожидающие фото, то изменение есть
+                if len(self._draft_photos[appointment_id].get('pending_photos', []))>0:
+                    return True
                 
-                # return True
-
+                # Если есть удалённые фото, то изменение есть
+                if len(self._draft_photos[appointment_id].get('deleted_photo_ids', []))>0:
+                    return True
+                
+                # Если есть изменённые фото, то изменение есть
+                if len(self._draft_photos[appointment_id].get('modified_photo_ids', []))>0:
+                    return True
+                
         return False
 
 

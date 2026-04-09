@@ -1,4 +1,5 @@
 # interfaces/gui/gui_window/widgets/log_viewer.py
+
 from PySide6.QtWidgets import QTextEdit
 from PySide6.QtCore import Signal, Slot
 import logging

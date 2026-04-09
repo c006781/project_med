@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/widgets/filter_table_view.py
+
 """
 Кастомный QTableView с заголовком, поддерживающим фильтрацию и сортировку.
 Заголовок (QHeaderView) переопределён для показа меню при клике.

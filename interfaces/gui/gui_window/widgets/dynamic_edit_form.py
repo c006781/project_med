@@ -1,4 +1,5 @@
-# -*- coding: utf-8 -*-
+# interfaces/gui/gui_window/widgets/dynamic_edit_form.py
+
 """
 Динамическая форма, автоматически создающая виджеты на основе DTO и field_configs.
 """

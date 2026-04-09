@@ -1,7 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-interfaces/gui/gui_window/widgets/dynamic_table_model.py
+# interfaces/gui/gui_window/widgets/dynamic_table_model.py
 
+"""
 Универсальная модель таблицы, строящаяся на основе списка DTO и описания колонок.
 Каждая колонка задаётся словарём:
     {

@@ -8,6 +8,7 @@
 import datetime
 
 from app.utils.logger.logger import AppLogger
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import CustomDateEdit, CustomTimeEdit
 
 from .completer_edit import CompleterEdit
 from .photo_uploader_widget import PhotoUploaderWidget
@@ -87,9 +88,9 @@ class WidgetFactory:
         :param editable: если False, виджет будет отключён
         :return: QDateEdit
         """
-        w = QDateEdit()
-        w.setCalendarPopup(True)
-        w.setDate(QDate.currentDate())
+        w = CustomDateEdit()
+        # w.setCalendarPopup(True)
+        w.setDate(QDate.currentDate())   # ← устанавливает текущую дату
         w.setEnabled(editable)
         return w
 
@@ -108,8 +109,8 @@ class WidgetFactory:
         :param editable: если False, виджет будет отключён
         :return: QTimeEdit
         """
-        w = QTimeEdit()
-        w.setTime(QTime.currentTime())
+        w = CustomTimeEdit()
+        w.setTime(QTime.currentTime())  # ← текущее время
         w.setEnabled(editable)
         return w
 

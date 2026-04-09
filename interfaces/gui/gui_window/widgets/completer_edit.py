@@ -5,9 +5,14 @@
 Предназначен для полей с автодополнением (например, выбор заметки).
 """
 
+
 from app.utils.logger.logger import AppLogger
+
+from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton
 from PySide6.QtCore import Signal
+
 
 
 class CompleterEdit(QWidget):
@@ -43,6 +48,7 @@ class CompleterEdit(QWidget):
 
         # Поле ввода текста
         self.line_edit = QLineEdit()
+        install_standard_context_menu(self.line_edit)
         layout.addWidget(self.line_edit)
 
         self.btn = None

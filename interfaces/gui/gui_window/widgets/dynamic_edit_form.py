@@ -8,17 +8,27 @@ import datetime
 from typing import Dict, Type, List, Union, get_origin, get_args
 
 from app.utils.logger.logger import AppLogger
-from pydantic import BaseModel
-from PySide6.QtWidgets import (
-    QSizePolicy, QWidget, QFormLayout, QLineEdit, QTextEdit,
-    QDateEdit, QTimeEdit, QSpinBox, QCheckBox, QComboBox
-)
-from PySide6.QtCore import QDate, QTime, Signal, Qt
+
+from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+
 
 # Импортируем вынесенные компоненты
 from .completer_edit import CompleterEdit
 from .photo_uploader_widget import PhotoUploaderWidget
 from .widget_factory import WidgetFactory
+
+
+from pydantic import BaseModel
+
+from PySide6.QtWidgets import (
+    QSizePolicy, QWidget, 
+    QFormLayout, QLineEdit, 
+    QTextEdit, QDateEdit,
+    QTimeEdit, QSpinBox, 
+    QCheckBox, QComboBox
+)
+from PySide6.QtCore import QDate, QTime, Signal, Qt
+
 
 
 class DynamicEditForm(QWidget):
@@ -181,7 +191,8 @@ class DynamicEditForm(QWidget):
             if widget is None:
                 self.logger.warning(f"Не удалось создать виджет для поля {name}")
                 continue
-
+            
+            install_standard_context_menu(widget)   # новая строка
             self.widgets[name] = widget
 
             # Если поле скрыто – не добавляем в layout, но сохраняем в словаре

@@ -4,16 +4,32 @@ import os
 from typing import List, Set, Tuple, Dict
 
 from app.utils.logger.logger import AppLogger
+
 from app.dto import PhotoDTO
 
-from PySide6.QtCore import QEvent, Signal, Qt, QSize
-from PySide6.QtGui import QColor, QPixmap, QFontMetrics, QPainter, QTextOption
-from PySide6.QtWidgets import (
-    QAbstractItemView, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QFileDialog, QDialog, QLabel, QScrollArea, QStyledItemDelegate,
-    QStyleOptionViewItem, QTextEdit, QApplication
+from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table, install_standard_context_menu
+
+from PySide6.QtCore import (
+    QEvent, Signal, 
+    Qt, QSize
 )
+from PySide6.QtGui import (
+    QColor, QPixmap,
+    QFontMetrics, QPainter, 
+    QTextOption
+)
+from PySide6.QtWidgets import (
+    QAbstractItemView, QMessageBox, 
+    QWidget, QVBoxLayout, 
+    QHBoxLayout, QPushButton,
+    QTableWidget, QTableWidgetItem, 
+    QHeaderView, QFileDialog, 
+    QDialog, QLabel, 
+    QScrollArea, QStyledItemDelegate,
+    QStyleOptionViewItem, QTextEdit, 
+    # QApplication
+)
+
 
 
 
@@ -140,6 +156,7 @@ class TextEditDelegate(QStyledItemDelegate):
         editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         editor.setMinimumHeight(80)
+        install_standard_context_menu(editor)
         self.logger.debug(f"createEditor: создан QTextEdit для строки {index.row()}")
         return editor
 
@@ -372,6 +389,7 @@ class PhotoUploaderWidget(QWidget):
 
         # Таблица
         self.table = QTableWidget()
+        add_copy_paste_to_table(self.table)
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Фото", "Описание"])
         self.table.verticalHeader().setVisible(False)

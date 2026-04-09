@@ -17,9 +17,10 @@ from functools import wraps
 import os
 import datetime
 
+from app.utils.logger.logger import AppLogger
+
 from app.config.config_manager.manager import get_config_env
 from app.dto.field_configs import PATIENT_CONFIG
-from app.utils.logger.logger import AppLogger
 
 from app.dependencies import (
     # get_appointment_service, 
@@ -28,6 +29,7 @@ from app.dependencies import (
 )
 
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
+from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
@@ -437,7 +439,7 @@ class PatientInfoMixin:
         self.info_value_widgets = {}
         row = 0
 
-        for field_name, config in PATIENT_CONFIG.items():
+        for field_name, config in PATIENT_CONFIG.items(): # проходимся по конфигурации
             if config.get('hidden', False) or field_name == 'id':
                 continue
 
@@ -449,9 +451,8 @@ class PatientInfoMixin:
 
             label_value = QLabel()
             label_value.setWordWrap(True)
+            label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)  # разрешаем выделение текста
             label_value.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)   # добавить
-            # label_value.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
             grid.addWidget(label_title, row, 0, alignment=Qt.AlignTop)
             grid.addWidget(label_value, row, 1, alignment=Qt.AlignTop)
@@ -526,6 +527,7 @@ class RightPanelMixin:
         """Создаёт виджеты правой панели и подключает сигналы."""
         # Заметка
         self.note_text_edit = QTextEdit()
+        install_standard_context_menu(self.note_text_edit)  
         self.note_text_edit.setReadOnly(True)  # изначально только просмотр
         self.note_text_edit.textChanged.connect(self._on_draft_changed)
 

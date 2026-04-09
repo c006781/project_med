@@ -18,15 +18,26 @@ from copy import deepcopy
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
+from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
-from interfaces.gui.gui_window.widgets.delegate.combo_box_delegate import ComboBoxDelegate
 from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import AdvancedFilterProxyModel
 
-from interfaces.gui.gui_window.widgets.delegate.date_delegate import DateDelegate
-from interfaces.gui.gui_window.widgets.delegate.time_delegate import TimeDelegate
-from interfaces.gui.gui_window.widgets.delegate.bool_delegate import BoolDelegate
-from interfaces.gui.gui_window.widgets.delegate.combo_box_delegate import ComboBoxDelegate
+from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
+    DateStringDelegate,
+    StringDelegate,
+    DateDelegate,
+    TimeDelegate,
+    BoolDelegate,
+    ComboBoxDelegate,
+    TimeStringDelegate,
+)
+
+# from interfaces.gui.gui_window.widgets.delegate.str_delegate import StringDelegate
+# from interfaces.gui.gui_window.widgets.delegate.date_delegate import DateDelegate
+# from interfaces.gui.gui_window.widgets.delegate.time_delegate import TimeDelegate
+# from interfaces.gui.gui_window.widgets.delegate.bool_delegate import BoolDelegate
+# from interfaces.gui.gui_window.widgets.delegate.combo_box_delegate import ComboBoxDelegate
 
 from PySide6.QtWidgets import (
     # QWidget, 
@@ -744,6 +755,23 @@ class ListUIMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _get_real_type(self, field_type):
+        """Извлекает реальный тип из Optional/Union (например, Optional[str] -> str)."""
+        origin = get_origin(field_type)
+        if origin is Union:
+            args = get_args(field_type)
+            for arg in args:
+                if arg is not type(None):
+                    return arg
+        return field_type
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_ui(self):
         """
         Установка UI для страницы со списком записей.
@@ -878,6 +906,7 @@ class ListUIMixin:
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
+        add_copy_paste_to_table(self.table_view)
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         # Модель таблицы
@@ -911,36 +940,57 @@ class ListUIMixin:
         Устанавливает делегаты для колонок на основе типов полей и field_configs.
         Приоритет: choices > widget_type > тип поля.
         """
+
+        # Словарь: тип -> класс делегата (и, возможно, дополнительные параметры)
+        
+        invert_tip = {
+            'date': datetime.date,
+            'time': datetime.time,
+            # 'textarea': StringDelegate,
+        }
+
+        type_delegate_map = {
+            # datetime.date: DateDelegate,
+            datetime.date: DateStringDelegate,
+            # datetime.time: TimeDelegate,
+            datetime.time: TimeStringDelegate,
+            bool: BoolDelegate,
+            str: StringDelegate,
+        }
+
         for col_idx, col_info in enumerate(self.columns):
             field_name = col_info['name']
             config = self.field_configs.get(field_name, {})
 
+            # Выпадающий список (choices)
             choices = config.get('choices')
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
                 self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
+                continue 
 
-            widget_type = config.get('widget_type')
-            if widget_type == 'date':
-                delegate = DateDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
-            elif widget_type == 'time':
-                delegate = TimeDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-                continue
 
-            field_type = col_info.get('type')
-            if field_type == datetime.date:
-                delegate = DateDelegate(self.table_view)
+            # Определяем тип поля и его реальный тип (для делегата) автоматически по параметрам
+            widget_type = config.get('widget_type') # Специальные типы виджетов из field_configs
+            if widget_type:
+                field_type = invert_tip.get(widget_type) # определяем по типу поля     
+            else:
+                field_type = col_info.get('type')   # Определяем по реальному типу поля
+
+            real_type = self._get_real_type( # определяем реальный тип
+                field_type
+            )
+            delegate_class = type_delegate_map.get(# определяем класс делегата по реальному типу поля
+                real_type
+            ) 
+            if delegate_class:
+                delegate = delegate_class(self.table_view)
                 self.table_view.setItemDelegateForColumn(col_idx, delegate)
-            elif field_type == datetime.time:
-                delegate = TimeDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
-            elif field_type == bool:
-                delegate = BoolDelegate(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+            # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
+
+
+
 
 class ListFilterMixin:
 
@@ -1261,7 +1311,19 @@ class DynamicListPage(
         # self._load_data() # загрузка данных на страницу
 
 
-
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_drafts(self, appointment_id=None):
+        """
+        Заглушка для страниц без черновиков.
+        Переопределяется в AppointmentListPage.
+        """
+        pass
 
     @AppLogger.get_instance(
         name='DynamicListPage',

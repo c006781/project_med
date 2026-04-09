@@ -586,9 +586,12 @@ class NavigationMixin:
                     elif reply == QMessageBox.StandardButton.No:
                         # Откатываем изменения
                         current_page._load_data() # обновляем список
-                        current_page.modified_rows.clear()
-                        current_page.deleted_rows.clear()
-                        current_page.new_rows.clear()
+                        current_page._clear_selection() # сбрасываем выделение в таблице (если оно есть)
+                        current_page._clear_drafts() # Очистка черновиков (если они есть)
+                        # current_page.modified_rows.clear()
+                        # current_page.deleted_rows.clear()
+                        # current_page.new_rows.clear()
+
                         current_page._update_save_button_state()  # обновляем состояние кнопки
                         # current_page._exit_edit_mode()
                         # Если страница умеет сбрасывать свою правую панель из БД — вызываем

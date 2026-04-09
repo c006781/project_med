@@ -81,6 +81,25 @@ class ListSelectionMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _clear_selection(self):
+        # Сбрасываем все отслеживаемые изменения
+        """
+        Очищает все отслеживаемые изменения (modified_rows, deleted_rows, new_rows).
+        """
+        self.modified_rows.clear()
+        self.deleted_rows.clear()
+        self.new_rows.clear()
+
+        # # Очистка черновиков
+        # self._clear_drafts()
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _select_by_id(self, entity_id: int) -> bool:
         """Выделяет строку по ID сущности. Возвращает True, если строка найдена."""
         row = self._find_row_by_dto_id(entity_id)
@@ -238,9 +257,10 @@ class ListDataMixin:
             self.source_model.clear_row_colors()
 
             # Сбрасываем все отслеживаемые изменения
-            self.modified_rows.clear()
-            self.deleted_rows.clear()
-            self.new_rows.clear()
+            # self.modified_rows.clear()
+            # self.deleted_rows.clear()
+            # self.new_rows.clear()
+            self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
             # self.original_data.clear()
             
             self._update_save_button_state()
@@ -383,9 +403,18 @@ class ListChangesMixin:
     def _set_row_color_by_source_row(self, source_row: int):
         """Устанавливает цвет строки в исходной модели по её индексу."""
 
-        self.logger.debug(f"_set_row_color_by_source_row: source_row={source_row}, modified_rows={self.modified_rows}, new_rows={self.new_rows}, deleted_rows={self.deleted_rows}")
+        self.logger.debug(
+            f"_set_row_color_by_source_row: "
+            f"source_row={source_row}, "
+            f"modified_rows={self.modified_rows}, "
+            f"new_rows={self.new_rows}, "
+            f"deleted_rows={self.deleted_rows}"
+        )
         if source_row < 0 or source_row >= self.source_model.rowCount():
-            self.logger.warning(f"source_row {source_row} вне диапазона (0-{self.source_model.rowCount()-1})")
+            self.logger.warning(
+                f"source_row {source_row} "
+            f"вне диапазона (0-{self.source_model.rowCount()-1})"
+            )
             
         if source_row in self.deleted_rows:
             color = QColor(255, 200, 200)   # красный
@@ -414,8 +443,9 @@ class ListChangesMixin:
         Обновляет состояние кнопки сохранения изменений.
         Кнопка будет активна, если есть какие-либо изменения (новые, измененные, удаленные строки).
         """
-        has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
-        self.save_changes_btn.setEnabled(has_changes)
+        # has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
+        has_changes = self._has_unsaved_changes()
+        self.save_changes_btn.setEnabled(has_changes) # сохранять можно, если есть изменения
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
@@ -434,7 +464,10 @@ class ListChangesMixin:
         :param row: индекс строки в таблице
         :type row: int
         """
-        self.logger.debug(f"_on_row_modified вызван для row={row}, modified_rows={self.modified_rows}")
+        self.logger.debug(
+            f"_on_row_modified вызван для row={row}, "
+            f"modified_rows={self.modified_rows}"
+        )
         # self.logger.debug(f"Строка {row} изменена")
 
         # Пропускаем, если строка уже помечена на удаление
@@ -519,7 +552,9 @@ class ListEditModeMixin:
 
         Если включён и таблица пуста, автоматически добавляет новую строку
         """
-        if not checked and (self.modified_rows or self.deleted_rows or self.new_rows):
+
+        has_changes = self._has_unsaved_changes()
+        if not checked and has_changes:
             reply = QMessageBox.question(
                 self, "Несохранённые изменения",
                 "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
@@ -530,9 +565,13 @@ class ListEditModeMixin:
                 self.edit_mode = False
             elif reply == QMessageBox.StandardButton.No:
                 self._load_data()
-                self.modified_rows.clear()
-                self.deleted_rows.clear()
-                self.new_rows.clear()
+                # self.modified_rows.clear()
+                # self.deleted_rows.clear()
+                # self.new_rows.clear()
+
+                self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
+                self._clear_drafts() # Очистка черновиков (если они есть)
+
                 self._update_save_button_state()
                 self.edit_mode = False
             else:
@@ -572,7 +611,16 @@ class ListEditModeMixin:
 
 class ListSaveMixin:
 
-
+    '''
+    Миксин для сохранения изменений в таблице
+    '''
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _save_deleted(self):
         for row in sorted(self.deleted_rows, reverse=True):
             dto = self.source_model.get_item_at_row(row)
@@ -582,6 +630,13 @@ class ListSaveMixin:
             # self.source_model.remove_row(row)
         self.deleted_rows.clear()
 
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _save_modified(self):
         for row in list(self.modified_rows):
             dto = self.source_model.get_item_at_row(row)
@@ -596,6 +651,13 @@ class ListSaveMixin:
                 self.logger.info(f"Обновлена запись ID={updated.id}")
         self.modified_rows.clear()
 
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _save_new(self):
         for row in list(self.new_rows):
             dto = self.source_model.get_item_at_row(row)
@@ -606,10 +668,6 @@ class ListSaveMixin:
                 self.logger.info(f"Создана новая запись ID={created.id}")
         self.new_rows.clear()
 
-
-    '''
-    Миксин для сохранения изменений в таблице
-    '''
     @AppLogger.get_instance(
         name = 'ListSaveMixin',
         enable_file_logging = 'system',
@@ -630,7 +688,9 @@ class ListSaveMixin:
         После сохранения изменений, обновляет данные на странице и восстанавливает кнопку сохранения.
         """
         self.logger.info("=== _save_changes ВЫЗВАН ИЗ ListSaveMixin ===")
-        if not (self.modified_rows or self.deleted_rows or self.new_rows):
+
+        has_changes = self._has_unsaved_changes()
+        if not has_changes:
             return
 
         reply = QMessageBox.question(
@@ -1199,6 +1259,58 @@ class DynamicListPage(
         self._setup_ui()
         
         # self._load_data() # загрузка данных на страницу
+
+
+
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _has_unsaved_changes(self) -> bool:
+        """
+        Возвращает True, если есть несохранённые изменения:
+        - изменённые/удалённые/новые строки в таблице приёмов
+        - черновики заметки или фото для текущего приёма
+
+        :return: True, если есть несохранённые изменения, False - иначе
+        :rtype: bool
+        """
+        
+        # Определяем, есть ли изменения
+        
+        if self.modified_rows or self.deleted_rows or self.new_rows:
+            return True
+        
+        # Добавляем проверку черновиков для текущего выбранного приёма
+        # if self.selected_dto:
+        #     appointment_id = self.selected_dto.id
+
+        #     # Заметка изменена?
+        #     if appointment_id in self._draft_note_current:
+        #         if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
+        #             return True
+
+        #     # Или фото изменены?
+        #     if appointment_id in self._draft_photos:
+        #         # Если есть ожидающие фото, то изменение есть
+        #         if len(self._draft_photos[appointment_id].get('pending_photos', []))>0:
+        #             return True
+                
+        #         # Если есть удалённые фото, то изменение есть
+        #         if len(self._draft_photos[appointment_id].get('deleted_photo_ids', []))>0:
+        #             return True
+                
+        #         # Если есть изменённые фото, то изменение есть
+        #         if len(self._draft_photos[appointment_id].get('modified_photo_ids', []))>0:
+        #             return True
+                
+        return False
+
+
 
     @AppLogger.get_instance(
         name = 'DynamicListPage',

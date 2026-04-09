@@ -9,7 +9,7 @@ from app.dto import PhotoDTO
 from PySide6.QtCore import QEvent, Signal, Qt, QSize
 from PySide6.QtGui import QColor, QPixmap, QFontMetrics, QPainter, QTextOption
 from PySide6.QtWidgets import (
-    QAbstractItemView, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QAbstractItemView, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QFileDialog, QDialog, QLabel, QScrollArea, QStyledItemDelegate,
     QStyleOptionViewItem, QTextEdit, QApplication
@@ -317,6 +317,8 @@ class PhotoUploaderWidget(QWidget):
     Отображает фото в таблице: столбец 0 – масштабированная иконка,
     столбец 1 – редактируемое описание с поддержкой переноса строк и многострочного редактирования.
     """
+    MAX_PHOTOS = 0  # ограничить максимальное количество загружаемых фото в приём. 0 - без ограницений
+
     photosChanged = Signal()
 
     @AppLogger.get_instance(
@@ -741,7 +743,8 @@ class PhotoUploaderWidget(QWidget):
     )
     def add_photo(self):
         """
-        Добавляет новое фото в список pending_photos.
+        Добавляет одно или несколько новых фото в список pending_photos.
+        Открывает диалог выбора файлов с возможностью множественного выбора.
 
         Открывает файл для добавления с помощью QFileDialog.getOpenFileName.
 
@@ -756,17 +759,32 @@ class PhotoUploaderWidget(QWidget):
         :return: None
         :rtype: None
         """
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Выберите изображение", "",
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self, 
+            "Выберите изображение", 
+            "",
             "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
-        if not file_path:
-            return
 
-        self.pending_photos.append((file_path, ""))
+
+        if not file_paths:
+            return
+        
+        if (
+            len(self.pending_photos) + len(file_paths) > self.MAX_PHOTOS
+        ) and (
+            self.MAX_PHOTOS > 0
+        ):
+            QMessageBox.warning(self, "Предупреждение", f"Можно добавить не более {self.MAX_PHOTOS} фото.")
+            return
+                
+        for file_path in file_paths:
+            self.pending_photos.append((file_path, ""))
+            self.logger.debug(f"Добавлено фото: {file_path}")
+
         self._refresh_table()
         self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приём
-        self.logger.debug(f"Добавлено фото: {file_path}")
+        self.logger.debug(f"Добавлено {len(file_paths)} фото")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1162,10 +1180,11 @@ class PhotoUploaderWidget(QWidget):
 
         # Полная очистка ВСЕГО состояния виджета
         self.clear()#  полный сброс
-        self.pending_photos.clear()
-        self.deleted_photo_ids.clear()
-        self.modified_photo_ids.clear()
-        self._image_cache.clear()
+        # self.pending_photos.clear()
+        # self.deleted_photo_ids.clear()
+        # self.modified_photo_ids.clear()
+        # self._image_cache.clear()
+
 
         # Заполняем новыми данными
         # self.existing_photos = list(photos) if photos else []

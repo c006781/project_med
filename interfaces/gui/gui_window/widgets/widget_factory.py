@@ -6,15 +6,19 @@
 """
 
 import datetime
+
+from app.utils.logger.logger import AppLogger
+
+from .completer_edit import CompleterEdit
+from .photo_uploader_widget import PhotoUploaderWidget
+
 from PySide6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QTimeEdit,
     QSpinBox, QCheckBox, QComboBox
 )
 from PySide6.QtCore import QDate, QTime
 
-from app.utils.logger.logger import AppLogger
-from .completer_edit import CompleterEdit
-from .photo_uploader_widget import PhotoUploaderWidget
+
 
 
 class WidgetFactory:

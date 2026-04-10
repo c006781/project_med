@@ -1582,17 +1582,13 @@ class AppointmentListPage(
 
             # Или фото изменены?
             if appointment_id in self._draft_photos:
-                # Если есть ожидающие фото, то изменение есть
-                if len(self._draft_photos[appointment_id].get('pending_photos', []))>0:
-                    return True
-                
-                # Если есть удалённые фото, то изменение есть
-                if len(self._draft_photos[appointment_id].get('deleted_photo_ids', []))>0:
-                    return True
-                
-                # Если есть изменённые фото, то изменение есть
-                if len(self._draft_photos[appointment_id].get('modified_photo_ids', []))>0:
-                    return True
+                for i in [
+                    'pending_photos', # ожидающие фото
+                    'deleted_photo_ids', # удалённые фото
+                    'modified_photo_ids', # изменённые фото
+                ]:
+                    if len(self._draft_photos[appointment_id].get(i, []))>0: # Если есть
+                        return True # то изменение есть
                 
         return False
 

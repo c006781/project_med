@@ -23,7 +23,7 @@ from app.dto.compute_fields import get_patient_full_name
 # choices	list	Список строк для выпадающего списка
 # choices_provider	str	Имя провайдера для автодополнения (например, 'note_service.get_choices')
 # source	str	(не используется) – для указания источника данных
-
+# autocomplete  bool -  включает автодополнение в таблице и форме (lkz QLineEdit)
 # Параметр 'widget_type':
 #     'textarea' — создаёт QTextEdit для многострочного текста (вместо обычного QLineEdit).
 #     'date' — используется как подсказка, чтобы создать QDateEdit (хотя тип поля datetime.date сам по себе ведёт к этому, но widget_type может явно указать виджет даты).
@@ -112,7 +112,6 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     'note_text': {
         'title'             : 'Заметка',    # заголовок колонки
-        # 'autocomplete'      : True,         # включает автодополнение в таблице и форме
         'editable'          : True,         # редактируемый ли
         'virtual'           : True,         # виртуальное ли поле
         'source_attr'       : 'note',       # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
@@ -163,7 +162,6 @@ NOTE_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     'text': {
         'title'         : 'Текст заметки',  # заголовок колонки
-        # 'autocomplete'      : True,         # включает автодополнение в таблице и форме
         'editable'      : True,             # редактируемый ли
         'widget_type'   : 'textarea',       # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
         'init_from_extra': 'text',          # ключ в extra_data

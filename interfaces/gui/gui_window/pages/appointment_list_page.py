@@ -546,8 +546,16 @@ class RightPanelMixin:
         self.photo_widget.set_readonly(True)
         self.photo_widget.photosChanged.connect(self._on_draft_changed)
 
+        # Устанавливаем функцию получения уникальных описаний для автодополнения
+        photo_service = get_photo_service()
+        self.photo_widget.set_unique_values_func(
+            lambda: [str(v) for v in photo_service.get_unique_values('description')]
+        )
+
         self.detail_layout.addWidget(QLabel("Фотографии:"))
         self.detail_layout.addWidget(self.photo_widget)
+
+        
 
         self._loading_right_panel = 0
 

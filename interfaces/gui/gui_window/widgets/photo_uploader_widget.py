@@ -30,6 +30,8 @@ from PySide6.QtWidgets import (
     # QApplication
 )
 
+from interfaces.gui.gui_window.widgets.delegate.type_delegate import CompleterStringDelegate
+
 
 
 
@@ -409,9 +411,18 @@ class PhotoUploaderWidget(QWidget):
         photo_delegate = PhotoDelegate(self.table, self)
         self.table.setItemDelegateForColumn(0, photo_delegate)
 
-        # text_delegate = TextEditDelegate(self.table)
-        text_delegate = TextEditDelegate(self.table, self)  # <-- передаём self (PhotoUploaderWidget)
-        self.table.setItemDelegateForColumn(1, text_delegate)
+        # # text_delegate = TextEditDelegate(self.table)
+        # text_delegate = TextEditDelegate(self.table, self)  # <-- передаём self (PhotoUploaderWidget)
+        # self.table.setItemDelegateForColumn(1, text_delegate)
+
+        # Создаём делегат с автодополнением
+        # Функция получения уникальных значений должна быть установлена извне
+        self.description_delegate = CompleterStringDelegate(
+            self.table,
+            get_unique_values_func=self._get_unique_values_for_description,
+            column=1
+        )
+        self.table.setItemDelegateForColumn(1, self.description_delegate)
 
         # Сигналы
         self.table.itemDoubleClicked.connect(self._on_table_double_clicked)
@@ -436,6 +447,40 @@ class PhotoUploaderWidget(QWidget):
         btn_layout.addWidget(self.remove_btn)
 
         main_layout.addLayout(btn_layout)
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_unique_values_for_description(self, column: int) -> List[str]:
+        """
+        Возвращает список уникальных описаний фото.
+        Используется для автодополнения.
+        """
+        if not hasattr(self, '_unique_values_func') or self._unique_values_func is None:
+            return []
+        return self._unique_values_func()
+    
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_unique_values_func(self, func):
+        """
+        Устанавливает функцию, возвращающую список уникальных строк для автодополнения.
+        :param func: вызываемый объект без аргументов, возвращающий List[str]
+        """
+        self._unique_values_func = func
+        # Обновим делегат, если он уже создан
+        if hasattr(self, 'description_delegate'):
+            self.description_delegate._get_unique_values_func = lambda col: func()
+            self.description_delegate._cache.clear()
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',

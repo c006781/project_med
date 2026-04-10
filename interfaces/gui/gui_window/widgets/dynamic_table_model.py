@@ -40,11 +40,13 @@ class DynamicTableModel(QAbstractTableModel):
         self,
         data: List[Any], 
         columns: List[Dict], 
-        parent=None
+        parent=None,
+        get_unique_values_func=None,
     ):
         """
         :param data: список DTO (объекты с атрибутами, соответствующими колонкам)
-        :param columns: описание колонок (см. выше)
+        :param columns: описание колонок в таблице
+        :param get_unique_values_func: вызываемый объект с сигнатурой func(column_index) -> List[str]
         """
         super().__init__(parent)
 
@@ -52,6 +54,7 @@ class DynamicTableModel(QAbstractTableModel):
             name = 'gui.DynamicTableModel',
             enable_file_logging = 'user',
             use_name_in_filename = 'user',
+            
         )
 
         self._data = data
@@ -59,7 +62,24 @@ class DynamicTableModel(QAbstractTableModel):
         self._editable_columns = {col['name']: col.get('editable', False) for col in columns}
 
         self._row_colors = {}  # словарь {row: QColor}
-        
+
+        self._get_unique_values_func = get_unique_values_func 
+
+
+    def get_unique_values_for_column(self, col: int) -> List[str]:
+        """
+        Возвращает список уникальных строк для указанного столбца.
+        Если функция не задана или возникает ошибка, возвращает пустой список.
+        """
+        if not self._get_unique_values_func:
+            return []
+        try:
+            return self._get_unique_values_func(col)
+        except Exception as e:
+            self.logger.exception(f"Ошибка получения уникальных значений для столбца {col}: {e}")
+            return []
+
+
     def clear_row_color(self, row: int):
         """
         Очищает цвет строки в таблице.

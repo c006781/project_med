@@ -22,7 +22,7 @@ from .widget_factory import WidgetFactory
 from pydantic import BaseModel
 
 from PySide6.QtWidgets import (
-    QSizePolicy, QWidget, 
+    QCompleter, QSizePolicy, QWidget, 
     QFormLayout, QLineEdit, 
     QTextEdit, QDateEdit,
     QTimeEdit, QSpinBox, 
@@ -58,6 +58,7 @@ class DynamicEditForm(QWidget):
         'choices': lambda editable, choices, **kw: WidgetFactory.create_combobox_widget(choices, editable),
         'photo_uploader': lambda editable, **kw: WidgetFactory.create_photo_uploader_widget(),
         'completer': lambda editable, widget_type, **kw: WidgetFactory.create_completer_edit_widget(widget_type, editable),
+        'autocomplete': lambda editable, **kw: WidgetFactory.create_autocomplete_widget(editable), 
     }
 
     @classmethod
@@ -173,7 +174,6 @@ class DynamicEditForm(QWidget):
         self._init_handlers()
 
         self._setup_ui()
-
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
@@ -346,15 +346,21 @@ class DynamicEditForm(QWidget):
         if config.get('virtual') and config.get('compute'):
             return self._create_virtual_widget(config, editable)
 
+        # Определяем реальный тип поля (нужен для решений ниже)
+        real_type = self._get_real_type(field.annotation)
+
         # Выпадающий список (choices)
         choices = config.get('choices')
-
         # Если есть choices – создаём комбобокс
         if choices:
             return self._SPECIAL_HANDLERS['choices'](
                 editable=editable, 
                 choices=choices
             )
+        
+        # Автодополнение для строковых полей (без кнопок)
+        if config.get('autocomplete') and real_type == str:
+            return self._SPECIAL_HANDLERS['autocomplete'](editable=editable)
 
         # Специальные типы виджетов
         widget_type = config.get('widget_type')
@@ -364,8 +370,10 @@ class DynamicEditForm(QWidget):
                 widget_type=widget_type
             )
         
-        # 4. Определяем реальный тип поля
-        real_type = self._get_real_type(field.annotation)# Определяем реальный тип поля
+        # # Определяем реальный тип поля
+        # real_type = self._get_real_type(field.annotation)# Определяем реальный тип поля
+
+        # Стандартные виджеты по типу данных
         handler = self._TYPE_HANDLERS.get(real_type)
         if handler:
             return handler(
@@ -504,7 +512,7 @@ class DynamicEditForm(QWidget):
         widget = self.widgets.get(field_name)
         if not isinstance(widget, CompleterEdit):
             return
-        from PySide6.QtWidgets import QCompleter
+        # from PySide6.QtWidgets import QCompleter
         completer = QCompleter(items)
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         widget.setCompleter(completer)

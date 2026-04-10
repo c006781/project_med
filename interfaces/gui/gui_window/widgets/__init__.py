@@ -9,17 +9,21 @@ from .advanced_filter_proxy_model import AdvancedFilterProxyModel
 from .completer_edit        import CompleterEdit
 from .widget_factory        import WidgetFactory
 
-from .delegate.type_delegate import ComboBoxDelegate
+from .delegate.type_delegate import (
+    ComboBoxDelegate,
+    CompleterStringDelegate,
+)
 
 __all__ = [
     'DynamicEditForm',
     'DynamicTableModel',
     'FilterTableView',
-    'ComboBoxDelegate',
     'PhotoUploaderWidget',
     'LogViewer',
     'LogViewerHandler',
     'AdvancedFilterProxyModel',
     'CompleterEdit',
     'WidgetFactory',
+    'ComboBoxDelegate',
+    'CompleterStringDelegate',
 ]

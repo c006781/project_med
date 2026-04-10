@@ -926,7 +926,7 @@ class AppointmentListPage(
         original = self.original_data.get(source_row)
         self.logger.debug(
             f"_check_and_clear_modified_if_unchanged: original = {original} ,"
-            f" self.selected_dto.model_dump() == original.model_dump() = {self.selected_dto.model_dump() == original.model_dump()}"
+            # f" self.selected_dto.model_dump() == original.model_dump() = {self.selected_dto.model_dump() == original.model_dump()}"
 
         )
         # if original and self.selected_dto.model_dump() == original.model_dump():

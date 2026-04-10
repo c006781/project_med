@@ -36,6 +36,24 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def create_autocomplete_widget(editable: bool):
+        """
+        Создаёт CompleterEdit без кнопок (только поле с автодополнением).
+        Используется для полей с autocomplete=True.
+        """
+        from .completer_edit import CompleterEdit
+        widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        widget.setEnabled(editable)
+        return widget
+
+    @staticmethod
+    @AppLogger.get_instance(
+        name='WidgetFactory',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def create_text_widget(widget_type: str, editable: bool):
         """
         Создаёт текстовый виджет: QLineEdit (обычное поле) или QTextEdit (многострочное).
@@ -163,17 +181,29 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_completer_edit_widget(widget_type: str, editable: bool):
+    def create_completer_edit_widget(
+        widget_type: str, 
+        editable: bool,
+        with_buttons: bool = True,
+    ):
         """
         Создаёт CompleterEdit с возможностью создания/редактирования.
 
         :param widget_type: 'completer', 'completer_with_create', 'completer_with_edit'
         :param editable: если False, виджет будет отключён
+        :param with_buttons: если False, кнопки не добавляются (только поле)
         :return: CompleterEdit
         """
-        with_create = (widget_type == 'completer_with_create')
-        with_edit = (widget_type == 'completer_with_edit')
-        widget = CompleterEdit(parent=None, with_create=with_create, with_edit=with_edit)
+
+        if widget_type == 'completer' and not with_buttons:
+            # Только поле без кнопок
+            widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        else:
+
+            with_create = (widget_type == 'completer_with_create')
+            with_edit = (widget_type == 'completer_with_edit')
+            widget = CompleterEdit(parent=None, with_create=with_create, with_edit=with_edit)
+
         widget.setEnabled(editable)
         return widget
 

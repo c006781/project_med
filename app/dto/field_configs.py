@@ -44,12 +44,14 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
     'first_name': {
         'title'         : 'Имя',    # заголовок колонки
         'editable'      : True,     # редактируемый ли
+        'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'order'         : 1,        # сортировка
         'required'      : True,     # обязательное поле для заполнения ли
     },
     'last_name': {
         'title'         : 'Фамилия',    # заголовок колонки
         'editable'      : True,         # редактируемый ли
+        'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'order'         : 2,            # сортировка
         'required'      : True,         # обязательное поле для заполнения ли
     },
@@ -110,6 +112,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     'note_text': {
         'title'             : 'Заметка',    # заголовок колонки
+        # 'autocomplete'      : True,         # включает автодополнение в таблице и форме
         'editable'          : True,         # редактируемый ли
         'virtual'           : True,         # виртуальное ли поле
         'source_attr'       : 'note',       # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
@@ -139,11 +142,11 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         # 'hidden': True, # скрываем ли его объект - True нельзя, так как не будет отображаться в Редакторе приёма
     },
     'has_photos': {
-        'title'         : 'Фото',   # заголовок колонки
-        'editable'      : False,    # редактируемый ли
-        'virtual'       : True,     # виртуальное ли поле
-        'source_attr'   : 'photos', # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
-        'order'       : 0,  # порядок в таблице
+        'title'         : 'Фото',       # заголовок колонки
+        'editable'      : False,        # редактируемый ли
+        'virtual'       : True,         # виртуальное ли поле
+        'source_attr'   : 'photos',     # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
+        'order'         : 0,            # порядок в таблице
         'compute': {  # как вычислить
             'func'  : lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
             'args'  : ['photos'],
@@ -160,6 +163,7 @@ NOTE_CONFIG: Dict[str, Dict[str, Any]] = {
     },
     'text': {
         'title'         : 'Текст заметки',  # заголовок колонки
+        # 'autocomplete'      : True,         # включает автодополнение в таблице и форме
         'editable'      : True,             # редактируемый ли
         'widget_type'   : 'textarea',       # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
         'init_from_extra': 'text',          # ключ в extra_data
@@ -183,7 +187,8 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable'  : False,    # редактируемый ли
     },
     'description': {
-        'title'     : 'Описание',   # заголовок колонки
-        'editable'  : True,         # редактируемый ли
+        'title'             : 'Описание',   # заголовок колонки
+        'editable'          : True,         # редактируемый ли
+        'autocomplete'      : True,         # включает автодополнение в таблице и форме
     },
 }

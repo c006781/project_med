@@ -5,10 +5,14 @@ from datetime import (
     date, 
     time
 )
+from typing import List
+
+from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 
 from PySide6.QtWidgets import (
+    QCompleter,
     QStyle,
     QStyledItemDelegate, 
     QLineEdit, QCheckBox, 
@@ -278,3 +282,70 @@ class TimeStringDelegate(StringDelegate):
                 model.setData(index, t, Qt.EditRole)
             except ValueError:
                 pass
+
+
+
+
+
+# """
+# Делегат для текстовых ячеек с автодополнением (QCompleter).
+# """
+
+
+
+class CompleterStringDelegate(QStyledItemDelegate):
+    """
+    Делегат для редактирования строковых ячеек с автодополнением.
+    Список вариантов берётся из модели через коллбэк get_unique_values.
+    """
+
+    def __init__(self, parent=None, get_unique_values_func=None, column=None):
+        """
+        :param parent: родительский виджет (обычно QTableView)
+        :param get_unique_values_func: функция, возвращающая список строк для автодополнения
+        :param column: номер столбца (передаётся в get_unique_values_func)
+        """
+        super().__init__(parent)
+        self.logger = AppLogger.get_instance(
+            name='gui.CompleterStringDelegate',
+            enable_file_logging='user',
+            use_name_in_filename='user'
+        )
+        self._get_unique_values_func = get_unique_values_func
+        self._column = column
+        self._cache = {}  # кэш вариантов для столбца (на случай, если функция тяжёлая)
+
+    def _get_values(self) -> List[str]:
+        """Возвращает список вариантов для автодополнения (с кэшированием)."""
+        if self._column in self._cache:
+            return self._cache[self._column]
+        if not self._get_unique_values_func:
+            return []
+        values = self._get_unique_values_func(self._column)
+        self._cache[self._column] = values
+        return values
+
+    def createEditor(self, parent, option, index):
+        """Создаёт QLineEdit с QCompleter."""
+        editor = QLineEdit(parent)
+        install_standard_context_menu(editor)
+
+        values = self._get_values()
+        if values:
+            completer = QCompleter(values)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)   # поиск по подстроке
+            editor.setCompleter(completer)
+
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.EditRole)
+        if value is not None:
+            editor.setText(str(value))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.text(), Qt.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)

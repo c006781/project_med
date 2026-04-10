@@ -24,6 +24,7 @@ from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import AdvancedFilterProxyModel
 
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
+    CompleterStringDelegate,
     DateStringDelegate,
     StringDelegate,
     DateDelegate,
@@ -910,7 +911,11 @@ class ListUIMixin:
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         # Модель таблицы
-        self.source_model = DynamicTableModel(self.current_data, self.columns)
+        self.source_model = DynamicTableModel(
+            self.current_data, 
+            self.columns,
+            get_unique_values_func=self.get_unique_values_for_column
+        )
         self.source_model.row_modified.connect(self._on_row_modified) # Подключаем сигнал изменения строки для отслеживания изменений
 
         # Прокси-модель
@@ -962,7 +967,7 @@ class ListUIMixin:
             field_name = col_info['name']
             config = self.field_configs.get(field_name, {})
 
-            # Выпадающий список (choices)
+            # Выпадающий список (choices) – наивысший приоритет
             choices = config.get('choices')
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
@@ -980,6 +985,19 @@ class ListUIMixin:
             real_type = self._get_real_type( # определяем реальный тип
                 field_type
             )
+
+
+            # Автодополнение для строковых полей (если включено в конфигурации)
+            if real_type == str and config.get('autocomplete', False):
+                delegate = CompleterStringDelegate(
+                    self.table_view,
+                    get_unique_values_func=self.get_unique_values_for_column,
+                    column=col_idx
+                )
+                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                continue
+
+            # Стандартные делегаты по типу
             delegate_class = type_delegate_map.get(# определяем класс делегата по реальному типу поля
                 real_type
             ) 
@@ -987,6 +1005,7 @@ class ListUIMixin:
                 delegate = delegate_class(self.table_view)
                 self.table_view.setItemDelegateForColumn(col_idx, delegate)
                 continue
+                # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
 
 

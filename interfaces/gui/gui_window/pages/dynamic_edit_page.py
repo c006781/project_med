@@ -125,6 +125,41 @@ class DynamicEditPage(BasePage):
         # # настройка интерфейса страницы
         self._setup_ui()
 
+
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_autocomplete_data(self):
+        """
+        Загружает уникальные значения для полей с autocomplete=True
+        и устанавливает QCompleter в соответствующие виджеты.
+        """
+        for field_name, widget in self.form.widgets.items():
+            if not isinstance(widget, CompleterEdit):
+                continue
+            config = self.field_configs.get(field_name, {})
+            if not config.get('autocomplete', False):
+                continue
+            # Имя столбца в БД – либо source_column, либо field_name
+            column_name = config.get('source_column', field_name)
+            try:
+                values = self.service.get_unique_values(column_name)
+            except Exception as e:
+                self.logger.exception(f"Ошибка получения уникальных значений для {field_name}: {e}")
+                continue
+            if values:
+                from PySide6.QtWidgets import QCompleter
+                completer = QCompleter(values)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchFlag.MatchContains)
+                widget.setCompleter(completer)
+
+
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         enable_file_logging = 'system',
@@ -658,6 +693,7 @@ class DynamicEditPage(BasePage):
 
         # Загружаем данные для полей с автодополнением
         self._load_completer_data()
+        self._load_autocomplete_data() 
 
         # Подключаем сигналы кнопок
         self._connect_button_signals()

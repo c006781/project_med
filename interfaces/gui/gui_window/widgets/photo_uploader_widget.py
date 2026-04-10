@@ -242,6 +242,8 @@ class PhotoUploaderWidget(QWidget):
     """
     MAX_PHOTOS = 0  # ограничить максимальное количество загружаемых фото в приём. 0 - без ограницений
 
+    VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'}
+
     photosChanged = Signal()
 
     @AppLogger.get_instance(
@@ -276,6 +278,8 @@ class PhotoUploaderWidget(QWidget):
         
         self._storage_path: str = None                    # базовый путь к хранилищу
         self._image_cache: Dict[str, QPixmap] = {}        # кэш изображений
+
+        self.setAcceptDrops(True) # разрешить перетаскивание
 
         self._setup_ui()
         self._adjust_column_widths()
@@ -665,50 +669,108 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _add_photo_files(self, file_paths):
+        """
+        Добавляет список файлов в pending_photos с проверкой расширений и лимита.
+
+        :param file_paths: список путей к файлам
+        :type file_paths: List[str]
+        :return: количество добавленных фото
+        :rtype: int
+        """
+        added = 0
+        for file_path in file_paths:
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext not in self.VALID_EXTENSIONS:
+                self.logger.debug(f"Файл {file_path} имеет неподдерживаемое расширение, пропускаем")
+                continue
+            
+            if self.MAX_PHOTOS > 0 and len(self.pending_photos) + added >= self.MAX_PHOTOS:
+                self.logger.warning(f"Достигнут лимит фото ({self.MAX_PHOTOS}), остальные файлы не добавлены")
+                break
+            
+            self.pending_photos.append((file_path, ""))
+            added += 1
+            self.logger.debug(f"Добавлено фото: {file_path}")
+        
+        if added:
+            self._refresh_table()
+            self.photosChanged.emit()
+        return added
+
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def dragEnterEvent(self, event):
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            event.ignore()
+            return
+        for url in mime_data.urls():
+            file_path = url.toLocalFile()
+            if file_path and os.path.splitext(file_path)[1].lower() in self.VALID_EXTENSIONS:
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def dragMoveEvent(self, event):
+        """Разрешает перемещение (повторяет логику dragEnter)."""
+        self.dragEnterEvent(event)
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def dropEvent(self, event):
+        """Обрабатывает сброшенные файлы, добавляя их через _add_photo_files."""
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            event.ignore()
+            return
+        
+        file_paths = []
+        for url in mime_data.urls():
+            file_path = url.toLocalFile()
+            if file_path:
+                file_paths.append(file_path)
+        
+        if file_paths:
+            self._add_photo_files(file_paths)
+        event.acceptProposedAction()   
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def add_photo(self):
-        """
-        Добавляет одно или несколько новых фото в список pending_photos.
-        Открывает диалог выбора файлов с возможностью множественного выбора.
-
-        Открывает файл для добавления с помощью QFileDialog.getOpenFileName.
-
-        Если файл не выбран, то ничего не делается.
-
-        Добавляет путь к файлу и пустое описание в список pending_photos.
-
-        Обновляет таблицу с новым фото.
-
-        Вызывает сигнал photosChanged.
-
-        :return: None
-        :rtype: None
-        """
+        """Добавляет одно или несколько новых фото через диалог выбора файлов."""
         file_paths, _ = QFileDialog.getOpenFileNames(
             self, 
             "Выберите изображение", 
             "",
             "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
         )
-
-
-        if not file_paths:
-            return
-        
-        if (
-            len(self.pending_photos) + len(file_paths) > self.MAX_PHOTOS
-        ) and (
-            self.MAX_PHOTOS > 0
-        ):
-            QMessageBox.warning(self, "Предупреждение", f"Можно добавить не более {self.MAX_PHOTOS} фото.")
-            return
-                
-        for file_path in file_paths:
-            self.pending_photos.append((file_path, ""))
-            self.logger.debug(f"Добавлено фото: {file_path}")
-
-        self._refresh_table()
-        self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приём
-        self.logger.debug(f"Добавлено {len(file_paths)} фото")
+        if file_paths:
+            self._add_photo_files(file_paths)
+            self.logger.debug(f"Добавлено {len(file_paths)} фото")
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',

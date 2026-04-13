@@ -352,7 +352,8 @@ class DraftMixin:
 
         self.logger.info(
             f"_on_draft_changed завершён. "
-            f"modified_rows = {len(self.modified_rows)}, "
+            # f"modified_rows = {len(self.modified_rows)}, "
+            f"modified_rows = {len(self.modified_ids)}, "
             f"selected_dto.id = {getattr(self.selected_dto, 'id', None)}"
         )
 
@@ -732,77 +733,132 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _has_row_changes(self, source_row: int, dto) -> bool:
-        """
-        Проверяет, есть ли изменения в строке по сравнению с оригиналом,
-        включая черновики фото и заметки.
+    def _modified_ids_control(self, appointment_id, if_add :bool):
 
-        :param source_row: индекс строки в source_model (должен быть >= 0)
-        :param dto: текущий DTO строки (не может быть None)
-        :return: True, если есть изменения (в основных полях, заметке или фото)
         """
-        # --- Проверка входных параметров ---
-        if source_row < 0:
-            self.logger.warning(f"_has_row_changes: некорректный source_row={source_row}")
-            return True  # лучше считать, что изменения есть, чем пропустить
+        Метод для управления измененных строк в таблице.
+        Если if_add=True, то добавляет source_row в множество измененных строк.
+        Если if_add=False, то удаляет source_row из множества измененных строк.
+        Затем вызывает _set_row_color_by_source_row для обновления цвета строки source_row,
+        а также _update_save_button_state для обновления состояния кнопки сохранения изменений.
+        """
+        super()._modified_ids_control(appointment_id, if_add)
+        # source_row = self._find_source_row_by_id(appointment_id)
+        # if if_add:
+        #     self.modified_ids.add(appointment_id)
+        # else:
+        #     self.modified_ids.discard(appointment_id)
 
+        # if source_row != -1: # Если строка была найдена
+        #     self._set_row_color_by_source_row(source_row) # обновляем цвет строки
+
+        # self._update_save_button_state() # активируем кнопку сохранения
+
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    # def _has_row_changes(self, source_row: int, dto) -> bool:
+    #     """
+    #     Проверяет, есть ли изменения в строке по сравнению с оригиналом,
+    #     включая черновики фото и заметки.
+
+    #     :param source_row: индекс строки в source_model (должен быть >= 0)
+    #     :param dto: текущий DTO строки (не может быть None)
+    #     :return: True, если есть изменения (в основных полях, заметке или фото)
+    #     """
+    #     # --- Проверка входных параметров ---
+    #     if source_row < 0:
+    #         self.logger.warning(f"_has_row_changes: некорректный source_row={source_row}")
+    #         return True  # лучше считать, что изменения есть, чем пропустить
+
+    #     if dto is None:
+    #         self.logger.warning(f"_has_row_changes: dto is None для строки {source_row}")
+    #         return True
+
+    #     # Проверяем, что dto имеет необходимые атрибуты
+    #     if not hasattr(dto, 'id'):
+    #         self.logger.warning(f"_has_row_changes: dto не имеет атрибута 'id' (тип {type(dto).__name__})")
+    #         return True
+    #     if not hasattr(dto, 'model_dump'):
+    #         self.logger.warning(f"_has_row_changes: dto не имеет метода model_dump (тип {type(dto).__name__})")
+    #         return True
+
+    #     # --- Проверка наличия оригинала ---
+    #     original = self.original_data.get(source_row)
+    #     if original is None:
+    #         # Нет оригинала – считаем, что это новая строка (изменения есть)
+    #         self.logger.debug(f"Строка {source_row}: нет оригинала (новая запись)")
+    #         return True
+
+    #     # --- 1. Сравнение основных полей DTO ---
+    #     # Исключаем виртуальные поля, которые не сохраняются в БД
+    #     exclude_fields = ['patient_name', 'has_photos']
+    #     current_dict = dto.model_dump(exclude=exclude_fields, exclude_none=True)
+    #     original_dict = original.model_dump(exclude=exclude_fields, exclude_none=True)
+    #     if current_dict != original_dict:
+    #         self.logger.debug(f"Строка {source_row}: изменены основные поля")
+    #         return True
+
+    #     # --- 2. Проверка черновиков заметки ---
+    #     appointment_id = dto.id
+    #     # Для новых записей с временным ID (отрицательным) черновики могут существовать,
+    #     # но сравнение с оригиналом уже не нужно, так как выше уже вернули True из-за отсутствия оригинала.
+    #     # Однако, если оригинал есть (например, перезагрузка), а ID временный – такого не должно быть.
+    #     if appointment_id in self._draft_note_current:
+    #         current_note = self._draft_note_current[appointment_id]
+    #         original_note = self._draft_note_original.get(appointment_id, "")
+    #         if current_note != original_note:
+    #             self.logger.debug(f"Строка {source_row}: изменена заметка")
+    #             return True
+
+    #     # --- 3. Проверка черновиков фото ---
+    #     if appointment_id in self._draft_photos:
+    #         draft = self._draft_photos[appointment_id]
+    #         # Есть ли pending фото?
+    #         if draft.get('pending_photos'):
+    #             self.logger.debug(f"Строка {source_row}: есть новые фото")
+    #             return True
+    #         # Есть ли удалённые фото?
+    #         if draft.get('deleted_photo_ids'):
+    #             self.logger.debug(f"Строка {source_row}: есть удалённые фото")
+    #             return True
+    #         # Есть ли изменённые описания существующих фото?
+    #         if draft.get('modified_photo_ids'):
+    #             self.logger.debug(f"Строка {source_row}: есть изменённые описания фото")
+    #             return True
+
+    #     return False
+    def _has_row_changes(self, appointment_id: int) -> bool:
+        # Находим DTO по id
+        dto = None
+        source_row = self._find_source_row_by_id(appointment_id)
+        if source_row != -1:
+            dto = self.source_model.get_item_at_row(source_row)
         if dto is None:
-            self.logger.warning(f"_has_row_changes: dto is None для строки {source_row}")
             return True
-
-        # Проверяем, что dto имеет необходимые атрибуты
-        if not hasattr(dto, 'id'):
-            self.logger.warning(f"_has_row_changes: dto не имеет атрибута 'id' (тип {type(dto).__name__})")
-            return True
-        if not hasattr(dto, 'model_dump'):
-            self.logger.warning(f"_has_row_changes: dto не имеет метода model_dump (тип {type(dto).__name__})")
-            return True
-
-        # --- Проверка наличия оригинала ---
         original = self.original_data.get(source_row)
         if original is None:
-            # Нет оригинала – считаем, что это новая строка (изменения есть)
-            self.logger.debug(f"Строка {source_row}: нет оригинала (новая запись)")
             return True
-
-        # --- 1. Сравнение основных полей DTO ---
-        # Исключаем виртуальные поля, которые не сохраняются в БД
-        exclude_fields = ['patient_name', 'has_photos']
-        current_dict = dto.model_dump(exclude=exclude_fields, exclude_none=True)
-        original_dict = original.model_dump(exclude=exclude_fields, exclude_none=True)
-        if current_dict != original_dict:
-            self.logger.debug(f"Строка {source_row}: изменены основные поля")
+        # Сравнение основных полей (исключая виртуальные)
+        exclude = ['patient_name', 'has_photos']
+        if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
             return True
-
-        # --- 2. Проверка черновиков заметки ---
-        appointment_id = dto.id
-        # Для новых записей с временным ID (отрицательным) черновики могут существовать,
-        # но сравнение с оригиналом уже не нужно, так как выше уже вернули True из-за отсутствия оригинала.
-        # Однако, если оригинал есть (например, перезагрузка), а ID временный – такого не должно быть.
+        # Проверка черновиков заметки
         if appointment_id in self._draft_note_current:
-            current_note = self._draft_note_current[appointment_id]
-            original_note = self._draft_note_original.get(appointment_id, "")
-            if current_note != original_note:
-                self.logger.debug(f"Строка {source_row}: изменена заметка")
+            if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
                 return True
-
-        # --- 3. Проверка черновиков фото ---
+        # Проверка черновиков фото
         if appointment_id in self._draft_photos:
             draft = self._draft_photos[appointment_id]
-            # Есть ли pending фото?
-            if draft.get('pending_photos'):
-                self.logger.debug(f"Строка {source_row}: есть новые фото")
+            if draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'):
                 return True
-            # Есть ли удалённые фото?
-            if draft.get('deleted_photo_ids'):
-                self.logger.debug(f"Строка {source_row}: есть удалённые фото")
-                return True
-            # Есть ли изменённые описания существующих фото?
-            if draft.get('modified_photo_ids'):
-                self.logger.debug(f"Строка {source_row}: есть изменённые описания фото")
-                return True
-
         return False
+
 
 
     @AppLogger.get_instance(
@@ -844,7 +900,8 @@ class AppointmentListPage(
         self.logger.debug(f"Сброс приёма {appointment_id} из БД")
 
         # 1. Удаляем черновики для этого приёма
-        self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
+        # self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
+        DraftMixin._clear_drafts(self, appointment_id)# Удаляем черновики для этого приёма
         
 
         # 2. Загружаем свежие данные из БД
@@ -861,12 +918,14 @@ class AppointmentListPage(
             self.source_model.update_row(source_row, fresh_dto)
             self.original_data[source_row] = fresh_dto
             # Снимаем пометку modified
-            if source_row in self.modified_rows:
+            # if source_row in self.modified_rows:
+            if appointment_id in self.modified_ids:
                 # self.modified_rows.discard(source_row)
                 # self._set_row_color_by_source_row(source_row)
                 # self._update_save_button_state()
-                self._modified_rows_control( # помечаем строку как изменённую
-                    source_row,
+                # self._modified_rows_control( # помечаем строку как изменённую
+                self._modified_ids_control( # помечаем строку как изменённую
+                    appointment_id,
                     False    
                 )
 
@@ -909,57 +968,31 @@ class AppointmentListPage(
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _check_and_clear_modified_if_unchanged(self):
-        """Проверяет, не вернулась ли текущая строка к исходному состоянию, и если да – снимает пометку modified."""
+        """
+        Проверяет, не вернулся ли текущий приём к исходному состоянию.
+        Если изменений нет – снимает пометку modified (удаляет id из self.modified_ids).
+        """
         if not self.selected_dto:
             return
-        
-        source_row = None
 
-        self.logger.debug(f"_check_and_clear_modified_if_unchanged: selected_dto = {self.selected_dto}")
-
-        for row in range(self.source_model.rowCount()):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id == self.selected_dto.id:  # Находим строку, соответствующую текущему DTO
-                source_row = row
-                break
-
-        self.logger.debug(f"_check_and_clear_modified_if_unchanged: source_row = {source_row}")
-        if source_row is None: # Если строка не нашлась в модели
+        appointment_id = self.selected_dto.id
+        # Новые записи (временные id) не хранятся в modified_ids
+        if appointment_id is None or appointment_id < 0:
             return
-        
-        # Проверяем, что self.selected_dto не None
-        if self.selected_dto is None:
-            return
-        
-        original = self.original_data.get(source_row)
-        self.logger.debug(
-            f"_check_and_clear_modified_if_unchanged: original = {original} ,"
-            # f" self.selected_dto.model_dump() == original.model_dump() = {self.selected_dto.model_dump() == original.model_dump()}"
 
-        )
-        # if original and self.selected_dto.model_dump() == original.model_dump():
-        #     if source_row in self.modified_rows:
-        #         self.modified_rows.discard(source_row)
-        #         self._set_row_color_by_source_row(source_row)
-        #         self._update_save_button_state()
+        # Проверяем наличие реальных изменений (основные поля, заметка, фото)
+        if not self._has_row_changes(appointment_id):
+            if appointment_id in self.modified_ids:
+                self.modified_ids.discard(appointment_id)
 
-        # t1 = original
-        # t2 = self.selected_dto.model_dump()
-        # t3 = original.model_dump()
-        
-        # if original and self.selected_dto.model_dump() == original.model_dump():
-        if not self._has_row_changes(source_row, self.selected_dto):
-            self.logger.debug(f"if source_row in self.modified_rows = {source_row in self.modified_rows}")
-            if source_row in self.modified_rows:
-                # self.modified_rows.discard(source_row)
-                # self._set_row_color_by_source_row(source_row)  
-                # self._update_save_button_state()
+                # Находим строку по id для обновления цвета
+                source_row = self._find_source_row_by_id(appointment_id)
+                if source_row != -1:
+                    self._set_row_color_by_source_row(source_row)
+                self._update_save_button_state()
+                self.logger.debug(f"Строка приёма {appointment_id} возвращена к оригиналу — пометка снята")
 
-                self._modified_rows_control( # помечаем строку как изменённую
-                    source_row,
-                    False    
-                )
-                self.logger.debug(f"_check_and_clear... : строка {source_row} возвращена к оригиналу — выделение СНЯТО")
+
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -1042,7 +1075,8 @@ class AppointmentListPage(
 
         # Очищаем черновики для новой строки (если она была)
         if temp_id is not None:
-            self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+            # self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+            DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
 
         # Если после удаления строк не осталось, очищаем правую панель
         if self.source_model.rowCount() == 0:
@@ -1113,50 +1147,74 @@ class AppointmentListPage(
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _save_modified_appointments(self):
-        """Сохраняет изменения в существующих приёмах (modified_rows)."""
-        for source_row in list(self.modified_rows):
-            dto = self.source_model.get_item_at_row(source_row)
-            if dto is None:
-                self.logger.warning(f"_save_modified_appointments: dto is None для строки {source_row}")
-                self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
-                continue
+    # def _save_modified_appointments(self):
+    #     """Сохраняет изменения в существующих приёмах (modified_rows)."""
+    #     for source_row in list(self.modified_rows):
+    #         dto = self.source_model.get_item_at_row(source_row)
+    #         if dto is None:
+    #             self.logger.warning(f"_save_modified_appointments: dto is None для строки {source_row}")
+    #             self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
+    #             continue
 
-            if dto.id is None or dto.id <= 0:
-                # Это новая строка – она должна обрабатываться в _save_new_appointments
-                self.logger.debug(f"Строка {source_row} имеет id={dto.id}, пропускаем в modified")
-                self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
-                continue
+    #         if dto.id is None or dto.id <= 0:
+    #             # Это новая строка – она должна обрабатываться в _save_new_appointments
+    #             self.logger.debug(f"Строка {source_row} имеет id={dto.id}, пропускаем в modified")
+    #             self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
+    #             continue
 
-            if not self._has_row_changes(source_row, dto): # Если строка не изменилась
-                # self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк
-                # self._set_row_color_by_source_row(source_row) 
-                # self._update_save_button_state()
+    #         if not self._has_row_changes(source_row, dto): # Если строка не изменилась
+    #             # self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк
+    #             # self._set_row_color_by_source_row(source_row) 
+    #             # self._update_save_button_state()
 
-                self._modified_rows_control( # помечаем строку как изменённую
-                    source_row,
-                    False    
-                )
-                continue
+    #             self._modified_rows_control( # помечаем строку как изменённую
+    #                 source_row,
+    #                 False    
+    #             )
+    #             continue
 
-            self._save_single_appointment(dto, source_row) # Сохраняем изменённую строку
+    #         self._save_single_appointment(dto, source_row) # Сохраняем изменённую строку
 
-        #     if dto and (dto.id is not None) and (dto.id > 0):
-        #         original = self.original_data.get(source_row)
+    #     #     if dto and (dto.id is not None) and (dto.id > 0):
+    #     #         original = self.original_data.get(source_row)
 
-        #         if original and dto.model_dump() == original.model_dump():
-        #             self.modified_rows.discard(source_row)
-        #             self._set_row_color_by_source_row(source_row)   # 
-        #             self._update_save_button_state()
-        #             continue
-        #         else:
-        #             0==0
+    #     #         if original and dto.model_dump() == original.model_dump():
+    #     #             self.modified_rows.discard(source_row)
+    #     #             self._set_row_color_by_source_row(source_row)   # 
+    #     #             self._update_save_button_state()
+    #     #             continue
+    #     #         else:
+    #     #             0==0
 
-        #         self._save_single_appointment(dto, source_row)
-        #     else:
-        #         0==0
+    #     #         self._save_single_appointment(dto, source_row)
+    #     #     else:
+    #     #         0==0
         
-        # 0==0
+    #     # 0==0
+
+    def _save_modified_appointments(self):
+        """Сохраняет изменения в существующих приёмах (modified_ids)."""
+        for aid in list(self.modified_ids):
+            source_row = self._find_source_row_by_id(aid)
+            self.logger.warning(f"_save_modified_appointments: if source_row == -1:  {source_row == -1}")
+            if source_row == -1:
+                self.modified_ids.discard(aid)
+                continue
+
+            dto = self.source_model.get_item_at_row(source_row)
+            self.logger.warning(f"_save_modified_appointments: if dto is None:  {dto is None}")
+            if dto is None:
+                self.modified_ids.discard(aid)
+                continue
+
+            self.logger.warning(f"_save_modified_appointments: if not self._has_row_changes(aid):  {not self._has_row_changes(aid)}")
+            if not self._has_row_changes(aid):
+                self.modified_ids.discard(aid)
+                continue
+
+            self._save_single_appointment(dto, source_row)
+
+        self.modified_ids.clear()   
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -1220,7 +1278,8 @@ class AppointmentListPage(
                     self.logger.warning(f"Не удалось сохранить фото для нового приёма: created.id = {created.id}")
 
                 # Очищаем черновики для этого временного ID
-                self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+                # self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+                DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
 
         return newly_created_id
 
@@ -1231,22 +1290,31 @@ class AppointmentListPage(
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    # def _save_deleted_appointments(self):
+    #     """Удаляет помеченные приёмы (если есть такая функциональность)."""
+    #     for row in sorted(self.deleted_rows, reverse=True):
+    #         dto = self.source_model.get_item_at_row(row) 
+    #         if dto:
+    #             if dto.id is not None and dto.id > 0:
+    #                 # Существующий приём – удаляем через сервис
+    #                 self.service.delete_appointment(dto.id)
+    #                 self.logger.info(f"Удалён приём ID={dto.id}")
+    #             else:
+    #                 # Новая строка (временный ID) – просто удаляем из модели
+    #                 self.logger.info(f"Удалена новая строка с временным ID={dto.id}")
+    #             # Удаляем строку из модели
+    #             # self.source_model.remove_row(row)
+    #     self.deleted_rows.clear()
+    #     # pass
     def _save_deleted_appointments(self):
-        """Удаляет помеченные приёмы (если есть такая функциональность)."""
-        for row in sorted(self.deleted_rows, reverse=True):
-            dto = self.source_model.get_item_at_row(row) 
-            if dto:
-                if dto.id is not None and dto.id > 0:
-                    # Существующий приём – удаляем через сервис
-                    self.service.delete_appointment(dto.id)
-                    self.logger.info(f"Удалён приём ID={dto.id}")
-                else:
-                    # Новая строка (временный ID) – просто удаляем из модели
-                    self.logger.info(f"Удалена новая строка с временным ID={dto.id}")
-                # Удаляем строку из модели
-                # self.source_model.remove_row(row)
-        self.deleted_rows.clear()
-        # pass
+        for aid in list(self.deleted_ids):
+            try:
+                self.service.delete_appointment(aid)
+                self.logger.info(f"Удалён приём ID={aid}")
+            except Exception as e:
+                self.logger.exception(f"Ошибка удаления приёма {aid}: {e}")
+        self.deleted_ids.clear()
+
 
     # ----------------------------------------------------------------------
     # Переопределение построения интерфейса
@@ -1422,18 +1490,21 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    # def _on_selection_changed(self, selected, deselected):
+    #     """
+    #     Переопределяем метод для сохранения черновика текущего приёма
+    #     перед переключением на другой.
+    #     """
+    #     # Сохраняем черновик текущего выбранного приёма (если есть)
+    #     if self.selected_dto:
+    #         self.logger.debug(f"Сохранение черновика для приёма {self.selected_dto.id} перед переключением")
+    #         self._save_current_draft()
+    #     # Вызываем родительский метод, который обновит self.selected_dto и вызовет update_details
+    #     super()._on_selection_changed(selected, deselected)
     def _on_selection_changed(self, selected, deselected):
-        """
-        Переопределяем метод для сохранения черновика текущего приёма
-        перед переключением на другой.
-        """
-        # Сохраняем черновик текущего выбранного приёма (если есть)
         if self.selected_dto:
-            self.logger.debug(f"Сохранение черновика для приёма {self.selected_dto.id} перед переключением")
             self._save_current_draft()
-        # Вызываем родительский метод, который обновит self.selected_dto и вызовет update_details
         super()._on_selection_changed(selected, deselected)
-
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -1442,65 +1513,19 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _mark_current_row_modified(self): 
-        """
-        Помечает текущую строку (self.selected_dto) как изменённую в модели.
-        Если строка уже в modified_rows, ничего не делает.
-
-        :return: None
-        """
+    def _mark_current_row_modified(self):
         if not self.selected_dto:
-            self.logger.debug("_mark_current_row_modified: selected_dto is None")
             return
-
-        # # Находим индекс строки в модели
-        # proxy_index = self.table_view.currentIndex()
-        # if not proxy_index.isValid():
-        #     return
-
-        # source_row = self.proxy_model.mapToSource(proxy_index).row()
-        # if source_row == -1:
-        #     return
-
-        # Ищем source_row по id (самый надёжный способ)
-        source_row = None
-        for row in range(self.source_model.rowCount()):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and getattr(dto, 'id', None) == self.selected_dto.id:
-                source_row = row
-                break
-
-        if source_row is None:
-            self.logger.warning(f"_mark_current_row_modified: не найдена строка для id={self.selected_dto.id}")
+        appointment_id = self.selected_dto.id
+        if appointment_id is None or appointment_id < 0:
             return
+        
+        self._modified_ids_control(
+            appointment_id,
+            self._has_row_changes(appointment_id)    ,
+        )
 
-        # Проверяем, есть ли реальные изменения
-        if not self._has_row_changes(source_row, self.selected_dto):
-            if source_row in self.modified_rows:
-                # self.modified_rows.discard(source_row)
-                # self._set_row_color_by_source_row(source_row)
-                # self._update_save_button_state()
-                self._modified_rows_control( # помечаем строку как изменённую
-                    source_row,
-                    False    
-                )
-                self.logger.debug(f"_mark_current_row_modified: строка {source_row} – изменений нет, пометка снята")
-            else:
-                self.logger.debug(f"_mark_current_row_modified: строка {source_row} уже пометка снята")
-        else:
-            # Если строка ещё не помечена как modified, добавляем
-            if source_row not in self.modified_rows:
-                # self.modified_rows.add(source_row)
-                # # self._update_row_color(source_row)   # обновляем цвет строки
-                # self._set_row_color_by_source_row(source_row)   # обновляем цвет строки
-                # self._update_save_button_state()    # активируем кнопку сохранения
-                self._modified_rows_control( # помечаем строку как изменённую
-                    source_row,
-                    True    
-                )
-                self.logger.debug(f"_mark_current_row_modified: строка {source_row} помечена как изменённая")
-            else:
-                self.logger.debug(f"_mark_current_row_modified: строка {source_row} уже изменена")
+
 
     # ----------------------------------------------------------------------
     # Режим редактирования
@@ -1535,14 +1560,17 @@ class AppointmentListPage(
         
         elif reply == QMessageBox.StandardButton.No:
             # Откат: сбросить черновики, перезагрузить данные, очистить множества строк
-            self._clear_drafts() # очищаем черновики
+            # self._clear_drafts() # очищаем черновики
+            DraftMixin._clear_drafts(self) # очищаем черновики
             self._load_data() # перезагружаем данные
 
             # self.modified_rows.clear()
             # self.deleted_rows.clear()
             # self.new_rows.clear()
-            self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
-            self._clear_drafts() # Очистка черновиков (если они есть)
+            
+            self._clear() # сбрасываем выделение в таблице (если оно есть) 
+            # self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
+            # self._clear_drafts() # Очистка черновиков (если они есть)
 
             
             self._update_save_button_state()
@@ -1576,7 +1604,10 @@ class AppointmentListPage(
         """
         
         # Определяем, есть ли изменения
-        if self.modified_rows or self.deleted_rows or self.new_rows:
+        # if self.modified_rows or self.deleted_rows or self.new_rows:
+        self.logger.debug(f"if self.modified_ids or self.deleted_ids or self.new_rows: {self.modified_ids or self.deleted_ids or self.new_rows}")
+        if self.modified_ids or self.deleted_ids or self.new_rows:
+            
             return True
         
         # Добавляем проверку черновиков для текущего выбранного приёма
@@ -1584,6 +1615,7 @@ class AppointmentListPage(
             appointment_id = self.selected_dto.id
 
             # Заметка изменена?
+            self.logger.debug(f"if appointment_id in self._draft_note_current: {appointment_id in self._draft_note_current}")
             if appointment_id in self._draft_note_current:
                 if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
                     return True
@@ -1595,6 +1627,8 @@ class AppointmentListPage(
                     'deleted_photo_ids', # удалённые фото
                     'modified_photo_ids', # изменённые фото
                 ]:
+                    
+                    self.logger.debug(f"if len(self._draft_photos[{appointment_id}].get({i}, []))>0: {len(self._draft_photos[appointment_id].get(i, []))>0}")
                     if len(self._draft_photos[appointment_id].get(i, []))>0: # Если есть
                         return True # то изменение есть
                 
@@ -1728,7 +1762,8 @@ class AppointmentListPage(
         self.logger.debug(f"  → Основные данные приёма {appointment_id} обновлены")
 
          # После успешного сохранения очищаем черновики для этого приёма
-        self._clear_drafts(appointment_id) # Удаляем черновики для этого приёма
+        # self._clear_drafts(appointment_id) # Удаляем черновики для этого приёма
+        DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
 
 
     # --- Финальные действия после сохранения ---
@@ -1819,6 +1854,17 @@ class AppointmentListPage(
 
     # --- Основной метод сохранения ---
 
+
+    def _clear(self):
+        self.logger.debug("_clear : self._clear_selection()")
+        self._clear_selection() # сбрасываем выделение в таблице (если оно есть)   (возможно повтор. проверить)       
+        # self._clear_drafts() # Очистка черновиков (если они есть)
+        self.logger.debug("_clear : DraftMixin._clear_drafts()")
+        DraftMixin._clear_drafts(self) # Очистка черновиков (если они есть)
+        self.logger.debug("_clear : self.photo_widget.clear()")
+        self.photo_widget.clear()# Сбрасываем временные данные в photo_widget (pending, deleted, modified)
+        0==0
+
     @AppLogger.get_instance(
         name='AppointmentListPage',
         enable_file_logging='system',
@@ -1869,9 +1915,11 @@ class AppointmentListPage(
             self._save_deleted_appointments()
 
             # ОЧИСТКА МНОЖЕСТВ ПОСЛЕ СОХРАНЕНИЯ (исправление двойного вопроса)
-            self._clear_selection() # сбрасываем выделение в таблице (если оно есть)   (возможно повтор. проверить)       
-            self._clear_drafts() # Очистка черновиков (если они есть)
-            self.photo_widget.clear()# Сбрасываем временные данные в photo_widget (pending, deleted, modified)
+            self._clear() # сбрасываем выделение в таблице (если оно есть) 
+            # self._clear_selection() # сбрасываем выделение в таблице (если оно есть)   (возможно повтор. проверить)       
+            # self._clear_drafts() # Очистка черновиков (если они есть)
+            # self.photo_widget.clear()# Сбрасываем временные данные в photo_widget (pending, deleted, modified)   
+            
 
             # Обновляет данные и восстанавливает выделение после сохранения
             self._finalize_after_save(newly_created_id if newly_created_id is not None else current_id)

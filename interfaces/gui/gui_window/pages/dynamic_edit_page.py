@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     # QSpinBox,
 )
 from PySide6.QtCore import (
+    Qt,
     Signal, 
     Slot, 
     # QAction
@@ -1103,3 +1104,5 @@ class DynamicEditPage(BasePage):
             # вызываем у page_manager метод go_back
             # это приводит к возврату на предыдущую страницу
             self.page_manager.go_back()
+    
+    

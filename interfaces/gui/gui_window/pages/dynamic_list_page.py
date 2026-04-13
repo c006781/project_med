@@ -98,8 +98,12 @@ class ListSelectionMixin:
         """
         Очищает все отслеживаемые изменения (modified_rows, deleted_rows, new_rows).
         """
-        self.modified_rows.clear()
-        self.deleted_rows.clear()
+        # self.modified_rows.clear()
+        # self.deleted_rows.clear()
+        # self.new_rows.clear()
+
+        self.modified_ids.clear()
+        self.deleted_ids.clear()
         self.new_rows.clear()
 
         # # Очистка черновиков
@@ -256,12 +260,14 @@ class ListDataMixin:
         """
 
         # Сохраняем ID выбранного DTO (если есть)
-        selected_id = None
-        if self.selected_dto and hasattr(self.selected_dto, 'id'):
-            selected_id = self.selected_dto.id
+        # selected_id = None
+        # if self.selected_dto and hasattr(self.selected_dto, 'id'):
+        #     selected_id = self.selected_dto.id
+        selected_id = self.selected_dto.id if self.selected_dto else None
             
         try:
             self.current_data = self.loader_func(self.current_extra) # Загружаем данные
+
             self.source_model.update_data(self.current_data)
             # self.original_data = {i: dto for i, dto in enumerate(self.current_data)}
             self.original_data = {i: deepcopy(dto) for i, dto in enumerate(self.current_data)}
@@ -274,13 +280,16 @@ class ListDataMixin:
             # self.new_rows.clear()
             self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
             # self.original_data.clear()
+
+            
             
             self._update_save_button_state()
 
             # self.table_view.clearSelection()
             # Восстанавливаем выделение по ID
             if selected_id is not None:
-                row = self._find_row_by_dto_id(selected_id)
+                # row = self._find_row_by_dto_id(selected_id)
+                row = self._find_source_row_by_id(selected_id)
                 if row >= 0:
                     self._set_current_row(row)
                 else:
@@ -292,6 +301,7 @@ class ListDataMixin:
             self._update_selection_state()
             
             self._data_loaded = True
+
             self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки данных: {e}")
@@ -412,36 +422,57 @@ class ListChangesMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _set_row_color_by_source_row(self, source_row: int):
-        """Устанавливает цвет строки в исходной модели по её индексу."""
+    # def _set_row_color_by_source_row(self, source_row: int):
+    #     """Устанавливает цвет строки в исходной модели по её индексу."""
 
-        self.logger.debug(
-            f"_set_row_color_by_source_row: "
-            f"source_row={source_row}, "
-            f"modified_rows={self.modified_rows}, "
-            f"new_rows={self.new_rows}, "
-            f"deleted_rows={self.deleted_rows}"
-        )
-        if source_row < 0 or source_row >= self.source_model.rowCount():
-            self.logger.warning(
-                f"source_row {source_row} "
-            f"вне диапазона (0-{self.source_model.rowCount()-1})"
-            )
+    #     self.logger.debug(
+    #         f"_set_row_color_by_source_row: "
+    #         f"source_row={source_row}, "
+    #         f"modified_rows={self.modified_rows}, "
+    #         f"new_rows={self.new_rows}, "
+    #         f"deleted_rows={self.deleted_rows}"
+    #     )
+    #     if source_row < 0 or source_row >= self.source_model.rowCount():
+    #         self.logger.warning(
+    #             f"source_row {source_row} "
+    #         f"вне диапазона (0-{self.source_model.rowCount()-1})"
+    #         )
             
-        if source_row in self.deleted_rows:
-            color = QColor(255, 200, 200)   # красный
-        elif source_row in self.new_rows:
-            color = QColor(200, 255, 200)   # зелёный
-        elif source_row in self.modified_rows:
-            color = QColor(255, 255, 180)   # жёлтый
+    #     if source_row in self.deleted_rows:
+    #         color = QColor(255, 200, 200)   # красный
+    #     elif source_row in self.new_rows:
+    #         color = QColor(200, 255, 200)   # зелёный
+    #     elif source_row in self.modified_rows:
+    #         color = QColor(255, 255, 180)   # жёлтый
+    #     else:
+    #         color = QColor(255, 255, 255)   # белый
+
+
+    #     self.logger.debug(f"Обновление цвета строки {source_row} - {color.name()}")
+    #     self.source_model.set_row_color(source_row, color)
+    #     self.table_view.viewport().update()   # перерисовка видимой области
+    #     # self.table_view.update()              # перерисовка всей таблицы
+
+    def _set_row_color_by_source_row(self, source_row: int):
+        dto = self.source_model.get_item_at_row(source_row)
+        if dto is None:
+            return
+        if dto.id is None or dto.id < 0:
+            # Новая строка
+            if source_row in self.new_rows:
+                color = QColor(200, 255, 200)   # зелёный
+            else:
+                color = QColor(255, 255, 255)   # белый
         else:
-            color = QColor(255, 255, 255)   # белый
-
-
-        self.logger.debug(f"Обновление цвета строки {source_row} - {color.name()}")
+            if dto.id in self.deleted_ids:
+                color = QColor(255, 200, 200)   # красный
+            elif dto.id in self.modified_ids:
+                color = QColor(255, 255, 180)   # жёлтый
+            else:
+                color = QColor(255, 255, 255)   # белый
         self.source_model.set_row_color(source_row, color)
-        self.table_view.viewport().update()   # перерисовка видимой области
-        # self.table_view.update()              # перерисовка всей таблицы
+        self.table_view.viewport().update() # перерисовка видимой области
+
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
@@ -458,6 +489,46 @@ class ListChangesMixin:
         # has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
         has_changes = self._has_unsaved_changes()
         self.save_changes_btn.setEnabled(has_changes) # сохранять можно, если есть изменения
+
+
+    @AppLogger.get_instance(
+        name='ListChangesMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _modified_ids(self, appointment_id, if_add :bool):
+        if if_add:
+            self.modified_ids.add(appointment_id)
+        else:
+            self.modified_ids.discard(appointment_id)
+
+    @AppLogger.get_instance(
+        name='ListChangesMixin',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _modified_ids_control(self, appointment_id, if_add :bool):
+
+        """
+        Метод для управления измененных строк в таблице.
+        Если if_add=True, то добавляет source_row в множество измененных строк.
+        Если if_add=False, то удаляет source_row из множества измененных строк.
+        Затем вызывает _set_row_color_by_source_row для обновления цвета строки source_row,
+        а также _update_save_button_state для обновления состояния кнопки сохранения изменений.
+        """
+        
+        source_row = self._find_source_row_by_id(appointment_id)
+
+        self._modified_ids(appointment_id, if_add) 
+
+        if source_row != -1: # Если строка была найдена
+            self._set_row_color_by_source_row(source_row) # обновляем цвет строки
+
+        self._update_save_button_state() # активируем кнопку сохранения
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
@@ -478,19 +549,37 @@ class ListChangesMixin:
         """
         self.logger.debug(
             f"_on_row_modified вызван для row={row}, "
-            f"modified_rows={self.modified_rows}"
+            # f"modified_rows={self.modified_rows}"
         )
         # self.logger.debug(f"Строка {row} изменена")
 
         # Пропускаем, если строка уже помечена на удаление
-        if row in self.deleted_rows:
-            return
+        # if row in self.deleted_rows:
 
         dto = self.source_model.get_item_at_row(row)
         # Если это новая строка (отрицательный ID или None) — не добавляем в modified_rows
-        if dto and (dto.id is None or (hasattr(dto, 'id') and dto.id < 0)):
-            self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_rows")
+
+        if dto is None:
             return
+
+        # Пропускаем, если строка помечена на удаление (по id)
+        if dto.id is not None and dto.id in self.deleted_ids:
+            return
+
+        # Если это новая строка (временный id), не добавляем в modified_ids
+        if dto.id is None or dto.id < 0:
+            self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_ids")
+            return 
+         
+            
+        # if row in self.deleted_ids:
+        #     return
+
+        # dto = self.source_model.get_item_at_row(row)
+        # # Если это новая строка (отрицательный ID или None) — не добавляем в modified_rows
+        # if dto and (dto.id is None or (hasattr(dto, 'id') and dto.id < 0)):
+        #     self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_rows")
+        #     return
         
 
         # Проверяем, не вернулось ли значение к исходному
@@ -501,26 +590,45 @@ class ListChangesMixin:
             # Сравниваем сериализованные данные (исключаем поля, которые могут меняться)
             current_dict = dto.model_dump()
             original_dict = original.model_dump()
+
             self.logger.debug(f"if current_dict == original_dict : {current_dict == original_dict}")
             if current_dict == original_dict:
                 # Значение совпадает с исходным – убираем из modified_rows
-                self.logger.debug(f"if row in self.modified_rows : {row in self.modified_rows}")
-                if row in self.modified_rows:
-                    self.modified_rows.discard(row)
-                    self.logger.debug(f"Вызов _set_row_color_by_source_row для row={row}")
-                    self._set_row_color_by_source_row(row)   # обновляем цвет
-                    self._update_save_button_state()
+                # self.logger.debug(f"if row in self.modified_rows : {row in self.modified_rows}")
+                # if row in self.modified_rows:
+                #     self.modified_rows.discard(row)
+                #     self.logger.debug(f"Вызов _set_row_color_by_source_row для row={row}")
+                #     self._set_row_color_by_source_row(row)   # обновляем цвет
+                #     self._update_save_button_state()
+                self.logger.debug(f"if dto.id in self.modified_ids : {dto.id in self.modified_ids}")
+
+
+                
+
+                if dto.id in self.modified_ids:
+                    self._modified_ids_control( dto.id, False )
+
+                #     self.modified_ids.discard(dto.id)
+                #     self._set_row_color_by_source_row(row)
+                #     self._update_save_button_state()
                 return
         
         
         # Иначе добавляем в modified_row
 
-        self.logger.debug(f"if row not in self.modified_rows : {row not in self.modified_rows}")
-        if row not in self.modified_rows:
-            self.modified_rows.add(row)
-            # self._update_row_color(row)
-            self._set_row_color_by_source_row(row)
-            self._update_save_button_state()
+        # self.logger.debug(f"if row not in self.modified_rows : {row not in self.modified_rows}")
+        # if row not in self.modified_rows:
+        #     self.modified_rows.add(row)
+        #     # self._update_row_color(row)
+        #     self._set_row_color_by_source_row(row)
+        #     self._update_save_button_state()
+        self.logger.debug(f"if dto.id not in self.modified_ids : {dto.id not in self.modified_ids}")
+        
+        if dto.id not in self.modified_ids:
+            self._modified_ids_control(dto.id, True) 
+            # self.modified_ids.add(dto.id)
+            # self._set_row_color_by_source_row(row)
+            # self._update_save_button_state()    
 
     # @AppLogger.get_instance(
     #     name = 'ListChangesMixin',
@@ -633,14 +741,22 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    # def _save_deleted(self):
+    #     for row in sorted(self.deleted_rows, reverse=True):
+    #         dto = self.source_model.get_item_at_row(row)
+    #         if dto and dto.id is not None:
+    #             self.service.delete(dto.id)
+    #             self.logger.info(f"Удалена запись ID={dto.id}")
+    #         # self.source_model.remove_row(row)
+    #     self.deleted_rows.clear()
     def _save_deleted(self):
-        for row in sorted(self.deleted_rows, reverse=True):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id is not None:
-                self.service.delete(dto.id)
-                self.logger.info(f"Удалена запись ID={dto.id}")
-            # self.source_model.remove_row(row)
-        self.deleted_rows.clear()
+        for entity_id in list(self.deleted_ids):
+            try:
+                self.service.delete(entity_id)
+                self.logger.info(f"Удалена запись ID={entity_id}")
+            except Exception as e:
+                self.logger.exception(f"Ошибка удаления ID={entity_id}: {e}")
+        self.deleted_ids.clear()
 
     @AppLogger.get_instance(
         name = 'ListSaveMixin',
@@ -649,19 +765,53 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    # def _save_modified(self):
+    #     for row in list(self.modified_rows):
+    #         dto = self.source_model.get_item_at_row(row)
+    #         if dto and dto.id is not None and dto.id > 0:
+    #             original = self.original_data.get(row)
+    #             if original and dto.model_dump() == original.model_dump():
+    #                 # Ничего не изменилось, снимаем пометку
+    #                 self.modified_rows.discard(row)
+    #                 continue
+    #             updated = self.service.update(dto)
+    #             self.source_model.update_row(row, updated)
+    #             self.logger.info(f"Обновлена запись ID={updated.id}")
+    #     self.modified_rows.clear()
     def _save_modified(self):
-        for row in list(self.modified_rows):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and dto.id is not None and dto.id > 0:
-                original = self.original_data.get(row)
-                if original and dto.model_dump() == original.model_dump():
-                    # Ничего не изменилось, снимаем пометку
-                    self.modified_rows.discard(row)
-                    continue
-                updated = self.service.update(dto)
-                self.source_model.update_row(row, updated)
-                self.logger.info(f"Обновлена запись ID={updated.id}")
-        self.modified_rows.clear()
+        # Проходим по копии, так как в процессе можем изменять множество
+        for entity_id in list(self.modified_ids):
+            # Находим DTO по id (может быть несколько строк с одним id? нет, id уникален)
+            dto = None
+            row = -1
+            for r in range(self.source_model.rowCount()):
+                candidate = self.source_model.get_item_at_row(r)
+                if candidate and getattr(candidate, 'id', None) == entity_id:
+                    dto = candidate
+                    row = r
+                    break
+
+            if dto is None:
+                # self.modified_ids.discard(entity_id)
+                self._modified_ids(entity_id, False)
+                continue
+
+            original = self.original_data.get(row)
+            if original and dto.model_dump() == original.model_dump():
+                # self.modified_ids.discard(entity_id)
+                self._modified_ids(entity_id, False)
+                continue
+
+            updated = self.service.update(dto)
+            self.source_model.update_row(row, updated)
+            self._modified_ids(entity_id, False)
+
+            if row != -1:
+                self._set_row_color_by_source_row(row)
+                
+            self.logger.info(f"Обновлена запись ID={updated.id}")
+
+        self.modified_ids.clear()
 
     @AppLogger.get_instance(
         name = 'ListSaveMixin',
@@ -674,7 +824,7 @@ class ListSaveMixin:
         for row in list(self.new_rows):
             dto = self.source_model.get_item_at_row(row)
             if dto:
-                self._apply_draft_to_new_dto(dto)
+                self._apply_draft_to_new_dto(dto) # если есть черновики
                 created = self.service.create(dto)
                 self.source_model.update_row(row, created)
                 self.logger.info(f"Создана новая запись ID={created.id}")
@@ -1164,42 +1314,53 @@ class ListInlineOpsMixin:
         if not self.selected_dto:
             return
         
-        proxy_index = self.table_view.currentIndex()
-        if not proxy_index.isValid():
-            return
-        
-        row = self.proxy_model.mapToSource(proxy_index).row()   # исходный индекс
-        if row == -1:
-            return
+        dto = self.selected_dto
 
-        # row = proxy_index.row()
-        if row in self.deleted_rows:
+        # Находим исходный индекс строки (нужен для цвета)
+        source_row = self._find_source_row_by_id(dto.id)
+        if source_row == -1:
             return
         
-        # dto = self.selected_dto
-        # # Если это новая строка (отрицательный ID) – удаляем локально
-        # if dto.id is not None and dto.id < 0:
-        #     self.source_model.remove_row(row)
-        #     self.new_rows.discard(row)
-        #     # Обновляем выделение
-        #     if self.source_model.rowCount() == 0:
-        #         if hasattr(self, '_clear_right_panel'):
-        #             self._clear_right_panel()
-        #     else:
-        #         self._select_first_row()
-        #     self._update_save_button_state()
-        #     self.logger.info(f"Новая строка {row} удалена без обращения к БД")
+        if dto.id is not None and dto.id < 0:
+            # Новая строка – удаляем из модели и из new_rows
+            self.source_model.remove_row(source_row)
+            self.new_rows.discard(source_row)
+            self._update_save_button_state()
+            # Очищаем правую панель, если она есть
+            if hasattr(self, '_clear_right_panel'):
+                self._clear_right_panel()
+            return
+        
+        # proxy_index = self.table_view.currentIndex()
+        # if not proxy_index.isValid():
+        #     return
+        
+        # row = self.proxy_model.mapToSource(proxy_index).row()   # исходный индекс
+        # if row == -1:
+        #     return
+        # # row = proxy_index.row()
+        # if row in self.deleted_rows:
         #     return
         
         # Помечаем строку на удаление (для любых строк – и новых, и существующих)
-        self.deleted_rows.add(row)
-        # Если строка была изменена или новая, убираем из соответствующих множеств
-        self.modified_rows.discard(row)
-        self.new_rows.discard(row)
-        # self._update_row_color(row)
-        self._set_row_color_by_source_row(row)
-        self._update_save_button_state()
+        # self.deleted_rows.add(row)
+        self.deleted_ids.add(dto.id)
+        # Если строка была изменена, убираем из соответствующих множеств
+        # self.modified_rows.discard(row)
+        
 
+        self._modified_ids_control(dto.id, False)  # # Если строка новая, убираем из соответствующих множеств
+        # self.modified_ids.discard(dto.id)
+        # # # Если строка новая, убираем из соответствующих множеств
+        # # self.new_rows.discard(row)
+
+        # # Обновляем цвет строки
+        # # self._update_row_color(row)
+        # # self._set_row_color_by_source_row(row)
+        # self._set_row_color_by_source_row(source_row)
+        # self._update_save_button_state()
+
+        # Снимаем выделение
         self.table_view.clearSelection()
         self.selected_dto = None
         # if hasattr(self, 'delete_btn'):
@@ -1207,7 +1368,8 @@ class ListInlineOpsMixin:
         if hasattr(self, 'action_btn'):
             self.action_btn.setEnabled(False)
 
-        self.logger.info(f"Строка {row} помечена на удаление")
+        # self.logger.info(f"Строка {row} помечена на удаление")
+        self.logger.info(f"Строка с id {source_row} помечена на удаление")
 
 class DynamicListPage(
     ListSelectionMixin,
@@ -1302,9 +1464,11 @@ class DynamicListPage(
 
         # Словарь для отслеживания изменённых строк:
         # modified_rows: set of row indices, которые были изменены пользователем (но ещё не сохранены)
-        self.modified_rows: Set[int] = set()
+        # self.modified_rows: Set[int] = set()
+        self.modified_ids: Set[int] = set()    # id записей, изменённых пользователем
         # deleted_rows: set of row indices, помеченные на удаление (соответствующие DTO будут удалены при сохранении)
-        self.deleted_rows: Set[int] = set()
+        # self.deleted_rows: Set[int] = set()
+        self.deleted_ids: Set[int] = set()     # id записей, помеченных на удаление
         # new_rows: set of row indices, которые были добавлены через inline-добавление (пока не реализовано)
         self.new_rows: Set[int] = set()
         # Сопоставление индекса строки с исходным DTO для восстановления при отмене (опционально)
@@ -1363,7 +1527,8 @@ class DynamicListPage(
         
         # Определяем, есть ли изменения
         
-        if self.modified_rows or self.deleted_rows or self.new_rows:
+        # if self.modified_rows or self.deleted_rows or self.new_rows:
+        if bool(self.modified_ids or self.deleted_ids or self.new_rows):
             return True
         
         # Добавляем проверку черновиков для текущего выбранного приёма

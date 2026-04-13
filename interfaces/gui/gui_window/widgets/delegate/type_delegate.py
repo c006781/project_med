@@ -330,6 +330,9 @@ class CompleterStringDelegate(QStyledItemDelegate):
         editor = QLineEdit(parent)
         install_standard_context_menu(editor)
 
+        # Выравнивание текста по верхнему краю (и левому)
+        editor.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+
         values = self._get_values()
         if values:
             completer = QCompleter(values)

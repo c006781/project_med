@@ -681,7 +681,9 @@ class ListEditModeMixin:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self._save_changes()
+                self._save_changes(
+                    if_question=False
+                )
                 self.edit_mode = False
             elif reply == QMessageBox.StandardButton.No:
                 self._load_data()

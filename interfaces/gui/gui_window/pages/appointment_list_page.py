@@ -901,7 +901,7 @@ class AppointmentListPage(
 
         # 1. Удаляем черновики для этого приёма
         # self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
-        DraftMixin._clear_drafts(self, appointment_id)# Удаляем черновики для этого приёма
+        DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
         
 
         # 2. Загружаем свежие данные из БД
@@ -1555,7 +1555,9 @@ class AppointmentListPage(
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self._save_changes()
+            self._save_changes(
+                if_question=False
+            )
             return True
         
         elif reply == QMessageBox.StandardButton.No:
@@ -1872,7 +1874,7 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _save_changes(self):
+    def _save_changes(self, if_question:bool = True):
         """Сохраняет все изменения (заметки, фото, основные поля) в БД."""
         self.logger.info("=== _save_changes ВЫЗВАН В AppointmentListPage ===")
     
@@ -1886,9 +1888,10 @@ class AppointmentListPage(
             current_id = self.selected_dto.id
             self.logger.info(f"Текущий выделенный приём: {current_id}")
 
-        reply = QMessageBox.question(
-            self, "Подтверждение сохранения",
-            "Сохранить все изменения в БД?",
+        if if_question:
+            reply = QMessageBox.question(
+                self, "Подтверждение сохранения",
+                "Сохранить все изменения в БД?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 

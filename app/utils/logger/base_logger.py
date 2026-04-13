@@ -926,7 +926,11 @@ class BaseAppLogger:
                 
 
                 # # Вызываем функцию
-                # result = func(*args, **kwargs)
+                #  try:
+                #     result = func(*args, **kwargs)
+                # except Exception as e:
+                #     err = e
+                #     # raise e
                 # return result
         
         

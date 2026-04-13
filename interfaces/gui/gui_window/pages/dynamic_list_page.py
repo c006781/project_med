@@ -655,6 +655,39 @@ class ListEditModeMixin:
     '''
     Миксин для работы с режимом редактирования.
     '''
+
+    @AppLogger.get_instance(
+        name = 'ListEditModeMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_visible_edit_mode_elements(self, edit_mode):
+        
+        
+        self.action_combo.setVisible(not edit_mode)
+        self.inline_action_combo.setVisible(edit_mode)
+        self.save_changes_btn.setVisible(edit_mode)
+
+        self.cancel_all_btn.setVisible(edit_mode)
+        self.cancel_current_btn.setVisible(edit_mode)
+
+
+        if hasattr(self, 'action_btn') and self.action_btn:
+            self.action_btn.setVisible(not edit_mode)
+        self.table_view.setEditTriggers(
+            QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers
+        )
+
+        if edit_mode:   
+            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)    
+        else:
+            self.table_view.doubleClicked.connect(self._on_row_double_clicked )
+        
+        
+
+
     @AppLogger.get_instance(
         name = 'ListEditModeMixin',
         enable_file_logging = 'system',
@@ -706,23 +739,24 @@ class ListEditModeMixin:
             self.edit_mode = checked
 
         # Управление видимостью кнопок
+        self._set_visible_edit_mode_elements(self.edit_mode)
 
-        if self.edit_mode:
-            self.action_combo.setVisible(False)
-            self.inline_action_combo.setVisible(True)
-            self.save_changes_btn.setVisible(True)
-            if hasattr(self, 'action_btn') and self.action_btn:
-                self.action_btn.setVisible(False)
-            self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
-            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
-        else:
-            self.action_combo.setVisible(True)
-            self.inline_action_combo.setVisible(False)
-            self.save_changes_btn.setVisible(False)
-            if hasattr(self, 'action_btn') and self.action_btn:
-                self.action_btn.setVisible(True)
-            self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-            self.table_view.doubleClicked.connect(self._on_row_double_clicked)
+        # if self.edit_mode:
+        #     self.action_combo.setVisible(False)
+        #     self.inline_action_combo.setVisible(True)
+        #     self.save_changes_btn.setVisible(True)
+        #     if hasattr(self, 'action_btn') and self.action_btn:
+        #         self.action_btn.setVisible(False)
+        #     self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
+        #     self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
+        # else:
+        #     self.action_combo.setVisible(True)
+        #     self.inline_action_combo.setVisible(False)
+        #     self.save_changes_btn.setVisible(False)
+        #     if hasattr(self, 'action_btn') and self.action_btn:
+        #         self.action_btn.setVisible(True)
+        #     self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        #     self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         self.table_view.clearSelection()
         self.selected_dto = None
@@ -1009,6 +1043,16 @@ class ListUIMixin:
         self.save_changes_btn.setEnabled(False)
         self.save_changes_btn.setVisible(False)
         top_layout.addWidget(self.save_changes_btn)
+
+        self.cancel_all_btn = QPushButton("Отменить все")
+        self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
+        self.cancel_all_btn.setVisible(False)          # скрыта по умолчанию
+        # top_layout.addWidget(self.cancel_all_btn)
+
+        self.cancel_current_btn = QPushButton("Отменить текущую")
+        self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
+        self.cancel_current_btn.setVisible(False)      # скрыта по умолчанию
+        # top_layout.addWidget(self.cancel_current_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
         if self.action_button_text:

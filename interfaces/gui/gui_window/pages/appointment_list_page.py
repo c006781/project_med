@@ -350,6 +350,13 @@ class DraftMixin:
         
         self._sync_draft_to_model() # синхронизируем с моделью
 
+        # Обновляем состояние кнопки «Отменить текущую»
+        if hasattr(self, 'cancel_current_btn'):
+            self.cancel_current_btn.setEnabled(self._has_current_row_changes())
+        
+        # Обновляем всё состояние (включая кнопку) – для синхронизации
+        self._update_selection_state()
+
         self.logger.info(
             f"_on_draft_changed завершён. "
             # f"modified_rows = {len(self.modified_rows)}, "
@@ -700,6 +707,32 @@ class AppointmentListPage(
     #     self.modified_rows.clear()
     #     self.deleted_rows.clear()
     #     self.new_rows.clear()
+
+
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _has_draft_changes_for_appointment(self, appointment_id: int) -> bool:
+        """
+        Проверяет наличие черновиков (заметка или фото) для указанного приёма.
+        Используется методом _has_current_row_changes из DynamicListPage.
+        """
+        # Заметка
+        if appointment_id in self._draft_note_current:
+            if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
+                return True
+            
+        # Фото
+        if appointment_id in self._draft_photos:
+            draft = self._draft_photos[appointment_id]
+            if draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'):
+                return True
+            
+        return False
 
 
     @AppLogger.get_instance(

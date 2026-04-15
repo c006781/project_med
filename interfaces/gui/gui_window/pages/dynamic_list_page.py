@@ -504,8 +504,12 @@ class ListChangesMixin:
         Кнопка будет активна, если есть какие-либо изменения (новые, измененные, удаленные строки).
         """
         # has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
-        has_changes = self._has_unsaved_changes()
+        has_changes = self._has_unsaved_changes() # возвращает True, если есть какие-либо изменения
+
         self.save_changes_btn.setEnabled(has_changes) # сохранять можно, если есть изменения
+        self.cancel_all_btn.setEnabled(has_changes) # отменять можно, если есть изменения
+        # self.cancel_current_btn.setEnabled(has_changes) # отменять можно, если есть изменения
+
 
 
     @AppLogger.get_instance(
@@ -625,9 +629,12 @@ class ListChangesMixin:
                 if dto.id in self.modified_ids:
                     self._modified_ids_control( dto.id, False )
 
+                    
                 #     self.modified_ids.discard(dto.id)
                 #     self._set_row_color_by_source_row(row)
                 #     self._update_save_button_state()
+
+                self._update_selection_state() # обновляем состояние выбора
                 return
         
         
@@ -643,6 +650,7 @@ class ListChangesMixin:
         
         if dto.id not in self.modified_ids:
             self._modified_ids_control(dto.id, True) 
+            self._update_selection_state()
             # self.modified_ids.add(dto.id)
             # self._set_row_color_by_source_row(row)
             # self._update_save_button_state()    
@@ -1064,12 +1072,14 @@ class ListUIMixin:
 
         self.cancel_all_btn = QPushButton("Отменить все")
         self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
-        self.cancel_all_btn.setVisible(False)          # скрыта по умолчанию
+        self.cancel_all_btn.setVisible(False)          
+        self.cancel_all_btn.setEnabled(False)
         top_layout.addWidget(self.cancel_all_btn)
 
         self.cancel_current_btn = QPushButton("Отменить текущую")
         self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
-        self.cancel_current_btn.setVisible(False)      # скрыта по умолчанию
+        self.cancel_current_btn.setVisible(False)      
+        self.cancel_current_btn.setEnabled(False)
         top_layout.addWidget(self.cancel_current_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
@@ -1371,6 +1381,8 @@ class ListInlineOpsMixin:
             self.table_view.setCurrentIndex(proxy_index)
             self.table_view.scrollTo(proxy_index)
 
+        self._update_selection_state() # Обновляем состояние выделения
+
         self.logger.info(f"Добавлена новая строка (индекс {row})")
 
     @Slot()
@@ -1564,6 +1576,44 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _has_current_row_changes(self) -> bool:
+        """
+        Проверяет, есть ли несохранённые изменения у текущей выбранной строки.
+        Учитывает:
+        - новые строки (id < 0)
+        - modified_ids и deleted_ids
+        - черновики заметки/фото (если есть метод _has_draft_changes_for_appointment)
+        """
+        if not self.selected_dto:
+            return False
+        
+        entity_id = self.selected_dto.id
+        if entity_id is None:
+            return False
+        
+        # Новая строка (временный ID) – всегда есть изменения
+        if entity_id < 0:
+            return True
+        
+        # Проверяем наличие в множествах изменённых/удалённых
+        if entity_id in self.modified_ids or entity_id in self.deleted_ids:
+            return True
+        
+        # Если есть метод проверки черновиков (для AppointmentListPage), используем его
+        if hasattr(self, '_has_draft_changes_for_appointment'):
+            return self._has_draft_changes_for_appointment(entity_id)
+        
+        return False
+
+
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _cancel_all_changes(self):
         """
         Отменить все несохранённые изменения:
@@ -1575,12 +1625,14 @@ class DynamicListPage(
         self.logger.info("Отмена всех изменений")
 
         # 1. Очистить все множества
-        self.modified_ids.clear()
-        self.deleted_ids.clear()
-        self.new_rows.clear()
+        # self.modified_ids.clear()
+        # self.deleted_ids.clear()
+        # self.new_rows.clear()
+
+        self._clear_selection() # очистить выделение (в базовом классе это заглушка, в AppointmentListPage реализован)
 
         # 2. Очистить черновики (если есть переопределённый метод в наследнике)
-        self._clear_drafts()  # в базовом классе это заглушка, в AppointmentListPage реализован
+        self._clear_drafts()  # очистить черновики  (в базовом классе это заглушка, в AppointmentListPage реализован)
 
         # 3. Перезагрузить данные из БД
         self._load_data()
@@ -1593,6 +1645,9 @@ class DynamicListPage(
 
         # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
         self._update_save_button_state()
+
+        # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
+        self._update_selection_state()
 
         # 6. Если мы в режиме редактирования, остаёмся в нём, но все изменения отменены
         self.logger.debug("Все изменения отменены")
@@ -1684,6 +1739,13 @@ class DynamicListPage(
 
         # 7. Обновить состояние кнопки сохранения
         self._update_save_button_state()
+
+         # 8. Обновить состояние кнопки «Отменить текущую» и другие элементы UI
+        self._update_selection_state()
+
+        # # 8. Обновить состояние кнопки «Отменить текущую»
+        # if hasattr(self, 'cancel_current_btn'):
+        #     self.cancel_current_btn.setEnabled(self._has_current_row_changes())
 
         self.logger.debug(f"Изменения для строки id={entity_id} отменены, данные восстановлены из БД")
 
@@ -1896,8 +1958,10 @@ class DynamicListPage(
     )
     def _update_selection_state(self):
         """Обновляет состояние выбранного DTO и кнопок на основе текущего выделения в таблице."""
+
         selection_model = self.table_view.selectionModel()
         if selection_model:
+
             indexes = selection_model.selectedIndexes()
             if indexes:
                 proxy_index = indexes[0]
@@ -1911,6 +1975,10 @@ class DynamicListPage(
         # Обновляем состояние дополнительной кнопки, если она есть
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setEnabled(self.selected_dto is not None)
+        
+        # Управляем кнопкой «Отменить текущую»
+        if hasattr(self, 'cancel_current_btn'):
+            self.cancel_current_btn.setEnabled(self._has_current_row_changes())
     
     @AppLogger.get_instance(
         name = 'DynamicListPage',

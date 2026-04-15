@@ -392,11 +392,207 @@ class PhotoUploaderWidget(QWidget):
             self.add_photo()
         elif index == 2:  # Удалить выбранное
             self._remove_selected()
-        # Пункты 3 и 4 будут для отмены (позже)
+        elif index == 3:        # Отменить все изменения
+            self._cancel_all_changes()
+        elif index == 4:        # Отменить текущее
+            self._cancel_current_row_changes()
+
         # Сбрасываем индекс на заглушку
         self.action_combo.blockSignals(True)
         self.action_combo.setCurrentIndex(0)
         self.action_combo.blockSignals(False)
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_all_changes(self):
+        """
+        Отменить все несохранённые изменения:
+        - Удалить все новые (pending) фото
+        - Восстановить удалённые существующие фото (убрать из deleted_photo_ids)
+        - Восстановить исходные описания для изменённых фото
+        """
+        self.logger.info("Отмена всех изменений в фото")
+        
+        # 1. Очистить pending_photos (новые фото, которые ещё не сохранены)
+        self.pending_photos.clear()
+        
+        # 2. Восстановить удалённые фото (убрать ID из deleted_photo_ids)
+        self.deleted_photo_ids.clear()
+        
+        # 3. Восстановить описания изменённых фото
+        for photo in self.existing_photos:
+            original_desc = self.original_descriptions.get(photo.id, "")
+            if photo.description != original_desc:
+                photo.description = original_desc
+        
+        # 4. Очистить modified_photo_ids
+        self.modified_photo_ids.clear()
+        
+        # 5. Обновить таблицу и цвета
+        self._refresh_table()
+        self.photosChanged.emit()
+        self.logger.debug("Все изменения в фото отменены")
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_current_row_changes(self):
+        """
+        Отменить изменения только для текущей выбранной строки.
+        - Если строка соответствует новому фото (pending) – удалить его.
+        - Если строка соответствует существующему фото:
+            - Если фото помечено на удаление – снять пометку.
+            - Если описание изменено – восстановить исходное.
+        """
+
+        # Получаем текущую выбранную строку
+        selected_rows = set()
+        for item in self.table.selectedItems():
+            selected_rows.add(item.row())
+        if not selected_rows:
+            self.logger.debug("Нет выбранной строки для отмены")
+            QMessageBox.warning(self, "Внимание", "Выберите строку для отмены изменений.")
+            return
+        
+        row = next(iter(selected_rows))
+        self.logger.debug(f"Отмена изменений для строки {row}")
+        
+        # Определяем, существующее это фото или новое
+        if row < len(self.existing_photos):
+            # Существующее фото
+            photo = self.existing_photos[row]
+            photo_id = photo.id
+            
+            # Снимаем пометку на удаление, если была
+            if photo_id in self.deleted_photo_ids:
+                self.deleted_photo_ids.discard(photo_id)
+                self.logger.debug(f"Снята пометка удаления для фото ID={photo_id}")
+            
+            # Восстанавливаем описание, если было изменено
+            original_desc = self.original_descriptions.get(photo_id, "")
+            if photo.description != original_desc:
+                photo.description = original_desc
+                # Убираем из modified_photo_ids
+                self.modified_photo_ids.discard(photo_id)
+                self.logger.debug(f"Восстановлено описание для фото ID={photo_id}")
+
+                # Обновляем текст в ячейке таблицы
+                item = self.table.item(row, 1)
+                if item:
+                    item.setText(original_desc)
+            
+            # Обновляем цвет строки и перерисовываем
+            self._set_row_color(row)
+        else:
+            # Новое фото (pending)
+            pending_index = row - len(self.existing_photos)
+            if pending_index < len(self.pending_photos):
+                del self.pending_photos[pending_index]
+                self.logger.debug(f"Удалено новое фото (строка {row})")
+                # Полностью перестраиваем таблицу, так как количество строк изменилось
+                self._refresh_table()
+            else:
+                self.logger.warning(f"Не удалось найти pending фото для строки {row}")
+        
+        # Обновляем состояние кнопок и сигнал
+        self.photosChanged.emit()
+        self._update_buttons_state() 
+        # Обновляем доступность кнопки просмотра
+        self.view_btn.setEnabled(len(self.table.selectedItems()) > 0)
+        
+        # Обновляем состояние пунктов меню отмены
+        self._update_undo_actions_state()
+
+        self.logger.debug("Отмена для текущей строки завершена")
+
+    AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _has_unsaved_changes(self) -> bool:
+        """
+        Возвращает True, если есть несохранённые изменения:
+        - новые фото (pending)
+        - удалённые фото (deleted_photo_ids)
+        - изменённые описания (modified_photo_ids)
+        """
+        return bool(self.pending_photos or self.deleted_photo_ids or self.modified_photo_ids)
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _has_current_row_changes(self, row: int) -> bool:
+        """
+        Проверяет, есть ли изменения у конкретной строки.
+        """
+        if row < len(self.existing_photos):
+            photo = self.existing_photos[row]
+            if photo.id in self.deleted_photo_ids:
+                return True
+            if photo.id in self.modified_photo_ids:
+                return True
+            return False
+        else:
+            # Новая строка (pending)
+            pending_index = row - len(self.existing_photos)
+            return pending_index < len(self.pending_photos)
+
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_undo_actions_state(self):
+        """
+        Обновляет доступность пунктов «Отменить все изменения» и «Отменить текущее»
+        в выпадающем списке в зависимости от наличия изменений.
+        """
+        model = self.action_combo.model()
+        # Пункт "Отменить все изменения" (индекс 3) активен, если есть любые изменения
+        has_changes = self._has_unsaved_changes()
+        model.item(3).setEnabled(has_changes)
+        
+        # Пункт "Отменить текущее" (индекс 4) активен, если есть выбранная строка с изменениями
+        selected_rows = set()
+        for item in self.table.selectedItems():
+            selected_rows.add(item.row())
+        if selected_rows:
+            row = next(iter(selected_rows))
+            has_current_changes = self._has_current_row_changes(row)
+        else:
+            has_current_changes = False
+        model.item(4).setEnabled(has_current_changes)
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_buttons_state(self):
+        """Обновляет состояние кнопок в зависимости от выделения."""
+        has_selection = len(self.table.selectedItems()) > 0
+        self.view_btn.setEnabled(has_selection)
+        # Можно также управлять доступностью пунктов меню, но комбобокс остаётся всегда активным в режиме редактирования
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -476,8 +672,8 @@ class PhotoUploaderWidget(QWidget):
         self.action_combo.addItem("▼ Действия")
         self.action_combo.addItem("Добавить фото")
         self.action_combo.addItem("Удалить выбранное")
-        # self.action_combo.addItem("Отменить все изменения")   # будет позже
-        # self.action_combo.addItem("Отменить текущее")         # будет позже
+        self.action_combo.addItem("Отменить все изменения")  
+        self.action_combo.addItem("Отменить текущее")        
         self.action_combo.setEditable(False)
         self.action_combo.setMaximumWidth(150)
         self.action_combo.model().item(0).setEnabled(False)  # первый пункт невыбираемый
@@ -586,6 +782,8 @@ class PhotoUploaderWidget(QWidget):
         self.view_btn.setEnabled(
             len(self.table.selectedItems()) > 0
         )
+
+        self._update_undo_actions_state()   # обновить состояние кнопки отмены текущей строки
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -752,6 +950,7 @@ class PhotoUploaderWidget(QWidget):
         if thec:
             # self._update_row_color(row)          # перекрасить
             self.photosChanged.emit() # сигнал : Что-то изменилось в фотографиях этого приёма
+            self._update_undo_actions_state()
 
         0==0
 
@@ -793,6 +992,8 @@ class PhotoUploaderWidget(QWidget):
         if added:
             self._refresh_table()
             self.photosChanged.emit()
+            self._update_undo_actions_state()
+
         return added
 
 
@@ -1078,6 +1279,8 @@ class PhotoUploaderWidget(QWidget):
         self.table.repaint()
         self.table.horizontalHeader().repaint()
         self.table.verticalHeader().repaint()
+
+        self._update_undo_actions_state()
 
         self.logger.debug(f"_refresh_table завершена. Строк в таблице: {total_rows}")
 
@@ -1383,6 +1586,8 @@ class PhotoUploaderWidget(QWidget):
             self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         else:
             self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+
+        self._update_undo_actions_state()   # обновить состояние пунктов (они станут неактивными, если комбобокс выключен, но это не нужно, т.к. комбобокс отключён целиком)
             
     # ----------------------------------------------------------------------
     # Вспомогательные методы для цвета строк

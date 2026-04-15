@@ -11,7 +11,7 @@ from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table,
 
 from PySide6.QtCore import (
     QEvent, Signal, 
-    Qt, QSize
+    Qt, QSize, Slot
 )
 from PySide6.QtGui import (
     QColor, QPixmap,
@@ -19,7 +19,7 @@ from PySide6.QtGui import (
     QTextOption
 )
 from PySide6.QtWidgets import (
-    QAbstractItemView, QMessageBox, 
+    QAbstractItemView, QComboBox, QMessageBox, 
     QWidget, QVBoxLayout, 
     QHBoxLayout, QPushButton,
     QTableWidget, QTableWidgetItem, 
@@ -379,6 +379,26 @@ class PhotoUploaderWidget(QWidget):
     # ----------------------------------------------------------------------
 
     @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int)
+    def _on_action_selected(self, index):
+        """Обрабатывает выбор действия в выпадающем списке."""
+        if index == 1:  # Добавить фото
+            self.add_photo()
+        elif index == 2:  # Удалить выбранное
+            self._remove_selected()
+        # Пункты 3 и 4 будут для отмены (позже)
+        # Сбрасываем индекс на заглушку
+        self.action_combo.blockSignals(True)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.blockSignals(False)
+
+    @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
         use_name_in_filename = 'system',
@@ -432,21 +452,53 @@ class PhotoUploaderWidget(QWidget):
         main_layout.addWidget(self.table)
 
         # Кнопки
-        btn_layout = QHBoxLayout()
-        self.add_btn = QPushButton("Добавить фото")
-        self.add_btn.clicked.connect(self.add_photo)
-        btn_layout.addWidget(self.add_btn)
+        # btn_layout = QHBoxLayout()
+        # self.add_btn = QPushButton("Добавить фото")
+        # self.add_btn.clicked.connect(self.add_photo)
+        # btn_layout.addWidget(self.add_btn)
 
+        # self.view_btn = QPushButton("Просмотр")
+        # self.view_btn.clicked.connect(self._view_photo)
+        # self.view_btn.setEnabled(False)
+        # btn_layout.addWidget(self.view_btn)
+
+        # self.remove_btn = QPushButton("Удалить выбранное")
+        # self.remove_btn.clicked.connect(self._remove_selected)
+        # btn_layout.addWidget(self.remove_btn)
+
+        # main_layout.addLayout(btn_layout)
+
+        # Кнопки
+        btn_layout = QHBoxLayout()
+
+        # Выпадающий список действий
+        self.action_combo = QComboBox()
+        self.action_combo.addItem("▼ Действия")
+        self.action_combo.addItem("Добавить фото")
+        self.action_combo.addItem("Удалить выбранное")
+        # self.action_combo.addItem("Отменить все изменения")   # будет позже
+        # self.action_combo.addItem("Отменить текущее")         # будет позже
+        self.action_combo.setEditable(False)
+        self.action_combo.setMaximumWidth(150)
+        self.action_combo.model().item(0).setEnabled(False)  # первый пункт невыбираемый
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+        btn_layout.addWidget(self.action_combo)
+
+        # Кнопка просмотра (отдельно)
         self.view_btn = QPushButton("Просмотр")
         self.view_btn.clicked.connect(self._view_photo)
         self.view_btn.setEnabled(False)
         btn_layout.addWidget(self.view_btn)
 
-        self.remove_btn = QPushButton("Удалить выбранное")
-        self.remove_btn.clicked.connect(self._remove_selected)
-        btn_layout.addWidget(self.remove_btn)
+        # # Кнопка удаления (можно оставить, но она дублирует пункт в комбобоксе, поэтому скроем)
+        # self.remove_btn = QPushButton("Удалить выбранное")
+        # self.remove_btn.clicked.connect(self._remove_selected)
+        # self.remove_btn.setVisible(False)  # скрываем, т.к. действие в комбобоксе
+        # btn_layout.addWidget(self.remove_btn)  # не добавляем, или добавляем, но скрываем
 
         main_layout.addLayout(btn_layout)
+
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1319,8 +1371,8 @@ class PhotoUploaderWidget(QWidget):
         Если нужно, также можно заблокировать редактирование описаний.
         """
 
-        self.add_btn.setEnabled(not readonly)
-        self.remove_btn.setEnabled(not readonly)
+        self.action_combo.setEnabled(not readonly)
+        self.view_btn.setEnabled(not readonly)
 
         # Если требуется запретить редактирование описаний, можно установить делегату другой режим,
         # но для простоты оставим как есть (пользователь может кликнуть, но изменения не сохранятся,

@@ -1385,8 +1385,17 @@ class ListInlineOpsMixin:
 
         self.logger.info(f"Добавлена новая строка (индекс {row})")
 
+    @AppLogger.get_instance(
+        name = 'ListFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     @Slot()
     def _mark_selected_for_deletion(self):
+        
+        
         if not self.selected_dto:
             return
         
@@ -1443,6 +1452,8 @@ class ListInlineOpsMixin:
         # #     self.delete_btn.setEnabled(False)
         # if hasattr(self, 'action_btn'): # снимаем выделение
         #     self.action_btn.setEnabled(False)
+
+        self._update_selection_state()   #
 
         # self.logger.info(f"Строка {row} помечена на удаление")
         self.logger.info(f"Строка с id {source_row} помечена на удаление")

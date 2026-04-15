@@ -1100,6 +1100,7 @@ class PhotoUploaderWidget(QWidget):
                 self._update_row_color(row)
 
             self.photosChanged.emit() # сигнал об изменениях
+            self._update_undo_actions_state()
             self.logger.debug(f"Помечено на удаление {len(selected_rows)} фото")
 
         except Exception as e:

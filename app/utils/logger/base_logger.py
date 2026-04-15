@@ -925,13 +925,13 @@ class BaseAppLogger:
 
                 
 
-                # # Вызываем функцию
-                #  try:
-                #     result = func(*args, **kwargs)
-                # except Exception as e:
-                #     err = e
+                # Вызываем функцию
+                try:
+                    result = func(*args, **kwargs)
+                except Exception as e:
+                    err = e
                     # func_qualname
-                # return result
+                return result
         
         
                 caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'

@@ -930,7 +930,7 @@ class BaseAppLogger:
                 #     result = func(*args, **kwargs)
                 # except Exception as e:
                 #     err = e
-                #     # raise e
+                    # func_qualname
                 # return result
         
         

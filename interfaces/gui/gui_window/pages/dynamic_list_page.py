@@ -240,6 +240,23 @@ class ListSelectionMixin:
                     return proxy_index.row()
         return -1
     
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _find_source_row_by_id(self, entity_id: int) -> int:
+        """
+        Возвращает индекс строки в source_model (исходной модели) по ID сущности, или -1.
+        """
+        for row in range(self.source_model.rowCount()):
+            dto = self.source_model.get_item_at_row(row)
+            if dto and getattr(dto, 'id', None) == entity_id:
+                return row
+        return -1
+    
 class ListDataMixin:
     """
     Миксин для работы с данными в таблице.
@@ -600,11 +617,11 @@ class ListChangesMixin:
                 #     self.logger.debug(f"Вызов _set_row_color_by_source_row для row={row}")
                 #     self._set_row_color_by_source_row(row)   # обновляем цвет
                 #     self._update_save_button_state()
-                self.logger.debug(f"if dto.id in self.modified_ids : {dto.id in self.modified_ids}")
 
 
                 
 
+                self.logger.debug(f"if dto.id in self.modified_ids : {dto.id in self.modified_ids}")
                 if dto.id in self.modified_ids:
                     self._modified_ids_control( dto.id, False )
 
@@ -629,6 +646,7 @@ class ListChangesMixin:
             # self.modified_ids.add(dto.id)
             # self._set_row_color_by_source_row(row)
             # self._update_save_button_state()    
+        # 0==0
 
     # @AppLogger.get_instance(
     #     name = 'ListChangesMixin',
@@ -1047,12 +1065,12 @@ class ListUIMixin:
         self.cancel_all_btn = QPushButton("Отменить все")
         self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
         self.cancel_all_btn.setVisible(False)          # скрыта по умолчанию
-        # top_layout.addWidget(self.cancel_all_btn)
+        top_layout.addWidget(self.cancel_all_btn)
 
         self.cancel_current_btn = QPushButton("Отменить текущую")
         self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
         self.cancel_current_btn.setVisible(False)      # скрыта по умолчанию
-        # top_layout.addWidget(self.cancel_current_btn)
+        top_layout.addWidget(self.cancel_current_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
         if self.action_button_text:
@@ -1406,13 +1424,13 @@ class ListInlineOpsMixin:
         # self._set_row_color_by_source_row(source_row)
         # self._update_save_button_state()
 
-        # Снимаем выделение
-        self.table_view.clearSelection()
-        self.selected_dto = None
-        # if hasattr(self, 'delete_btn'):
-        #     self.delete_btn.setEnabled(False)
-        if hasattr(self, 'action_btn'):
-            self.action_btn.setEnabled(False)
+        # # Снимаем выделение
+        # self.table_view.clearSelection() # снимаем выделение
+        # self.selected_dto = None
+        # # if hasattr(self, 'delete_btn'):
+        # #     self.delete_btn.setEnabled(False)
+        # if hasattr(self, 'action_btn'): # снимаем выделение
+        #     self.action_btn.setEnabled(False)
 
         # self.logger.info(f"Строка {row} помечена на удаление")
         self.logger.info(f"Строка с id {source_row} помечена на удаление")
@@ -1538,6 +1556,136 @@ class DynamicListPage(
         self._setup_ui()
         
         # self._load_data() # загрузка данных на страницу
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_all_changes(self):
+        """
+        Отменить все несохранённые изменения:
+        - очистить modified_ids, deleted_ids, new_rows
+        - очистить черновики (через _clear_drafts)
+        - перезагрузить данные из БД
+        - сбросить правую панель, если есть
+        """
+        self.logger.info("Отмена всех изменений")
+
+        # 1. Очистить все множества
+        self.modified_ids.clear()
+        self.deleted_ids.clear()
+        self.new_rows.clear()
+
+        # 2. Очистить черновики (если есть переопределённый метод в наследнике)
+        self._clear_drafts()  # в базовом классе это заглушка, в AppointmentListPage реализован
+
+        # 3. Перезагрузить данные из БД
+        self._load_data()
+
+        # 4. Сбросить выделение и правую панель (если есть)
+        self.table_view.clearSelection()
+        self.selected_dto = None
+        if hasattr(self, '_clear_right_panel'):
+            self._clear_right_panel()
+
+        # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
+        self._update_save_button_state()
+
+        # 6. Если мы в режиме редактирования, остаёмся в нём, но все изменения отменены
+        self.logger.debug("Все изменения отменены")
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_current_row_changes(self):
+        """
+        Отменить изменения только для текущей выбранной строки.
+        - Если строка новая (id < 0) → удалить строку.
+        - Если строка существующая → перезагрузить из БД, очистить черновики,
+        убрать из modified_ids, обновить модель.
+        """
+        
+        if not self.selected_dto:
+            QMessageBox.warning(self, "Внимание", "Нет выбранной строки.")
+            return
+
+        dto = self.selected_dto
+        entity_id = dto.id
+        self.logger.info(f"Отмена изменений для строки с id={entity_id}")
+
+        # Найти исходный индекс строки (в source_model)
+        source_row = self._find_source_row_by_id(entity_id)
+        if source_row == -1:
+            self.logger.warning(f"Строка с id={entity_id} не найдена в модели")
+            return
+
+        # Если это новая строка (временный ID)
+        if entity_id is not None and entity_id < 0:
+
+            # Удаляем строку из модели
+            self.source_model.remove_row(source_row)
+            self.new_rows.discard(source_row)
+
+            # Очищаем черновики для этого временного ID
+            self._clear_drafts(entity_id)
+            
+            # Снимаем выделение
+            self.table_view.clearSelection()
+            self.selected_dto = None
+            if hasattr(self, '_clear_right_panel'):
+                self._clear_right_panel()
+
+            # Обновляем состояние кнопки сохранения
+            self._update_save_button_state()
+            
+            self.logger.debug(f"Новая строка с id={entity_id} удалена")
+            return
+
+        # Существующая строка (id > 0)
+        # 1. Очистить черновики для этого приёма (если есть)
+        self._clear_drafts(entity_id)
+
+        # 2. Перезагрузить DTO из БД
+        try:
+            fresh_dto = self.service.get_by_id(entity_id)
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки свежих данных для id={entity_id}: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
+            return
+
+        # 3. Обновить модель (заменить DTO)
+        self.source_model.update_row(source_row, fresh_dto)
+        # Обновить original_data
+        self.original_data[source_row] = fresh_dto
+
+        # 4. Убрать из modified_ids, если был
+        if entity_id in self.modified_ids:
+            self.modified_ids.discard(entity_id)
+
+
+        # убираем из deleted_ids, если был помечен на удаление
+        if entity_id in self.deleted_ids:
+            self.deleted_ids.discard(entity_id)
+
+        # 5. Обновить цвет строки
+        self._set_row_color_by_source_row(source_row)
+
+        # 6. Если есть правая панель, обновить её
+        if hasattr(self, 'update_details'):
+            self.update_details(fresh_dto)
+
+
+        # 7. Обновить состояние кнопки сохранения
+        self._update_save_button_state()
+
+        self.logger.debug(f"Изменения для строки id={entity_id} отменены, данные восстановлены из БД")
 
 
     @AppLogger.get_instance(

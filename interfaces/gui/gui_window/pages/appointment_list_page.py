@@ -589,8 +589,8 @@ class RightPanelMixin:
         pass
 
 class AppointmentListPage(
-    DynamicDetailListPage,
     DraftMixin,
+    DynamicDetailListPage,
     PatientInfoMixin,
     RightPanelMixin
 
@@ -861,20 +861,20 @@ class AppointmentListPage(
 
 
 
-    @AppLogger.get_instance(
-        name='AppointmentListPage',
-        enable_file_logging='system',
-        use_name_in_filename='system',
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _find_source_row_by_id(self, entity_id: int) -> int:
-        """Возвращает индекс строки в source_model по ID сущности, или -1."""
-        for row in range(self.source_model.rowCount()):
-            dto = self.source_model.get_item_at_row(row)
-            if dto and getattr(dto, 'id', None) == entity_id:
-                return row
-        return -1
+    # @AppLogger.get_instance(
+    #     name='AppointmentListPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename='system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _find_source_row_by_id(self, entity_id: int) -> int:
+    #     """Возвращает индекс строки в source_model по ID сущности, или -1."""
+    #     for row in range(self.source_model.rowCount()):
+    #         dto = self.source_model.get_item_at_row(row)
+    #         if dto and getattr(dto, 'id', None) == entity_id:
+    #             return row
+    #     return -1
 
 
 
@@ -900,8 +900,8 @@ class AppointmentListPage(
         self.logger.debug(f"Сброс приёма {appointment_id} из БД")
 
         # 1. Удаляем черновики для этого приёма
-        # self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
-        DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
+        self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
+        # DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
         
 
         # 2. Загружаем свежие данные из БД
@@ -1075,8 +1075,8 @@ class AppointmentListPage(
 
         # Очищаем черновики для новой строки (если она была)
         if temp_id is not None:
-            # self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
-            DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
+            self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+            # DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
 
         # Если после удаления строк не осталось, очищаем правую панель
         if self.source_model.rowCount() == 0:
@@ -1278,8 +1278,8 @@ class AppointmentListPage(
                     self.logger.warning(f"Не удалось сохранить фото для нового приёма: created.id = {created.id}")
 
                 # Очищаем черновики для этого временного ID
-                # self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
-                DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
+                self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+                # DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
 
         return newly_created_id
 
@@ -1562,8 +1562,8 @@ class AppointmentListPage(
         
         elif reply == QMessageBox.StandardButton.No:
             # Откат: сбросить черновики, перезагрузить данные, очистить множества строк
-            # self._clear_drafts() # очищаем черновики
-            DraftMixin._clear_drafts(self) # очищаем черновики
+            self._clear_drafts() # очищаем черновики
+            # DraftMixin._clear_drafts(self) # очищаем черновики
             self._load_data() # перезагружаем данные
 
             # self.modified_rows.clear()
@@ -1764,8 +1764,8 @@ class AppointmentListPage(
         self.logger.debug(f"  → Основные данные приёма {appointment_id} обновлены")
 
          # После успешного сохранения очищаем черновики для этого приёма
-        # self._clear_drafts(appointment_id) # Удаляем черновики для этого приёма
-        DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
+        self._clear_drafts(appointment_id) # Удаляем черновики для этого приёма
+        # DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
 
 
     # --- Финальные действия после сохранения ---
@@ -1859,10 +1859,11 @@ class AppointmentListPage(
 
     def _clear(self):
         self.logger.debug("_clear : self._clear_selection()")
-        self._clear_selection() # сбрасываем выделение в таблице (если оно есть)   (возможно повтор. проверить)       
-        # self._clear_drafts() # Очистка черновиков (если они есть)
-        self.logger.debug("_clear : DraftMixin._clear_drafts()")
-        DraftMixin._clear_drafts(self) # Очистка черновиков (если они есть)
+        self._clear_selection() # сбрасываем выделение в таблице (если оно есть)   (возможно повтор. проверить)   
+        self.logger.debug("_clear : self._clear_drafts()")    
+        self._clear_drafts() # Очистка черновиков (если они есть)
+        # self.logger.debug("_clear : DraftMixin._clear_drafts()")    
+        # DraftMixin._clear_drafts(self) # Очистка черновиков (если они есть)
         self.logger.debug("_clear : self.photo_widget.clear()")
         self.photo_widget.clear()# Сбрасываем временные данные в photo_widget (pending, deleted, modified)
         0==0

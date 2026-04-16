@@ -1917,7 +1917,7 @@ class AppointmentListPage(
             self.logger.debug("Нет изменений для сохранения")
             return
 
-        current_id = None
+        current_id = None 
         if self.selected_dto and getattr(self.selected_dto, 'id', None) is not None:
             current_id = self.selected_dto.id
             self.logger.info(f"Текущий выделенный приём: {current_id}")
@@ -1926,12 +1926,12 @@ class AppointmentListPage(
             reply = QMessageBox.question(
                 self, "Подтверждение сохранения",
                 "Сохранить все изменения в БД?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
 
-        if reply != QMessageBox.StandardButton.Yes:
-            self.logger.debug("Сохранение отменено пользователем")
-            return
+            if reply != QMessageBox.StandardButton.Yes:
+                self.logger.debug("Сохранение отменено пользователем")
+                return
 
         self.table_view.setEnabled(False)
         self.save_changes_btn.setEnabled(False)

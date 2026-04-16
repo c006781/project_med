@@ -83,6 +83,251 @@ def preserve_selection(func):
     
     return wrapper
 
+
+
+class CheckboxSelectionMixin:
+    """
+    Миксин для добавления столбца с чекбоксами в таблицу.
+    Предоставляет методы для управления выбором строк через чекбоксы.
+    """
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_checkbox_column(self) -> None:
+        """Включает столбец чекбоксов в модели и настраивает заголовок."""
+        if not hasattr(self, 'source_model'):
+            return
+        
+        self.source_model.set_checkbox_column_visible(self.edit_mode)
+        # Добавляем пункты в контекстное меню заголовка чекбокс-столбца
+        if hasattr(self.table_view, 'horizontalHeader'):
+            header = self.table_view.horizontalHeader()
+            if hasattr(header, 'set_checkbox_header_menu'):
+                header.set_checkbox_header_menu(self._toggle_all_checkboxes)
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _toggle_all_checkboxes(self, checked: bool) -> None:
+        """Устанавливает или снимает все чекбоксы."""
+        if not self.edit_mode:
+            return
+        
+        for row in range(self.source_model.rowCount()):
+            self.source_model.set_checkbox_state(row, checked)
+
+        # self._update_save_button_state()
+        self.table_view.viewport().update()
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_selected_checkbox_ids(self) -> Set[int]:
+        """
+        Возвращает множество ID сущностей, у которых в текущей модели
+        установлен чекбокс (CheckStateRole == Checked).
+        """
+
+        ids = set()
+        for row in range(self.source_model.rowCount()):
+            index = self.source_model.index(row, 0)
+            if self.source_model.data(index, Qt.CheckStateRole) == Qt.Checked:
+                dto = self.source_model.get_item_at_row(row)
+                if dto and dto.id is not None:
+                    ids.add(dto.id)
+
+        return ids
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_checkboxes(self) -> None:
+        """Снимает все чекбоксы (без изменения deleted_ids)."""
+        for row in range(self.source_model.rowCount()):
+            self.source_model.set_checkbox_state(row, False)
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_current_selected_dto(self):
+        """
+        Возвращает DTO текущей выделенной строки или None, если выделения нет.
+        """
+        selection_model = self.table_view.selectionModel()
+        if not selection_model or not selection_model.hasSelection():
+            return None
+        
+        indexes = selection_model.selectedIndexes()
+        if not indexes:
+            return None
+        
+        proxy_index = indexes[0]
+        source_index = self.proxy_model.mapToSource(proxy_index)
+        if not source_index.isValid():
+            return None
+        
+        return self.source_model.get_item_at_row(source_index.row())
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _delete_with_selection_prompt(self) -> None:
+        """
+        Вызывает диалог выбора области удаления и выполняет удаление.
+        Используется вместо прямого _mark_selected_for_deletion.
+        """
+        if not self.edit_mode:
+            return
+
+        current_dto = self._get_current_selected_dto()
+        checkbox_ids = self._get_selected_checkbox_ids() # ID сущностей, выбранных через чекбоксы
+        has_checkbox_selection = bool(checkbox_ids) # Есть ли выбранные чекбоксы
+        has_current = current_dto is not None # Есть ли текущая строка
+
+        if not has_checkbox_selection and  not has_current:
+            QMessageBox.warning(self, "Нет выбора", "Нет строк для удаления.")
+            return
+
+        # Если нет выбранных чекбоксов – удаляем только текущую строку без вопросов
+        if (
+            has_current and not has_checkbox_selection # Есть текущая строка, но нет выбранных чекбоксов
+        ) or (
+            has_current and (current_dto.id in checkbox_ids) and len(checkbox_ids) == 1 # Есть текущая строка и только она выбрана через чекбокс
+        ):
+            self._perform_deletion({current_dto.id}, current_dto)
+            return
+
+        # Есть выбранные чекбоксы – показываем диалог
+        msg = QMessageBox(self)
+
+        msg.setWindowTitle("Удаление записей")
+        msg.setText("Выберите, какие записи пометить на удаление:")
+
+        btn_checkbox = msg.addButton("Только выбранные (чекбоксы)", QMessageBox.ActionRole)
+        btn_current = msg.addButton("Только текущую", QMessageBox.ActionRole)
+        btn_both = msg.addButton("Текущую + выбранные", QMessageBox.ActionRole)
+        btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
+
+        # Устанавливаем доступность кнопок
+        btn_checkbox.setEnabled(has_checkbox_selection)
+        btn_current.setEnabled(has_current)
+        btn_both.setEnabled(has_current and has_checkbox_selection)
+
+        msg.setDefaultButton(btn_cancel)
+
+        ret = msg.exec()
+        ids_to_delete = set()
+
+        if msg.clickedButton() == btn_current: # Только текущую
+            if has_current:
+                ids_to_delete.add(current_dto.id)
+
+        elif msg.clickedButton() == btn_checkbox:  # Только выбранные
+            ids_to_delete.update(checkbox_ids)
+
+        elif msg.clickedButton() == btn_both:
+            ids_to_delete.update(checkbox_ids) # Текущую + выбранные
+
+            if has_current:
+                ids_to_delete.add(current_dto.id)  # Текущую
+
+        else:
+            return  # отмена
+
+        # Удаляем строки
+
+        self._perform_deletion(
+            ids_to_delete, 
+            current_dto if has_current and (current_dto.id in ids_to_delete) else None
+        )
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _perform_deletion(self, ids_to_delete: Set[int], current_dto_to_clear: Optional[Any]= None) -> None:
+        """
+        Помечает записи на удаление, удаляет из модели новые строки,
+        сбрасывает чекбоксы для удалённых.
+        """
+        if not ids_to_delete:
+            return
+
+        for entity_id in list(ids_to_delete):
+            source_row = self._find_source_row_by_id(entity_id)
+            if source_row == -1:
+                continue
+
+            dto = self.source_model.get_item_at_row(source_row)
+            if dto is None:
+                continue
+
+            if dto.id is None or dto.id < 0:  # новая строка
+                self.source_model.remove_row(source_row)
+                self.new_rows.discard(source_row)
+                self.deleted_ids.discard(entity_id)
+            else:
+                self.deleted_ids.add(entity_id)
+                # Снимаем модификацию, если была
+                if entity_id in self.modified_ids:
+                    self.modified_ids.discard(entity_id)
+                # Обновляем цвет строки
+                self._set_row_color_by_source_row(source_row)
+
+        # Сбрасываем чекбоксы для всех удалённых ID
+        self._clear_checkboxes()
+        # Если текущий DTO был удалён, очищаем правую панель
+        if current_dto_to_clear is not None and current_dto_to_clear.id in ids_to_delete:
+            self.selected_dto = None
+            if hasattr(self, '_clear_right_panel'):
+                self._clear_right_panel()
+        self._update_save_button_state()
+        self.table_view.viewport().update()
+
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_entity_id(self, dto) -> int:
+        """Возвращает ID сущности из DTO (учитывая временные отрицательные ID)."""
+        if dto is None:
+            return None
+        return dto.id
+
+
+
+
 class ListSelectionMixin:
     """
     Миксин для управления выделением строк в таблице.
@@ -735,6 +980,7 @@ class ListEditModeMixin:
         """
 
         has_changes = self._has_unsaved_changes()
+
         if not checked and has_changes:
             reply = QMessageBox.question(
                 self, "Несохранённые изменения",
@@ -746,6 +992,7 @@ class ListEditModeMixin:
                     if_question=False
                 )
                 self.edit_mode = False
+
             elif reply == QMessageBox.StandardButton.No:
                 self._load_data()
                 # self.modified_rows.clear()
@@ -757,6 +1004,7 @@ class ListEditModeMixin:
 
                 self._update_save_button_state()
                 self.edit_mode = False
+
             else:
                 return
         else:
@@ -788,6 +1036,7 @@ class ListEditModeMixin:
 
         self.table_view.clearSelection()
         self.selected_dto = None
+
         if hasattr(self, 'action_btn'):
             self.action_btn.setEnabled(False)
 
@@ -924,10 +1173,10 @@ class ListSaveMixin:
             reply = QMessageBox.question(
                 self, "Подтверждение",
                 "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         self.table_view.setEnabled(False)
         self.save_changes_btn.setEnabled(False)
@@ -948,6 +1197,8 @@ class ListSaveMixin:
 
             # Выходим из режима редактирования, если он был включён
             self._exit_edit_mode()
+
+            self._clear_checkboxes() # снимаем все чекбоксы
 
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранении изменений: {e}")
@@ -1142,7 +1393,10 @@ class ListUIMixin:
             self.columns,
             get_unique_values_func=self.get_unique_values_for_column
         )
-        self.source_model.row_modified.connect(self._on_row_modified) # Подключаем сигнал изменения строки для отслеживания изменений
+
+        self.source_model.row_modified.connect(self._on_row_modified) # Подключаем сигнал изменения строки для отслеживания изменений строк
+
+        # self.source_model.checkbox_toggled.connect(self._on_checkbox_toggled) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
 
         # Прокси-модель
         self.proxy_model = AdvancedFilterProxyModel()
@@ -1461,6 +1715,7 @@ class ListInlineOpsMixin:
         self.logger.info(f"Строка с id {source_row} помечена на удаление")
 
 class DynamicListPage(
+    CheckboxSelectionMixin,
     ListSelectionMixin,
     ListDataMixin,
     ListChangesMixin,
@@ -1534,6 +1789,7 @@ class DynamicListPage(
             use_name_in_filename = 'user',
         )
 
+        self._checkbox_setup_done = False
 
         self.service = service
         self.loader_func = loader_func
@@ -1581,6 +1837,39 @@ class DynamicListPage(
         self._setup_ui()
         
         # self._load_data() # загрузка данных на страницу
+     
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_ui(self):
+        super()._setup_ui()
+        if not self._checkbox_setup_done:
+            self._setup_checkbox_column()
+            self._checkbox_setup_done = True
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_edit_mode_toggled(self, checked: bool):
+        # Вызываем родительский (он переключит edit_mode)
+        super()._on_edit_mode_toggled(checked)
+        # Включаем/отключаем видимость чекбокс-столбца
+        self.source_model.set_checkbox_column_visible(self.edit_mode)
+
+        if not self.edit_mode:
+            self._clear_checkboxes()
+            self.deleted_ids.clear()
+            self._update_save_button_state()
+
+        self.table_view.resizeColumnsToContents()
 
     @AppLogger.get_instance(
         name='DynamicListPage',
@@ -1617,8 +1906,6 @@ class DynamicListPage(
             return self._has_draft_changes_for_appointment(entity_id)
         
         return False
-
-
 
     @AppLogger.get_instance(
         name='DynamicListPage',
@@ -1761,7 +2048,6 @@ class DynamicListPage(
         #     self.cancel_current_btn.setEnabled(self._has_current_row_changes())
 
         self.logger.debug(f"Изменения для строки id={entity_id} отменены, данные восстановлены из БД")
-
 
     @AppLogger.get_instance(
         name='DynamicListPage',
@@ -2151,10 +2437,11 @@ class DynamicListPage(
         if index == 1:  # Добавить строку
             self._add_inline_row()
         elif index == 2:  # Удалить строку
-            if self.selected_dto:
-                self._mark_selected_for_deletion()
-            else:
-                QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
+            # if self.selected_dto:
+            self._delete_with_selection_prompt()
+                # self._mark_selected_for_deletion()
+            # else:
+            #     QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
 
         # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
         self.inline_action_combo.blockSignals(True)

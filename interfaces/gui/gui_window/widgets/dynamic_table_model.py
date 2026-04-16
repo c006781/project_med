@@ -27,7 +27,9 @@ class DynamicTableModel(QAbstractTableModel):
     """
 
     # Сигнал, испускаемый при изменении данных в строке (передаётся индекс строки)
-    row_modified = Signal(int)
+    row_modified = Signal(int) # (row) # сигнал, испускаемый при изменении данных в строке
+
+    # checkbox_toggled = Signal(int, bool)   # (row, checked) # сигнал, испускаемый при изменении состояния чекбокса
 
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
@@ -65,6 +67,48 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._get_unique_values_func = get_unique_values_func 
 
+        # для работы с чекбоксами 
+        self._checkbox_column_enabled = False # флаг, указывающий, что в таблице есть колонка с чекбоксами
+        self._checkbox_states = {} # словарь {row: bool} для хранения состояний чекбоксов
+
+        
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_checkbox_column_visible(self, visible: bool):
+        """Включает/выключает столбец чекбоксов."""
+        if self._checkbox_column_enabled == visible:
+            return
+        
+        self.beginResetModel()
+        self._checkbox_column_enabled = visible
+
+        if not visible:
+            self._checkbox_states.clear()
+            
+        self.endResetModel()
+        
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_checkbox_state(self, row: int, checked: bool):
+        """Устанавливает состояние чекбокса для строки (source row)."""
+        if not self._checkbox_column_enabled:
+            return
+        
+        self._checkbox_states[row] = checked
+        # Уведомляем об изменении только столбца 0
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
     def get_unique_values_for_column(self, col: int) -> List[str]:
         """
@@ -116,11 +160,14 @@ class DynamicTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         """
         Возвращает количество столбцов в таблице.
+        Если в таблице есть колонка с чекбоксами, то она учитывается.
         :return: количество столбцов
         :rtype: int
         """
 
         base = len(self._columns)
+        return base + (1 if self._checkbox_column_enabled else 0)
+
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
     #     enable_file_logging = 'system',
@@ -141,30 +188,31 @@ class DynamicTableModel(QAbstractTableModel):
         row = index.row()
         col = index.column()
 
+        if self._checkbox_column_enabled and col == 0:
+            if role == Qt.CheckStateRole:
+                state = Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
+                self.logger.debug(f"data: row={row}, CheckStateRole returning {state}")
+                return state
+            return None
+
+        # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        actual_col = col - 1 if self._checkbox_column_enabled else col
+
         # self.logger.debug(f'row: {row}, col: {col} result: {row >= len(self._data)}')
 
-        if row >= len(self._data):
+        if actual_col < 0 or actual_col >= len(self._columns):
             return None
-        
+
         # ----- Фоновый цвет строки -----
         if role == Qt.ItemDataRole.BackgroundRole:
             return self._row_colors.get(row)
         
         item = self._data[row]
-        col_info = self._columns[col]
+        col_info = self._columns[actual_col]
         field_name = col_info['name']
         value = getattr(item, field_name, None)
 
         # ----- Отображение (DisplayRole) -----
-        #     # f'item: {item}, col_info: {col_info}, field_name: {field_name}, value: {value}, role: {role}'
-        #     f'field_name: {field_name}, value: {value}, role: {role}'
-        # )
- 
-        # self.logger.debug(
-        #     # f'item: {item}, col_info: {col_info}, field_name: {field_name}, value: {value}, role: {role}'
-        #     # f'field_name: {field_name}, value: {value}, role: {role}'
-        #     f'field_name: {field_name}, value: {value}, role: {role}'
-        # )
         if role == Qt.ItemDataRole.DisplayRole:
             # self.logger.debug(f'Qt.ItemDataRole.DisplayRole result: {value is None}')
             
@@ -229,17 +277,82 @@ class DynamicTableModel(QAbstractTableModel):
         Обновляет значение в ячейке (если колонка редактируемая).
         Сигнал dataChanged испускается автоматически.
         """
-        
-        if not index.isValid() or role != Qt.ItemDataRole.EditRole:
+
+        self.logger.debug(
+            f"setData: "
+            f"role={role}, "
+            f"value={value}, "
+            f"not index.isValid ={not index.isValid}, "
+            f"varole != Qt.ItemDataRole.EditRolelue={role != Qt.ItemDataRole.EditRole}"
+        )
+        if not index.isValid():
             return False
+        # if role != Qt.ItemDataRole.EditRole:
+        #     return False
         
         row = index.row()
         col = index.column()
 
-        if row >= len(self._data):
+        self.logger.debug(
+            f"setData called: "
+            f"row={row}, "
+            f"col={col}, "
+            f"role={role}, "
+            f"value={value}"
+        )
+
+        # ----- Чекбокс-столбец (только если включён) -----
+        if self._checkbox_column_enabled and col == 0 and role == Qt.ItemDataRole.CheckStateRole:
+            # self.logger.debug(
+            #     f"Checkbox DEBUG: "
+            #     f"value={value}, "
+            #     f"type={type(value)}, "
+            #     f"value==2: {value==2}, "
+            #     f"value==Qt.Checked: {value==Qt.Checked}"
+            # )
+            
+            checked = (value == Qt.Checked.value) # нынешняя метка
+            # checked = (value == Qt.CheckState.Checked)
+
+            old_state = self._checkbox_states.get(row, False)
+            # self.logger.debug(
+            #     f"Checkbox DEBUG 2: "
+            #     f"checked={checked}, "
+            #     f"old_state: {old_state}, "
+            # )
+
+            if old_state != checked:
+
+                self._checkbox_states[row] = checked
+                # self.dataChanged.emit(index, index, [role])
+
+                # Эмитим с обеими ролями, чтобы перерисовать
+                self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.CheckStateRole])
+
+                # # Принудительно обновляем виджет (если это возможно)
+                # if self.parent() and hasattr(self.parent(), 'viewport'):
+                #     self.parent().viewport().update()
+
+                # Дополнительно можно испустить сигнал об изменении выбора строки
+                # self.checkbox_state_changed.emit(row, checked)
+
+                # self.checkbox_toggled.emit(row, checked) # испускаем сигнал об изменении чекбокса
+
+            return True
+        
+        # Для остальных ролей (EditRole и др.) продолжаем
+        if role != Qt.EditRole:
             return False
 
-        col_info = self._columns[col]
+        # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        actual_col = col - 1 if self._checkbox_column_enabled else col
+        if actual_col < 0 or actual_col >= len(self._columns):
+            return False
+
+        if role != Qt.ItemDataRole.EditRole:
+            return False
+
+        col_info = self._columns[actual_col]
         if not col_info.get('editable', False):
             return False
 
@@ -296,7 +409,7 @@ class DynamicTableModel(QAbstractTableModel):
             bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
             self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.BackgroundRole])
 
-    # @AppLogger.get_instance(
+    # @AppLogger.get_instance( 
     #     name = 'DynamicTableModel',
     #     enable_file_logging = 'system',
     #     use_name_in_filename = 'system',
@@ -322,9 +435,31 @@ class DynamicTableModel(QAbstractTableModel):
         :rtype: Any
         """
 
-        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
-            return self._columns[section]['title']
-        
+        # Только горизонтальные заголовки
+        if orientation != Qt.Orientation.Horizontal:
+            return None
+
+        # Если чекбокс-столбец активен и запрошен первый столбец (section == 0)
+        if self._checkbox_column_enabled and section == 0:
+            if role == Qt.ItemDataRole.DisplayRole:
+                return ""  # Пустой заголовок, чтобы не было текста
+            # Для специальных ролей можно вернуть идентификатор (например, для контекстного меню)
+            # if role == Qt.UserRole:
+            #     return "checkbox_header"
+            return None
+
+        # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        actual_section = section - 1 if self._checkbox_column_enabled else section
+        if actual_section < 0 or actual_section >= len(self._columns):
+            return None
+
+        if role == Qt.ItemDataRole.DisplayRole:
+            return self._columns[actual_section]['title']
+
+        # Для роли выравнивания (можно задать выравнивание по центру для чекбокс-столбца, но здесь не нужно)
+        # if role == Qt.TextAlignmentRole and self._checkbox_column_enabled and section == 0:
+        #     return Qt.AlignCenter
+
         return None
 
     # @AppLogger.get_instance(
@@ -343,11 +478,45 @@ class DynamicTableModel(QAbstractTableModel):
         :return: флаги для ячейки
         :rtype: Qt.ItemFlags
         """
-        flags = super().flags(index)
-        if index.isValid():
-            col = index.column()
-            if self._columns[col].get('editable', False):
-                flags |= Qt.ItemFlag.ItemIsEditable
+
+        
+
+        if not index.isValid():
+            return Qt.ItemFlag.NoItemFlags
+
+        row = index.row()
+        col = index.column()
+
+        # self.logger.debug(
+        #     f"setData: "
+        #     f"row = {row}, "
+        #     f"col = {col}, "
+        #     f"not index.isValid ={not index.isValid}, "
+        #     f"row >= len(self._data) = {row >= len(self._data)}"
+        # )
+
+        if row >= len(self._data):
+            return Qt.ItemFlag.NoItemFlags
+
+        # ----- Чекбокс-столбец (только если включён) -----
+        if self._checkbox_column_enabled and col == 0:
+            # Чекбокс всегда можно включить/выключить, но только если редактирование разрешено глобально?
+            # В нашем случае чекбоксы активны только в режиме редактирования,
+            # но модель не знает о режиме – управление видимостью и доступностью через edit_mode
+            # Поэтому просто даём флаги чекбокса и включения.
+            return Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
+
+        # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        actual_col = col - 1 if self._checkbox_column_enabled else col
+        if actual_col < 0 or actual_col >= len(self._columns):
+            return Qt.ItemFlag.NoItemFlags
+
+        flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+
+        # Проверяем, редактируема ли колонка
+        if self._columns[actual_col].get('editable', False):
+            flags |= Qt.ItemFlag.ItemIsEditable
+
         return flags
 
     # @AppLogger.get_instance(

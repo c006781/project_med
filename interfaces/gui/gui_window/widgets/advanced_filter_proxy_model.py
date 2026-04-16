@@ -45,6 +45,9 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         self._column_filters: Dict[int, Dict[str, Any]] = {}   # column -> filter info
         self._global_text_filter: str = ""                     # общий текстовый фильтр
 
+
+
+
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
@@ -213,3 +216,40 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
                 return self.sourceModel().data(source_index, role)
             
         return super().data(index, role)
+    
+    @AppLogger.get_instance( 
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def setData(self, index, value, role=Qt.EditRole):
+        
+        if role == Qt.CheckStateRole:
+            source_index = self.mapToSource(index)
+            if source_index.isValid():
+                result = self.sourceModel().setData(source_index, value, role)
+                if result:
+                    # Уведомляем представление, что данные изменились
+                    self.dataChanged.emit(index, index, [role])
+                    # Принудительно обновляем виджет (если dataChanged недостаточно)
+                    if self.parent() and hasattr(self.parent(), 'viewport'):
+                        self.parent().viewport().update()
+                return result
+            
+        return super().setData(index, value, role)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def flags(self, index):
+        source_index = self.mapToSource(index)
+        if source_index.isValid():
+            return self.sourceModel().flags(source_index)
+        
+        return super().flags(index)

@@ -52,6 +52,49 @@ class FilterHeaderView(QHeaderView):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def set_checkbox_header_menu(self, toggle_callback):
+        """Устанавливает callback для управления всеми чекбоксами."""
+        self._checkbox_toggle_callback = toggle_callback
+
+
+
+ 
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_checkbox_menu_item( 
+        self, 
+        name:str, 
+        thec:bool
+    ):   
+        """
+        Создает пункт меню для чекбокса со значением thec.
+
+        :param name: имя пункта меню
+        :type name: str
+        :param thec: значение чекбокса
+        :type thec: bool
+        :return: пункт меню
+        :rtype: QAction
+        """
+        select_ = QAction(name, self)
+        select_.triggered.connect(
+            lambda: self._checkbox_toggle_callback(thec)
+        )
+
+        return select_
+    
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def set_get_unique_values_func(self, func):
         """
         Устанавливает функцию, которая будет использоваться для получения списка уникальных значений
@@ -74,6 +117,28 @@ class FilterHeaderView(QHeaderView):
         if logical_index == -1:
             return
 
+        # ----- Если это столбец чекбоксов (индекс 0) и callback задан -----
+        if logical_index == 0 and hasattr(self, '_checkbox_toggle_callback'):
+            menu = QMenu(self)
+
+            for name, thec in [ # True - выбрать, False - снять
+                ("Выбрать все", True), 
+                ("Снять все", False),
+            ]:
+                menu.addAction(
+                    self._create_checkbox_menu_item ( 
+                        name, 
+                        thec 
+                    )    
+                )
+
+            menu.exec(
+                self.viewport().mapToGlobal(pos)
+            )
+
+            return
+
+        # ----- Обычное меню для остальных столбцов -----
         menu = QMenu(self)
 
         # Сортировка

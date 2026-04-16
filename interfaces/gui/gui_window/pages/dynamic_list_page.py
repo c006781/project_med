@@ -1406,12 +1406,27 @@ class ListUIMixin:
         # Настройка заголовка таблицы
         header = self.table_view.horizontalHeader()
         if hasattr(header, 'set_get_unique_values_func'):
-            header.set_get_unique_values_func(self.get_unique_values_for_column)
-            header.filter_requested.connect(self.on_filter_requested)
-            header.filter_clear_requested.connect(self.on_filter_clear)
+            header.set_get_unique_values_func(self.get_unique_values_for_column) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
+            header.filter_requested.connect(self.on_filter_requested) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
+            header.filter_clear_requested.connect(self.on_filter_clear) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
 
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+        self._setup_header_settings_table(header=header)
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_header_settings_table(self, header):
+        
+        header.setStretchLastSection(True) # Растянуть последний столбец
+        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Размеры столбцов под контент
+
+
+
 
     @AppLogger.get_instance(
         name = 'ListUIMixin',
@@ -1869,7 +1884,15 @@ class DynamicListPage(
             self.deleted_ids.clear()
             self._update_save_button_state()
 
-        self.table_view.resizeColumnsToContents()
+        # Принудительно восстанавливаем растяжение последнего столбца
+        header = self.table_view.horizontalHeader() # получаем заголовок
+
+        self._setup_header_settings_table(header=header)
+
+        # Обновляем геометрию таблицы
+        # self.table_view.resizeColumnsToContents() # обновляем размеры столбцов
+
+        # self.table_view.updateGeometry() # обновляем геометрию
 
     @AppLogger.get_instance(
         name='DynamicListPage',

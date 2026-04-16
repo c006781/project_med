@@ -73,8 +73,10 @@ class DynamicTableModel(QAbstractTableModel):
         """
         if not self._get_unique_values_func:
             return []
+        
         try:
             return self._get_unique_values_func(col)
+        
         except Exception as e:
             self.logger.exception(f"Ошибка получения уникальных значений для столбца {col}: {e}")
             return []
@@ -101,6 +103,7 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def rowCount(self, parent=QModelIndex()) -> int:
+        """Возвращает количество строк в таблице."""
         return len(self._data)
 
     # @AppLogger.get_instance(
@@ -111,8 +114,13 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def columnCount(self, parent=QModelIndex()) -> int:
-        return len(self._columns)
+        """
+        Возвращает количество столбцов в таблице.
+        :return: количество столбцов
+        :rtype: int
+        """
 
+        base = len(self._columns)
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
     #     enable_file_logging = 'system',
@@ -138,6 +146,7 @@ class DynamicTableModel(QAbstractTableModel):
         if row >= len(self._data):
             return None
         
+        # ----- Фоновый цвет строки -----
         if role == Qt.ItemDataRole.BackgroundRole:
             return self._row_colors.get(row)
         
@@ -146,7 +155,7 @@ class DynamicTableModel(QAbstractTableModel):
         field_name = col_info['name']
         value = getattr(item, field_name, None)
 
-        # self.logger.debug(
+        # ----- Отображение (DisplayRole) -----
         #     # f'item: {item}, col_info: {col_info}, field_name: {field_name}, value: {value}, role: {role}'
         #     f'field_name: {field_name}, value: {value}, role: {role}'
         # )
@@ -175,12 +184,14 @@ class DynamicTableModel(QAbstractTableModel):
             # self.logger.debug(f'return str(value): {temp}')
 
             return temp
-
+        
+        # ----- Редактирование (EditRole) -----
         if role == Qt.ItemDataRole.EditRole:
             # self.logger.debug(f'Qt.ItemDataRole.EditRole')
             # Для редактирования возвращаем сырое значение
             return value
 
+        # ----- Выравнивание текста -----
         if role == Qt.ItemDataRole.TextAlignmentRole:
             # self.logger.debug(
             #     f"Qt.ItemDataRole.TextAlignmentRole result: {col_info.get('type') in (int, float)}"
@@ -191,6 +202,7 @@ class DynamicTableModel(QAbstractTableModel):
             
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
+        # ----- Пользовательские данные (для сортировки) -----
         # Для сортировки используем DisplayRole (уже строка) или можно вернуть значение
         if role == Qt.ItemDataRole.UserRole:
             # self.logger.debug(f'Qt.ItemDataRole.UserRole')
@@ -244,11 +256,7 @@ class DynamicTableModel(QAbstractTableModel):
             target_type = col_info.get('type')
             if target_type is not None and value is not None:
                 if target_type == int:
-                    try:
-                        value = int(value)
-                    except ValueError as e:
-                        self.logger.error(f"Ошибка преобразования в int {e}")
-                        return False
+                    value = int(value)
                     
                 elif target_type == datetime.date and isinstance(value, str):
                     # ожидается строка в формате YYYY-MM-DD
@@ -261,10 +269,11 @@ class DynamicTableModel(QAbstractTableModel):
 
                 # и т.д. – можно расширить
         except (ValueError, TypeError) as e:            
-            self.logger.error(f"Ошибка преобразования типа {e}")
+            self.logger.error(f"Ошибка преобразования типа для поля {field_name}: {e}")
             return False  # не удалось преобразовать
 
         setattr(item, field_name, value)
+        
         self.dataChanged.emit(index, index, [role])
         self.row_modified.emit(row)
 

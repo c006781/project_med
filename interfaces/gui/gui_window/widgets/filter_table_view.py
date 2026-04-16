@@ -4,6 +4,9 @@
 Кастомный QTableView с заголовком, поддерживающим фильтрацию и сортировку.
 Заголовок (QHeaderView) переопределён для показа меню при клике.
 """
+
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtWidgets import QTableView, QHeaderView, QMenu, QDialog
 from PySide6.QtCore import Qt, Signal#, Slot
 from PySide6.QtGui import QAction
@@ -14,9 +17,17 @@ class FilterHeaderView(QHeaderView):
     Заголовок таблицы, который при клике правой кнопкой мыши показывает меню
     с опциями сортировки и фильтрации.
     """
+
     filter_requested = Signal(int, str, object)  # индекс колонки, оператор, значение
     filter_clear_requested = Signal(int)         # сброс фильтра для колонки
-
+    
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, orientation, parent=None):
         """
         Инициализирует заголовок таблицы.
@@ -26,6 +37,7 @@ class FilterHeaderView(QHeaderView):
         :param parent: родительский объект (необязательный)
         :type parent: QObject
         """
+
         super().__init__(orientation, parent)
         self.setSectionsClickable(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -33,6 +45,13 @@ class FilterHeaderView(QHeaderView):
 
         self._get_unique_values_func = None   # функция для получения уникальных значений 
 
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def set_get_unique_values_func(self, func):
         """
         Устанавливает функцию, которая будет использоваться для получения списка уникальных значений
@@ -40,8 +59,16 @@ class FilterHeaderView(QHeaderView):
         """
         self._get_unique_values_func = func
 
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _show_context_menu(self, pos):
         """Показывает контекстное меню для секции заголовка."""
+
         logical_index = self.logicalIndexAt(pos)
 
         if logical_index == -1:
@@ -97,6 +124,13 @@ class FilterHeaderView(QHeaderView):
 
         menu.exec(self.viewport().mapToGlobal(pos))
 
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _show_values_dialog(self, logical_index):
         """
         Открывает диалог выбора значений для фильтрации в таблице.
@@ -165,6 +199,13 @@ class FilterHeaderView(QHeaderView):
     #         selected = dialog.get_selected_values()
     #         self.filter_requested.emit(logical_index, 'in', selected)
 
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _request_filter(self, logical_index):
         """Запрашивает ввод значения фильтра."""
         # Здесь можно открыть диалог, но для простоты используем input dialog
@@ -183,6 +224,14 @@ class FilterTableView(QTableView):
     Таблица с поддержкой фильтрации через заголовок.
     Использует FilterHeaderView.
     """
+
+    @AppLogger.get_instance( 
+        name = 'FilterTableView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSortingEnabled(True)
@@ -190,6 +239,13 @@ class FilterTableView(QTableView):
         self.setHorizontalHeader(header)
         header.filter_requested.connect(self.on_filter_requested)
 
+    @AppLogger.get_instance( 
+        name = 'FilterTableView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def on_filter_requested(self, column, operator, value):
         """
         Обрабатывает сигнал фильтрации.

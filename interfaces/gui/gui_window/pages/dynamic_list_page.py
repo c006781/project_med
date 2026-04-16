@@ -1,6 +1,8 @@
 # interfaces/gui/gui_window/pages/dynamic_list_page.py
 
+
 from functools import wraps
+
 from typing import (
     List,
     Optional, 
@@ -901,7 +903,7 @@ class ListSaveMixin:
     )
     @preserve_selection
     @Slot()
-    def _save_changes(self):
+    def _save_changes(self , if_question:bool = True):
         """
         Сохраняет все изменения в БД.
 
@@ -917,9 +919,11 @@ class ListSaveMixin:
         if not has_changes:
             return
 
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
+
+        if if_question:
+            reply = QMessageBox.question(
+                self, "Подтверждение",
+                "Сохранить все изменения? Будут обновлены, добавлены и удалены записи в БД.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -937,8 +941,6 @@ class ListSaveMixin:
 
             # Удаление
             self._save_deleted()
-
-
 
             self._load_data()
 

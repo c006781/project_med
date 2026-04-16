@@ -641,10 +641,13 @@ class AppointmentListPage(
             use_name_in_filename = 'user',
         )
 
+        self._current_patient_dto = None
+
         # Словари для хранения черновиков приёмов
-        self._draft_photos = {}      # appointment_id -> состояние от photo_widget.dump_state()
+        self._draft_photos = {}         # appointment_id -> состояние от photo_widget.dump_state()
         self._draft_note_original = {}   # appointment_id -> оригинальный текст
         self._draft_note_current = {}    # appointment_id -> текущий текст (если изменён)
+
 
         # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
         self._right_panel_modified = False
@@ -1168,7 +1171,7 @@ class AppointmentListPage(
         self.note_text_edit.clear()
         self.photo_widget.clear()
         self.selected_dto = None
-        self.current_patient_changed.emit(None)
+        # self.current_patient_changed.emit(None)
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -2019,15 +2022,15 @@ class AppointmentListPage(
             self._sync_draft_to_model()
         # self._sync_draft_to_model()
 
-        # обновление пациента (остаётся как было)
-        try:
-            if dto.patient_id:
-                patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
-                self.current_patient_changed.emit(patient_dto)
-            else:
-                self.current_patient_changed.emit(None)
-        except Exception as e:
-            self.logger.exception(f"Ошибка загрузки пациента: {e}")
+        # # обновление пациента (остаётся как было)
+        # try:
+        #     if dto.patient_id:
+        #         patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
+        #         self.current_patient_changed.emit(patient_dto)
+        #     else:
+        #         self.current_patient_changed.emit(None)
+        # except Exception as e:
+        #     self.logger.exception(f"Ошибка загрузки пациента: {e}")
 
     # ----------------------------------------------------------------------
     # Вход на страницу
@@ -2057,6 +2060,7 @@ class AppointmentListPage(
         if patient_id:
             try:
                 patient_dto = self.patient_service.get_patient_by_id(patient_id)
+                self._current_patient_dto = patient_dto   # сохраняем
                 self.current_patient_changed.emit(patient_dto)
             except Exception as e:
                 self.logger.exception(f"Ошибка загрузки пациента при входе: {e}")

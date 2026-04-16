@@ -1134,7 +1134,6 @@ class AppointmentListPage(
         if self.source_model.rowCount() == 0:
             self._clear_right_panel()
 
-
         # Если был выделен какой-то приём – пытаемся восстановить выделение и обновить детали
         if current_id is not None:
             # Ищем DTO с таким же ID в новых данных
@@ -1145,13 +1144,11 @@ class AppointmentListPage(
                     new_dto = dto
                     break
 
-            if new_dto:
-                # Обновляем выделение (без генерации лишних сигналов)
-                self.selected_dto = new_dto
-                # Принудительно обновляем правую панель
-                self.update_details(new_dto)
-                # Восстанавливаем выделение строки в таблице
-                self._select_row_by_id(current_id)
+            if new_dto:                
+                self.selected_dto = new_dto # Обновляем выделение (без генерации лишних сигналов)
+                self.update_details(new_dto) # Принудительно обновляем правую панель
+                self._select_row_by_id(current_id) # Восстанавливаем выделение строки в таблице
+
             else:
                 # Если приём больше не существует – очищаем правую панель
                 self._clear_right_panel()

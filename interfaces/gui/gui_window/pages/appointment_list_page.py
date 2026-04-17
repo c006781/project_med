@@ -1132,6 +1132,7 @@ class AppointmentListPage(
         current_id = self.selected_dto.id if self.selected_dto else None
         
         super()._load_data()
+
         # После загрузки, если нет строк, очищаем правую панель
         self.logger.debug(f"_load_data... : строк в таблице: {self.source_model.rowCount()}")
         if self.source_model.rowCount() == 0:
@@ -2021,6 +2022,7 @@ class AppointmentListPage(
         self._load_draft_for_appointment(dto.id, dto)
         if self.edit_mode:
             self._sync_draft_to_model()
+            
         # self._sync_draft_to_model()
 
         # # обновление пациента (остаётся как было)

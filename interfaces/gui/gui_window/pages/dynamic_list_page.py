@@ -652,6 +652,8 @@ class ListDataMixin:
         # selected_id = None
         # if self.selected_dto and hasattr(self.selected_dto, 'id'):
         #     selected_id = self.selected_dto.id
+
+        # Запоминаем ID текущего выделенного приёма (если есть)
         selected_id = self.selected_dto.id if self.selected_dto else None
             
         try:
@@ -2077,7 +2079,7 @@ class DynamicListPage(
         """
         self.logger.info("Отмена всех изменений")
 
-        self._store_current_row()               # сохраняем текущую строку
+        # self._store_current_row()               # сохраняем текущую строку
 
         # 1. Очистить все множества
         # self.modified_ids.clear()
@@ -2092,20 +2094,18 @@ class DynamicListPage(
         # 3. Перезагрузить данные из БД
         self._load_data()
 
-        # 4. Сбросить выделение и правую панель (если есть)
-        self.table_view.clearSelection()
-        self.selected_dto = None
-        if hasattr(self, '_clear_right_panel'):
-            self._clear_right_panel()
+        # # 4. Сбросить выделение и правую панель (если есть)
+        # self.table_view.clearSelection()
+        # self.selected_dto = None
+        # if hasattr(self, '_clear_right_panel'):
+        #     self._clear_right_panel()
 
 
-        # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
-        self._update_selection_state()
 
         # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
         self._update_save_button_state()
 
-
+        # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
         self._update_selection_state()
 
         # 6. Если мы в режиме редактирования, остаёмся в нём, но все изменения отменены

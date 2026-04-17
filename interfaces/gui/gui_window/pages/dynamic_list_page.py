@@ -63,26 +63,110 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 
 
-def preserve_selection(func):
-    """
-    Декоратор для методов, которые могут изменить данные или режим редактирования.
-    Сохраняет текущую строку перед выполнением и восстанавливает её после. 
-    (работает от DynamicListPage)
-    """
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        self._store_current_row()
-        try:
-            result = func(self, *args, **kwargs)
-        except Exception as e:
-            self.logger.exception(f"Ошибка в {func.__name__}: {e}")
-            raise 
-        finally:
-            self._restore_current_row()
-        return result
+# def preserve_selection(func):
+#     """
+#     Декоратор для методов, которые могут изменить данные или режим редактирования.
+#     Сохраняет текущую строку перед выполнением и восстанавливает её после. 
+#     (работает от DynamicListPage)
+#     """
+#     @wraps(func)
+#     def wrapper(self, *args, **kwargs):
+#         self._store_current_row()
+#         try:
+#             result = func(self, *args, **kwargs)
+#         except Exception as e:
+#             self.logger.exception(f"Ошибка в {func.__name__}: {e}")
+#             raise 
+#         finally:
+#             self._restore_current_row()
+#         return result
     
-    return wrapper
+#     return wrapper
 
+
+class _PreserveSelectionStorage:
+    """Хранилище сохранённых строк для декоратора preserve_selection."""
+    _data = {}
+
+    @classmethod
+    def make_key(cls, obj, func_name: str, label: Optional[str] = None) -> str:
+        if label:
+            return label
+        class_name = obj.__class__.__name__
+        return f"{class_name}.{func_name}"
+    
+    @classmethod
+    def save(cls, key: str, row: int) -> bool:
+        """Сохраняет строку только если для данного ключа ещё нет значения."""
+        if key not in cls._data:
+            cls._data[key] = row
+            return True
+        return False
+
+    @classmethod
+    def get(cls, key: str) -> int:
+        return cls._data.get(key, -1)
+
+    @classmethod
+    def clear(cls, key: str):
+        cls._data.pop(key, None)
+
+    # @classmethod
+    # def save(cls, obj, func_name, row):
+    #     key = (id(obj), func_name)
+    #     cls._data[key] = row
+
+    # @classmethod
+    # def get(cls, obj, func_name):
+    #     key = (id(obj), func_name)
+    #     return cls._data.get(key, -1)
+
+    # @classmethod
+    # def clear(cls, obj, func_name):
+    #     key = (id(obj), func_name)
+    #     cls._data.pop(key, None)
+
+
+def preserve_selection(
+        store_method_name='_store_current_row', 
+        restore_method_name='_restore_current_row',
+        label: Optional[str] = None
+    ):
+    """
+    Декоратор для сохранения и восстановления текущей строки в таблице.
+    
+    :param store_method_name: имя метода, возвращающего индекс строки (по умолчанию '_store_current_row')
+    :param restore_method_name: имя метода, принимающего индекс строки и восстанавливающего выделение
+    :param label: произвольная строка – если указана, используется как ключ в хранилище вместо автоматического "ClassName.method_name"
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            store = getattr(self, store_method_name, None)
+            restore = getattr(self, restore_method_name, None)
+            if store is None or restore is None:
+                # Если методы не найдены, просто выполняем функцию без сохранения
+                return func(self, *args, **kwargs)
+
+            # Формируем ключ
+            key = _PreserveSelectionStorage.make_key(self, func.__name__, label)
+
+            # Сохраняем строку только если ещё не сохранена для этого ключа
+            saved_row = store()
+            is_new = _PreserveSelectionStorage.save(key, saved_row)
+
+            try:
+                result = func(self, *args, **kwargs)
+            finally:
+                # Восстанавливаем строку только если мы её сохранили (is_new)
+                if is_new:
+                    row_to_restore = _PreserveSelectionStorage.get(key)
+                    if row_to_restore != -1:
+                        restore(row_to_restore)
+                    _PreserveSelectionStorage.clear(key)
+            return result
+        return wrapper
+    return decorator
 
 
 class CheckboxSelectionMixin:
@@ -405,9 +489,10 @@ class ListSelectionMixin:
         """
         if row < 0 or row >= self.proxy_model.rowCount():
             return
-        proxy_index = self.proxy_model.index(row, 0)
-        self.table_view.setCurrentIndex(proxy_index)
-        self.table_view.scrollTo(proxy_index)
+        
+        proxy_index = self.proxy_model.index(row, 0) # 
+        self.table_view.setCurrentIndex(proxy_index) # 
+        self.table_view.scrollTo(proxy_index) # 
 
     @AppLogger.get_instance(
         name = 'ListSelectionMixin',
@@ -423,7 +508,9 @@ class ListSelectionMixin:
         :return: None
         :rtype: None
         """
-        self._saved_row = self._get_current_row()
+        row = self._get_current_row()
+        self._saved_row = row
+        return row
 
     @AppLogger.get_instance(
         name = 'ListSelectionMixin',
@@ -432,24 +519,35 @@ class ListSelectionMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _restore_current_row(self) -> None:
+    def _restore_current_row(self, row: int = None ) -> None:
         """
         Восстанавливает ранее сохранённую строку.
         Если сохранённой строки не существует, выбирает первую строку.
         :return: None
         :rtype: None
         """
-        if hasattr(self, '_saved_row') and self._saved_row != -1:
-            if self._saved_row < self.proxy_model.rowCount():
-                self._set_current_row(self._saved_row)
-            else:
-                self._select_first_row()
+
+        # if hasattr(self, '_saved_row') and self._saved_row != -1:
+        #     if self._saved_row < self.proxy_model.rowCount():
+        #         self._set_current_row(self._saved_row)
+        #     else:
+        #         self._select_first_row()
+        # else:
+        #     self._select_first_row()
+
+        if row is None:
+            row = getattr(self, '_saved_row', -1)
+
+        if row != -1 and row < self.proxy_model.rowCount():
+            self._set_current_row(row)
         else:
             self._select_first_row()
+
         self._saved_row = -1
 
         # Обновляем состояние кнопок на основе текущего выделения
         self._update_selection_state()
+        
 
     @AppLogger.get_instance(
         name = 'ListSelectionMixin',
@@ -968,7 +1066,10 @@ class ListEditModeMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    @preserve_selection
+    @preserve_selection(
+        store_method_name='_store_current_row', 
+        restore_method_name='_restore_current_row',
+    )
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """
@@ -1150,7 +1251,7 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    @preserve_selection
+    @preserve_selection()
     @Slot()
     def _save_changes(self , if_question:bool = True):
         """
@@ -1873,6 +1974,7 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    @preserve_selection()
     def _on_edit_mode_toggled(self, checked: bool):
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
@@ -1937,6 +2039,7 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    @preserve_selection()
     def _cancel_all_changes(self):
         """
         Отменить все несохранённые изменения:
@@ -1946,6 +2049,8 @@ class DynamicListPage(
         - сбросить правую панель, если есть
         """
         self.logger.info("Отмена всех изменений")
+
+        self._store_current_row()               # сохраняем текущую строку
 
         # 1. Очистить все множества
         # self.modified_ids.clear()
@@ -1966,14 +2071,20 @@ class DynamicListPage(
         if hasattr(self, '_clear_right_panel'):
             self._clear_right_panel()
 
-        # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
-        self._update_save_button_state()
 
         # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
         self._update_selection_state()
 
+        # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
+        self._update_save_button_state()
+
+
+        self._update_selection_state()
+
         # 6. Если мы в режиме редактирования, остаёмся в нём, но все изменения отменены
         self.logger.debug("Все изменения отменены")
+
+
 
     @AppLogger.get_instance(
         name='DynamicListPage',

@@ -28,7 +28,7 @@ from app.dependencies import (
     get_photo_service
 )
 
-from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
+from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage, preserve_selection
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
@@ -1697,6 +1697,7 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    @preserve_selection()
     def _on_edit_mode_toggled(self, checked: bool):
         """
         Переопределяем метод для:

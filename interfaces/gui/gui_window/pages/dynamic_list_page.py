@@ -1350,6 +1350,13 @@ class ListSaveMixin:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
 
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _exit_edit_mode(self):
         """Выходит из режима редактирования, если он активен."""
         if self.edit_mode:
@@ -1605,11 +1612,16 @@ class ListUIMixin:
             field_name = col_info['name']
             config = self.field_configs.get(field_name, {})
 
+            # Определяем индекс колонки в модели (с учётом чекбокса)
+            model_col = self.source_model.get_model_column_index(field_name)
+            if model_col == -1:
+                continue
+
             # Выпадающий список (choices) – наивысший приоритет
             choices = config.get('choices')
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)
                 continue 
 
 
@@ -1627,12 +1639,12 @@ class ListUIMixin:
 
             # Автодополнение для строковых полей (если включено в конфигурации)
             if real_type == str and config.get('autocomplete', False):
-                delegate = CompleterStringDelegate(
+                delegate = CompleterStringDelegate( # определяем делегата по реальному типу поля
                     self.table_view,
                     get_unique_values_func=self.get_unique_values_for_column,
                     column=col_idx
                 )
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)
                 continue
 
             # Стандартные делегаты по типу
@@ -1641,7 +1653,7 @@ class ListUIMixin:
             ) 
             if delegate_class:
                 delegate = delegate_class(self.table_view)
-                self.table_view.setItemDelegateForColumn(col_idx, delegate)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)
                 continue
                 # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
@@ -1741,9 +1753,11 @@ class ListInlineOpsMixin:
         defaults = {}
         for col_info in self.columns:
             field_name = col_info['name']
+
             config = self.field_configs.get(field_name, {})
             if config.get('virtual', False) or config.get('hidden', False):
                 continue
+            
             field_info = self.dto_class.model_fields.get(field_name)
             if field_info is None:
                 continue
@@ -1951,6 +1965,8 @@ class DynamicListPage(
 
         self._checkbox_setup_done = False
 
+        self._delegates_setup_done = False
+
         self.service = service
         self.loader_func = loader_func
         # self.columns = columns
@@ -1998,6 +2014,23 @@ class DynamicListPage(
         
         # self._load_data() # загрузка данных на страницу
      
+
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _reapply_delegates(self):
+        """Очищает все делегаты и переустанавливает их заново с учётом текущего маппинга колонок."""
+        # Очищаем все существующие делегаты
+        for col in range(self.table_view.model().columnCount()):
+            self.table_view.setItemDelegateForColumn(col, None)
+        # Устанавливаем заново
+        self._setup_delegates()
+
     @AppLogger.get_instance(
         name='DynamicListPage',
         enable_file_logging='system',
@@ -2007,9 +2040,14 @@ class DynamicListPage(
     )
     def _setup_ui(self):
         super()._setup_ui()
+
         if not self._checkbox_setup_done:
             self._setup_checkbox_column()
             self._checkbox_setup_done = True
+        
+        if not self._delegates_setup_done:
+            self._setup_delegates()
+            self._delegates_setup_done = True
 
     @AppLogger.get_instance(
         name='DynamicListPage',
@@ -2024,6 +2062,8 @@ class DynamicListPage(
         super()._on_edit_mode_toggled(checked)
         # Включаем/отключаем видимость чекбокс-столбца
         self.source_model.set_checkbox_column_visible(self.edit_mode)
+
+        self._reapply_delegates()
 
         if not self.edit_mode:
             self._clear_checkboxes()
@@ -2456,13 +2496,13 @@ class DynamicListPage(
         if hasattr(self, 'cancel_current_btn'):
             self.cancel_current_btn.setEnabled(self._has_current_row_changes())
     
-    @AppLogger.get_instance(
-        name = 'DynamicListPage',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'DynamicListPage',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def _on_selection_changed(
         self, 
         selected, 

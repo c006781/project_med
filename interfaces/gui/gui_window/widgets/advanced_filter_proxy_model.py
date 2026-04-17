@@ -184,13 +184,13 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
 
         return True
     
-    @AppLogger.get_instance(
-        name = 'AdvancedFilterProxyModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'AdvancedFilterProxyModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def data(
         self, 
         index: QModelIndex, 
@@ -240,13 +240,13 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             
         return super().setData(index, value, role)
 
-    @AppLogger.get_instance(
-        name = 'AdvancedFilterProxyModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'AdvancedFilterProxyModel',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def flags(self, index):
         source_index = self.mapToSource(index)
         if source_index.isValid():

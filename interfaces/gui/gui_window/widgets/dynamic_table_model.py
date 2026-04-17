@@ -14,7 +14,7 @@
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QColor
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional, Callable, Union, get_args, get_origin
 # from datetime import date, time
 import datetime
 
@@ -71,6 +71,58 @@ class DynamicTableModel(QAbstractTableModel):
         self._checkbox_column_enabled = False # флаг, указывающий, что в таблице есть колонка с чекбоксами
         self._checkbox_states = {} # словарь {row: bool} для хранения состояний чекбоксов
 
+        self._field_by_column = {}          # номер колонки -> имя поля
+        self._update_column_mapping()
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_field_name(self, column: int) -> str:
+        """Возвращает имя поля для данного индекса колонки или None."""
+        return self._field_by_column.get(column)
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_column_mapping(self):
+        """Создаёт маппинг: индекс колонки модели -> имя поля (или '__checkbox__' для чекбокс-столбца)."""
+
+        self._field_by_column.clear()
+        offset = 1 if self._checkbox_column_enabled else 0
+
+        if self._checkbox_column_enabled:
+            self._field_by_column[0] = '__checkbox__'
+
+        for i, col_info in enumerate(self._columns):
+            self._field_by_column[i + offset] = col_info['name']
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_real_type(self, field_type):
+        """Извлекает реальный тип из Optional/Union."""
+        # from typing import get_origin, get_args, Union
+
+        origin = get_origin(field_type)
+        if origin is Union:
+            args = get_args(field_type)
+            for arg in args:
+                if arg is not type(None):
+                    return arg
+                
+        return field_type
+    
     @AppLogger.get_instance(
         name = 'DynamicTableModel',
         enable_file_logging = 'system',
@@ -83,11 +135,15 @@ class DynamicTableModel(QAbstractTableModel):
         Возвращает реальный индекс колонки в модели (с учётом чекбокс-столбца)
         по имени поля. Если поле не найдено, возвращает -1.
         """
-        for idx, col in enumerate(self._columns):
-            if col['name'] == field_name:
-                # Если чекбокс-столбец активен, он находится в позиции 0,
-                # значит реальные колонки начинаются с индекса 1.
-                return idx + (1 if self._checkbox_column_enabled else 0)
+        # for idx, col in enumerate(self._columns):
+        #     if col['name'] == field_name:
+        #         # Если чекбокс-столбец активен, он находится в позиции 0,
+        #         # значит реальные колонки начинаются с индекса 1.
+        #         return idx + (1 if self._checkbox_column_enabled else 0)
+        
+        for col, name in self._field_by_column.items():
+            if name == field_name:
+                return col
         return -1     
 
     @AppLogger.get_instance(
@@ -107,7 +163,9 @@ class DynamicTableModel(QAbstractTableModel):
 
         if not visible:
             self._checkbox_states.clear()
-            
+        
+        self._update_column_mapping() # обновляем маппинг индекса колонки -> имя поля
+
         self.endResetModel()
         
     @AppLogger.get_instance(
@@ -199,34 +257,58 @@ class DynamicTableModel(QAbstractTableModel):
     ) -> Any:
         # self.logger.debug(f'index: {index}, role: {role}')
 
+        """
+        Возвращает данные из модели для указанного индекса и роли.
+        
+        :param index: индекс ячейки
+        :type index: QModelIndex
+        :param role: роль данных (необязательно)
+        :type role: int
+        :return: данные из модели
+        :rtype: Any
+        
+        Роли поддерживаются:
+            - Qt.ItemDataRole.DisplayRole (по умолчанию)
+            - Qt.ItemDataRole.EditRole
+            - Qt.ItemDataRole.BackgroundRole
+            - Qt.ItemDataRole.TextAlignmentRole
+            - Qt.ItemDataRole.UserRole (для сортировки)
+        """
         if not index.isValid():
             return None
         
         row = index.row()
         col = index.column()
 
-        if self._checkbox_column_enabled and col == 0:
+        field_name = self._get_field_name(col)
+        if field_name is None:
+            return None
+
+        if field_name == '__checkbox__':
             if role == Qt.CheckStateRole:
                 state = Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
-                self.logger.debug(f"data: row={row}, CheckStateRole returning {state}")
+                # self.logger.debug(f"data: row={row}, CheckStateRole returning {state}")
                 return state
             return None
 
-        # Сдвигаем реальные колонки, если чекбокс-столбец активен
-        actual_col = col - 1 if self._checkbox_column_enabled else col
+        # # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        # actual_col = col - 1 if self._checkbox_column_enabled else col
 
-        # self.logger.debug(f'row: {row}, col: {col} result: {row >= len(self._data)}')
+        # # self.logger.debug(f'row: {row}, col: {col} result: {row >= len(self._data)}')
 
-        if actual_col < 0 or actual_col >= len(self._columns):
-            return None
+        # if actual_col < 0 or actual_col >= len(self._columns):
+        #     return None
 
         # ----- Фоновый цвет строки -----
         if role == Qt.ItemDataRole.BackgroundRole:
             return self._row_colors.get(row)
         
+        # item = self._data[row]
+        # col_info = self._columns[actual_col]
+        # field_name = col_info['name']
+        # value = getattr(item, field_name, None)
+
         item = self._data[row]
-        col_info = self._columns[actual_col]
-        field_name = col_info['name']
         value = getattr(item, field_name, None)
 
         # ----- Отображение (DisplayRole) -----
@@ -261,8 +343,10 @@ class DynamicTableModel(QAbstractTableModel):
             # self.logger.debug(
             #     f"Qt.ItemDataRole.TextAlignmentRole result: {col_info.get('type') in (int, float)}"
             # )
+            col_info = next((c for c in self._columns if c['name'] == field_name), None)
             # Числа выравниваем вправо, текст влево
-            if col_info.get('type') in (int, float):
+            # if col_info.get('type') in (int, float):
+            if col_info and col_info.get('type') in (int, float):
                 return Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             
             return Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
@@ -295,13 +379,13 @@ class DynamicTableModel(QAbstractTableModel):
         Сигнал dataChanged испускается автоматически.
         """
 
-        self.logger.debug(
-            f"setData: "
-            f"role={role}, "
-            f"value={value}, "
-            f"not index.isValid ={not index.isValid}, "
-            f"varole != Qt.ItemDataRole.EditRolelue={role != Qt.ItemDataRole.EditRole}"
-        )
+        # self.logger.debug(
+        #     f"setData: "
+        #     f"role={role}, "
+        #     f"value={value}, "
+        #     f"not index.isValid ={not index.isValid}, "
+        #     f"varole != Qt.ItemDataRole.EditRolelue={role != Qt.ItemDataRole.EditRole}"
+        # )
         if not index.isValid():
             return False
         # if role != Qt.ItemDataRole.EditRole:
@@ -309,51 +393,28 @@ class DynamicTableModel(QAbstractTableModel):
         
         row = index.row()
         col = index.column()
+        
+        field_name = self._get_field_name(col)
 
-        self.logger.debug(
-            f"setData called: "
-            f"row={row}, "
-            f"col={col}, "
-            f"role={role}, "
-            f"value={value}"
-        )
+        # self.logger.debug(
+        #     f"setData called: "
+        #     f"row={row}, "
+        #     f"col={col}, "
+        #     f"role={role}, "
+        #     f"value={value}"
+        # )
 
         # ----- Чекбокс-столбец (только если включён) -----
-        if self._checkbox_column_enabled and col == 0 and role == Qt.ItemDataRole.CheckStateRole:
-            # self.logger.debug(
-            #     f"Checkbox DEBUG: "
-            #     f"value={value}, "
-            #     f"type={type(value)}, "
-            #     f"value==2: {value==2}, "
-            #     f"value==Qt.Checked: {value==Qt.Checked}"
-            # )
-            
-            checked = (value == Qt.Checked.value) # нынешняя метка
-            # checked = (value == Qt.CheckState.Checked)
+        # if self._checkbox_column_enabled and col == 0 and role == Qt.ItemDataRole.CheckStateRole:
+        if field_name == '__checkbox__' and role == Qt.CheckStateRole:
 
+            checked = (value == Qt.Checked.value) # нынешняя метка
             old_state = self._checkbox_states.get(row, False)
-            # self.logger.debug(
-            #     f"Checkbox DEBUG 2: "
-            #     f"checked={checked}, "
-            #     f"old_state: {old_state}, "
-            # )
 
             if old_state != checked:
-
                 self._checkbox_states[row] = checked
-                # self.dataChanged.emit(index, index, [role])
-
                 # Эмитим с обеими ролями, чтобы перерисовать
                 self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.CheckStateRole])
-
-                # # Принудительно обновляем виджет (если это возможно)
-                # if self.parent() and hasattr(self.parent(), 'viewport'):
-                #     self.parent().viewport().update()
-
-                # Дополнительно можно испустить сигнал об изменении выбора строки
-                # self.checkbox_state_changed.emit(row, checked)
-
-                # self.checkbox_toggled.emit(row, checked) # испускаем сигнал об изменении чекбокса
 
             return True
         
@@ -361,46 +422,56 @@ class DynamicTableModel(QAbstractTableModel):
         if role != Qt.EditRole:
             return False
 
-        # Сдвигаем реальные колонки, если чекбокс-столбец активен
-        actual_col = col - 1 if self._checkbox_column_enabled else col
-        if actual_col < 0 or actual_col >= len(self._columns):
-            return False
+        # # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        # actual_col = col - 1 if self._checkbox_column_enabled else col
+        # if actual_col < 0 or actual_col >= len(self._columns):
+        #     return False
 
         if role != Qt.ItemDataRole.EditRole:
             return False
-
-        col_info = self._columns[actual_col]
-        if not col_info.get('editable', False):
+        
+        # Найти информацию о колонке по имени поля
+        col_info = next((c for c in self._columns if c['name'] == field_name), None)
+        if not col_info or not col_info.get('editable', False):
             return False
+
+        # col_info = self._columns[actual_col]
+        # if not col_info.get('editable', False):
+        #     return False
 
         field_name = col_info['name']
         item = self._data[row]
 
         # првкерка на изменение значения
         old_value = getattr(item, field_name, None)
+
         if old_value == value:
             return True   # ничего не меняем, сигнал не испускаем
 
-        # Преобразование типа (если нужно)
-        try:
-            target_type = col_info.get('type')
-            if target_type is not None and value is not None:
-                if target_type == int:
-                    value = int(value)
-                    
-                elif target_type == datetime.date and isinstance(value, str):
-                    # ожидается строка в формате YYYY-MM-DD
-                    # from datetime import date
-                    value = datetime.date.fromisoformat(value)
+        # Преобразование типа
+        target_type = col_info.get('type')
+        if target_type is not None and value is not None:
+            real_type = self._get_real_type(target_type)
+            try:
+                if target_type is not None and value is not None:
+                    real_type = self._get_real_type(target_type)
 
-                elif target_type == datetime.time and isinstance(value, str):
-                    # from datetime import time
-                    value = datetime.time.fromisoformat(value)
+                    if real_type == int:
+                        value = int(value)
+                        
+                    elif real_type == datetime.date and isinstance(value, str):
+                        # ожидается строка в формате YYYY-MM-DD
+                        # from datetime import date
+                        value = datetime.date.fromisoformat(value)
 
-                # и т.д. – можно расширить
-        except (ValueError, TypeError) as e:            
-            self.logger.error(f"Ошибка преобразования типа для поля {field_name}: {e}")
-            return False  # не удалось преобразовать
+                    elif real_type == datetime.time and isinstance(value, str):
+                        # from datetime import time
+                        value = datetime.time.fromisoformat(value)
+
+                    # и т.д. – можно расширить
+            except (ValueError, TypeError) as e:            
+                self.logger.error(f"Ошибка преобразования типа для поля {field_name}: {e}")
+                return False  # не удалось преобразовать
 
         setattr(item, field_name, value)
         
@@ -457,21 +528,29 @@ class DynamicTableModel(QAbstractTableModel):
             return None
 
         # Если чекбокс-столбец активен и запрошен первый столбец (section == 0)
-        if self._checkbox_column_enabled and section == 0:
-            if role == Qt.ItemDataRole.DisplayRole:
-                return ""  # Пустой заголовок, чтобы не было текста
-            # Для специальных ролей можно вернуть идентификатор (например, для контекстного меню)
-            # if role == Qt.UserRole:
-            #     return "checkbox_header"
-            return None
+        field_name = self._get_field_name(section)
+        if role == Qt.DisplayRole:
+            if field_name == '__checkbox__':
+                return ""   # пустой заголовок для чекбокс-столбца
+        # if self._checkbox_column_enabled and section == 0:
+        #     if role == Qt.ItemDataRole.DisplayRole:
+        #         return ""  # Пустой заголовок, чтобы не было текста
+        #     # Для специальных ролей можно вернуть идентификатор (например, для контекстного меню)
+        #     # if role == Qt.UserRole:
+        #     #     return "checkbox_header"
+        #     return None
 
-        # Сдвигаем реальные колонки, если чекбокс-столбец активен
-        actual_section = section - 1 if self._checkbox_column_enabled else section
-        if actual_section < 0 or actual_section >= len(self._columns):
-            return None
+        # # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        # actual_section = section - 1 if self._checkbox_column_enabled else section
+        # if actual_section < 0 or actual_section >= len(self._columns):
+        #     return None
 
-        if role == Qt.ItemDataRole.DisplayRole:
-            return self._columns[actual_section]['title']
+        # if role == Qt.ItemDataRole.DisplayRole:
+        #     return self._columns[actual_section]['title']
+
+        col_info = next((c for c in self._columns if c['name'] == field_name), None)
+        if col_info:
+            return col_info['title']
 
         # Для роли выравнивания (можно задать выравнивание по центру для чекбокс-столбца, но здесь не нужно)
         # if role == Qt.TextAlignmentRole and self._checkbox_column_enabled and section == 0:
@@ -496,8 +575,6 @@ class DynamicTableModel(QAbstractTableModel):
         :rtype: Qt.ItemFlags
         """
 
-        
-
         if not index.isValid():
             return Qt.ItemFlag.NoItemFlags
 
@@ -516,23 +593,31 @@ class DynamicTableModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
 
         # ----- Чекбокс-столбец (только если включён) -----
-        if self._checkbox_column_enabled and col == 0:
+        field_name = self._get_field_name(col)
+        if field_name == '__checkbox__':
+        # if self._checkbox_column_enabled and col == 0:
             # Чекбокс всегда можно включить/выключить, но только если редактирование разрешено глобально?
             # В нашем случае чекбоксы активны только в режиме редактирования,
             # но модель не знает о режиме – управление видимостью и доступностью через edit_mode
             # Поэтому просто даём флаги чекбокса и включения.
             return Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
-        # Сдвигаем реальные колонки, если чекбокс-столбец активен
-        actual_col = col - 1 if self._checkbox_column_enabled else col
-        if actual_col < 0 or actual_col >= len(self._columns):
-            return Qt.ItemFlag.NoItemFlags
+        # # Сдвигаем реальные колонки, если чекбокс-столбец активен
+        # actual_col = col - 1 if self._checkbox_column_enabled else col
+        # if actual_col < 0 or actual_col >= len(self._columns):
+        #     return Qt.ItemFlag.NoItemFlags
+
+        col_info = next((c for c in self._columns if c['name'] == field_name), None)
+        if not col_info:
+            return Qt.NoItemFlags
 
         flags = Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled
+        if col_info.get('editable', False):
+            flags |= Qt.ItemIsEditable
 
-        # Проверяем, редактируема ли колонка
-        if self._columns[actual_col].get('editable', False):
-            flags |= Qt.ItemFlag.ItemIsEditable
+        # # Проверяем, редактируема ли колонка
+        # if self._columns[actual_col].get('editable', False):
+        #     flags |= Qt.ItemFlag.ItemIsEditable
 
         return flags
 

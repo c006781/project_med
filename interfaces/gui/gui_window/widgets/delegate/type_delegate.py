@@ -253,6 +253,11 @@ class DateStringDelegate(StringDelegate):
             editor.setText(str(value) if value else "")
 
     def setModelData(self, editor, model, index):
+        """
+        Сохраняет текст в модели в формате datetime.date.
+        Если текст пустой, то сохраняет None.
+        Если текст не может быть преобразован в datetime.date, то оставляет старое значение.
+        """
         text = editor.text().strip()
         if not text:
             model.setData(index, None, Qt.EditRole)

@@ -420,6 +420,7 @@ class CheckboxSelectionMixin:
             self.selected_dto = None
             if hasattr(self, '_clear_right_panel'):
                 self._clear_right_panel()
+
         self._update_save_button_state()
         self.table_view.viewport().update()
 
@@ -1812,9 +1813,11 @@ class ListInlineOpsMixin:
             self.source_model.remove_row(source_row)
             self.new_rows.discard(source_row)
             self._update_save_button_state()
+
             # Очищаем правую панель, если она есть
             if hasattr(self, '_clear_right_panel'):
                 self._clear_right_panel()
+
             return
         
         # proxy_index = self.table_view.currentIndex()
@@ -2097,6 +2100,7 @@ class DynamicListPage(
         # # 4. Сбросить выделение и правую панель (если есть)
         # self.table_view.clearSelection()
         # self.selected_dto = None
+        # # Очищаем правую панель (заметку и фото)
         # if hasattr(self, '_clear_right_panel'):
         #     self._clear_right_panel()
 

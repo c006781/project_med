@@ -71,7 +71,24 @@ class DynamicTableModel(QAbstractTableModel):
         self._checkbox_column_enabled = False # флаг, указывающий, что в таблице есть колонка с чекбоксами
         self._checkbox_states = {} # словарь {row: bool} для хранения состояний чекбоксов
 
-        
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def get_model_column_index(self, field_name: str) -> int:
+        """
+        Возвращает реальный индекс колонки в модели (с учётом чекбокс-столбца)
+        по имени поля. Если поле не найдено, возвращает -1.
+        """
+        for idx, col in enumerate(self._columns):
+            if col['name'] == field_name:
+                # Если чекбокс-столбец активен, он находится в позиции 0,
+                # значит реальные колонки начинаются с индекса 1.
+                return idx + (1 if self._checkbox_column_enabled else 0)
+        return -1     
 
     @AppLogger.get_instance(
         name = 'DynamicTableModel',

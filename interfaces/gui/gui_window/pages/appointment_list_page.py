@@ -1056,7 +1056,7 @@ class AppointmentListPage(
                 source_row = row
                 break
 
-        if source_row is None:
+        if source_row == -1 or source_row is None:
             return
        
         # Заметка
@@ -1064,13 +1064,13 @@ class AppointmentListPage(
             new_text = self._draft_note_current[aid]
             if self.selected_dto.note_text != new_text:
                 self.selected_dto.note_text = new_text
-                # Обновить в модели
-                source_row = self._find_source_row_by_id(aid)
-                if source_row != -1:
-                    col_idx = self._get_column_index('note_text')
-                    if col_idx >= 0:
-                        index = self.source_model.index(source_row, col_idx)
-                        self.source_model.setData(index, new_text, Qt.EditRole)
+
+                # Обновить в модели — используем метод, учитывающий чекбокс-столбец
+                real_col = self.source_model.get_model_column_index('note_text')
+                if real_col >= 0:
+                    index = self.source_model.index(source_row, real_col)
+                    self.source_model.setData(index, new_text, Qt.EditRole)
+
         # Фото уже синхронизировано через _sync_draft_to_selected_dto
         self._sync_draft_to_selected_dto()
         # после возможного обновления проверить, не стал ли DTO равным оригиналу

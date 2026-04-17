@@ -140,10 +140,33 @@ def preserve_selection(
     :param label: произвольная строка – если указана, используется как ключ в хранилище вместо автоматического "ClassName.method_name"
     """
     def decorator(func):
+        """
+        Декоратор для сохранения и восстановления текущей строки в таблице.
+
+        :param store_method_name: имя метода, возвращающего индекс строки (по умолчанию '_store_current_row')
+        :param restore_method_name: имя метода, принимающего индекс строки и восстанавливающего выделение
+        :param label: произвольная строка – если указана, используется как ключ в хранилище вместо автоматического "ClassName.method_name"
+
+        Декоратор сохраняет текущую строку перед выполнением функции, а затем восстанавливает её после выполнения.
+        Если методы не найдены, декоратор просто выполняет функцию без сохранения.
+        """
+
         @wraps(func)
         def wrapper(self, *args, **kwargs):
+            """
+            Декоратор для сохранения и восстановления текущей строки в таблице.
+
+            :param func: функция, для которой сохраняется и восстанавливается строка
+            :return: результат выполнения функции func
+            :rtype: Any
+
+            Декоратор сохраняет текущую строку перед выполнением функции, а затем восстанавливает её после выполнения.
+            Если методы не найдены, декоратор просто выполняет функцию без сохранения.
+            """
+
             store = getattr(self, store_method_name, None)
             restore = getattr(self, restore_method_name, None)
+
             if store is None or restore is None:
                 # Если методы не найдены, просто выполняем функцию без сохранения
                 return func(self, *args, **kwargs)
@@ -161,11 +184,15 @@ def preserve_selection(
                 # Восстанавливаем строку только если мы её сохранили (is_new)
                 if is_new:
                     row_to_restore = _PreserveSelectionStorage.get(key)
+
                     if row_to_restore != -1:
                         restore(row_to_restore)
+                        
                     _PreserveSelectionStorage.clear(key)
             return result
+            
         return wrapper
+    
     return decorator
 
 

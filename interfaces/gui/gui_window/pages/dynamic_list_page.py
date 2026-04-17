@@ -659,12 +659,10 @@ class ListDataMixin:
             
         try:
             self.current_data = self.loader_func(self.current_extra) # Загружаем данные
-
-            self.source_model.update_data(self.current_data)
-            # self.original_data = {i: dto for i, dto in enumerate(self.current_data)}
+            self.source_model.update_data(self.current_data) # Обновляем модель
             self.original_data = {i: deepcopy(dto) for i, dto in enumerate(self.current_data)}
 
-            self.source_model.clear_row_colors()
+            self.source_model.clear_row_colors() # Очищаем все установленные цвета
 
             # Сбрасываем все отслеживаемые изменения
             # self.modified_rows.clear()
@@ -676,8 +674,16 @@ class ListDataMixin:
             
             
             self._update_save_button_state()
-
             # self.table_view.clearSelection()
+            self._data_loaded = True # Устанавливаем флаг, что данные загружены
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки данных: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
+
+
+        self._suppress_draft_save = True
+        try:
             # Восстанавливаем выделение по ID
             if selected_id is not None:
                 # row = self._find_row_by_dto_id(selected_id)
@@ -689,15 +695,21 @@ class ListDataMixin:
             else:
                 self._select_first_row()
 
-            # Обновляем состояние кнопок на основе текущего выделения
-            self._update_selection_state()
-            
-            self._data_loaded = True
-
-            self.logger.debug(f"Загружено {len(self.current_data)} записей")
         except Exception as e:
-            self.logger.exception(f"Ошибка загрузки данных: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
+            self.logger.exception(f"Ошибка восстановления выделения: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось восстановить выделение: {e}")
+        finally:
+            self._suppress_draft_save = False
+        
+        # Обновляем состояние кнопок на основе текущего выделения
+        self._update_selection_state()
+        
+        self._data_loaded = True # Устанавливаем флаг, что данные загружены
+
+        self.logger.debug(f"Загружено {len(self.current_data)} записей")
+        # except Exception as e:
+        #     self.logger.exception(f"Ошибка загрузки данных: {e}")
+        #     QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные: {e}")
 
     @AppLogger.get_instance(
         name = 'ListDataMixin',
@@ -750,7 +762,7 @@ class ListDataMixin:
         if reload_needed or not self._data_loaded: 
             self._load_data()
             self._needs_refresh = False
-            self._data_loaded = True
+            self._data_loaded = True # Устанавливаем флаг, что данные загружены
             # После загрузки выделяем строку, если указан select_id
             if select_id is not None:
                 self._select_by_id(select_id)

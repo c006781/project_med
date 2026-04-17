@@ -658,6 +658,7 @@ class AppointmentListPage(
         self.photo_service = get_photo_service()
         self.patient_service = get_patient_service()
 
+        self._suppress_draft_save = False
 
         # Создаём правую панель
         # Создаём виджеты правой панели (после того как detail_layout создан в родительском _setup_ui)
@@ -1536,8 +1537,16 @@ class AppointmentListPage(
     #     # Вызываем родительский метод, который обновит self.selected_dto и вызовет update_details
     #     super()._on_selection_changed(selected, deselected)
     def _on_selection_changed(self, selected, deselected):
-        if self.selected_dto:
+        """
+        Переопределяем метод для сохранения черновика текущего приёма
+        перед переключением на другой.
+        
+        Сохраняет черновик текущего выбранного приёма (если есть)
+        и вызывает родительский метод, который обновит self.selected_dto и вызовет update_details
+        """
+        if not getattr(self, '_suppress_draft_save', False) and self.selected_dto:
             self._save_current_draft()
+            
         super()._on_selection_changed(selected, deselected)
 
     @AppLogger.get_instance(

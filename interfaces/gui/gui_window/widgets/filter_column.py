@@ -23,13 +23,6 @@ from PySide6.QtCore import (
 
 from PySide6.QtGui import QDoubleValidator
 
-
-
-
-
-
-
-
 class FilterColumnDialog(QDialog):
     """Диалог настройки фильтра для одного столбца."""
 
@@ -46,102 +39,72 @@ class FilterColumnDialog(QDialog):
         "between": "между",
         "is_null": "пусто (NULL)",
         "is_not_null": "не пусто (NOT NULL)",
-        "fuzzy": "нечёткий поиск"
+        # "fuzzy": "нечёткий поиск"
     }
-    
 
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
         use_name_in_filename='system'
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         column_title: str,
         column_type: type,
-        current_operator: str = None,
-        current_value: Any = None,
-        current_value2: Any = None,
+        current_logic=None,
+        current_conditions=None,
         unique_values: List[Any] = None,
         parent=None
     ):
         super().__init__(parent)
-        self.logger = AppLogger.get_instance(
-            name='gui.FilterColumnDialog',
-            enable_file_logging='user',
-            use_name_in_filename='user'
-        )
-        self.setWindowTitle(f"Фильтр для столбца «{column_title}»")
-        self.setMinimumWidth(400)
-
+        self.column_title = column_title
         self.column_type = column_type
         self.unique_values = unique_values or []
+        self.setWindowTitle(f"Фильтр для столбца «{column_title}»")
+        self.setMinimumWidth(500)
 
         # Текущие значения
-        self.current_operator = current_operator
-        self.current_value = current_value
-        self.current_value2 = current_value2
+        self.current_logic = current_logic if current_logic in ('AND', 'OR') else 'AND'
+        self.current_conditions = current_conditions or []
 
         self._setup_ui()
-        self._update_ui_for_operator()
-        
-
+        self._load_conditions()
+       
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    ) 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
-        # Выбор оператора
-        self.op_combo = QComboBox()
+        # Выбор логики объединения
+        logic_layout = QHBoxLayout()
+        logic_layout.addWidget(QLabel("Условия объединять через:"))
+        self.logic_combo = QComboBox()
+        self.logic_combo.addItem("И (AND)", 'AND')
+        self.logic_combo.addItem("ИЛИ (OR)", 'OR')
+        self.logic_combo.setCurrentIndex(0 if self.current_logic == 'AND' else 1)
+        logic_layout.addWidget(self.logic_combo)
+        layout.addLayout(logic_layout)
 
-        for op_key, op_text in self._OPERATORS.items():
-            self.op_combo.addItem(op_text, op_key)
+        # Список условий
+        self.conditions_widget = QWidget()
+        self.conditions_layout = QVBoxLayout(self.conditions_widget)
+        self.conditions_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.conditions_widget)
+        layout.addWidget(scroll)
 
-        if self.current_operator:
-            idx = self.op_combo.findData(self.current_operator)
-            if idx >= 0:
-                self.op_combo.setCurrentIndex(idx)
-
-        self.op_combo.currentIndexChanged.connect(self._on_operator_changed)
-
-        # Форма для ввода значений
-        self.form_layout = QFormLayout()
-        self.value_edit = QLineEdit()
-        self.value2_edit = QLineEdit()
-        self.between_label = QLabel("и")
-        self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        self.null_check = QCheckBox("NULL (пустое значение)")
-
-        # Специальные виджеты для дат/времени
-        if self.column_type == datetime.date:
-            self.value_edit = QDateEdit()
-            self.value_edit.setCalendarPopup(True)
-            self.value_edit.setDisplayFormat("yyyy-MM-dd")
-            self.value2_edit = QDateEdit()
-            self.value2_edit.setCalendarPopup(True)
-            self.value2_edit.setDisplayFormat("yyyy-MM-dd")
-        elif self.column_type == datetime.time:
-            self.value_edit = QTimeEdit()
-            self.value_edit.setDisplayFormat("HH:mm")
-            self.value2_edit = QTimeEdit()
-            self.value2_edit.setDisplayFormat("HH:mm")
-        elif self.column_type == int:
-            self.value_edit = QSpinBox()
-            self.value_edit.setRange(-9999999, 9999999)
-            self.value2_edit = QSpinBox()
-            self.value2_edit.setRange(-9999999, 9999999)
-        elif self.column_type == float:
-            self.value_edit = QLineEdit()
-            self.value_edit.setValidator(QDoubleValidator())
-            self.value2_edit = QLineEdit()
-            self.value2_edit.setValidator(QDoubleValidator())
-
-        self.form_layout.addRow("Оператор:", self.op_combo)
-        self.form_layout.addRow(self.value_edit)
-        self.form_layout.addRow(self.between_label, self.value2_edit)
-        self.form_layout.addRow(self.list_widget)
-        self.form_layout.addRow(self.null_check)
-
-        layout.addLayout(self.form_layout)
+        # Кнопка добавления условия
+        add_btn = QPushButton("+ Добавить условие")
+        add_btn.clicked.connect(self._add_condition)
+        layout.addWidget(add_btn)
 
         # Кнопки OK/Cancel
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -149,96 +112,313 @@ class FilterColumnDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self._update_ui_for_operator()
-
-    def _on_operator_changed(self):
-        self._update_ui_for_operator()
-
-    def _update_ui_for_operator(self):
-        op_key = self.op_combo.currentData()
-        # Скрываем все, потом покажем нужное
-        self.value_edit.setVisible(False)
-        self.value2_edit.setVisible(False)
-        self.between_label.setVisible(False)
-        self.list_widget.setVisible(False)
-        self.null_check.setVisible(False)
-
-        if op_key == "between":
-            self.value_edit.setVisible(True)
-            self.value2_edit.setVisible(True)
-            self.between_label.setVisible(True)
-        elif op_key == "in":
-            self.list_widget.setVisible(True)
-            self._populate_list_widget()
-        elif op_key in ("is_null", "is_not_null"):
-            self.null_check.setVisible(True)
-            self.null_check.setText("NULL (пустое значение)" if op_key == "is_null" else "NOT NULL (не пустое)")
-            self.null_check.setChecked(True)
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_conditions(self):
+        """Загружает существующие условия в UI."""
+        self._clear_conditions()
+        if not self.current_conditions:
+            self._add_condition()  # одно пустое условие по умолчанию
         else:
-            self.value_edit.setVisible(True)
+            for cond in self.current_conditions:
+                self._add_condition(cond)
+    
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )            
+    def _clear_conditions(self):
+        while self.conditions_layout.count():
+            child = self.conditions_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
 
-    def _populate_list_widget(self):
-        self.list_widget.clear()
-        for val in self.unique_values:
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _add_condition(self, condition=None):
+        """Добавляет строку редактирования одного условия."""
+        frame = QFrame()
+        frame.setFrameShape(QFrame.StyledPanel)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Выбор оператора
+        op_combo = QComboBox()
+        for op_key, op_text in self._OPERATORS.items():
+            op_combo.addItem(op_text, op_key)
+        if condition:
+            idx = op_combo.findData(condition['operator'])
+            if idx >= 0:
+                op_combo.setCurrentIndex(idx)
+        layout.addWidget(op_combo)
+
+        # Виджеты для ввода значений (зависит от оператора)
+        value_widget = self._create_value_widget()
+        value2_widget = self._create_value_widget()
+        between_label = QLabel("и")
+        between_label.setVisible(False)
+        list_widget = QListWidget()
+        list_widget.setSelectionMode(QListWidget.MultiSelection)
+        list_widget.setVisible(False)
+        null_check = QCheckBox("NULL (пустое значение)")
+        null_check.setVisible(False)
+
+        layout.addWidget(value_widget)
+        layout.addWidget(between_label)
+        layout.addWidget(value2_widget)
+        layout.addWidget(list_widget)
+        layout.addWidget(null_check)
+
+        # Кнопка удаления условия
+        del_btn = QPushButton("✖")
+        del_btn.setFixedSize(24, 24)
+        # del_btn.clicked.connect(lambda: frame.deleteLater())
+        del_btn.clicked.connect(lambda: self._remove_condition_frame(frame))
+        layout.addWidget(del_btn)
+
+        # Сохраняем ссылки на динамические виджеты в свойствах frame
+        frame.op_combo = op_combo
+        frame.value_widget = value_widget
+        frame.value2_widget = value2_widget
+        frame.between_label = between_label
+        frame.list_widget = list_widget
+        frame.null_check = null_check
+
+        # Функция обновления видимости при смене оператора
+        def update_visibility():
+            op_key = op_combo.currentData()
+            # Скрыть все
+            value_widget.setVisible(False)
+            value2_widget.setVisible(False)
+            between_label.setVisible(False)
+            list_widget.setVisible(False)
+            null_check.setVisible(False)
+            if op_key == "between":
+                value_widget.setVisible(True)
+                value2_widget.setVisible(True)
+                between_label.setVisible(True)
+            elif op_key == "in":
+                list_widget.setVisible(True)
+                self._populate_list_widget(list_widget, self.unique_values)
+                # Если есть сохранённое значение, выделить
+                if condition and condition.get('operator') == 'in':
+                    selected = condition.get('value', [])
+                    for i in range(list_widget.count()):
+                        item = list_widget.item(i)
+                        if item.data(Qt.UserRole) in selected:
+                            item.setSelected(True)
+            elif op_key in ("is_null", "is_not_null"):
+                null_check.setVisible(True)
+                null_check.setText("NULL (пустое значение)" if op_key == "is_null" else "NOT NULL (не пустое)")
+                null_check.setChecked(condition.get('value') is None if op_key == "is_null" else condition.get('value') is not None)
+            else:
+                value_widget.setVisible(True)
+                # Установить значение из condition, если есть
+                if condition and condition.get('operator') == op_key:
+                    self._set_widget_value(value_widget, condition.get('value'))
+                    if op_key == "between" and condition.get('value2'):
+                        self._set_widget_value(value2_widget, condition.get('value2'))
+
+        op_combo.currentIndexChanged.connect(update_visibility)
+        update_visibility()
+
+        self.conditions_layout.addWidget(frame)
+
+
+    def _remove_condition_frame(self, frame):
+        self.conditions_layout.removeWidget(frame)
+        frame.deleteLater()
+
+
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_value_widget(self):
+        """Создаёт виджет для ввода значения в зависимости от column_type."""
+        if self.column_type == datetime.date:
+            w = QDateEdit()
+            w.setCalendarPopup(True)
+            w.setDisplayFormat("yyyy-MM-dd")
+        elif self.column_type == datetime.time:
+            w = QTimeEdit()
+            w.setDisplayFormat("HH:mm")
+        elif self.column_type == int:
+            w = QSpinBox()
+            w.setRange(-9999999, 9999999)
+        elif self.column_type == float:
+            w = QLineEdit()
+            w.setValidator(QDoubleValidator())
+        else:
+            w = QLineEdit()
+        return w
+
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _set_widget_value(self, widget, value):
+        if value is None:
+            return
+        if isinstance(widget, QDateEdit):
+            if isinstance(value, datetime.date):
+                widget.setDate(QDate(value.year, value.month, value.day))
+        elif isinstance(widget, QTimeEdit):
+            if isinstance(value, datetime.time):
+                widget.setTime(QTime(value.hour, value.minute))
+        elif isinstance(widget, QSpinBox):
+            widget.setValue(value)
+        elif isinstance(widget, QLineEdit):
+            widget.setText(str(value))
+
+    # @AppLogger.get_instance(
+    #     name='FilterColumnDialog',
+    #     enable_file_logging='system',
+    #     use_name_in_filename='system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _on_operator_changed(self):
+    #     self._update_ui_for_operator()
+
+    # @AppLogger.get_instance(
+    #     name='FilterColumnDialog',
+    #     enable_file_logging='system',
+    #     use_name_in_filename='system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _update_ui_for_operator(self):
+    #     op_key = self.op_combo.currentData()
+    #     # Скрываем все, потом покажем нужное
+    #     self.value_edit.setVisible(False)
+    #     self.value2_edit.setVisible(False)
+    #     self.between_label.setVisible(False)
+    #     self.list_widget.setVisible(False)
+    #     self.null_check.setVisible(False)
+
+    #     if op_key == "between":
+    #         self.value_edit.setVisible(True)
+    #         self.value2_edit.setVisible(True)
+    #         self.between_label.setVisible(True)
+    #     elif op_key == "in":
+    #         self.list_widget.setVisible(True)
+    #         self._populate_list_widget()
+    #     elif op_key in ("is_null", "is_not_null"):
+    #         self.null_check.setVisible(True)
+    #         self.null_check.setText("NULL (пустое значение)" if op_key == "is_null" else "NOT NULL (не пустое)")
+    #         self.null_check.setChecked(True)
+    #     else:
+    #         self.value_edit.setVisible(True)
+
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _populate_list_widget(self, list_widget, values):
+        list_widget.clear()
+        for val in values:
             item = QListWidgetItem(str(val))
             item.setData(Qt.UserRole, val)
-            self.list_widget.addItem(item)
-        if self.current_operator == "in" and isinstance(self.current_value, list):
-            for i in range(self.list_widget.count()):
-                item = self.list_widget.item(i)
-                if item.data(Qt.UserRole) in self.current_value:
-                    item.setSelected(True)
+            list_widget.addItem(item)
 
-    def get_filter(self) -> Tuple[str, Any, Any]:
-        """Возвращает (operator, value, value2)."""
-        op_key = self.op_combo.currentData()
-        value = None
-        value2 = None
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_filter(self):
+        """Возвращает (logic, list_of_conditions)."""
+        logic = self.logic_combo.currentData()
+        conditions = []
+        for i in range(self.conditions_layout.count()):
+            frame = self.conditions_layout.itemAt(i).widget()
+            if not frame:
+                continue
+            op_key = frame.op_combo.currentData()
+            if op_key == "in":
+                selected = []
+                for j in range(frame.list_widget.count()):
+                    if frame.list_widget.item(j).isSelected():
+                        selected.append(frame.list_widget.item(j).data(Qt.UserRole))
+                value = selected
+                value2 = None
+            elif op_key in ("is_null", "is_not_null"):
+                value = None
+                value2 = None
+            elif op_key == "between":
+                value = self._get_widget_value(frame.value_widget)
+                value2 = self._get_widget_value(frame.value2_widget)
+            else:
+                value = self._get_widget_value(frame.value_widget)
+                value2 = None
+            conditions.append({
+                'operator': op_key,
+                'value': value,
+                'value2': value2
+            })
+        # Фильтруем пустые условия (без значения)
+        conditions = [c for c in conditions if not (c['operator'] not in ('is_null', 'is_not_null') and c['value'] is None)]
+        return logic, conditions
 
-        if op_key == "between":
-            value = self._get_widget_value(self.value_edit)
-            value2 = self._get_widget_value(self.value2_edit)
-        elif op_key == "in":
-            selected = []
-            for i in range(self.list_widget.count()):
-                if self.list_widget.item(i).isSelected():
-                    selected.append(self.list_widget.item(i).data(Qt.UserRole))
-            value = selected
-        elif op_key in ("is_null", "is_not_null"):
-            value = None
-        else:
-            value = self._get_widget_value(self.value_edit)
-
-        return op_key, value, value2
-
+    @AppLogger.get_instance(
+        name='FilterColumnDialog',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_widget_value(self, widget):
         if isinstance(widget, QDateEdit):
-            qdate = widget.date()
-            if qdate.isValid():
-                return datetime.date(qdate.year(), qdate.month(), qdate.day())
-            return None
+            qd = widget.date()
+            return datetime.date(qd.year(), qd.month(), qd.day()) if qd.isValid() else None
+        
         if isinstance(widget, QTimeEdit):
-            qtime = widget.time()
-            if qtime.isValid():
-                return datetime.time(qtime.hour(), qtime.minute())
-            return None
+            qt = widget.time()
+            return datetime.time(qt.hour(), qt.minute()) if qt.isValid() else None
+        
         if isinstance(widget, QSpinBox):
             return widget.value()
+        
         if isinstance(widget, QLineEdit):
             text = widget.text().strip()
             if not text:
                 return None
+            
             if self.column_type == int:
-                try:
-                    return int(text)
-                except:
-                    return None
+                try: return int(text)
+                except: return None
+
             if self.column_type == float:
-                try:
-                    return float(text)
-                except:
-                    return None
+                try: return float(text)
+                except: return None
+
             return text
+        
         return None
 
 class FilterBar(QFrame):
@@ -257,8 +437,10 @@ class FilterBar(QFrame):
         "between": "от",
         "is_null": "пусто",
         "is_not_null": "не пусто",
-        "fuzzy": "похоже на"
+        # "fuzzy": "похоже на"
     }
+
+    filter_condition_removed = Signal(int, int)  # column, condition_index
 
     filter_removed = Signal(int)          # column index
     all_filters_cleared = Signal()
@@ -308,32 +490,48 @@ class FilterBar(QFrame):
         self.clear_all_btn.clicked.connect(self.all_filters_cleared.emit)
         layout.addWidget(self.clear_all_btn)
 
-    def update_filters(self, filters: Dict[int, Dict[str, Any]], column_titles: Dict[int, str]):
-        """Обновляет строку фильтров на основе активных фильтров из прокси-модели."""
-        # Удаляем все чипы
+    @AppLogger.get_instance(
+        name='FilterBar',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def update_filters(
+        self, 
+        filters: Dict[int, Dict[str, Any]], 
+        column_titles: Dict[int, str]
+    ):
+        # Очищаем все чипы
         while self.chips_layout.count() > 1:
             item = self.chips_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-
         if not filters:
             self.setVisible(False)
             return
 
-        for col, filter_info in filters.items():
-            if filter_info.get('active', False):
-                chip = self._create_chip(col, filter_info, column_titles.get(col, f"Столбец {col}"))
+        # Для каждого столбца создаём отдельный чип для каждого условия
+        for col, filter_def in filters.items():
+            logic = filter_def.get('logic', 'AND')
+            conditions = filter_def.get('conditions', [])
+            col_title = column_titles.get(col, f"Столбец {col}")
+            for idx, cond in enumerate(conditions):
+                chip = self._create_chip(col, cond, col_title, idx, len(conditions), logic)
                 self.chips_layout.insertWidget(self.chips_layout.count() - 1, chip)
+        self.setVisible(True)
 
-        self.setVisible(len(filters) > 0)
-
-    def _create_chip(self, column: int, filter_info: dict, column_title: str) -> QPushButton:
-        """Создаёт кнопку-чип для одного фильтра."""
-        op = filter_info.get('operator')
-        value = filter_info.get('value')
-        value2 = filter_info.get('value2')
-
-        # Формируем текст
+    @AppLogger.get_instance(
+        name='FilterBar',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_chip(self, column: int, condition: dict, column_title: str, cond_idx: int, total_conds: int, logic: str) -> QPushButton:
+        op = condition.get('operator')
+        value = condition.get('value')
+        value2 = condition.get('value2')
         op_text = self._OPERATOR_NAMES.get(op, op)
         if op == "between":
             text = f"{column_title} {op_text} {value} и {value2}"
@@ -346,10 +544,12 @@ class FilterBar(QFrame):
             text = f"{column_title} {op_text}"
         else:
             text = f"{column_title} {op_text} {value}"
-
+        if total_conds > 1:
+            text = f"[{logic}] {text}"
         chip = QPushButton(f"✖ {text}")
         chip.setFlat(True)
-        chip.setStyleSheet("""
+        chip.setStyleSheet(
+            """
             QPushButton {
                 background-color: #e0e0e0;
                 border-radius: 12px;
@@ -359,10 +559,11 @@ class FilterBar(QFrame):
             QPushButton:hover {
                 background-color: #d0d0d0;
             }
-        """)
+            """
+        )
         chip.setCursor(Qt.PointingHandCursor)
-        # При клике на кнопку удаляем фильтр
-        chip.clicked.connect(lambda checked, col=column: self.filter_removed.emit(col))
-        # Двойной клик – редактировать
+        # При клике – удалить конкретное условие
+        chip.clicked.connect(lambda checked, col=column, idx=cond_idx: self.filter_condition_removed.emit(col, idx))
+        # Двойной клик – редактировать весь фильтр столбца (все условия)
         chip.mouseDoubleClickEvent = lambda event: self.filter_edit_requested.emit(column)
-        return chip        
+        return chip       

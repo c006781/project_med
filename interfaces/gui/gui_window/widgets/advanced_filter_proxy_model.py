@@ -46,14 +46,51 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             use_name_in_filename = 'user',
         )
 
-        # self._column_filters: Dict[int, Dict[str, Any]] = {}    # column -> filter info # номер столбца
-        # self._global_text_filter: str = ""                      # общий текстовый фильтр
+        self._column_filters: Dict[int, Dict[str, Any]] = {}  # column -> {active, operator, value, value2}  # номер столбца
 
-        self._filters: Dict[int, Dict[str, Any]] = {}   # column -> {active, operator, value, value2}  # номер столбца
         self._global_text_filter = ""                   # общий текстовый фильтр
 
 
+    @AppLogger.get_instance(
+        name='AdvancedFilterProxyModel',
+        enable_file_logging='system',
+        use_name_in_filename='system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def remove_condition(self, column: int, condition_index: int) -> None:
+        """
+        Удаляет одно условие из фильтра для указанного столбца.
 
+        :param column: номер столбца
+        :param condition_index: индекс условия в списке conditions (0-based)
+        """
+        if column not in self._column_filters:
+            self.logger.warning(f"Попытка удалить условие из столбца {column}, для которого нет фильтра")
+            return
+
+        filter_def = self._column_filters[column]
+        conditions = filter_def.get('conditions', [])
+        if condition_index < 0 or condition_index >= len(conditions):
+            self.logger.warning(f"Индекс условия {condition_index} вне диапазона (0-{len(conditions)-1}) для столбца {column}")
+            return
+
+        # Удаляем условие
+        del conditions[condition_index]
+
+        # Если условий не осталось – удаляем весь фильтр для столбца
+        if not conditions:
+            self.clear_column_filter(column)
+        else:
+            # Иначе перезаписываем фильтр (логика не меняется)
+            self._column_filters[column] = {
+                'logic': filter_def['logic'],
+                'conditions': conditions
+            }
+            self.invalidateFilter()
+            self.filtersChanged.emit()
+
+        self.logger.debug(f"Удалено условие {condition_index} из столбца {column}, осталось {len(conditions)} условий")
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -63,21 +100,28 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def set_column_filter(
-        self, 
-        column: int, 
-        operator: str, 
-        value: Any = None, 
-        value2: Any = None
+        self,
+        column: int,
+        logic: str,                           # 'AND' или 'OR'
+        conditions: List[Dict[str, Any]]      # список условий
     ):
-        """Устанавливает расширенный фильтр для столбца."""
-        if operator is None or operator == 'clear':
+        """
+        Устанавливает сложный фильтр для столбца.
+
+        :param column: номер столбца
+        :param logic: 'AND' (все условия должны выполняться) или 'OR' (хотя бы одно)
+        :param conditions: список словарей, каждый с ключами:
+            - 'operator' (str): eq, ne, gt, ge, lt, le, like, ilike, in, between, is_null, is_not_null
+            - 'value' (Any): значение для сравнения
+            - 'value2' (Any, optional): второе значение для between
+        """
+        if not conditions:
             self.clear_column_filter(column)
             return
-        self._filters[column] = {
-            'active': True,
-            'operator': operator,
-            'value': value,
-            'value2': value2
+
+        self._column_filters[column] = {
+            'logic': logic,
+            'conditions': conditions
         }
         self.invalidateFilter()
         self.filtersChanged.emit()
@@ -95,8 +139,8 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         
         :param column: номер столбца
         """
-        if column in self._filters:
-            del self._filters[column]
+        if column in self._column_filters:
+            del self._column_filters[column]
             self.invalidateFilter()
             self.filtersChanged.emit()
     
@@ -108,8 +152,8 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         level = AppLogger._parse_log_level('DEBUG')
     )        
     def get_active_filters(self) -> Dict[int, Dict]:
-        """Возвращает копию активных фильтров для отображения в FilterBar."""
-        return self._filters.copy()
+        """Возвращает копию для отображения в FilterBar (может быть преобразована в плоский список чипов)."""
+        return self._column_filters.copy()
     
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -120,9 +164,9 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     )
     def set_column_filter_simple(self, column: int, filter_text: str = None, selected_values: list = None):
         if filter_text:
-            self.set_column_filter(column, 'ilike', filter_text)
+            self.set_column_filter(column, 'AND', [{'operator': 'ilike', 'value': filter_text}])
         elif selected_values:
-            self.set_column_filter(column, 'in', selected_values)
+            self.set_column_filter(column, 'AND', [{'operator': 'in', 'value': selected_values}])
         else:
             self.clear_column_filter(column)
 
@@ -137,10 +181,11 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         """
         Очищает все фильтры (фильтры для столбцов и общий текстовый фильтр).
         """
-        self._filters.clear()
-        self._global_text_filter = ""
-        self.invalidateFilter()
-        self.filtersChanged.emit()
+        if self._column_filters:
+            self._column_filters.clear()
+            self._global_text_filter = ""
+            self.invalidateFilter()
+            self.filtersChanged.emit()
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -188,27 +233,40 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         if not source_model:
             return True
 
-        # Глобальный текстовый фильтр (ищет во всех столбцах)
+        # Глобальный текстовый фильтр
         if self._global_text_filter:
             found = False
             for col in range(source_model.columnCount()):
                 idx = source_model.index(source_row, col, source_parent)
                 data = source_model.data(idx, Qt.DisplayRole)
-
                 if data is not None and self._global_text_filter in str(data).lower():
                     found = True
                     break
-
             if not found:
                 return False
 
         # Фильтры по столбцам
-        for col, f in self._filters.items():
+        for col, filter_def in self._column_filters.items():
             idx = source_model.index(source_row, col, source_parent)
             data = source_model.data(idx, Qt.DisplayRole)
-            if not self._evaluate_filter(data, f['operator'], f.get('value'), f.get('value2')):
-                return False
-
+            logic = filter_def['logic']
+            conditions = filter_def['conditions']
+            results = []
+            for cond in conditions:
+                op = cond['operator']
+                val = cond.get('value')
+                val2 = cond.get('value2')
+                results.append(self._evaluate_filter(data, op, val, val2))
+            if logic == 'AND':
+                for res in results:
+                    if not res:
+                        return False
+            else:  # OR
+                for res in results:
+                    if res:
+                        break
+                else:
+                    return False
         return True
 
     @AppLogger.get_instance(
@@ -226,14 +284,20 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
 
         # Для строковых операторов приводим к строке
         if operator == 'like':
+            if value is None:
+                return False
             # регистрозависимый поиск
             return str(value) in str(data) if value is not None else False
 
         if operator == 'ilike':
+            if value is None:
+                return False
             # регистронезависимый поиск
             return str(value).lower() in str(data).lower() if value is not None else False
 
         if operator == 'fuzzy':
+            if value is None:
+                return False
             # нечёткий поиск (регистронезависимый, можно доработать)
             return str(value).lower() in str(data).lower() if value is not None else False
             

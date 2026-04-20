@@ -217,24 +217,38 @@ class AdvancedFilterMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _on_filter_condition_removed(self, column: int, condition_index: int):
+        """Обработчик удаления конкретного условия через чип."""
+        self.proxy_model.remove_condition(column, condition_index)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_filter_bar(self):
         """Создаёт и размещает FilterBar между топ-панелью и таблицей."""
         if not hasattr(self, 'filter_bar'):
             self.filter_bar = FilterBar(self)
             # Вставляем после топ-панели, но перед таблицей
-            # Предполагаем, что self.main_layout уже содержит self.table_view
-            # Найдём индекс таблицы и вставим перед ней
+            # Находим индекс таблицы в main_layout
             idx = self.main_layout.indexOf(self.table_view)
             if idx >= 0:
                 self.main_layout.insertWidget(idx, self.filter_bar)
             else:
                 self.main_layout.addWidget(self.filter_bar)
 
-            # Подключаем сигналы
+            # Подключаем сигналы прокси-модели
             self.proxy_model.filtersChanged.connect(self._refresh_filter_bar)
+            # Сигналы от строки фильтров
             self.filter_bar.filter_removed.connect(self._on_filter_removed)
             self.filter_bar.all_filters_cleared.connect(self._on_all_filters_cleared)
             self.filter_bar.filter_edit_requested.connect(self._on_filter_edit_requested)
+            # Для множественных условий (если реализовано)
+            if hasattr(self.filter_bar, 'filter_condition_removed'):
+                self.filter_bar.filter_condition_removed.connect(self._on_filter_condition_removed)
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterMixin',
@@ -298,8 +312,8 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     # Переопределяем on_filter_requested (из ListFilterMixin) для поддержки новых операторов
-    def on_filter_requested(self, column: int, operator: str, value: Any, value2: Any = None):
-        self.proxy_model.set_column_filter(column, operator, value, value2)
+    def on_filter_requested(self, column, logic, conditions):
+        self.proxy_model.set_column_filter(column, logic, conditions)
 
 class SelectionDialogMixin:
     """
@@ -1923,21 +1937,21 @@ class ListFilterMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def on_filter_requested(self, column: int, operator: str, value, value2=None):
-        """
-        Обработка сигнала фильтрации от заголовка.
+    # def on_filter_requested(self, column: int, operator: str, value, value2=None):
+    #     """
+    #     Обработка сигнала фильтрации от заголовка.
 
-        :param column: номер столбца, для которого нужно установить фильтр
-        :param operator: оператор фильтрации (eq, like, fuzzy, in)
-        :param value: значение для сравнения (зависит от оператора)
-        """
-        # if operator == 'in':
-        #     self.proxy_model.set_column_filter(column, selected_values=value)
-        # elif operator == 'contains':
-        #     self.proxy_model.set_column_filter(column, filter_text=value)
-        # elif operator == 'clear':
-        #     self.proxy_model.clear_column_filter(column)
-        self.proxy_model.set_column_filter(column, operator, value, value2)
+    #     :param column: номер столбца, для которого нужно установить фильтр
+    #     :param operator: оператор фильтрации (eq, like, fuzzy, in)
+    #     :param value: значение для сравнения (зависит от оператора)
+    #     """
+    #     # if operator == 'in':
+    #     #     self.proxy_model.set_column_filter(column, selected_values=value)
+    #     # elif operator == 'contains':
+    #     #     self.proxy_model.set_column_filter(column, filter_text=value)
+    #     # elif operator == 'clear':
+    #     #     self.proxy_model.clear_column_filter(column)
+    #     self.proxy_model.set_column_filter(column, operator, value, value2)
 
     @AppLogger.get_instance(
         name = 'ListFilterMixin',

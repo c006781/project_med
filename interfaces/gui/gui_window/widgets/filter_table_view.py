@@ -27,7 +27,7 @@ class FilterHeaderView(QHeaderView):
     """
 
     # filter_requested = Signal(int, str, object)  # индекс колонки, оператор, значение
-    filter_requested = Signal(int, str, object, object)  # column, operator, value, value2 # индекс колонки, оператор, значение, значение2
+    filter_requested = Signal(int, str, object)  # column, logic, conditions
     filter_clear_requested = Signal(int)         # сброс фильтра для колонки
     
     @AppLogger.get_instance( 
@@ -188,10 +188,9 @@ class FilterHeaderView(QHeaderView):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _request_advanced_filter(self, logical_index: int):
-        """Открывает диалог расширенной фильтрации для столбца."""
-        # if not self._get_unique_values_func:
-        #     return
-
+        """Открывает диалог расширенной фильтрации для столбца с поддержкой множественных условий."""
+        
+        # Получаем уникальные значения для столбца (для оператора 'in')
         if self._get_unique_values_func:
             values = self._get_unique_values_func(logical_index)
         else:
@@ -204,100 +203,97 @@ class FilterHeaderView(QHeaderView):
 
         # Получаем текущий фильтр для этого столбца (если есть)
         model = self.parent().model()
-        current_filter = None
+        current_logic = None
+        current_conditions = []
+
         if (
-            hasattr(self.parent(), 'filter_model')
-        ) and (
-            hasattr(model, '_filters')
+            hasattr(self.parent(), 'model')
+            and hasattr(model, '_column_filters')
+            and logical_index in model._column_filters
         ):
-            current_filter = model._filters.get(logical_index)
+            current_filter = model._column_filters[logical_index]
+            current_logic = current_filter.get('logic')
+            current_conditions = current_filter.get('conditions', [])
 
-        current_operator = current_filter.get('operator') if current_filter else None
-        current_value = current_filter.get('value') if current_filter else None
-        current_value2 = current_filter.get('value2') if current_filter else None
-
-        # Определяем тип данных столбца (можно получить из модели)
-        # По умолчанию str, но можно расширить, если модель предоставляет типы
+        # Определяем тип данных столбца
         column_type = str
         if hasattr(self.model(), 'column_type'):
             column_type = self.model().column_type(logical_index)
-
-        # Альтернативно: можно получить из первого значения в столбце (не идеально, но работает)
         elif self.model().rowCount() > 0:
             idx = self.model().index(0, logical_index)
             data = self.model().data(idx, Qt.EditRole)
             if data is not None:
                 column_type = type(data)
 
-        # Создаём диалог фильтрации
+        # Создаём диалог фильтрации (новый, с поддержкой множественных условий)
+        from .filter_column import FilterColumnDialog
         dialog = FilterColumnDialog(
             column_title=column_title,
             column_type=column_type,
-            current_operator=current_operator,
-            current_value=current_value,
-            current_value2=current_value2,
+            current_logic=current_logic,
+            current_conditions=current_conditions,
             unique_values=values,
             parent=self
         )
 
         if dialog.exec() == QDialog.Accepted:
-            op_key, val, val2 = dialog.get_filter()
-            # Испускаем сигнал с параметрами фильтра
-            self.filter_requested.emit(logical_index, op_key, val, val2)
+            logic, conditions = dialog.get_filter()
+            # Испускаем сигнал с логикой и списком условий
+            self.filter_requested.emit(logical_index, logic, conditions)
 
-    @AppLogger.get_instance( 
-        name = 'FilterHeaderView',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _show_values_dialog(self, logical_index):
-        """
-        Открывает диалог выбора значений для фильтрации в таблице.
+    # @AppLogger.get_instance( 
+    #     name = 'FilterHeaderView',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _show_values_dialog(self, logical_index):
+    #     """
+    #     Открывает диалог выбора значений для фильтрации в таблице.
 
-        :param logical_index: индекс столбца, для которого необходимо отобразить фильтр
-        :type logical_index: int
-        """
-        if not self._get_unique_values_func:
-            return
+    #     :param logical_index: индекс столбца, для которого необходимо отобразить фильтр
+    #     :type logical_index: int
+    #     """
+    #     if not self._get_unique_values_func:
+    #         return
         
-        values = self._get_unique_values_func(logical_index)
+    #     values = self._get_unique_values_func(logical_index)
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Выбор значений")
+    #     dialog = QDialog(self)
+    #     dialog.setWindowTitle("Выбор значений")
 
-        layout = QVBoxLayout(dialog)
+    #     layout = QVBoxLayout(dialog)
 
-        list_widget = QListWidget()
-        list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+    #     list_widget = QListWidget()
+    #     list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
 
-        for val in values:
-            item = QListWidgetItem(str(val))
-            item.setData(Qt.UserRole, val)
-            list_widget.addItem(item)
+    #     for val in values:
+    #         item = QListWidgetItem(str(val))
+    #         item.setData(Qt.UserRole, val)
+    #         list_widget.addItem(item)
             
-        layout.addWidget(list_widget)
+    #     layout.addWidget(list_widget)
 
-        btn_layout = QHBoxLayout()
+    #     btn_layout = QHBoxLayout()
 
-        ok_btn = QPushButton("OK")
-        ok_btn.clicked.connect(dialog.accept)
-        btn_layout.addWidget(ok_btn)
+    #     ok_btn = QPushButton("OK")
+    #     ok_btn.clicked.connect(dialog.accept)
+    #     btn_layout.addWidget(ok_btn)
 
-        cancel_btn = QPushButton("Отмена")
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_layout.addWidget(cancel_btn)
+    #     cancel_btn = QPushButton("Отмена")
+    #     cancel_btn.clicked.connect(dialog.reject)
+    #     btn_layout.addWidget(cancel_btn)
        
         
-        layout.addLayout(btn_layout)
+    #     layout.addLayout(btn_layout)
 
-        if dialog.exec() == QDialog.Accepted:
-            selected = []
-            for item in list_widget.selectedItems():
-                selected.append(item.data(Qt.UserRole))
+    #     if dialog.exec() == QDialog.Accepted:
+    #         selected = []
+    #         for item in list_widget.selectedItems():
+    #             selected.append(item.data(Qt.UserRole))
                 
-            self.filter_requested.emit(logical_index, 'in', selected, None)
+    #         self.filter_requested.emit(logical_index, 'in', selected, None)
 
     # def _populate_values_menu(self, values_menu, logical_index):
     #     """Заполняет подменю уникальными значениями с чекбоксами."""
@@ -332,19 +328,19 @@ class FilterHeaderView(QHeaderView):
     #         selected = dialog.get_selected_values()
     #         self.filter_requested.emit(logical_index, 'in', selected)
 
-    @AppLogger.get_instance( 
-        name = 'FilterHeaderView',
-        enable_file_logging = 'system',
-        use_name_in_filename = 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _request_filter(self, logical_index):
-        """Запрашивает ввод значения фильтра."""
-        # Здесь можно открыть диалог, но для простоты используем input dialog
-        value, ok = QInputDialog.getText(self, "Фильтр", f"Введите значение для фильтрации (столбец {logical_index}):")
-        if ok and value:
-            self.filter_requested.emit(logical_index, 'contains', value)
+    # @AppLogger.get_instance( 
+    #     name = 'FilterHeaderView',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _request_filter(self, logical_index):
+    #     """Запрашивает ввод значения фильтра."""
+    #     # Здесь можно открыть диалог, но для простоты используем input dialog
+    #     value, ok = QInputDialog.getText(self, "Фильтр", f"Введите значение для фильтрации (столбец {logical_index}):")
+    #     if ok and value:
+    #         self.filter_requested.emit(logical_index, 'contains', value)
 
     # def _clear_filter(self, logical_index):
     #     """Сброс фильтра для колонки."""

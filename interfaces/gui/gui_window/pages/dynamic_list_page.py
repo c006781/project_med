@@ -571,7 +571,7 @@ class CheckboxSelectionMixin:
                 self.deleted_ids.discard(entity_id)
 
             else:
-                self.deleted_ids.add(entity_id)\
+                self.deleted_ids.add(entity_id)
                 
                 # Снимаем модификацию, если была
                 if entity_id in self.modified_ids:

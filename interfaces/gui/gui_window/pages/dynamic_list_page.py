@@ -1195,8 +1195,8 @@ class ListEditModeMixin:
         self.inline_action_combo.setVisible(edit_mode)
         self.save_changes_btn.setVisible(edit_mode)
 
-        self.cancel_all_btn.setVisible(edit_mode)
-        self.cancel_current_btn.setVisible(edit_mode)
+        # self.cancel_all_btn.setVisible(edit_mode)
+        # self.cancel_current_btn.setVisible(edit_mode)
 
 
         if hasattr(self, 'action_btn') and self.action_btn:
@@ -1511,54 +1511,111 @@ class ListUIMixin:
         self.edit_mode_btn.toggled.connect(self._on_edit_mode_toggled)
         top_layout.addWidget(self.edit_mode_btn)
         
+
+        def setup_action_combo(
+            action_combo, 
+            btns:list, 
+            fun_connect:Callable
+        ):
+            """
+            Настройка комбо-бокса действий с заданными кнопками и функцией подключения.
+
+            Аргументы:
+                action_combo (QComboBox): Комбо-бокс, который нужно настроить.
+                btns (list): Список кнопок, которые нужно добавить в комбо-бокс.
+                fun_connect (Callable): Функция, которая будет подключена к сигналу currentIndexChanged комбо-бокса.
+
+            Возвращает:
+                None
+            """
+
+            for btn in btns:
+                action_combo.addItem(btn)
+
+            action_combo.setEditable(False)
+            action_combo.setMaximumWidth(170)
+
+            # Делаем первый пункт невыбираемым
+            action_combo.model().item(0).setEnabled(False)
+            action_combo.setCurrentIndex(0)
+            action_combo.currentIndexChanged.connect(fun_connect)
+
+            # Принудительное открытие вниз
+            # action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
+
         # Выпадающий список для действий в обычном режиме
         self.action_combo = QComboBox()
-        self.action_combo.addItem("▼ Действия с записями")
-        self.action_combo.addItem("Добавить")
-        self.action_combo.addItem("Редактировать")
-        self.action_combo.addItem("Удалить")
-        self.action_combo.addItem("Обновить")
-        self.action_combo.setEditable(False)
-        self.action_combo.setMaximumWidth(170)
-        # Делаем первый пункт невыбираемым
-        self.action_combo.model().item(0).setEnabled(False)
-        self.action_combo.setCurrentIndex(0)
-        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
-        # Принудительное открытие вниз
-        # self.action_combo.setPopupPolicy(QComboBox.PopupPolicy.InstantPopup)
+        setup_action_combo(
+            action_combo=self.action_combo,
+            btns=["▼ Действия с записями", "Добавить", "Редактировать", "Удалить", "Обновить"],
+            fun_connect=self._on_action_selected
+        )
+        
         top_layout.addWidget(self.action_combo)
 
         # Выпадающий список для inline-действий (скрыт по умолчанию)
         self.inline_action_combo = QComboBox()
-        self.inline_action_combo.addItem("▼ Действия со строками")
-        self.inline_action_combo.addItem("Добавить строку")
-        self.inline_action_combo.addItem("Удалить строку")
-        self.inline_action_combo.setEditable(False)
-        self.inline_action_combo.setMaximumWidth(170)
-        # Делаем первый пункт невыбираемым
-        self.inline_action_combo.model().item(0).setEnabled(False)
-        self.inline_action_combo.setCurrentIndex(0)
-        self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
+        setup_action_combo(
+            action_combo=self.inline_action_combo,
+            btns=["▼ Действия со строками", "Добавить строку", "Удалить строку", "Отменить изменения"],
+            fun_connect=self._on_inline_action_selected
+        )
+
         self.inline_action_combo.setVisible(False)
         top_layout.addWidget(self.inline_action_combo)
 
+        def setup_button(name, fun_connect, set_flags=False):
+            """
+            Создает и настраивает кнопку QPushButton с указанным именем и подключает ее к функции.
+
+            Аргументы:
+                name (str): Текст, который будет отображаться на кнопке.
+                fun_connect (Callable): Функция, которая будет вызываться при нажатии кнопки.
+                set_flags (bool, optional): Флаг, указывающий, нужно ли устанавливать флаги включения и видимости кнопки в значение False. По умолчанию False.
+
+            Возвращает:
+                QPushButton: Настроенная кнопка QPushButton.
+            """
+
+            btn = QPushButton(name)
+            btn.setEnabled(set_flags)
+            btn.setVisible(set_flags)
+            btn.clicked.connect(fun_connect)
+
+            return btn
+
         # Кнопка сохранения (отдельная, показывается в режиме редактирования)
-        self.save_changes_btn = QPushButton("Сохранить изменения")
-        self.save_changes_btn.clicked.connect(self._save_changes)
-        self.save_changes_btn.setEnabled(False)
-        self.save_changes_btn.setVisible(False)
+        self.save_changes_btn = setup_button(
+            name="Сохранить изменения", 
+            fun_connect=self._save_changes, 
+            set_flags=False
+        )
+        # self.save_changes_btn = QPushButton("Сохранить изменения")
+        # self.save_changes_btn.clicked.connect(self._save_changes)
+        # self.save_changes_btn.setEnabled(False)
+        # self.save_changes_btn.setVisible(False)
         top_layout.addWidget(self.save_changes_btn)
 
-        self.cancel_all_btn = QPushButton("Отменить все")
-        self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
-        self.cancel_all_btn.setVisible(False)          
-        self.cancel_all_btn.setEnabled(False)
+        # self.cancel_all_btn = QPushButton("Отменить все")
+        # self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
+        # self.cancel_all_btn.setVisible(False)          
+        # self.cancel_all_btn.setEnabled(False)
+        self.cancel_all_btn = setup_button(
+            name="Отменить все", 
+            fun_connect=self._cancel_all_changes, 
+            set_flags=False
+        )
         top_layout.addWidget(self.cancel_all_btn)
 
-        self.cancel_current_btn = QPushButton("Отменить текущую")
-        self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
-        self.cancel_current_btn.setVisible(False)      
-        self.cancel_current_btn.setEnabled(False)
+        # self.cancel_current_btn = QPushButton("Отменить текущую")
+        # self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
+        # self.cancel_current_btn.setVisible(False)      
+        # self.cancel_current_btn.setEnabled(False)
+        self.cancel_current_btn = setup_button(
+            name="Отменить текущую", 
+            fun_connect=self._cancel_current_row_changes, 
+            set_flags=False
+        )
         top_layout.addWidget(self.cancel_current_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
@@ -2708,6 +2765,9 @@ class DynamicListPage(
                 # self._mark_selected_for_deletion()
             # else:
             #     QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
+        
+        elif index == 3:  # Отменить изменения
+            self._cancel_with_selection_prompt()
 
         # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
         self.inline_action_combo.blockSignals(True)

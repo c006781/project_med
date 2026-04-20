@@ -350,9 +350,9 @@ class DraftMixin:
         
         self._sync_draft_to_model() # синхронизируем с моделью
 
-        # Обновляем состояние кнопки «Отменить текущую»
-        if hasattr(self, 'cancel_current_btn'):
-            self.cancel_current_btn.setEnabled(self._has_current_row_changes())
+        # # Обновляем состояние кнопки «Отменить текущую»
+        # if hasattr(self, 'cancel_current_btn'):
+        #     self.cancel_current_btn.setEnabled(self._has_current_row_changes())
         
         # Обновляем всё состояние (включая кнопку) – для синхронизации
         self._update_selection_state()
@@ -780,17 +780,6 @@ class AppointmentListPage(
         а также _update_save_button_state для обновления состояния кнопки сохранения изменений.
         """
         super()._modified_ids_control(appointment_id, if_add)
-        # source_row = self._find_source_row_by_id(appointment_id)
-        # if if_add:
-        #     self.modified_ids.add(appointment_id)
-        # else:
-        #     self.modified_ids.discard(appointment_id)
-
-        # if source_row != -1: # Если строка была найдена
-        #     self._set_row_color_by_source_row(source_row) # обновляем цвет строки
-
-        # self._update_save_button_state() # активируем кнопку сохранения
-
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -957,10 +946,6 @@ class AppointmentListPage(
             # Снимаем пометку modified
             # if source_row in self.modified_rows:
             if appointment_id in self.modified_ids:
-                # self.modified_rows.discard(source_row)
-                # self._set_row_color_by_source_row(source_row)
-                # self._update_save_button_state()
-                # self._modified_rows_control( # помечаем строку как изменённую
                 self._modified_ids_control( # помечаем строку как изменённую
                     appointment_id,
                     False    
@@ -1182,51 +1167,6 @@ class AppointmentListPage(
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    # def _save_modified_appointments(self):
-    #     """Сохраняет изменения в существующих приёмах (modified_rows)."""
-    #     for source_row in list(self.modified_rows):
-    #         dto = self.source_model.get_item_at_row(source_row)
-    #         if dto is None:
-    #             self.logger.warning(f"_save_modified_appointments: dto is None для строки {source_row}")
-    #             self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
-    #             continue
-
-    #         if dto.id is None or dto.id <= 0:
-    #             # Это новая строка – она должна обрабатываться в _save_new_appointments
-    #             self.logger.debug(f"Строка {source_row} имеет id={dto.id}, пропускаем в modified")
-    #             self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк (если ошибка)
-    #             continue
-
-    #         if not self._has_row_changes(source_row, dto): # Если строка не изменилась
-    #             # self.modified_rows.discard(source_row) # Удаляем из списка изменённых строк
-    #             # self._set_row_color_by_source_row(source_row) 
-    #             # self._update_save_button_state()
-
-    #             self._modified_rows_control( # помечаем строку как изменённую
-    #                 source_row,
-    #                 False    
-    #             )
-    #             continue
-
-    #         self._save_single_appointment(dto, source_row) # Сохраняем изменённую строку
-
-    #     #     if dto and (dto.id is not None) and (dto.id > 0):
-    #     #         original = self.original_data.get(source_row)
-
-    #     #         if original and dto.model_dump() == original.model_dump():
-    #     #             self.modified_rows.discard(source_row)
-    #     #             self._set_row_color_by_source_row(source_row)   # 
-    #     #             self._update_save_button_state()
-    #     #             continue
-    #     #         else:
-    #     #             0==0
-
-    #     #         self._save_single_appointment(dto, source_row)
-    #     #     else:
-    #     #         0==0
-        
-    #     # 0==0
-
     def _save_modified_appointments(self):
         """Сохраняет изменения в существующих приёмах (modified_ids)."""
         for aid in list(self.modified_ids):
@@ -1606,30 +1546,24 @@ class AppointmentListPage(
         elif reply == QMessageBox.StandardButton.No:
             # Откат: сбросить черновики, перезагрузить данные, очистить множества строк
             self._clear_drafts() # очищаем черновики
-            # DraftMixin._clear_drafts(self) # очищаем черновики
             self._load_data() # перезагружаем данные
 
-            # self.modified_rows.clear()
-            # self.deleted_rows.clear()
-            # self.new_rows.clear()
-            
             self._clear() # сбрасываем выделение в таблице (если оно есть) 
-            # self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
-            # self._clear_drafts() # Очистка черновиков (если они есть)
 
-            
             self._update_save_button_state()
+
             # Сбросить правую панель для текущего приёма (если есть)
             if self.selected_dto:
-                self.reset_current_appointment_from_db()
+                self.reset_current_appointment_from_db(),
+            
             # Выйти из режима редактирования (без повторного диалога)
             if self.edit_mode:
-                self._exit_edit_mode()
+                self._exit_edit_mode(),
+            
             return True
         else:
             # Cancel
             return False
-
 
     @AppLogger.get_instance(
         name='AppointmentListPage',

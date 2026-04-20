@@ -1054,7 +1054,7 @@ class ListChangesMixin:
         has_changes = self._has_unsaved_changes() # возвращает True, если есть какие-либо изменения
 
         self.save_changes_btn.setEnabled(has_changes) # сохранять можно, если есть изменения
-        self.cancel_all_btn.setEnabled(has_changes) # отменять можно, если есть изменения
+        # self.cancel_all_btn.setEnabled(has_changes) # отменять можно, если есть изменения
         # self.cancel_current_btn.setEnabled(has_changes) # отменять можно, если есть изменения
 
 
@@ -1600,23 +1600,23 @@ class ListUIMixin:
         # self.cancel_all_btn.clicked.connect(self._cancel_all_changes)
         # self.cancel_all_btn.setVisible(False)          
         # self.cancel_all_btn.setEnabled(False)
-        self.cancel_all_btn = setup_button(
-            name="Отменить все", 
-            fun_connect=self._cancel_all_changes, 
-            set_flags=False
-        )
-        top_layout.addWidget(self.cancel_all_btn)
+        # self.cancel_all_btn = setup_button(
+        #     name="Отменить все", 
+        #     fun_connect=self._cancel_all_changes, 
+        #     set_flags=False
+        # )
+        # top_layout.addWidget(self.cancel_all_btn)
 
-        # self.cancel_current_btn = QPushButton("Отменить текущую")
-        # self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
-        # self.cancel_current_btn.setVisible(False)      
-        # self.cancel_current_btn.setEnabled(False)
-        self.cancel_current_btn = setup_button(
-            name="Отменить текущую", 
-            fun_connect=self._cancel_current_row_changes, 
-            set_flags=False
-        )
-        top_layout.addWidget(self.cancel_current_btn)
+        # # self.cancel_current_btn = QPushButton("Отменить текущую")
+        # # self.cancel_current_btn.clicked.connect(self._cancel_current_row_changes)
+        # # self.cancel_current_btn.setVisible(False)      
+        # # self.cancel_current_btn.setEnabled(False)
+        # self.cancel_current_btn = setup_button(
+        #     name="Отменить текущую", 
+        #     fun_connect=self._cancel_current_row_changes, 
+        #     set_flags=False
+        # )
+        # top_layout.addWidget(self.cancel_current_btn)
 
         # Кнопка "Действие" (если она была указана) (например, "Приёмы")
         if self.action_button_text:
@@ -2598,9 +2598,9 @@ class DynamicListPage(
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setEnabled(self.selected_dto is not None)
         
-        # Управляем кнопкой «Отменить текущую»
-        if hasattr(self, 'cancel_current_btn'):
-            self.cancel_current_btn.setEnabled(self._has_current_row_changes())
+        # # Управляем кнопкой «Отменить текущую»
+        # if hasattr(self, 'cancel_current_btn'):
+        #     self.cancel_current_btn.setEnabled(self._has_current_row_changes())
     
     # @AppLogger.get_instance(
     #     name = 'DynamicListPage',

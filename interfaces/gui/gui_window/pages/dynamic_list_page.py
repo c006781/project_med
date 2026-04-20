@@ -196,6 +196,164 @@ def preserve_selection(
     return decorator
 
 
+class SelectionDialogMixin:
+    """
+    Миксин для отображения диалога выбора области действия над строками таблицы.
+    Поддерживает:
+        - только текущую строку
+        - только строки, отмеченные чекбоксами
+        - текущую + отмеченные чекбоксами
+        - все строки (видимые после фильтрации)
+    Возвращает структуру с типом действия и списком ID (для точечных действий) или флаг all_visible.
+    """
+
+    class SelectionChoice:
+        __slots__ = ('action_type', 'ids', 'all_visible')
+        @AppLogger.get_instance(
+            name = 'SelectionChoice',
+            enable_file_logging = 'system',
+            use_name_in_filename = 'system',
+        ).log_execution_time(
+            level = AppLogger._parse_log_level('DEBUG')
+        )
+        def __init__(self, action_type: str, ids: set = None, all_visible: bool = False):
+            self.action_type = action_type   # 'none', 'current', 'checkbox', 'both', 'all'
+            self.ids = ids or set()
+            self.all_visible = all_visible
+
+    @AppLogger.get_instance(
+        name = 'SelectionDialogMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _show_selection_dialog(self, action_name: str = "удаление") -> 'SelectionChoice':
+        """
+        Показывает диалог выбора области для действия action_name.
+        Возвращает объект SelectionChoice.
+        """
+
+        current_dto = self._get_current_selected_dto() # 
+        checkbox_ids = self._get_selected_checkbox_ids()  # ID сущностей, выбранных через чекбоксы
+        has_checkbox = bool(checkbox_ids) # Есть ли выбранные чекбоксы
+        has_current = current_dto is not None # Есть ли текущая строка
+
+        total_visible = self.proxy_model.rowCount() if self.proxy_model else 0 # Всего видимых строк
+
+        if not has_checkbox and not has_current:
+            QMessageBox.warning(self, "Нет выбора", "Нет строк для выполнения действия.")
+            return self.SelectionChoice('none')
+
+        # # Если нет чекбоксов – сразу возвращаем текущую строку
+        # if not has_checkbox and has_current:
+        #     return self.SelectionChoice('current', ids={current_dto.id})
+
+
+        # Если нет выбранных чекбоксов – удаляем только текущую строку без вопросов
+        if (
+            has_current and not has_checkbox # Есть текущая строка, но нет выбранных чекбоксов
+        ) or (
+            has_current and (current_dto.id in checkbox_ids) and len(checkbox_ids) == 1 # Есть текущая строка и только она выбрана через чекбокс
+        ):
+            # self._perform_deletion({current_dto.id}, current_dto)
+            return self.SelectionChoice('current', ids={current_dto.id})
+
+
+
+
+
+        # Если нет текущей строки, но есть чекбоксы – предлагаем только чекбоксы
+        if not has_current and has_checkbox:
+            reply = QMessageBox.question(
+                self, f"Подтверждение {action_name}",
+                f"Выполнить {action_name} для {len(checkbox_ids)} отмеченных записей?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                return self.SelectionChoice('checkbox', ids=checkbox_ids)
+            
+            return self.SelectionChoice('none')
+
+        # Есть и текущая строка, и чекбоксы – показываем расширенный диалог
+        msg = QMessageBox(self)
+        msg.setWindowTitle(f"Выбор области {action_name}")
+        msg.setText("Выберите, к каким записям применить действие:")
+
+        btn_current = msg.addButton("Только текущую", QMessageBox.ActionRole)
+        btn_checkbox = msg.addButton("Только выбранные (чекбоксы)", QMessageBox.ActionRole)
+        btn_both = msg.addButton("Текущую + выбранные", QMessageBox.ActionRole)
+        btn_all = msg.addButton("Все строки", QMessageBox.ActionRole)
+        btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
+
+        # Устанавливаем доступность кнопок 
+        btn_current.setEnabled(has_current) # Только текущая
+        btn_checkbox.setEnabled(has_checkbox) # Только чекбоксы
+        btn_both.setEnabled(has_current and has_checkbox) # Текущая + чекбоксы
+        btn_all.setEnabled(total_visible > 0) # Все
+
+        msg.setDefaultButton(btn_cancel)
+
+        msg.exec()
+        clicked = msg.clickedButton()
+
+        if clicked == btn_current: # Только текущая
+            return self.SelectionChoice('current', ids={current_dto.id})
+        
+        elif clicked == btn_checkbox: # Только чекбоксы
+            return self.SelectionChoice('checkbox', ids=checkbox_ids)
+        
+        elif clicked == btn_both: # Текущая + чекбоксы
+            ids = set(checkbox_ids)
+            ids.add(current_dto.id)
+            return self.SelectionChoice('both', ids=ids)
+        
+        elif clicked == btn_all: # Все
+            # Дополнительное подтверждение для массовой операции
+            reply = QMessageBox.question(
+                self, "Подтверждение массового действия",
+                f"Вы действительно хотите применить действие ко всем {total_visible} отображаемым записям?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes: # 
+                return self.SelectionChoice('all', all_visible=True)
+            
+            else:
+                return self.SelectionChoice('none')
+            
+        else:
+            return self.SelectionChoice('none')
+
+    @AppLogger.get_instance(
+        name = 'SelectionDialogMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_all_visible_ids(self) -> set:
+        """Возвращает множество ID всех видимых строк (после фильтрации)."""
+
+        ids = set()
+
+        if not self.proxy_model:
+            return ids
+        
+        for row in range(self.proxy_model.rowCount()):
+            proxy_index = self.proxy_model.index(row, 0)
+
+            if proxy_index.isValid():
+                source_index = self.proxy_model.mapToSource(proxy_index)
+                dto = self.source_model.get_item_at_row(source_index.row())
+
+                if dto and dto.id is not None:
+                    ids.add(dto.id)
+
+        return ids
+
+
+
+
 class CheckboxSelectionMixin:
     """
     Миксин для добавления столбца с чекбоксами в таблицу.
@@ -312,70 +470,76 @@ class CheckboxSelectionMixin:
         Вызывает диалог выбора области удаления и выполняет удаление.
         Используется вместо прямого _mark_selected_for_deletion.
         """
+
         if not self.edit_mode:
             return
 
-        current_dto = self._get_current_selected_dto()
-        checkbox_ids = self._get_selected_checkbox_ids() # ID сущностей, выбранных через чекбоксы
-        has_checkbox_selection = bool(checkbox_ids) # Есть ли выбранные чекбоксы
-        has_current = current_dto is not None # Есть ли текущая строка
+        choice = self._show_selection_dialog("удаление")
 
-        if not has_checkbox_selection and  not has_current:
-            QMessageBox.warning(self, "Нет выбора", "Нет строк для удаления.")
+        if choice.action_type == 'none':
             return
 
-        # Если нет выбранных чекбоксов – удаляем только текущую строку без вопросов
-        if (
-            has_current and not has_checkbox_selection # Есть текущая строка, но нет выбранных чекбоксов
-        ) or (
-            has_current and (current_dto.id in checkbox_ids) and len(checkbox_ids) == 1 # Есть текущая строка и только она выбрана через чекбокс
-        ):
-            self._perform_deletion({current_dto.id}, current_dto)
-            return
-
-        # Есть выбранные чекбоксы – показываем диалог
-        msg = QMessageBox(self)
-
-        msg.setWindowTitle("Удаление записей")
-        msg.setText("Выберите, какие записи пометить на удаление:")
-
-        btn_checkbox = msg.addButton("Только выбранные (чекбоксы)", QMessageBox.ActionRole)
-        btn_current = msg.addButton("Только текущую", QMessageBox.ActionRole)
-        btn_both = msg.addButton("Текущую + выбранные", QMessageBox.ActionRole)
-        btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
-
-        # Устанавливаем доступность кнопок
-        btn_checkbox.setEnabled(has_checkbox_selection)
-        btn_current.setEnabled(has_current)
-        btn_both.setEnabled(has_current and has_checkbox_selection)
-
-        msg.setDefaultButton(btn_cancel)
-
-        ret = msg.exec()
-        ids_to_delete = set()
-
-        if msg.clickedButton() == btn_current: # Только текущую
-            if has_current:
-                ids_to_delete.add(current_dto.id)
-
-        elif msg.clickedButton() == btn_checkbox:  # Только выбранные
-            ids_to_delete.update(checkbox_ids)
-
-        elif msg.clickedButton() == btn_both:
-            ids_to_delete.update(checkbox_ids) # Текущую + выбранные
-
-            if has_current:
-                ids_to_delete.add(current_dto.id)  # Текущую
-
+        if choice.action_type == 'all':
+            ids_to_delete = self._get_all_visible_ids()
+            current_dto = None
+            # Если текущая строка входит в список, очистим правую панель
+            if self.selected_dto and self.selected_dto.id in ids_to_delete:
+                current_dto = self.selected_dto
         else:
-            return  # отмена
+            ids_to_delete = choice.ids
+            current_dto = self.selected_dto if (self.selected_dto and self.selected_dto.id in ids_to_delete) else None
+
+        if not ids_to_delete:
+            return
 
         # Удаляем строки
+        self._perform_deletion(ids_to_delete, current_dto)
 
-        self._perform_deletion(
-            ids_to_delete, 
-            current_dto if has_current and (current_dto.id in ids_to_delete) else None
-        )
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_with_selection_prompt(self) -> None:
+        
+        if not self.edit_mode:
+            return
+
+        choice = self._show_selection_dialog("отмены изменений")
+        if choice.action_type == 'none':
+            return
+
+        if choice.action_type == 'all':
+            ids_to_cancel = self._get_all_visible_ids()
+        else:
+            ids_to_cancel = choice.ids
+
+        if not ids_to_cancel:
+            return
+
+        # Дополнительное подтверждение перед массовой отменой
+        if choice.action_type == 'all' or len(ids_to_cancel) > 5:
+            reply = QMessageBox.question(
+                self, "Подтверждение отмены",
+                f"Отменить изменения для {len(ids_to_cancel)} записей?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+
+        ids_to_cancel = list(ids_to_cancel)
+
+        self._cancel_rows(ids_to_cancel)
+          
+        self._update_save_button_state() # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
+        self._update_selection_state() # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
+
+
+        self.logger.debug(f"Изменения для строки id={ids_to_cancel} отменены, данные восстановлены из БД")
+
 
     @AppLogger.get_instance(
         name = 'CheckboxSelectionMixin',
@@ -405,11 +569,15 @@ class CheckboxSelectionMixin:
                 self.source_model.remove_row(source_row)
                 self.new_rows.discard(source_row)
                 self.deleted_ids.discard(entity_id)
+
             else:
-                self.deleted_ids.add(entity_id)
+                self.deleted_ids.add(entity_id)\
+                
                 # Снимаем модификацию, если была
                 if entity_id in self.modified_ids:
-                    self.modified_ids.discard(entity_id)
+                    # self.modified_ids.discard(entity_id)
+                    self._modified_ids(entity_id, False)
+
                 # Обновляем цвет строки
                 self._set_row_color_by_source_row(source_row)
 
@@ -436,9 +604,6 @@ class CheckboxSelectionMixin:
         if dto is None:
             return None
         return dto.id
-
-
-
 
 class ListSelectionMixin:
     """
@@ -665,16 +830,11 @@ class ListDataMixin:
             self.source_model.clear_row_colors() # Очищаем все установленные цвета
 
             # Сбрасываем все отслеживаемые изменения
-            # self.modified_rows.clear()
-            # self.deleted_rows.clear()
-            # self.new_rows.clear()
-            self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
-            # self.original_data.clear()
 
+            self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
             
-            
-            self._update_save_button_state()
-            # self.table_view.clearSelection()
+            self._update_save_button_state() # Обновить состояние кнопки сохранения (она должна стать неактивной)
+
             self._data_loaded = True # Устанавливаем флаг, что данные загружены
 
         except Exception as e:
@@ -1001,68 +1161,20 @@ class ListChangesMixin:
 
             self.logger.debug(f"if current_dict == original_dict : {current_dict == original_dict}")
             if current_dict == original_dict:
-                # Значение совпадает с исходным – убираем из modified_rows
-                # self.logger.debug(f"if row in self.modified_rows : {row in self.modified_rows}")
-                # if row in self.modified_rows:
-                #     self.modified_rows.discard(row)
-                #     self.logger.debug(f"Вызов _set_row_color_by_source_row для row={row}")
-                #     self._set_row_color_by_source_row(row)   # обновляем цвет
-                #     self._update_save_button_state()
-
-
-                
 
                 self.logger.debug(f"if dto.id in self.modified_ids : {dto.id in self.modified_ids}")
                 if dto.id in self.modified_ids:
                     self._modified_ids_control( dto.id, False )
 
-                    
-                #     self.modified_ids.discard(dto.id)
-                #     self._set_row_color_by_source_row(row)
-                #     self._update_save_button_state()
-
                 self._update_selection_state() # обновляем состояние выбора
                 return
-        
-        
-        # Иначе добавляем в modified_row
 
-        # self.logger.debug(f"if row not in self.modified_rows : {row not in self.modified_rows}")
-        # if row not in self.modified_rows:
-        #     self.modified_rows.add(row)
-        #     # self._update_row_color(row)
-        #     self._set_row_color_by_source_row(row)
-        #     self._update_save_button_state()
+
         self.logger.debug(f"if dto.id not in self.modified_ids : {dto.id not in self.modified_ids}")
         
         if dto.id not in self.modified_ids:
             self._modified_ids_control(dto.id, True) 
             self._update_selection_state()
-            # self.modified_ids.add(dto.id)
-            # self._set_row_color_by_source_row(row)
-            # self._update_save_button_state()    
-        # 0==0
-
-    # @AppLogger.get_instance(
-    #     name = 'ListChangesMixin',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
-    # ).log_execution_time(
-    #     level = AppLogger._parse_log_level('DEBUG')
-    # )
-    # def _update_row_color_by_source_row(self, source_row: int):
-    #     """Обновляет цвет строки в таблице по индексу исходной модели."""
-    #     # Находим соответствующий индекс в прокси-модели
-    #     source_index = self.source_model.index(source_row, 0)
-    #     if not source_index.isValid():
-    #         return
-        
-    #     proxy_index = self.proxy_model.mapFromSource(source_index)
-    #     if not proxy_index.isValid():
-    #         return
-        
-    #     proxy_row = proxy_index.row()
-    #     self._update_row_color(proxy_row)   # используем существующий метод
 
 class ListEditModeMixin:
     '''
@@ -1138,9 +1250,6 @@ class ListEditModeMixin:
 
             elif reply == QMessageBox.StandardButton.No:
                 self._load_data()
-                # self.modified_rows.clear()
-                # self.deleted_rows.clear()
-                # self.new_rows.clear()
 
                 self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
                 self._clear_drafts() # Очистка черновиков (если они есть)
@@ -1159,23 +1268,6 @@ class ListEditModeMixin:
 
         # Управление видимостью кнопок
         self._set_visible_edit_mode_elements(self.edit_mode)
-
-        # if self.edit_mode:
-        #     self.action_combo.setVisible(False)
-        #     self.inline_action_combo.setVisible(True)
-        #     self.save_changes_btn.setVisible(True)
-        #     if hasattr(self, 'action_btn') and self.action_btn:
-        #         self.action_btn.setVisible(False)
-        #     self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked)
-        #     self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)
-        # else:
-        #     self.action_combo.setVisible(True)
-        #     self.inline_action_combo.setVisible(False)
-        #     self.save_changes_btn.setVisible(False)
-        #     if hasattr(self, 'action_btn') and self.action_btn:
-        #         self.action_btn.setVisible(True)
-        #     self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        #     self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         self.table_view.clearSelection()
         self.selected_dto = None
@@ -1197,14 +1289,6 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    # def _save_deleted(self):
-    #     for row in sorted(self.deleted_rows, reverse=True):
-    #         dto = self.source_model.get_item_at_row(row)
-    #         if dto and dto.id is not None:
-    #             self.service.delete(dto.id)
-    #             self.logger.info(f"Удалена запись ID={dto.id}")
-    #         # self.source_model.remove_row(row)
-    #     self.deleted_rows.clear()
     def _save_deleted(self):
         for entity_id in list(self.deleted_ids):
             try:
@@ -1221,19 +1305,6 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    # def _save_modified(self):
-    #     for row in list(self.modified_rows):
-    #         dto = self.source_model.get_item_at_row(row)
-    #         if dto and dto.id is not None and dto.id > 0:
-    #             original = self.original_data.get(row)
-    #             if original and dto.model_dump() == original.model_dump():
-    #                 # Ничего не изменилось, снимаем пометку
-    #                 self.modified_rows.discard(row)
-    #                 continue
-    #             updated = self.service.update(dto)
-    #             self.source_model.update_row(row, updated)
-    #             self.logger.info(f"Обновлена запись ID={updated.id}")
-    #     self.modified_rows.clear()
     def _save_modified(self):
         # Проходим по копии, так как в процессе можем изменять множество
         for entity_id in list(self.modified_ids):
@@ -1260,6 +1331,7 @@ class ListSaveMixin:
 
             updated = self.service.update(dto)
             self.source_model.update_row(row, updated)
+
             self._modified_ids(entity_id, False)
 
             if row != -1:
@@ -1373,12 +1445,15 @@ class ListUIMixin:
     )
     def _get_real_type(self, field_type):
         """Извлекает реальный тип из Optional/Union (например, Optional[str] -> str)."""
+
         origin = get_origin(field_type)
         if origin is Union:
             args = get_args(field_type)
+
             for arg in args:
                 if arg is not type(None):
                     return arg
+                
         return field_type
 
     @AppLogger.get_instance(
@@ -1400,6 +1475,7 @@ class ListUIMixin:
         # Основной макет
         self._setup_top_panel() # Верхняя панель
         self._setup_table() # Добавляем основной макет
+
         # Добавляем таблицу в основной layout
         self.main_layout.addWidget(self.table_view)
         self._setup_delegates() # Устанавливаем делегаты для колонок с выпадающими списками
@@ -1658,9 +1734,6 @@ class ListUIMixin:
                 # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
 
-
-
-
 class ListFilterMixin:
 
     @AppLogger.get_instance(
@@ -1823,7 +1896,6 @@ class ListInlineOpsMixin:
     @Slot()
     def _mark_selected_for_deletion(self):
         
-        
         if not self.selected_dto:
             return
         
@@ -1845,51 +1917,22 @@ class ListInlineOpsMixin:
                 self._clear_right_panel()
 
             return
-        
-        # proxy_index = self.table_view.currentIndex()
-        # if not proxy_index.isValid():
-        #     return
-        
-        # row = self.proxy_model.mapToSource(proxy_index).row()   # исходный индекс
-        # if row == -1:
-        #     return
-        # # row = proxy_index.row()
-        # if row in self.deleted_rows:
-        #     return
-        
+
         # Помечаем строку на удаление (для любых строк – и новых, и существующих)
         # self.deleted_rows.add(row)
         self.deleted_ids.add(dto.id)
-        # Если строка была изменена, убираем из соответствующих множеств
-        # self.modified_rows.discard(row)
-        
 
         self._modified_ids_control(dto.id, False)  # # Если строка новая, убираем из соответствующих множеств
-        # self.modified_ids.discard(dto.id)
-        # # # Если строка новая, убираем из соответствующих множеств
-        # # self.new_rows.discard(row)
+        
 
-        # # Обновляем цвет строки
-        # # self._update_row_color(row)
-        # # self._set_row_color_by_source_row(row)
-        # self._set_row_color_by_source_row(source_row)
-        # self._update_save_button_state()
-
-        # # Снимаем выделение
-        # self.table_view.clearSelection() # снимаем выделение
-        # self.selected_dto = None
-        # # if hasattr(self, 'delete_btn'):
-        # #     self.delete_btn.setEnabled(False)
-        # if hasattr(self, 'action_btn'): # снимаем выделение
-        #     self.action_btn.setEnabled(False)
-
-        self._update_selection_state()   #
+        self._update_selection_state() # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
 
         # self.logger.info(f"Строка {row} помечена на удаление")
         self.logger.info(f"Строка с id {source_row} помечена на удаление")
 
 class DynamicListPage(
     CheckboxSelectionMixin,
+    SelectionDialogMixin,
     ListSelectionMixin,
     ListDataMixin,
     ListChangesMixin,
@@ -2134,12 +2177,7 @@ class DynamicListPage(
         """
         self.logger.info("Отмена всех изменений")
 
-        # self._store_current_row()               # сохраняем текущую строку
-
         # 1. Очистить все множества
-        # self.modified_ids.clear()
-        # self.deleted_ids.clear()
-        # self.new_rows.clear()
 
         self._clear_selection() # очистить выделение (в базовом классе это заглушка, в AppointmentListPage реализован)
 
@@ -2148,15 +2186,6 @@ class DynamicListPage(
 
         # 3. Перезагрузить данные из БД
         self._load_data()
-
-        # # 4. Сбросить выделение и правую панель (если есть)
-        # self.table_view.clearSelection()
-        # self.selected_dto = None
-        # # Очищаем правую панель (заметку и фото)
-        # if hasattr(self, '_clear_right_panel'):
-        #     self._clear_right_panel()
-
-
 
         # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
         self._update_save_button_state()
@@ -2176,28 +2205,29 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _cancel_current_row_changes(self):
-        """
-        Отменить изменения только для текущей выбранной строки.
-        - Если строка новая (id < 0) → удалить строку.
-        - Если строка существующая → перезагрузить из БД, очистить черновики,
-        убрать из modified_ids, обновить модель.
-        """
+    def _cancel_rows(self, entity_ids:list):
         
-        if not self.selected_dto:
-            QMessageBox.warning(self, "Внимание", "Нет выбранной строки.")
-            return
+        for i in entity_ids:
+            self._cancel_row(i)
 
-        dto = self.selected_dto
-        entity_id = dto.id
-        self.logger.info(f"Отмена изменений для строки с id={entity_id}")
+            # self.logger.debug(f"Изменения для строки id={i} отменены, данные восстановлены из БД")
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_row(self, entity_id):
 
         # Найти исходный индекс строки (в source_model)
         source_row = self._find_source_row_by_id(entity_id)
         if source_row == -1:
+            
             self.logger.warning(f"Строка с id={entity_id} не найдена в модели")
             return
-
+        
         # Если это новая строка (временный ID)
         if entity_id is not None and entity_id < 0:
 
@@ -2239,8 +2269,8 @@ class DynamicListPage(
 
         # 4. Убрать из modified_ids, если был
         if entity_id in self.modified_ids:
-            self.modified_ids.discard(entity_id)
-
+            # self.modified_ids.discard(entity_id)
+            self._modified_ids(entity_id, False)
 
         # убираем из deleted_ids, если был помечен на удаление
         if entity_id in self.deleted_ids:
@@ -2253,18 +2283,37 @@ class DynamicListPage(
         if hasattr(self, 'update_details'):
             self.update_details(fresh_dto)
 
-
         # 7. Обновить состояние кнопки сохранения
         self._update_save_button_state()
 
          # 8. Обновить состояние кнопки «Отменить текущую» и другие элементы UI
         self._update_selection_state()
 
+        self.source_model.set_checkbox_state(source_row, False)
+
         # # 8. Обновить состояние кнопки «Отменить текущую»
         # if hasattr(self, 'cancel_current_btn'):
         #     self.cancel_current_btn.setEnabled(self._has_current_row_changes())
 
-        self.logger.debug(f"Изменения для строки id={entity_id} отменены, данные восстановлены из БД")
+
+    @AppLogger.get_instance(
+        name='DynamicListPage',
+        enable_file_logging='system',
+        use_name_in_filename='system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _cancel_current_row_changes(self):
+        """
+        Отменить изменения только для текущей выбранной строки.
+        - Если строка новая (id < 0) → удалить строку.
+        - Если строка существующая → перезагрузить из БД, очистить черновики,
+        убрать из modified_ids, обновить модель.
+        """
+
+        self._cancel_with_selection_prompt() 
+        
+
 
     @AppLogger.get_instance(
         name='DynamicListPage',

@@ -547,11 +547,17 @@ class CheckboxSelectionMixin:
 
         ids_to_cancel = list(ids_to_cancel)
 
-        self._cancel_rows(ids_to_cancel)
-          
-        self._update_save_button_state() # 5. Обновить состояние кнопки сохранения (она должна стать неактивной)
+        self._cancel_rows(ids_to_cancel) # Отменить изменения для строк
+        self._update_save_button_state() # Обновить состояние кнопки сохранения (она должна стать неактивной)
         self._update_selection_state() # Обновить состояние кнопки «Отменить текущую» (выделения нет → кнопка неактивна)
 
+        # Обновляем правую панель, если есть выбранная строка
+        if self.selected_dto:
+            try:
+                fresh_dto = self.service.get_by_id(self.selected_dto.id)
+                self.update_details(fresh_dto)
+            except Exception as e:
+                self.logger.exception(f"Ошибка обновления правой панели после отмены: {e}")
 
         self.logger.debug(f"Изменения для строки id={ids_to_cancel} отменены, данные восстановлены из БД")
 
@@ -2174,7 +2180,6 @@ class DynamicListPage(
     @preserve_selection()
     def _on_edit_mode_toggled(self, checked: bool):
 
-
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
 
@@ -2283,11 +2288,31 @@ class DynamicListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _cancel_rows(self, entity_ids:list):
+        if not entity_ids:
+            return
         
-        for i in entity_ids:
-            self._cancel_row(i)
+        if len(entity_ids) == 0 :
+            return
 
-            # self.logger.debug(f"Изменения для строки id={i} отменены, данные восстановлены из БД")
+        current_id = self.selected_dto.id if self.selected_dto else None
+    
+        # Сначала отменяем все, кроме текущего (если он в списке)
+        for eid in entity_ids:
+            if eid == current_id:
+                continue
+            self._cancel_row(eid, update_right_panel=False)
+        
+        # Затем отменяем текущий (если есть) с обновлением правой панели
+        if current_id is not None and current_id in entity_ids:
+            self._cancel_row(current_id, update_right_panel=True)
+        # Если текущий не был отменён, но после отмены других строк он мог измениться,
+        # перезагружаем его данные в правую панель
+        elif self.selected_dto is not None:
+            try:
+                fresh_dto = self.service.get_by_id(self.selected_dto.id)
+                self.update_details(fresh_dto)
+            except Exception as e:
+                self.logger.exception(f"Ошибка обновления правой панели после отмены: {e}")
 
     @AppLogger.get_instance(
         name='DynamicListPage',
@@ -2296,12 +2321,16 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _cancel_row(self, entity_id):
+    def _cancel_row(
+        self, 
+        entity_id,
+        update_right_panel:bool=True,
+    ):
 
         # Найти исходный индекс строки (в source_model)
         source_row = self._find_source_row_by_id(entity_id)
+
         if source_row == -1:
-            
             self.logger.warning(f"Строка с id={entity_id} не найдена в модели")
             return
         
@@ -2357,7 +2386,7 @@ class DynamicListPage(
         self._set_row_color_by_source_row(source_row)
 
         # 6. Если есть правая панель, обновить её
-        if hasattr(self, 'update_details'):
+        if update_right_panel and hasattr(self, 'update_details'):
             self.update_details(fresh_dto)
 
         # 7. Обновить состояние кнопки сохранения

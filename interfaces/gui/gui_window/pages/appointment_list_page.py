@@ -1914,6 +1914,7 @@ class AppointmentListPage(
         except Exception as e:
             self.logger.exception(f"Ошибка сохранения: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения:\n{e}")
+            
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()

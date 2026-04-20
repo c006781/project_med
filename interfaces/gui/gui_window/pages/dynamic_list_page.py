@@ -367,6 +367,24 @@ class CheckboxSelectionMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    def _ensure_checkbox_header_menu(self):
+        """Переустанавливает callback для заголовка чекбокс-столбца при каждом показе страницы."""
+        if not self.edit_mode:
+            return
+        
+        if hasattr(self.table_view, 'horizontalHeader'):
+            header = self.table_view.horizontalHeader()
+            if hasattr(header, 'set_checkbox_header_menu'):
+                header.set_checkbox_header_menu(self._toggle_all_checkboxes)
+                
+                
+    @AppLogger.get_instance(
+        name = 'CheckboxSelectionMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_checkbox_column(self) -> None:
         """Включает столбец чекбоксов в модели и настраивает заголовок."""
         if not hasattr(self, 'source_model'):
@@ -374,10 +392,7 @@ class CheckboxSelectionMixin:
         
         self.source_model.set_checkbox_column_visible(self.edit_mode)
         # Добавляем пункты в контекстное меню заголовка чекбокс-столбца
-        if hasattr(self.table_view, 'horizontalHeader'):
-            header = self.table_view.horizontalHeader()
-            if hasattr(header, 'set_checkbox_header_menu'):
-                header.set_checkbox_header_menu(self._toggle_all_checkboxes)
+        self._ensure_checkbox_header_menu()   # вызываем общий метод 
 
     @AppLogger.get_instance(
         name = 'CheckboxSelectionMixin',
@@ -2158,10 +2173,15 @@ class DynamicListPage(
     )
     @preserve_selection()
     def _on_edit_mode_toggled(self, checked: bool):
+
+
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
+
         # Включаем/отключаем видимость чекбокс-столбца
         self.source_model.set_checkbox_column_visible(self.edit_mode)
+
+        self._ensure_checkbox_header_menu()
 
         self._reapply_delegates()
 
@@ -2673,10 +2693,13 @@ class DynamicListPage(
             selection_model = self.table_view.selectionModel()
             
             self.logger.debug(f'if selection_model is not None : {selection_model is not None}')
+
             if selection_model is not None:
                 # Подключаем сигнал selectionChanged к слоту _on_selection_changed
                 selection_model.selectionChanged.connect(self._on_selection_changed)
                 self._selection_connected = True
+
+        self._ensure_checkbox_header_menu() # обновляем контекстное меню с чекбоксами
 
     # ----------------------- Вспомогательные методы для inline-добавления (опционально) -----------------------
 

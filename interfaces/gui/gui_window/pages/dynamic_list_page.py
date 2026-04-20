@@ -20,8 +20,11 @@ from copy import deepcopy
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
+
 from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table
+
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
+from interfaces.gui.gui_window.widgets.filter_column import FilterBar
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import AdvancedFilterProxyModel
 
@@ -58,7 +61,8 @@ from PySide6.QtCore import (
     Qt, 
     Signal, 
     Slot, 
-    QModelIndex
+    QModelIndex,
+    QTimer
 )
 from PySide6.QtGui import QColor
 
@@ -195,6 +199,107 @@ def preserve_selection(
     
     return decorator
 
+
+
+class AdvancedFilterMixin:
+    """
+    Миксин для добавления строки активных фильтров и связи с прокси-моделью.
+    Должен использоваться в классах, имеющих:
+        - self.proxy_model (AdvancedFilterProxyModel)
+        - self.main_layout (QVBoxLayout)
+        - self.table_view (QTableView)
+    """
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_filter_bar(self):
+        """Создаёт и размещает FilterBar между топ-панелью и таблицей."""
+        if not hasattr(self, 'filter_bar'):
+            self.filter_bar = FilterBar(self)
+            # Вставляем после топ-панели, но перед таблицей
+            # Предполагаем, что self.main_layout уже содержит self.table_view
+            # Найдём индекс таблицы и вставим перед ней
+            idx = self.main_layout.indexOf(self.table_view)
+            if idx >= 0:
+                self.main_layout.insertWidget(idx, self.filter_bar)
+            else:
+                self.main_layout.addWidget(self.filter_bar)
+
+            # Подключаем сигналы
+            self.proxy_model.filtersChanged.connect(self._refresh_filter_bar)
+            self.filter_bar.filter_removed.connect(self._on_filter_removed)
+            self.filter_bar.all_filters_cleared.connect(self._on_all_filters_cleared)
+            self.filter_bar.filter_edit_requested.connect(self._on_filter_edit_requested)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _refresh_filter_bar(self):
+        """Обновляет строку фильтров на основе текущих фильтров в прокси-модели."""
+        if not hasattr(self, 'filter_bar'):
+            return
+        filters = self.proxy_model.get_active_filters()
+        # Получаем заголовки столбцов
+        column_titles = {}
+        for col in filters.keys():
+            title = self.proxy_model.headerData(col, Qt.Horizontal, Qt.DisplayRole)
+            column_titles[col] = title
+        self.filter_bar.update_filters(filters, column_titles)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_filter_removed(self, column: int):
+        """Обработчик удаления фильтра через чип."""
+        self.proxy_model.clear_column_filter(column)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_all_filters_cleared(self):
+        self.proxy_model.clear_all_filters()
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_filter_edit_requested(self, column: int):
+        """Открывает диалог редактирования фильтра для столбца."""
+        # Эмулируем клик по заголовку для вызова диалога
+        header = self.table_view.horizontalHeader()
+        if hasattr(header, '_request_advanced_filter'):
+            header._request_advanced_filter(column)
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    # Переопределяем on_filter_requested (из ListFilterMixin) для поддержки новых операторов
+    def on_filter_requested(self, column: int, operator: str, value: Any, value2: Any = None):
+        self.proxy_model.set_column_filter(column, operator, value, value2)
 
 class SelectionDialogMixin:
     """
@@ -350,9 +455,6 @@ class SelectionDialogMixin:
                     ids.add(dto.id)
 
         return ids
-
-
-
 
 class CheckboxSelectionMixin:
     """
@@ -1821,7 +1923,7 @@ class ListFilterMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def on_filter_requested(self, column: int, operator: str, value):
+    def on_filter_requested(self, column: int, operator: str, value, value2=None):
         """
         Обработка сигнала фильтрации от заголовка.
 
@@ -1829,12 +1931,13 @@ class ListFilterMixin:
         :param operator: оператор фильтрации (eq, like, fuzzy, in)
         :param value: значение для сравнения (зависит от оператора)
         """
-        if operator == 'in':
-            self.proxy_model.set_column_filter(column, selected_values=value)
-        elif operator == 'contains':
-            self.proxy_model.set_column_filter(column, filter_text=value)
-        elif operator == 'clear':
-            self.proxy_model.clear_column_filter(column)
+        # if operator == 'in':
+        #     self.proxy_model.set_column_filter(column, selected_values=value)
+        # elif operator == 'contains':
+        #     self.proxy_model.set_column_filter(column, filter_text=value)
+        # elif operator == 'clear':
+        #     self.proxy_model.clear_column_filter(column)
+        self.proxy_model.set_column_filter(column, operator, value, value2)
 
     @AppLogger.get_instance(
         name = 'ListFilterMixin',
@@ -2018,6 +2121,7 @@ class DynamicListPage(
     ListSaveMixin,
     ListUIMixin,
     ListFilterMixin,
+    AdvancedFilterMixin,
     ListInlineOpsMixin,
     BasePage,
 ):
@@ -2161,6 +2265,8 @@ class DynamicListPage(
     )
     def _setup_ui(self):
         super()._setup_ui()
+
+        self._setup_filter_bar()   # добавляем строку фильтров
 
         if not self._checkbox_setup_done:
             self._setup_checkbox_column()

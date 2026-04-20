@@ -11,7 +11,9 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt, QModelIndex
+from PySide6.QtCore import (
+    QSortFilterProxyModel, Qt, QModelIndex, Signal
+)
 from PySide6.QtWidgets import (
     # QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QHeaderView, 
@@ -24,6 +26,8 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     Прокси-модель с поддержкой фильтрации по столбцам (текстовый поиск,
     выбор значений из списка) и общим текстовым фильтром.
     """
+
+    filtersChanged = Signal() # сигнал об изменении фильтров
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -42,8 +46,11 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             use_name_in_filename = 'user',
         )
 
-        self._column_filters: Dict[int, Dict[str, Any]] = {}   # column -> filter info
-        self._global_text_filter: str = ""                     # общий текстовый фильтр
+        # self._column_filters: Dict[int, Dict[str, Any]] = {}    # column -> filter info # номер столбца
+        # self._global_text_filter: str = ""                      # общий текстовый фильтр
+
+        self._filters: Dict[int, Dict[str, Any]] = {}   # column -> {active, operator, value, value2}  # номер столбца
+        self._global_text_filter = ""                   # общий текстовый фильтр
 
 
 
@@ -56,39 +63,68 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def set_column_filter(
-            self, 
-            column: int, 
-            filter_text: Optional[str] = None, 
-            selected_values: Optional[List[str]] = None
-        ) -> None:
-        """
-        Устанавливает фильтр для столбца.
-        :param column: номер столбца
-        :param filter_text: подстрока для поиска (необязательно)
-        :param selected_values: список строк, которые должны проходить фильтр (если не пуст)
-        """
-        if filter_text is None and selected_values is None:
-            # удаляем фильтр
-            if column in self._column_filters:
-                del self._column_filters[column]
-        else:
-            self._column_filters[column] = {}
-            if filter_text is not None:
-                self._column_filters[column]['text'] = filter_text.lower()
-            if selected_values is not None:
-                self._column_filters[column]['values'] = set(selected_values)
+        self, 
+        column: int, 
+        operator: str, 
+        value: Any = None, 
+        value2: Any = None
+    ):
+        """Устанавливает расширенный фильтр для столбца."""
+        if operator is None or operator == 'clear':
+            self.clear_column_filter(column)
+            return
+        self._filters[column] = {
+            'active': True,
+            'operator': operator,
+            'value': value,
+            'value2': value2
+        }
         self.invalidateFilter()
+        self.filtersChanged.emit()
 
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def clear_column_filter(self, column: int) -> None:
         """
         Очищает фильтр для столбца.
         
         :param column: номер столбца
         """
-        if column in self._column_filters:
-            del self._column_filters[column]
+        if column in self._filters:
+            del self._filters[column]
             self.invalidateFilter()
-
+            self.filtersChanged.emit()
+    
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )        
+    def get_active_filters(self) -> Dict[int, Dict]:
+        """Возвращает копию активных фильтров для отображения в FilterBar."""
+        return self._filters.copy()
+    
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_column_filter_simple(self, column: int, filter_text: str = None, selected_values: list = None):
+        if filter_text:
+            self.set_column_filter(column, 'ilike', filter_text)
+        elif selected_values:
+            self.set_column_filter(column, 'in', selected_values)
+        else:
+            self.clear_column_filter(column)
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -101,10 +137,10 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         """
         Очищает все фильтры (фильтры для столбцов и общий текстовый фильтр).
         """
-        self._column_filters.clear()
+        self._filters.clear()
         self._global_text_filter = ""
         self.invalidateFilter()
-
+        self.filtersChanged.emit()
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -121,7 +157,6 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         """
         self._global_text_filter = text.lower()
         self.invalidateFilter()
-
 
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
@@ -148,6 +183,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         :return: True, если строка проходит фильтр, False в противном случае
         :rtype: bool
         """
+
         source_model = self.sourceModel()
         if not source_model:
             return True
@@ -158,39 +194,79 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             for col in range(source_model.columnCount()):
                 idx = source_model.index(source_row, col, source_parent)
                 data = source_model.data(idx, Qt.DisplayRole)
+
                 if data is not None and self._global_text_filter in str(data).lower():
                     found = True
                     break
+
             if not found:
                 return False
 
         # Фильтры по столбцам
-        for col, filter_info in self._column_filters.items():
+        for col, f in self._filters.items():
             idx = source_model.index(source_row, col, source_parent)
             data = source_model.data(idx, Qt.DisplayRole)
-            if data is None:
-                data = ""
-            data_str = str(data)
-
-            # Текстовый фильтр (подстрока)
-            if 'text' in filter_info:
-                if filter_info['text'] not in data_str.lower():
-                    return False
-
-            # Фильтр по списку значений
-            if 'values' in filter_info and filter_info['values']:
-                if data_str not in filter_info['values']:
-                    return False
+            if not self._evaluate_filter(data, f['operator'], f.get('value'), f.get('value2')):
+                return False
 
         return True
-    
-    # @AppLogger.get_instance(
-    #     name = 'AdvancedFilterProxyModel',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
-    # ).log_execution_time(
-    #     level = AppLogger._parse_log_level('DEBUG')
-    # )
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _evaluate_filter(self, data: Any, operator: str, value: Any, value2: Any = None) -> bool:
+        """Применяет оператор к значению ячейки."""
+
+        if data is None:
+            data = ""
+
+        # Для строковых операторов приводим к строке
+        if operator == 'like':
+            # регистрозависимый поиск
+            return str(value) in str(data) if value is not None else False
+
+        if operator == 'ilike':
+            # регистронезависимый поиск
+            return str(value).lower() in str(data).lower() if value is not None else False
+
+        if operator == 'fuzzy':
+            # нечёткий поиск (регистронезависимый, можно доработать)
+            return str(value).lower() in str(data).lower() if value is not None else False
+            
+        # Числовые операторы
+        if operator == 'eq':
+            return data == value
+        if operator == 'ne':
+            return data != value
+        if operator == 'gt':
+            return data > value
+        if operator == 'ge':
+            return data >= value
+        if operator == 'lt':
+            return data < value
+        if operator == 'le':
+            return data <= value
+        if operator == 'between':
+            return value <= data <= value2
+        if operator == 'in':
+            return data in value if isinstance(value, list) else False
+        if operator == 'is_null':
+            return data is None or data == ""
+        if operator == 'is_not_null':
+            return data is not None and data != ""
+        return True  # неизвестный оператор – пропускаем
+
+    @AppLogger.get_instance(
+        name = 'AdvancedFilterProxyModel',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def data(
         self, 
         index: QModelIndex, 

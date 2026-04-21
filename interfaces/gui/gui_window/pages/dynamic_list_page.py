@@ -1885,8 +1885,24 @@ class ListUIMixin:
         Устанавливает растяжение последнего столбца и размеры столбцов под контент.
         """
         
-        header.setStretchLastSection(True) # Растянуть последний столбец
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Размеры столбцов под контент
+        # header.setStretchLastSection(True) # Растянуть последний столбец
+        # header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Размеры столбцов под контент
+
+        # Разрешаем пользователю изменять размеры столбцов
+        header.setSectionsMovable(False)      # запрещаем перетаскивание столбцов (опционально)
+        header.setSectionsClickable(True)     # кликабельность для сортировки
+
+        # Устанавливаем режим для каждого столбца
+        for col in range(header.count()):
+            if col == header.count() - 1:
+                # Последний столбец – растягиваемый
+                header.setSectionResizeMode(col, QHeaderView.Stretch)
+            else:
+                # Остальные – изменяемые пользователем
+                header.setSectionResizeMode(col, QHeaderView.Interactive)
+
+        # Растяжение последнего столбца (дополнительная гарантия)
+        header.setStretchLastSection(True)
 
         # self.table_view.horizontalHeader().setVisible(True) # показываем заголовок
 

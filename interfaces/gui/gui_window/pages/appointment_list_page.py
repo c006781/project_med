@@ -1655,6 +1655,7 @@ class AppointmentListPage(
                 # Если пользователь нажал Cancel, остаёмся в режиме редактирования
                 self.edit_mode_btn.setChecked(True)
                 return
+            
         super()._on_edit_mode_toggled(checked)
 
         # Настройка правых виджетов в зависимости от режима

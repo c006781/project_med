@@ -489,9 +489,9 @@ class CheckboxSelectionMixin:
             return
         
         if hasattr(self.table_view, 'horizontalHeader'):
-            header = self.table_view.horizontalHeader()
+            header = self.table_view.horizontalHeader()  # заголовок таблицы
             if hasattr(header, 'set_checkbox_header_menu'):
-                header.set_checkbox_header_menu(self._toggle_all_checkboxes)
+                header.set_checkbox_header_menu(self._toggle_all_checkboxes) # устанавливаем callback
                 
                 
     @AppLogger.get_instance(
@@ -1326,6 +1326,10 @@ class ListEditModeMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _set_visible_edit_mode_elements(self, edit_mode):
+        """
+        Устанавливает видимость элементов интерфейса в зависимости от режима редактирования.
+        :param edit_mode: Флаг режима редактирования
+        """
         
         
         self.action_combo.setVisible(not edit_mode)
@@ -1338,7 +1342,8 @@ class ListEditModeMixin:
 
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setVisible(not edit_mode)
-        self.table_view.setEditTriggers(
+
+        self.table_view.setEditTriggers( # устанавливаем режим редактирования таблицы 
             QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers
         )
 
@@ -1371,7 +1376,7 @@ class ListEditModeMixin:
         Если включён и таблица пуста, автоматически добавляет новую строку
         """
 
-        has_changes = self._has_unsaved_changes()
+        has_changes = self._has_unsaved_changes() # возвращает True, если есть какие-либо изменения
 
         if not checked and has_changes:
             reply = QMessageBox.question(
@@ -1380,18 +1385,18 @@ class ListEditModeMixin:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self._save_changes(
+                self._save_changes( # сохраняем изменения
                     if_question=False
                 )
                 self.edit_mode = False
 
             elif reply == QMessageBox.StandardButton.No:
-                self._load_data()
+                self._load_data() # обновляем данные
 
                 self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
                 self._clear_drafts() # Очистка черновиков (если они есть)
 
-                self._update_save_button_state()
+                self._update_save_button_state() # обновляем состояние кнопки сохранения
                 self.edit_mode = False
 
             else:
@@ -1399,18 +1404,18 @@ class ListEditModeMixin:
         else:
             # При включении режима редактирования, если таблица пуста, создаём новую строку
             if checked and self.source_model.rowCount() == 0:
-                self._add_inline_row()
+                self._add_inline_row() # добавляем новую строку
                 
             self.edit_mode = checked
 
         # Управление видимостью кнопок
-        self._set_visible_edit_mode_elements(self.edit_mode)
+        self._set_visible_edit_mode_elements(self.edit_mode) # устанавливаем видимость кнопок
 
-        self.table_view.clearSelection()
+        self.table_view.clearSelection() # сбрасываем выделение в таблице
         self.selected_dto = None
 
-        if hasattr(self, 'action_btn'):
-            self.action_btn.setEnabled(False)
+        if hasattr(self, 'action_btn'): # если есть дополнительная кнопка
+            self.action_btn.setEnabled(False) # отключаем ее
 
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
@@ -1569,7 +1574,7 @@ class ListSaveMixin:
     def _exit_edit_mode(self):
         """Выходит из режима редактирования, если он активен."""
         if self.edit_mode:
-            self.edit_mode_btn.setChecked(False)
+            self.edit_mode_btn.setChecked(False) # снимаем флаг режима редактирования
 
 class ListUIMixin:
 
@@ -1804,7 +1809,8 @@ class ListUIMixin:
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
-        add_copy_paste_to_table(self.table_view)
+        add_copy_paste_to_table(self.table_view) # Добавляем возможность копирования и вставки
+
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         # Модель таблицы
@@ -1825,13 +1831,45 @@ class ListUIMixin:
 
         # Настройка заголовка таблицы
         header = self.table_view.horizontalHeader()
+
+        # Устанавливаем начальное состояние видимости чекбокс-столбца (скрыт)
+        if hasattr(header, 'set_checkbox_column_visible'):
+            header.set_checkbox_column_visible(False)
+
         if hasattr(header, 'set_get_unique_values_func'):
             header.set_get_unique_values_func(self.get_unique_values_for_column) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
             header.filter_requested.connect(self.on_filter_requested) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
             header.filter_clear_requested.connect(self.on_filter_clear) # Подключаем сигнал изменения строки для отслеживания изменений чекбоксов
 
+        # tt = self.table_view.horizontalHeader().Visible
+        self._setup_header_settings_table(header=header) # Настройка заголовка таблицы
 
-        self._setup_header_settings_table(header=header)
+        self._setup_header_visible_table(header=header) 
+        
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_header_visible_table(self, header):
+        """
+        Устанавливает настройки визуализации заголовка таблици
+        """
+        
+        # Сохраняем нормальную высоту заголовка (если она не 0)
+        if header.height() > 0:
+            self._header_height = header.height()
+        else:
+            # Запасной вариант: высота по умолчанию
+            self._header_height = 20    
+
+        # Принудительно показываем заголовок
+        # header.show()
+        header.setMinimumHeight(self._header_height)
+        # header.resizeSections(QHeaderView.ResizeToContents)   
+        header.setVisible(True) # Показываем заголовок
 
     @AppLogger.get_instance(
         name = 'ListUIMixin',
@@ -1841,10 +1879,16 @@ class ListUIMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_header_settings_table(self, header):
+        """
+        Устанавливает настройки для заголовка таблицы.
+
+        Устанавливает растяжение последнего столбца и размеры столбцов под контент.
+        """
         
         header.setStretchLastSection(True) # Растянуть последний столбец
         header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents) # Размеры столбцов под контент
 
+        # self.table_view.horizontalHeader().setVisible(True) # показываем заголовок
 
 
 
@@ -1923,7 +1967,7 @@ class ListUIMixin:
             ) 
             if delegate_class:
                 delegate = delegate_class(self.table_view)
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.table_view.setItemDelegateForColumn(model_col, delegate) # устанавливаем делегата
                 continue
                 # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
@@ -2222,6 +2266,8 @@ class DynamicListPage(
 
         self._next_temp_id = -1 # генерация временных ID для новых строк
 
+        self._header_height = 20  # значение по умолчанию
+
         # Словарь для отслеживания изменённых строк:
         # modified_rows: set of row indices, которые были изменены пользователем (но ещё не сохранены)
         # self.modified_rows: Set[int] = set()
@@ -2302,23 +2348,29 @@ class DynamicListPage(
 
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
+        0==0
 
         # Включаем/отключаем видимость чекбокс-столбца
         self.source_model.set_checkbox_column_visible(self.edit_mode)
 
-        self._ensure_checkbox_header_menu()
+        # Синхронизируем состояние в заголовке
+        header = self.table_view.horizontalHeader()  # получаем заголовок
 
-        self._reapply_delegates()
+        if hasattr(header, 'set_checkbox_column_visible'):
+            header.set_checkbox_column_visible(self.edit_mode)
+
+        self._ensure_checkbox_header_menu() # добавляем пункты в контекстное меню
+
+        self._reapply_delegates() # переустанавливаем делегаты
 
         if not self.edit_mode:
-            self._clear_checkboxes()
-            self.deleted_ids.clear()
-            self._update_save_button_state()
+            self._clear_checkboxes() # снимаем все чекбоксы
+            self.deleted_ids.clear() # очищаем список удалённых
+            self._update_save_button_state() # обновляем состояние кнопки сохранения
 
-        # Принудительно восстанавливаем растяжение последнего столбца
-        header = self.table_view.horizontalHeader() # получаем заголовок
-
-        self._setup_header_settings_table(header=header)
+        self._setup_header_settings_table(header=header) # Принудительно восстанавливаем растяжение последнего столбца
+        
+        self._setup_header_visible_table(header=header)
 
         # Обновляем геометрию таблицы
         # self.table_view.resizeColumnsToContents() # обновляем размеры столбцов
@@ -2621,7 +2673,7 @@ class DynamicListPage(
         
         # Выход из режима редактирования
         if self.edit_mode:
-            self._exit_edit_mode()
+            self._exit_edit_mode() # выход из режима редактирования
 
         # Дополнительные действия, например, очистка черновиков, если нужно
         # self._clear_drafts()  # если требуется    
@@ -2810,11 +2862,12 @@ class DynamicListPage(
         Обработка двойного клика в обычном режиме (не редактирование).
         Вызывает action_requested для перехода на следующий фрейм.
         """
-        if not self.edit_mode and index.isValid():
-            source_index = self.proxy_model.mapToSource(index)
-            dto = self.source_model.get_item_at_row(source_index.row())
+
+        if not self.edit_mode and index.isValid(): # если индекс валиден
+            source_index = self.proxy_model.mapToSource(index) # получаем индекс в исходном модели
+            dto = self.source_model.get_item_at_row(source_index.row()) # 
             if dto:
-                self.action_requested.emit(dto)
+                self.action_requested.emit(dto) # вызываем сигнал
                 
     
     @AppLogger.get_instance(

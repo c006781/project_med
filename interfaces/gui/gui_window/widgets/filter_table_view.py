@@ -54,6 +54,19 @@ class FilterHeaderView(QHeaderView):
 
         self._get_unique_values_func = None   # функция для получения уникальных значений 
 
+        self._checkbox_column_visible = False   # по умолчанию скрыт
+
+    @AppLogger.get_instance( 
+        name = 'FilterHeaderView',
+        enable_file_logging = 'system',
+        use_name_in_filename = 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_checkbox_column_visible(self, visible: bool):
+        """Устанавливает, виден ли столбец чекбоксов."""
+        self._checkbox_column_visible = visible
+
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
         enable_file_logging = 'system',
@@ -127,7 +140,13 @@ class FilterHeaderView(QHeaderView):
             return
 
         # ----- Если это столбец чекбоксов (индекс 0) и callback задан -----
-        if logical_index == 0 and hasattr(self, '_checkbox_toggle_callback'):
+        if (
+            logical_index == 0
+        ) and (
+            hasattr(self, '_checkbox_toggle_callback') # callback задан
+        ) and (
+            self._checkbox_column_visible # столбец виден
+        ):
             menu = QMenu(self)
 
             for name, thec in [ # True - выбрать, False - снять
@@ -226,7 +245,7 @@ class FilterHeaderView(QHeaderView):
                 column_type = type(data)
 
         # Создаём диалог фильтрации (новый, с поддержкой множественных условий)
-        from .filter_column import FilterColumnDialog
+        # from .filter_column import FilterColumnDialog
         dialog = FilterColumnDialog(
             column_title=column_title,
             column_type=column_type,
@@ -362,10 +381,28 @@ class FilterTableView(QTableView):
     )
     def __init__(self, parent=None):
         super().__init__(parent)
+
         self.setSortingEnabled(True)
+
         header = FilterHeaderView(Qt.Orientation.Horizontal, self)
+
         self.setHorizontalHeader(header)
+
         header.filter_requested.connect(self.on_filter_requested)
+
+        # self.horizontalHeader().setVisible(True)
+
+    # @AppLogger.get_instance( 
+    #     name = 'FilterTableView',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def showEvent(self, event):
+    #     """При каждом отображении таблицы принудительно показываем заголовок."""
+    #     super().showEvent(event)
+    #     self.horizontalHeader().setVisible(True)
 
     @AppLogger.get_instance( 
         name = 'FilterTableView',

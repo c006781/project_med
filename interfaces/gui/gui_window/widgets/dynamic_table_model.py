@@ -73,6 +73,7 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._field_by_column = {}          # номер колонки -> имя поля
         self._update_column_mapping()
+        
     @AppLogger.get_instance(
         name = 'DynamicTableModel',
         enable_file_logging = 'system',

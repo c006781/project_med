@@ -67,32 +67,34 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         Переопределённый метод emit: перед записью проверяет существование файла.
         Если файл удалён, переоткрывает его.
         """
-        try:
-            now = time.time()
-            # Проверяем существование файла, если прошло достаточно времени
-            if now - self._last_check > self._check_interval:
-                with self._lock:
-                    if not os.path.exists(self.baseFilename):
-                        # Файл удалён – переоткрываем
-                        self._reopen()
-
-                    self._last_check = now 
-                    
-            super().emit(record)
-        except (FileNotFoundError, PermissionError) as e:
-            # Если файл внезапно исчез между проверкой и записью
-            self.handleError(record)
-            
-            with self._lock:
-                self._reopen()
-
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                super().emit(record)  # повторяем запись
+                now = time.time()
+                # Проверяем существование файла, если прошло достаточно времени
+                if now - self._last_check > self._check_interval:
+                    with self._lock:
+                        if not os.path.exists(self.baseFilename):
+                            # Файл удалён – переоткрываем
+                            self._reopen()
+
+                        self._last_check = now 
+                        
+                super().emit(record)
+                return
+            except (FileNotFoundError, PermissionError) as e:
+                # Если файл внезапно исчез между проверкой и записью
+                # self.handleError(record)
+                if attempt == max_retries - 1:
+                    self.handleError(record)
+                    return
+                
+                with self._lock:
+                    self._reopen()
+
             except Exception:
                 self.handleError(record)
-
-        except Exception:
-            self.handleError(record)
+                return
 
     def _reopen(self):
         """Принудительно закрывает и открывает файл."""
@@ -126,6 +128,10 @@ class BaseAppLogger:
             Возвращает экземпляр логгера с указанным именем.
     """
 
+    _instances: Dict[str, 'BaseAppLogger'] = {}   # Словарь экземпляров (ключ - имя логгера)
+    _instances_lock = threading.RLock()
+
+    _global_handlers = []  # список обработчиков, добавляемых ко всем логгерам
     # _levels_up = 3
     _levels_up = 0
 
@@ -139,10 +145,6 @@ class BaseAppLogger:
         },
     )
 
-    # Словарь экземпляров (ключ - имя логгера)
-    _instances: Dict[str, 'BaseAppLogger'] = {}
-
-    _global_handlers = []  # список обработчиков, добавляемых ко всем логгерам
 
     # Простой формат лога: время, уровень, сообщение (всё остальное формируем вручную)
     LOG_FORMAT = '%(asctime)s\t%(levelname)s\t%(message)s'
@@ -159,44 +161,53 @@ class BaseAppLogger:
     @classmethod
     def disable_exact(cls, name: str):
         """Отключает логгер с точным именем (не префикс)."""
-        inst = cls._instances.get(name)
+        inst = None
+
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+
         if inst:
             inst.disable()
 
     @classmethod
     def enable_exact(cls, name: str):
         """Включает логгер с точным именем."""
-        inst = cls._instances.get(name)
-        if inst:
-            inst.enable()
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+            if inst:
+                inst.enable()
 
     @classmethod
     def disable_console_exact(cls, name: str):
         """Отключает консольный вывод для точного логгера."""
-        inst = cls._instances.get(name)
-        if inst:
-            inst.disable_console()
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+            if inst:
+                inst.disable_console()
 
     @classmethod
     def enable_console_exact(cls, name: str):
         """Включает консольный вывод для точного логгера."""
-        inst = cls._instances.get(name)
-        if inst:
-            inst.enable_console()
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+            if inst:
+                inst.enable_console()
 
     @classmethod
     def disable_file_exact(cls, name: str):
         """Отключает файловое логирование для точного логгера."""
-        inst = cls._instances.get(name)
-        if inst:
-            inst.disable_file()
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+            if inst:
+                inst.disable_file()
 
     @classmethod
     def enable_file_exact(cls, name: str):
         """Включает файловое логирование для точного логгера."""
-        inst = cls._instances.get(name)
-        if inst:
-            inst.enable_file()
+        with cls._instances_lock:
+            inst = cls._instances.get(name)
+            if inst:
+                inst.enable_file()
 
     # @classmethod
     # def disable_group_exact(cls, name: str):
@@ -217,8 +228,8 @@ class BaseAppLogger:
         # import threading
         def watch():
             while True:
-                time.sleep(interval_sec)
-                cls.reopen_all_files()
+                time.sleep(interval_sec)  
+                cls.reopen_all_files()  # внутри есть блокировка
 
         thread = threading.Thread(target=watch, daemon=True, name="LoggerWatchdog")
         thread.start()
@@ -226,9 +237,10 @@ class BaseAppLogger:
     @classmethod
     def reopen_all_files(cls):
         """Переоткрывает файловые обработчики всех логгеров (например, после изменения пути)."""
-        for inst in cls._instances.values():
-            if inst.file_handler and hasattr(inst.file_handler, 'force_reopen'):
-                inst.file_handler.force_reopen()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.file_handler and hasattr(inst.file_handler, 'force_reopen'):
+                    inst.file_handler.force_reopen()
 
     @classmethod
     def reload_all_from_config(cls, global_config: Dict[str, Any]):
@@ -237,23 +249,25 @@ class BaseAppLogger:
         Ключи вида '<name>_enabled' и т.д. применяются к конкретным логгерам,
         ключи без префикса – как значения по умолчанию.
         """
-        for inst in cls._instances.values():
-            # Формируем конфиг для этого логгера: сначала общие настройки, затем специфичные
-            specific = {}
-            for key, value in global_config.items():
-                if key.startswith(f"{inst.name}_"):
-                    # Убираем префикс для внутреннего использования
-                    specific[key[len(inst.name)+1:]] = value
+        with cls._instances_lock:
 
-            # Объединяем: специфичные переопределяют общие
-            merged = {**global_config, **specific}
-            inst.reload_from_config(merged)
+            for inst in cls._instances.values():
+                # Формируем конфиг для этого логгера: сначала общие настройки, затем специфичные
+                specific = {}
+                for key, value in global_config.items():
+                    if key.startswith(f"{inst.name}_"):
+                        # Убираем префикс для внутреннего использования
+                        specific[key[len(inst.name)+1:]] = value
 
-        # Дополнительно: после изменения конфигурации можно принудительно переоткрыть файлы
-        # для всех логгеров, у которых включено файловое логирование
-        for inst in cls._instances.values():
-            if inst._file_enabled and inst.file_handler:
-                inst._reopen_file_handler_if_needed()
+                # Объединяем: специфичные переопределяют общие
+                merged = {**global_config, **specific}
+                inst.reload_from_config(merged)
+
+            # Дополнительно: после изменения конфигурации можно принудительно переоткрыть файлы
+            # для всех логгеров, у которых включено файловое логирование
+            for inst in cls._instances.values():
+                if inst._file_enabled and inst.file_handler:
+                    inst._reopen_file_handler_if_needed()
 
     @classmethod
     def add_global_handler(cls, handler):
@@ -268,12 +282,15 @@ class BaseAppLogger:
             BaseAppLogger.add_global_handler(logging.Handler(my_handler))
 
         """
+
         cls._global_handlers.append(handler)
-        # Добавляем ко всем уже созданным экземплярам
-        for instance in cls._instances.values():
-            instance.logger.addHandler(handler)
-            # Обновляем список обработчиков экземпляра (опционально)
-            instance.handlers = instance.logger.handlers[:]
+
+        with cls._instances_lock:
+            # Добавляем ко всем уже созданным экземплярам
+            for instance in cls._instances.values():
+                instance.logger.addHandler(handler)
+                # Обновляем список обработчиков экземпляра (опционально)
+                instance.handlers = instance.logger.handlers[:]
 
     @classmethod
     def remove_global_handler(cls, handler):
@@ -283,16 +300,17 @@ class BaseAppLogger:
         :param handler: Обработчик, который нужно удалить.
         """
 
-        # Если обработчик есть в глобальном списке, удаляем его
-        if handler in cls._global_handlers:
-            cls._global_handlers.remove(handler)
+        with cls._instances_lock:
+            # Если обработчик есть в глобальном списке, удаляем его
+            if handler in cls._global_handlers:
+                cls._global_handlers.remove(handler)
 
-        # Удаляем обработчик из каждого существующего экземпляра
-        for instance in cls._instances.values():
-            instance.logger.removeHandler(handler)
+            # Удаляем обработчик из каждого существующего экземпляра
+            for instance in cls._instances.values():
+                instance.logger.removeHandler(handler)
 
-            # Обновляем список обработчиков экземпляра (опционально)
-            instance.handlers = instance.logger.handlers[:]
+                # Обновляем список обработчиков экземпляра (опционально)
+                instance.handlers = instance.logger.handlers[:]
             
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
@@ -317,39 +335,48 @@ class BaseAppLogger:
     @classmethod
     def disable_group(cls, name_prefix: str):
         """Отключает все логгеры, чьи имена начинаются с name_prefix."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.disable()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.disable()
 
     @classmethod
     def enable_group(cls, name_prefix: str):
         """Включает все логгеры группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.enable()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.enable()
 
     @classmethod
     def set_group_level(cls, name_prefix: str, level: str):
         """Устанавливает уровень логирования для всех логгеров группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.setLevel(cls._parse_log_level(level))
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.setLevel(cls._parse_log_level(level))
 
     @classmethod
     def get_group_loggers(cls, name_prefix: str) -> list:
         """
         Возвращает список имён логгеров, чьи имена начинаются с name_prefix.
         """
-        return [inst.name for inst in cls._instances.values() if inst.name.startswith(name_prefix)]
+        with cls._instances_lock:
+            return [
+                inst.name 
+                for inst in cls._instances.values() 
+                if inst.name.startswith(name_prefix)
+            ]
 
     @classmethod
     def reconfigure_group(cls, name_prefix: str, **kwargs):
         """
         Переконфигурирует все логгеры группы (например, изменить уровень).
         """
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.reconfigure(**kwargs)
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.reconfigure(**kwargs)
 
     def __init__(
         self,
@@ -460,11 +487,50 @@ class BaseAppLogger:
         
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
 
+    def apply_config_from_dict(self, config_dict: Dict[str, Any]):
+        """Применяет настройки из словаря (аналогично reload_from_config, но без перенаправления мастеру)."""
+        # Сохраняем старые флаги
+        old_file = self._file_enabled
+        old_console = self._console_enabled
+        old_enabled = self._enabled
+
+        self._init_config_load(config_dict, None, None)
+
+        if 'LOG_LEVEL' in config_dict:
+            self.log_level = self._parse_log_level(config_dict['LOG_LEVEL'])
+            self.logger.setLevel(self.log_level)
+
+        if 'LOG_FILE' in config_dict:
+            self.base_log_file = config_dict['LOG_FILE']
+
+        if 'LOG_MAX_BYTES' in config_dict:
+            self.log_max_bytes = int(config_dict['LOG_MAX_BYTES'])
+
+        if 'LOG_BACKUP_COUNT' in config_dict:
+            self.log_backup_count = int(config_dict['LOG_BACKUP_COUNT'])
+
+        if 'LOG_ARGS' in config_dict:
+            self.log_args = config_dict['LOG_ARGS']
+
+        if (self._file_enabled != old_file or
+            self._console_enabled != old_console or
+            self._enabled != old_enabled):
+            self._update_handlers()
+        else:
+            for handler in self.logger.handlers:
+                handler.setLevel(self.log_level)
+            if self._shared_slaves:                    
+                self._update_shared_slaves()
+
+        # if self._shared_slaves:
+        #     self._update_shared_slaves()
+
     def _reopen_file_handler_if_needed(self):
         """Переоткрывает файловый обработчик, если файл лога был удалён извне."""
-        if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
+        # if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
             # self.file_handler.reopen_if_needed()
-            self.file_handler.reopen_if_needed()
+        if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
+            self.file_handler.force_reopen()
 
     @property
     def effective_enable_file_logging(self) -> bool:
@@ -787,6 +853,11 @@ class BaseAppLogger:
             # Важно: после создания обработчика проверяем существование файла
             # и при необходимости переоткрываем (восстановление после удаления)
             self._reopen_file_handler_if_needed()
+        elif self._shared_handler and self.file_handler is None and self._master_logger:
+            # Восстанавливаем общий обработчик от мастера
+            self.file_handler = self._master_logger.file_handler
+            if self.file_handler and self.file_handler not in self.logger.handlers:
+                self.logger.addHandler(self.file_handler)    
         else:
             # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
             # Ничего не делаем, просто убеждаемся, что self.file_handler ссылается на него
@@ -833,7 +904,7 @@ class BaseAppLogger:
         if not self.base_log_file:
             raise ValueError("base_log_file (LOG_DIR) не задан")
 
-        path = self.base_log_file
+        path = os.path.normpath(self.base_log_file)   # нормализуем
 
         # 1. Если путь существует – определяем по факту
         if os.path.exists(path):
@@ -1040,15 +1111,26 @@ class BaseAppLogger:
                 slave.file_handler.setFormatter(self.formatter)
                 
     def _update_shared_slave(self, slave) -> None:
+
+        if slave.file_handler is None:
+            # У слейва нет обработчика – возможно, он отключил файловое логирование
+            return
+        
         # Убедимся, что он всё ещё использует наш обработчик
         if slave.file_handler != self.file_handler:
             # Возможно, он уже переключился – перепривязываем
-            slave.logger.removeHandler(slave.file_handler)
+            if slave.file_handler in slave.logger.handlers:
+                slave.logger.removeHandler(slave.file_handler)
+                
+            # if slave.file_handler is not None:
+            #     slave.file_handler.close()
             slave.file_handler = self.file_handler
 
-            if self.file_handler not in slave.logger.handlers:
-                slave.logger.addHandler(self.file_handler)
-                slave._save_handlers()
+        if self.file_handler not in slave.logger.handlers:
+            slave.logger.addHandler(self.file_handler)
+            slave._save_handlers()
+
+            
 
     def _update_shared_slaves(self) -> None:
         """
@@ -1193,6 +1275,8 @@ class BaseAppLogger:
         Возвращает True, если требуется перестроить обработчики.
         """
         need_rebuild = False
+        level_changed = False
+
         if 'console_enabled' in kwargs:
             self._console_enabled = kwargs['console_enabled']
             need_rebuild = True
@@ -1208,10 +1292,13 @@ class BaseAppLogger:
         # Отдельные уровни для консоли и файла (не требуют перестройки)
         if 'console_level' in kwargs:
             self.set_console_level(kwargs['console_level'])
+            level_changed = True
 
         if 'file_level' in kwargs:
             self.set_file_level(kwargs['file_level'])
-        return need_rebuild
+            level_changed = True
+
+        return need_rebuild or level_changed
 
     def reconfigure(self, **kwargs):
         """
@@ -1234,8 +1321,11 @@ class BaseAppLogger:
             return
         
         # Обновляем уровень логирования
+
+        level_changed = False
         if 'level' in kwargs:
             self._update_level(kwargs['level'])
+            level_changed = True
 
         # Обновляем log_args (не влияет на обработчики, просто сохраняем)
         if 'log_args' in kwargs:
@@ -1244,7 +1334,8 @@ class BaseAppLogger:
         # Обновляем параметры файла (сохраняем всегда, пересоздадим обработчики в конце)
 
         need_rebuild = self._update_file_params(**kwargs)
-        need_rebuild = self._update_flags(**kwargs) or need_rebuild
+        flags_changed = self._update_flags(**kwargs)
+        need_rebuild = need_rebuild or flags_changed
 
         if need_rebuild:
             self._update_handlers() # внутри вызывает _update_shared_slaves при наличии зависимых
@@ -1253,10 +1344,10 @@ class BaseAppLogger:
         # elif level_changed:
         #     # Уровень изменился, но обработчики не перестраивались – синхронизируем зависимых вручную
         #     self._update_shared_slaves()
-        else:
+        elif level_changed or flags_changed:
             # Если менялся только уровень, но обработчик не пересоздавался, тоже нужно синхронизировать
-            if 'level' in kwargs:
-                self._update_shared_slaves()
+            # if 'level' in kwargs:
+            self._update_shared_slaves()
 
         # need_rebuild = False
         # if not self._shared_handler:
@@ -1363,47 +1454,53 @@ class BaseAppLogger:
     @classmethod
     def disable_group_console(cls, name_prefix: str):
         """Отключает вывод в консоль для всех логгеров группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.disable_console()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.disable_console()
 
     @classmethod
     def enable_group_console(cls, name_prefix: str):
         """Включает вывод в консоль для всех логгеров группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.enable_console()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.enable_console()
 
     @classmethod
     def disable_group_file(cls, name_prefix: str):
         """Отключает файловое логирование для всех логгеров группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.turn_off_file_logging()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.turn_off_file_logging()
 
     @classmethod
     def enable_group_file(cls, name_prefix: str):
         """Включает файловое логирование для всех логгеров группы."""
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.turn_on_file_logging()
+        with cls._instances_lock:
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.turn_on_file_logging()
 
     # Также можно добавить установку уровня отдельно для консоли и файла для группы:
     @classmethod
     def set_group_console_level(cls, name_prefix: str, level: str):
         """Устанавливает уровень логирования для консольного вывода всех логгеров группы."""
-        lvl = cls._parse_log_level(level)
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.set_console_level(lvl)
+        with cls._instances_lock:
+            lvl = cls._parse_log_level(level)
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.set_console_level(lvl)
 
     @classmethod
     def set_group_file_level(cls, name_prefix: str, level: str):
         """Устанавливает уровень логирования для файлового вывода всех логгеров группы."""
-        lvl = cls._parse_log_level(level)
-        for inst in cls._instances.values():
-            if inst.name.startswith(name_prefix):
-                inst.set_file_level(lvl)
+        with cls._instances_lock:
+            lvl = cls._parse_log_level(level)
+            for inst in cls._instances.values():
+                if inst.name.startswith(name_prefix):
+                    inst.set_file_level(lvl)
 
 
     def reload_from_config(self, new_config: Dict[str, Any]):
@@ -1452,8 +1549,11 @@ class BaseAppLogger:
             for handler in self.logger.handlers:
                 handler.setLevel(self.log_level)
 
-        if self._shared_slaves:
-            self._update_shared_slaves()
+            if self._shared_slaves:
+                self._update_shared_slaves()
+
+        # if self._shared_slaves:
+        #     self._update_shared_slaves()
     
     
     # ----------------------------------------------------------------------
@@ -1640,7 +1740,8 @@ class BaseAppLogger:
         :param name: Имя экземпляра класса.
         :return: True, если экземпляр с именем name существует, False в противном случае.
         """
-        return (name in cls._instances )
+        with cls._instances_lock:
+            return (name in cls._instances )
 
     
     @classmethod
@@ -1652,44 +1753,46 @@ class BaseAppLogger:
         use_name_in_filename=False,  # использовать имя экземпляра в имени файла
         auto_share=True, # автоматический шаринг
     ):
-        # Создаём новый экземпляр
-        instance = cls(
-            name=name,
-            config=config,
-            enable_file_logging=enable_file_logging,
-            use_name_in_filename=use_name_in_filename
-        )
-        cls._instances[name] = instance
+        with cls._instances_lock:
+            # Создаём новый экземпляр
+            instance = cls(
+                name=name,
+                config=config,
+                enable_file_logging=enable_file_logging,
+                use_name_in_filename=use_name_in_filename
+            )
+            cls._instances[name] = instance
 
-        # Автоматический шаринг, если разрешено
-        if auto_share and not instance._use_name_in_filename:
-            # Ищем любой другой логгер с таким же base_log_file и без использования имени
-            for other_name, other in cls._instances.items():
-                if other_name == name:
-                    continue
-                # Используем effective_use_name_in_filename для проверки        
-                if (
-                    # not other._use_name_in_filename and
-                    not other.effective_use_name_in_filename and  # Используем эффективное значение, чтобы правильно обработать строковые ссылки
-                    other.base_log_file == instance.base_log_file and
-                    other.file_handler is not None
-                ):
-                    instance.share_file_handler_with(other)
-                    break
+            # Автоматический шаринг, если разрешено
+            if auto_share and not instance._use_name_in_filename:
+                # Ищем любой другой логгер с таким же base_log_file и без использования имени
+                for other_name, other in cls._instances.items():
+                    if other_name == name:
+                        continue
+                    # Используем effective_use_name_in_filename для проверки        
+                    if (
+                        # not other._use_name_in_filename and
+                        not other.effective_use_name_in_filename and  # Используем эффективное значение, чтобы правильно обработать строковые ссылки
+                        other.base_log_file == instance.base_log_file and
+                        other.file_handler is not None
+                    ):
+                        instance.share_file_handler_with(other)
+                        break
 
 
-        return instance
+            return instance
 
     @classmethod
     def _get_instance(cls, name, share_file_with):
+        with cls._instances_lock:
 
-        # экземпляр с таким именем уже существует - возвращается существующий
-        inst = cls._instances[name]
-        # Если запрошен шаринг с другим логгером, но ещё не настроен – настраиваем
-        if share_file_with and not inst.has_shared_handler():
-            other = cls._instances.get(share_file_with)
-            if other and other.file_handler:
-                inst.share_file_handler_with(other)
+            # экземпляр с таким именем уже существует - возвращается существующий
+            inst = cls._instances[name]
+            # Если запрошен шаринг с другим логгером, но ещё не настроен – настраиваем
+            if share_file_with and not inst.has_shared_handler():
+                other = cls._instances.get(share_file_with)
+                if other and other.file_handler:
+                    inst.share_file_handler_with(other)
 
         return inst
 
@@ -1729,30 +1832,30 @@ class BaseAppLogger:
             share_file_with = enable_file_logging
             enable_file_logging = True   # файловое логирование включаем, но обработчик будет общим
         
-        if not force_new and name in cls._instances:
-            # Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
-            return cls._get_instance(
+        with cls._instances_lock:
+            if not force_new and name in cls._instances:
+                # Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
+                return cls._get_instance(
+                    name=name,
+                    share_file_with=share_file_with
+                )
+
+            instance = cls._create_instance_and_share( # Создаём новый экземпляр и применяем шаринг
                 name=name,
-                share_file_with=share_file_with
+                config=config,
+                enable_file_logging=enable_file_logging,
+                use_name_in_filename=use_name_in_filename,
+
+                auto_share=False
             )
 
-       
-        instance = cls._create_instance_and_share( # Создаём новый экземпляр и применяем шаринг
-            name=name,
-            config=config,
-            enable_file_logging=enable_file_logging,
-            use_name_in_filename=use_name_in_filename,
+            # После создания – если нужен шаринг, применяем
+            if share_file_with:
+                other = cls._instances.get(share_file_with)
+                if other and other.file_handler:
+                    instance.share_file_handler_with(other)
 
-            auto_share=False
-        )
-
-        # После создания – если нужен шаринг, применяем
-        if share_file_with:
-            other = cls._instances.get(share_file_with)
-            if other and other.file_handler:
-                instance.share_file_handler_with(other)
-
-        return instance
+            return instance
 
     @staticmethod
     def _parse_log_level(level_str: str) -> int:
@@ -2150,6 +2253,7 @@ class BaseAppLogger:
             description: str = "", 
             level: int = logging.DEBUG,
             log_args: Optional[bool] = None,
+            log_return: bool = False,
         ) -> Callable:
         """
         Декоратор для логирования времени выполнения функции или метода.
@@ -2186,6 +2290,9 @@ class BaseAppLogger:
             # Если указанный уровень логирования не активен, возвращаем исходную функцию без обёртки
             if not logger_instance.logger.isEnabledFor(level):
                 return func
+            
+            # сохраняем значение log_return для использования внутри обёртки
+            _log_return = log_return
 
             # Используем квалифицированное имя (с классом, если это метод)
             func_qualname = func.__qualname__
@@ -2230,10 +2337,26 @@ class BaseAppLogger:
                     formatted = logger_instance._format_message(caller_info, start_msg)
                     logger_instance.logger.log(level, formatted)
 
-                def log_end(execution_time: float, error: Optional[Exception] = None):
-                    end_msg = f"{desc_part}[Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+                def log_end(
+                    execution_time: float, 
+                    error: Optional[Exception] = None,
+                    return_value=None,
+                ):
+
+                    if desc_part:
+                        end_msg = f"{desc_part}[Завершение: {execution_time:.4f} сек]" 
+                    else:
+                        end_msg = f"[Завершение: {execution_time:.4f} сек]"
+                    
                     if error:
                         end_msg += f": {error}"
+
+                    if _log_return and return_value is not None and not error:
+                        ret_str = repr(return_value)
+                        # if len(ret_str) > 200:
+                        #     ret_str = ret_str[:197] + "..."
+                        end_msg += f" -> {ret_str}"
+
                     formatted = logger_instance._format_message(caller_info, end_msg)
                     logger_instance.logger.log(level, formatted)
 
@@ -2252,7 +2375,9 @@ class BaseAppLogger:
                     
                     log_start(args, kwargs)
                     start_time = time.time()
+                    result = None
                     error = None
+                    
                     try:
                         result = func(*args, **kwargs)
                     except Exception as e:
@@ -2260,7 +2385,7 @@ class BaseAppLogger:
                         # raise
                     finally:
                         execution_time = time.time() - start_time
-                        log_end(execution_time, error)
+                        log_end(execution_time, error, result)
 
                     if error:
                         raise error
@@ -2272,7 +2397,9 @@ class BaseAppLogger:
                 async def async_wrapper(*args, **kwargs):
                     log_start(args, kwargs)
                     start_time = time.time()
+                    result = None
                     error = None
+
                     try:
                         result = await func(*args, **kwargs)
                     except Exception as e:
@@ -2280,7 +2407,7 @@ class BaseAppLogger:
                         # raise
                     finally:
                         execution_time = time.time() - start_time
-                        log_end(execution_time, error)
+                        log_end(execution_time, error, result)
 
                     if error:
                         raise error
@@ -2501,9 +2628,11 @@ class BaseAppLogger:
         Закрывает все экземпляры логгера, удаляя все хендлеры из каждого из них,
         и очищает словарь экземпляров.
         """
-        for instance in cls._instances.values():
-            instance.close()
-        cls._instances.clear()
+
+        with cls._instances_lock:
+            for instance in cls._instances.values():
+                instance.close()
+            cls._instances.clear()
 
 
 # ------------------------------------------------------------------------------

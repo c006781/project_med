@@ -460,6 +460,12 @@ class BaseAppLogger:
         
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
 
+    def _reopen_file_handler_if_needed(self):
+        """Переоткрывает файловый обработчик, если файл лога был удалён извне."""
+        if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
+            # self.file_handler.reopen_if_needed()
+            self.file_handler.reopen_if_needed()
+
     @property
     def effective_enable_file_logging(self) -> bool:
         """Возвращает реальное состояние файлового логирования с учётом ссылки на другой логгер."""
@@ -540,14 +546,14 @@ class BaseAppLogger:
             if self._shared_slaves:
                 self._update_shared_slaves()
 
-    def _reopen_file_handler_if_needed(self):
-        """Переоткрывает файловый обработчик, если он существует и файл отсутствует."""
-        if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
-            # Проверяем существование файла
-            log_file = self._get_log_file()
-            if not os.path.exists(log_file):
-                self.file_handler.force_reopen()
-                self.logger.debug(f"Файл лога {log_file} переоткрыт (был удалён)")
+    # def _reopen_file_handler_if_needed(self):
+    #     """Переоткрывает файловый обработчик, если он существует и файл отсутствует."""
+    #     if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
+    #         # Проверяем существование файла
+    #         log_file = self._get_log_file()
+    #         if not os.path.exists(log_file):
+    #             self.file_handler.force_reopen()
+    #             self.logger.debug(f"Файл лога {log_file} переоткрыт (был удалён)")
 
     def setLevel(self, level):
         """
@@ -652,6 +658,7 @@ class BaseAppLogger:
         }
 
     def _save_handlers (self):
+        """Сохраняет копию списка обработчиков."""
         # Сохраняем ссылки на обработчики (может пригодиться для GUI)
         self.handlers = self.logger.handlers[:]
 
@@ -665,24 +672,24 @@ class BaseAppLogger:
 
         # Если общий – ничего не делаем, оставляем как есть
 
-    def _clear_handlers_all(self):
-        # Удаляем все обработчики
-        for handler in self.logger.handlers[:]:
+    # def _clear_handlers_all(self):
+    #     # Удаляем все обработчики
+    #     for handler in self.logger.handlers[:]:
 
-            self.logger.removeHandler(handler)
-            if hasattr(handler, 'close'):
-                handler.close()
+    #         self.logger.removeHandler(handler)
+    #         if hasattr(handler, 'close'):
+    #             handler.close()
 
-    def _update_console_handler (self):
-        # Консольный обработчик
-        if self._enabled and self._console_enabled:
-            self.console_handler = logging.StreamHandler()
-            self.console_handler.setLevel(self.log_level)
-            self.console_handler.setFormatter(self.formatter)
-            self.logger.addHandler(self.console_handler)
+    # def _update_console_handler (self):
+    #     # Консольный обработчик
+    #     if self._enabled and self._console_enabled:
+    #         self.console_handler = logging.StreamHandler()
+    #         self.console_handler.setLevel(self.log_level)
+    #         self.console_handler.setFormatter(self.formatter)
+    #         self.logger.addHandler(self.console_handler)
 
-        else:
-            self.console_handler = None
+    #     else:
+    #         self.console_handler = None
 
     def _update_console_handler_if_on (self):
         # Консольный обработчик (если включён)
@@ -692,16 +699,16 @@ class BaseAppLogger:
             self.console_handler.setFormatter(self.formatter)
             self.logger.addHandler(self.console_handler)   
              
-    def _file_handler_update (self):
-        # Файловый обработчик
-        if self._enabled and self._file_enabled:
-            self.file_handler = self._create_file_handler()
-            self.logger.addHandler(self.file_handler)
+    # def _file_handler_update (self):
+    #     # Файловый обработчик
+    #     if self._enabled and self._file_enabled:
+    #         self.file_handler = self._create_file_handler()
+    #         self.logger.addHandler(self.file_handler)
 
-        else:
-            if self.file_handler:
-                self.file_handler.close()
-                self.file_handler = None
+    #     else:
+    #         if self.file_handler:
+    #             self.file_handler.close()
+    #             self.file_handler = None
 
     def _file_handler_update_if_on (self):
         # Файловый обработчик (если включён)
@@ -723,35 +730,76 @@ class BaseAppLogger:
         return self._shared_handler
     
     def _update_handlers(self):
-        """Обновляет набор обработчиков в соответствии с текущими флагами."""
+        """
+        Обновляет набор обработчиков (консольный и файловый) в соответствии с текущими флагами:
+        - _enabled, _console_enabled, _file_enabled
+        - _shared_handler (использует общий обработчик от другого логгера)
+        - эффективные значения (с учётом ссылок enable_file_logging_ref)
+
+        При включении файлового логирования дополнительно вызывает _reopen_file_handler_if_needed()
+        для восстановления файла, если он был удалён извне.
+
+        После обновления собственных обработчиков синхронизирует зависимые логгеры (_shared_slaves).
+        """
 
         # self._clear_handlers_all() # Удаляем все обработчики
         # self._update_console_handler() # Консольный обработчик
         # self._file_handler_update() # Файловый обработчик
 
-        self._clear_handlers_old() # Удаляем старые "свои" обработчики, если они были
+        # self._clear_handlers_old() # Удаляем старые "свои" обработчики, если они были
+
+        # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
+        #    Закрываем их только если они не являются общими с другими логгерами.
+        self._remove_console_handler(if_close_console_handler=True)
+
+        if self.file_handler and not self._shared_handler:
+            self._remove_file_handler(if_close_file_handler=True)
+
 
         # Если логгер полностью отключён – больше ничего не добавляем
         if not self._enabled:
             self._save_handlers()
             return
         
-        self._update_console_handler_if_on() # Консольный обработчик (если включён)
+        # self._update_console_handler_if_on() # Консольный обработчик (если включён)
 
-        # Создаём файловый обработчик только если не используется общий
+        # Консольный обработчик (всегда создаётся заново, если включён)
+        if self._console_enabled:
+            self.console_handler = logging.StreamHandler()
+            self.console_handler.setLevel(self.log_level)
+            self.console_handler.setFormatter(self.formatter)
+            self.logger.addHandler(self.console_handler)
+        else:
+            self.console_handler = None
+
+        # # Создаём файловый обработчик только если не используется общий
+        # # if not self._shared_handler:
+        # #     self._file_handler_update_if_on() # Файловый обработчик (если включён) #  не создаём новый обработчик, если общий
         # if not self._shared_handler:
-        #     self._file_handler_update_if_on() # Файловый обработчик (если включён) #  не создаём новый обработчик, если общий
-        if not self._shared_handler:
-            # Проверяем эффективное состояние файлового логирования
-            if self.effective_enable_file_logging:
-                self._file_handler_update_if_on()
+        #     # Проверяем эффективное состояние файлового логирования
+        #     if self.effective_enable_file_logging:
+        #         self._file_handler_update_if_on()
 
-        # Добавляем глобальные обработчики обратно
+        # Файловый обработчик – только если не используется общий и файловое логирование включено
+        if not self._shared_handler and self._file_enabled:
+            self.file_handler = self._create_file_handler()
+            self.logger.addHandler(self.file_handler)
+            # Важно: после создания обработчика проверяем существование файла
+            # и при необходимости переоткрываем (восстановление после удаления)
+            self._reopen_file_handler_if_needed()
+        else:
+            # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
+            # Ничего не делаем, просто убеждаемся, что self.file_handler ссылается на него
+            pass
+
+
+        # Добавляем глобальные обработчики обратно (например, для GUI-логов)
         # Убедимся, что глобальные обработчики присутствуют (они не удалялись, но на всякий случай)
         for handler in self._global_handlers:
             if handler not in self.logger.handlers:
                 self.logger.addHandler(handler)
 
+        # Синхронизируем зависимые логгеры (которые используют наш файловый обработчик)
         if self._shared_slaves:
             self._update_shared_slaves()
 
@@ -1468,12 +1516,8 @@ class BaseAppLogger:
         self._file_enabled = True
         self._update_handlers()
 
-        # # Дополнительно переоткрываем файл, если обработчик уже создан
-        # self._reopen_file_handler_if_needed()
-
-        # Принудительно переоткрываем файл, если обработчик уже создан
-        if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
-            self.file_handler.reopen_if_needed()
+        self._reopen_file_handler_if_needed() # после перестроения обработчиков проверяем существование файл
+           
 
     def turn_off_file_logging(self):
         """
@@ -1680,7 +1724,12 @@ class BaseAppLogger:
         :return: Экземпляр BaseAppLogger.
         """
 
-        if not force_new and (cls.thec_craete(name = name)):
+        # Если enable_file_logging – строка и это не 'true'/'false', используем как имя для шаринга
+        if isinstance(enable_file_logging, str) and enable_file_logging.lower() not in ('true', 'false'):
+            share_file_with = enable_file_logging
+            enable_file_logging = True   # файловое логирование включаем, но обработчик будет общим
+        
+        if not force_new and name in cls._instances:
             # Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
             return cls._get_instance(
                 name=name,
@@ -2134,7 +2183,7 @@ class BaseAppLogger:
             # func_name = func.__name__
             # is_async = inspect.iscoroutinefunction(func)
         
-                    # Если указанный уровень логирования не активен, возвращаем исходную функцию без обёртки
+            # Если указанный уровень логирования не активен, возвращаем исходную функцию без обёртки
             if not logger_instance.logger.isEnabledFor(level):
                 return func
 
@@ -2152,191 +2201,280 @@ class BaseAppLogger:
             # Определяем, является ли функция асинхронной
             is_async = inspect.iscoroutinefunction(func)
 
-            @wraps(func)
-            def sync_wrapper(*args, **kwargs):
-                """
-                Обернулка для синхронных функций.
-
-                Она вызывает функцию, добавляя информацию о вызове функции:
-                    - имя файла, в котором находится вызов функции
-                    - номер строки в файле, в которой находится вызов функции
-                    - имя функции
-                    - информацию об аргументах (если log_args == True)
-
-                description - текст, добавляемый к caller_info
-                level - уровень логирования
-                log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
-                """
-
-                
-
-                # Вызываем функцию
-                # try:
-                #     result = func(*args, **kwargs)
-                # except Exception as e:
-                #     err = e
-                #     raise e
-                #     # func_qualname
-                # return result
-        
-        
+            # Общая логика для формирования сообщений и замера времени
+            def make_wrapper():
+                # Формируем базовую информацию о caller'е (один раз для всех вызовов)
                 caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
-
-                # Формируем строку с описанием
                 desc_part = f"{description} " if description else ""
 
                 # Определяем, нужно ли логировать аргументы
                 effective_log_args = log_args
-
-                # Для __init__ всегда отключаем логирование аргументов
                 if func.__name__ == '__init__':
                     effective_log_args = False
-                    
-                # Формируем строку с аргументами
-                # args_part = ""
-                # if log_args:
-                #     args_str = ', '.join(repr(a) for a in args) if effective_log_args else ''
-                #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
-                #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
-                #     args_part = f" with args: ({all_args})"
-                args_part = ""
-                if effective_log_args:
-                    # Для методов исключаем self из отображения
+
+                def format_args(args, kwargs):
+                    """Форматирует аргументы для логирования."""
+                    if not effective_log_args:
+                        return ""
                     display_args = args
-                    # Проверяем, является ли функция методом (первый аргумент обычно self)
                     if args and inspect.ismethod(func) and func.__self__ is not None:
                         display_args = args[1:]  # убираем self
                     args_str = ', '.join(repr(a) for a in display_args)
                     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
                     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
-                    args_part = f" with args: ({all_args})"
+                    return f" with args: ({all_args})"
 
-                # Формируем строку с информацией о вызове функции
-                start_msg = f"{desc_part}[Начало]{args_part}"
+                def log_start(args, kwargs):
+                    args_part = format_args(args, kwargs)
+                    start_msg = f"{desc_part}[Начало]{args_part}"
+                    formatted = logger_instance._format_message(caller_info, start_msg)
+                    logger_instance.logger.log(level, formatted)
 
-                # Формируем полное сообщение
-                formatted_start = logger_instance._format_message(caller_info, start_msg)
+                def log_end(execution_time: float, error: Optional[Exception] = None):
+                    end_msg = f"{desc_part}[Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+                    if error:
+                        end_msg += f": {error}"
+                    formatted = logger_instance._format_message(caller_info, end_msg)
+                    logger_instance.logger.log(level, formatted)
 
-                # Логируем сообщение
-                logger_instance.logger.log(level, formatted_start)
+                # Создаём синхронную обёртку
+                @wraps(func)
+                def sync_wrapper(*args, **kwargs):
 
-                # Получаем время начала выполнения
-                start_time = time.time()
+                    # Вызываем функцию
+                    # try:
+                    #     result = func(*args, **kwargs)
+                    # except Exception as e:
+                    #     err = e
+                    #     raise e
+                    #     # func_qualname
+                    # return result
+                    
+                    log_start(args, kwargs)
+                    start_time = time.time()
+                    error = None
+                    try:
+                        result = func(*args, **kwargs)
+                    except Exception as e:
+                        error = e
+                        # raise
+                    finally:
+                        execution_time = time.time() - start_time
+                        log_end(execution_time, error)
+
+                    if error:
+                        raise error
+                        
+                    return result
+
+                # Создаём асинхронную обёртку
+                @wraps(func)
+                async def async_wrapper(*args, **kwargs):
+                    log_start(args, kwargs)
+                    start_time = time.time()
+                    error = None
+                    try:
+                        result = await func(*args, **kwargs)
+                    except Exception as e:
+                        error = e
+                        # raise
+                    finally:
+                        execution_time = time.time() - start_time
+                        log_end(execution_time, error)
+
+                    if error:
+                        raise error
+                    
+                    return result
                 
-                err = None
-                # Вызываем функцию
-                try:
-                    result = func(*args, **kwargs)
-                except Exception as e:
-                    err = e
-                    # raise
+                return async_wrapper if is_async else sync_wrapper
+            return make_wrapper()
+        
+            # @wraps(func)
+            # def sync_wrapper(*args, **kwargs):
+            #     """
+            #     Обернулка для синхронных функций.
 
-                # Получаем время окончания выполнения
-                execution_time = time.time() - start_time
+            #     Она вызывает функцию, добавляя информацию о вызове функции:
+            #         - имя файла, в котором находится вызов функции
+            #         - номер строки в файле, в которой находится вызов функции
+            #         - имя функции
+            #         - информацию об аргументах (если log_args == True)
 
-                # Формируем строку с информацией о времени выполнения
-                end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+            #     description - текст, добавляемый к caller_info
+            #     level - уровень логирования
+            #     log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+            #     """
 
-                # Если есть ошибка, добавляем ее в конце сообщения
-                if err:
-                    end_msg += f": {err}"
-
-                # Формируем полное сообщение
-                formatted_end = logger_instance._format_message(caller_info, end_msg)
-
-                # Логируем сообщение
-                logger_instance.logger.log(level, formatted_end)
-
-                # Возвращаем ошибку если она есть
-                if err:
-                    raise err
                 
-                return result
 
-            @wraps(func)
-            async def async_wrapper(*args, **kwargs):
-                """
-                Обернулка для асинхронных функций.
+            #     # Вызываем функцию
+            #     # try:
+            #     #     result = func(*args, **kwargs)
+            #     # except Exception as e:
+            #     #     err = e
+            #     #     raise e
+            #     #     # func_qualname
+            #     # return result
+        
+        
+            #     caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
 
-                Она вызывает функцию, добавляя информацию о вызове функции:
-                    - имя файла, в котором находится вызов функции
-                    - номер строки в файле, в которой находится вызов функции
-                    - имя функции
-                    - информацию об аргументах (если log_args == True)
+            #     # Формируем строку с описанием
+            #     desc_part = f"{description} " if description else ""
 
-                description - текст, добавляемый к caller_info
-                level - уровень логирования
-                log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
-                """
-                caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
+            #     # Определяем, нужно ли логировать аргументы
+            #     effective_log_args = log_args
 
-                # Формируем строку с описанием
-                desc_part = f"{description} " if description else ""
+            #     # Для __init__ всегда отключаем логирование аргументов
+            #     if func.__name__ == '__init__':
+            #         effective_log_args = False
+                    
+            #     # Формируем строку с аргументами
+            #     # args_part = ""
+            #     # if log_args:
+            #     #     args_str = ', '.join(repr(a) for a in args) if effective_log_args else ''
+            #     #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+            #     #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+            #     #     args_part = f" with args: ({all_args})"
+            #     args_part = ""
+            #     if effective_log_args:
+            #         # Для методов исключаем self из отображения
+            #         display_args = args
+            #         # Проверяем, является ли функция методом (первый аргумент обычно self)
+            #         if args and inspect.ismethod(func) and func.__self__ is not None:
+            #             display_args = args[1:]  # убираем self
+            #         args_str = ', '.join(repr(a) for a in display_args)
+            #         kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+            #         all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+            #         args_part = f" with args: ({all_args})"
 
+            #     # Формируем строку с информацией о вызове функции
+            #     start_msg = f"{desc_part}[Начало]{args_part}"
 
-                effective_log_args = log_args
-                if func.__name__ == '__init__':
-                    effective_log_args = False
+            #     # Формируем полное сообщение
+            #     formatted_start = logger_instance._format_message(caller_info, start_msg)
 
-                # Формируем строку с аргументами
-                # args_part = ""
-                # if log_args:
-                #     args_str = ', '.join(repr(a) for a in args)
-                #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
-                #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
-                #     args_part = f" with args: ({all_args})"
+            #     # Логируем сообщение
+            #     logger_instance.logger.log(level, formatted_start)
 
-                args_part = ""
-                if effective_log_args:
-                    display_args = args
-                    if args and inspect.ismethod(func) and func.__self__ is not None:
-                        display_args = args[1:]
-                    args_str = ', '.join(repr(a) for a in display_args)
-                    kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
-                    all_args = ', '.join(filter(None, [args_str, kwargs_str]))
-                    args_part = f" with args: ({all_args})"
-                # Формируем строку с информацией о вызове функции
-                start_msg = f"{desc_part}[Начало]{args_part}"
-
-                # Формируем полное сообщение
-                formatted_start = logger_instance._format_message(caller_info, start_msg)
-
-                # Логируем сообщение
-                logger_instance.logger.log(level, formatted_start)
-
-                # Получаем время начала выполнения
-                start_time = time.time()
-
-                err = None
-                # Вызываем функцию
-                try:
-                    result = await func(*args, **kwargs)
-                except Exception as e:
-                    err = e
+            #     # Получаем время начала выполнения
+            #     start_time = time.time()
                 
-                # Получаем время окончания выполнения
-                execution_time = time.time() - start_time
+            #     err = None
+            #     # Вызываем функцию
+            #     try:
+            #         result = func(*args, **kwargs)
+            #     except Exception as e:
+            #         err = e
+            #         # raise
 
-                # Формируем строку с информацией о времени выполнения
-                end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+            #     # Получаем время окончания выполнения
+            #     execution_time = time.time() - start_time
+
+            #     # Формируем строку с информацией о времени выполнения
+            #     end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+
+            #     # Если есть ошибка, добавляем ее в конце сообщения
+            #     if err:
+            #         end_msg += f": {err}"
+
+            #     # Формируем полное сообщение
+            #     formatted_end = logger_instance._format_message(caller_info, end_msg)
+
+            #     # Логируем сообщение
+            #     logger_instance.logger.log(level, formatted_end)
+
+            #     # Возвращаем ошибку если она есть
+            #     if err:
+            #         raise err
                 
-                # Если есть ошибка, добавляем ее в конце сообщения
-                if err:
-                    end_msg += f": {err}"
+            #     return result
 
-                # Формируем полное сообщение
-                formatted_end = logger_instance._format_message(caller_info, end_msg)
+            # @wraps(func)
+            # async def async_wrapper(*args, **kwargs):
+            #     """
+            #     Обернулка для асинхронных функций.
 
-                # Логируем сообщение
-                logger_instance.logger.log(level, formatted_end)
+            #     Она вызывает функцию, добавляя информацию о вызове функции:
+            #         - имя файла, в котором находится вызов функции
+            #         - номер строки в файле, в которой находится вызов функции
+            #         - имя функции
+            #         - информацию об аргументах (если log_args == True)
 
-                # Возвращаем ошибку если она есть
-                if err:
-                    raise err
+            #     description - текст, добавляемый к caller_info
+            #     level - уровень логирования
+            #     log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+            #     """
+            #     caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
 
-                return result
+            #     # Формируем строку с описанием
+            #     desc_part = f"{description} " if description else ""
 
-            return async_wrapper if is_async else sync_wrapper
+
+            #     effective_log_args = log_args
+            #     if func.__name__ == '__init__':
+            #         effective_log_args = False
+
+            #     # Формируем строку с аргументами
+            #     # args_part = ""
+            #     # if log_args:
+            #     #     args_str = ', '.join(repr(a) for a in args)
+            #     #     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+            #     #     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+            #     #     args_part = f" with args: ({all_args})"
+
+            #     args_part = ""
+            #     if effective_log_args:
+            #         display_args = args
+            #         if args and inspect.ismethod(func) and func.__self__ is not None:
+            #             display_args = args[1:]
+            #         args_str = ', '.join(repr(a) for a in display_args)
+            #         kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
+            #         all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+            #         args_part = f" with args: ({all_args})"
+            #     # Формируем строку с информацией о вызове функции
+            #     start_msg = f"{desc_part}[Начало]{args_part}"
+
+            #     # Формируем полное сообщение
+            #     formatted_start = logger_instance._format_message(caller_info, start_msg)
+
+            #     # Логируем сообщение
+            #     logger_instance.logger.log(level, formatted_start)
+
+            #     # Получаем время начала выполнения
+            #     start_time = time.time()
+
+            #     err = None
+            #     # Вызываем функцию
+            #     try:
+            #         result = await func(*args, **kwargs)
+            #     except Exception as e:
+            #         err = e
+                
+            #     # Получаем время окончания выполнения
+            #     execution_time = time.time() - start_time
+
+            #     # Формируем строку с информацией о времени выполнения
+            #     end_msg = f"{desc_part} [Завершение: {execution_time:.4f} сек]" if desc_part else f"[Завершение: {execution_time:.4f} сек]"
+                
+            #     # Если есть ошибка, добавляем ее в конце сообщения
+            #     if err:
+            #         end_msg += f": {err}"
+
+            #     # Формируем полное сообщение
+            #     formatted_end = logger_instance._format_message(caller_info, end_msg)
+
+            #     # Логируем сообщение
+            #     logger_instance.logger.log(level, formatted_end)
+
+            #     # Возвращаем ошибку если она есть
+            #     if err:
+            #         raise err
+
+            #     return result
+
+            # return async_wrapper if is_async else sync_wrapper
 
         return decorator
 

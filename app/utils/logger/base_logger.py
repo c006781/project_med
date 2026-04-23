@@ -47,6 +47,8 @@ import inspect
 
 import threading
 
+import contextvars
+
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 
@@ -115,6 +117,7 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         with self._lock:
             self._reopen()
             self._last_check = time.time()
+
 class BaseAppLogger:
     """
     Менеджер логгеров с поддержкой нескольких именованных экземпляров.
@@ -130,6 +133,12 @@ class BaseAppLogger:
 
     _instances: Dict[str, 'BaseAppLogger'] = {}   # Словарь экземпляров (ключ - имя логгера)
     _instances_lock = threading.RLock()
+
+    # Глубина вложенности вызовов для синхронных потоков (threading.local)
+    _depth_local = threading.local()
+
+    # Глубина вложенности вызовов для асинхронных задач (contextvars)
+    _depth_context: contextvars.ContextVar[int] = contextvars.ContextVar('log_depth', default=0)
 
     _global_handlers = []  # список обработчиков, добавляемых ко всем логгерам
     # _levels_up = 3
@@ -383,7 +392,8 @@ class BaseAppLogger:
         name: str,
         config: Optional[Union[str,Dict[str, Any]]] = None,
         enable_file_logging: Union[str,bool] = False,
-        use_name_in_filename: Union[str,bool] = False
+        use_name_in_filename: Union[str,bool] = False,
+        show_call_depth: bool = False,
     ): 
         """
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
@@ -413,6 +423,10 @@ class BaseAppLogger:
         self._shared_handler = False    # флаг, что используется общий обработчик
         self._master_logger = None      # ссылка на логгер, предоставивший общий обработчик
         self._shared_slaves = []        # логгеры, которые используют мой обработчик
+
+        self._show_call_depth = show_call_depth
+
+        self._handler_lock = threading.RLock()
 
         # self._console_enabled = True   # флаг для консольного вывода
         # self._enabled = True            # полное отключение логирования
@@ -487,14 +501,84 @@ class BaseAppLogger:
         
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
 
+    def _get_call_depth(self) -> int:
+        """
+        Вычисляет реальную глубину вызовов на основе стека.
+        Пропускает фреймы самого логгера и его внутренних методов.
+        Возвращает количество пользовательских фреймов (глубину вложенности).
+        """
+        # import inspect
+        stack = inspect.stack()
+        depth = 0
+        for frame_info in stack[1:]:  # пропускаем текущий фрейм
+            # Пропускаем фреймы, относящиеся к логгеру
+            if self._thec_skip_patterns_modeles({
+                'filename': (frame_info.filename,),
+                'function': (frame_info.function,)
+            }):
+                continue
+
+            depth += 1
+
+        return depth
+
+    def _get_current_depth(self) -> int:
+        """Возвращает текущую глубину вложенности для текущего контекста (поток/задача)."""
+
+        try:
+            # Пытаемся получить из contextvars (асинхронный контекст)
+            # return self._depth_context.get()
+            # Асинхронный контекст всегда имеет значение (default=0)
+            depth_async = self._depth_context.get()
+            if depth_async != 0:
+                return depth_async
+            return getattr(self._depth_local, 'depth', 0)
+        
+        except LookupError:
+            # Если не задан, используем threading.local (синхронный поток)
+            return getattr(self._depth_local, 'depth', 0)
+
+    def _set_current_depth(self, depth: int) -> None:
+        """Устанавливает глубину для текущего контекста."""
+        try:
+            self._depth_context.set(depth)
+
+        except LookupError:
+            self._depth_local.depth = depth
+
+    def _increase_depth(self) -> int:
+        """Увеличивает глубину на 1 и возвращает новое значение."""
+        current = self._get_current_depth()
+        new_depth = current + 1
+        self._set_current_depth(new_depth)
+        
+        return new_depth
+
+    def _decrease_depth(self) -> int:
+        """Уменьшает глубину на 1 и возвращает новое значение."""
+        current = self._get_current_depth()
+        new_depth = max(0, current - 1)
+        self._set_current_depth(new_depth)
+
+        return new_depth
+
     def apply_config_from_dict(self, config_dict: Dict[str, Any]):
         """Применяет настройки из словаря (аналогично reload_from_config, но без перенаправления мастеру)."""
         # Сохраняем старые флаги
         old_file = self._file_enabled
         old_console = self._console_enabled
         old_enabled = self._enabled
+        old_base_log_file = self.base_log_file
+        old_max_bytes = self.log_max_bytes
+        old_backup_count = self.log_backup_count
+        old_use_timestamp = self.use_timestamp
+        old_use_name = self._use_name_in_filename
+
+        # Обновляем текущие параметры
 
         self._init_config_load(config_dict, None, None)
+
+        # обновление остальных параметров
 
         if 'LOG_LEVEL' in config_dict:
             self.log_level = self._parse_log_level(config_dict['LOG_LEVEL'])
@@ -512,18 +596,32 @@ class BaseAppLogger:
         if 'LOG_ARGS' in config_dict:
             self.log_args = config_dict['LOG_ARGS']
 
-        if (self._file_enabled != old_file or
-            self._console_enabled != old_console or
-            self._enabled != old_enabled):
-            self._update_handlers()
-        else:
-            for handler in self.logger.handlers:
-                handler.setLevel(self.log_level)
-            if self._shared_slaves:                    
-                self._update_shared_slaves()
-
         # if self._shared_slaves:
         #     self._update_shared_slaves()
+
+        # Проверяем, изменились ли параметры файла
+        file_params_changed = (
+            self.base_log_file != old_base_log_file or
+            self.log_max_bytes != old_max_bytes or
+            self.log_backup_count != old_backup_count or
+            self.use_timestamp != old_use_timestamp or
+            self._use_name_in_filename != old_use_name
+        )
+
+        if (
+            self._file_enabled != old_file or
+            self._console_enabled != old_console or
+            self._enabled != old_enabled or
+            file_params_changed
+        ):
+            self._update_handlers()
+            
+        else:
+            # обновить уровни
+            for handler in self.logger.handlers:
+                handler.setLevel(self.log_level)
+            if self._shared_slaves:
+                self._update_shared_slaves()
 
     def _reopen_file_handler_if_needed(self):
         """Переоткрывает файловый обработчик, если файл лога был удалён извне."""
@@ -593,7 +691,9 @@ class BaseAppLogger:
 
     def set_formatter(self, formatter: logging.Formatter):
         """Устанавливает новый форматтер для всех обработчиков."""
+
         self.formatter = formatter
+        
         for handler in self.logger.handlers:
             handler.setFormatter(formatter)
 
@@ -794,7 +894,29 @@ class BaseAppLogger:
     def has_shared_handler(self) -> bool:
         """Возвращает True, если логгер использует общий файловый обработчик."""
         return self._shared_handler
-    
+    def _sync_all_from_master(self):
+        """Копирует все настройки от мастера (для слейва)."""
+        if not self._master_logger:
+            return
+        
+        self.log_level = self._master_logger.log_level
+        self.logger.setLevel(self.log_level)
+        self.formatter = self._master_logger.formatter
+        self.base_log_file = self._master_logger.base_log_file
+        self.log_max_bytes = self._master_logger.log_max_bytes
+        self.log_backup_count = self._master_logger.log_backup_count
+        self.use_timestamp = self._master_logger.use_timestamp
+        self.log_args = self._master_logger.log_args
+        self._use_name_in_filename = self._master_logger._use_name_in_filename
+        self._file_enabled = self._master_logger._file_enabled
+
+        self._show_call_depth = self._master_logger._show_call_depth
+
+        # Обновляем обработчик, если он уже привязан
+        if self.file_handler:
+            self.file_handler.setLevel(self.log_level)
+            self.file_handler.setFormatter(self.formatter)
+
     def _update_handlers(self):
         """
         Обновляет набор обработчиков (консольный и файловый) в соответствии с текущими флагами:
@@ -807,74 +929,93 @@ class BaseAppLogger:
 
         После обновления собственных обработчиков синхронизирует зависимые логгеры (_shared_slaves).
         """
+        with self._handler_lock:
+            # self._clear_handlers_all() # Удаляем все обработчики
+            # self._update_console_handler() # Консольный обработчик
+            # self._file_handler_update() # Файловый обработчик
 
-        # self._clear_handlers_all() # Удаляем все обработчики
-        # self._update_console_handler() # Консольный обработчик
-        # self._file_handler_update() # Файловый обработчик
+            # self._clear_handlers_old() # Удаляем старые "свои" обработчики, если они были
 
-        # self._clear_handlers_old() # Удаляем старые "свои" обработчики, если они были
+            # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
+            #    Закрываем их только если они не являются общими с другими логгерами.
+            self._remove_console_handler(if_close_console_handler=True)
 
-        # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
-        #    Закрываем их только если они не являются общими с другими логгерами.
-        self._remove_console_handler(if_close_console_handler=True)
-
-        if self.file_handler and not self._shared_handler:
-            self._remove_file_handler(if_close_file_handler=True)
-
-
-        # Если логгер полностью отключён – больше ничего не добавляем
-        if not self._enabled:
-            self._save_handlers()
-            return
-        
-        # self._update_console_handler_if_on() # Консольный обработчик (если включён)
-
-        # Консольный обработчик (всегда создаётся заново, если включён)
-        if self._console_enabled:
-            self.console_handler = logging.StreamHandler()
-            self.console_handler.setLevel(self.log_level)
-            self.console_handler.setFormatter(self.formatter)
-            self.logger.addHandler(self.console_handler)
-        else:
-            self.console_handler = None
-
-        # # Создаём файловый обработчик только если не используется общий
-        # # if not self._shared_handler:
-        # #     self._file_handler_update_if_on() # Файловый обработчик (если включён) #  не создаём новый обработчик, если общий
-        # if not self._shared_handler:
-        #     # Проверяем эффективное состояние файлового логирования
-        #     if self.effective_enable_file_logging:
-        #         self._file_handler_update_if_on()
-
-        # Файловый обработчик – только если не используется общий и файловое логирование включено
-        if not self._shared_handler and self._file_enabled:
-            self.file_handler = self._create_file_handler()
-            self.logger.addHandler(self.file_handler)
-            # Важно: после создания обработчика проверяем существование файла
-            # и при необходимости переоткрываем (восстановление после удаления)
-            self._reopen_file_handler_if_needed()
-        elif self._shared_handler and self.file_handler is None and self._master_logger:
-            # Восстанавливаем общий обработчик от мастера
-            self.file_handler = self._master_logger.file_handler
-            if self.file_handler and self.file_handler not in self.logger.handlers:
-                self.logger.addHandler(self.file_handler)    
-        else:
-            # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
-            # Ничего не делаем, просто убеждаемся, что self.file_handler ссылается на него
-            pass
+            if self.file_handler and not self._shared_handler:
+                self._remove_file_handler(if_close_file_handler=True)
 
 
-        # Добавляем глобальные обработчики обратно (например, для GUI-логов)
-        # Убедимся, что глобальные обработчики присутствуют (они не удалялись, но на всякий случай)
-        for handler in self._global_handlers:
-            if handler not in self.logger.handlers:
-                self.logger.addHandler(handler)
+            # Если логгер полностью отключён – больше ничего не добавляем
+            if not self._enabled:
+                self._save_handlers()
+                return
+            
+            # self._update_console_handler_if_on() # Консольный обработчик (если включён)
 
-        # Синхронизируем зависимые логгеры (которые используют наш файловый обработчик)
-        if self._shared_slaves:
-            self._update_shared_slaves()
+            # Консольный обработчик (всегда создаётся заново, если включён)
+            if self._console_enabled:
+                self.console_handler = logging.StreamHandler()
+                self.console_handler.setLevel(self.log_level)
+                self.console_handler.setFormatter(self.formatter)
+                self.logger.addHandler(self.console_handler)
+            else:
+                self.console_handler = None
 
-        self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)               
+            # # Создаём файловый обработчик только если не используется общий
+            # # if not self._shared_handler:
+            # #     self._file_handler_update_if_on() # Файловый обработчик (если включён) #  не создаём новый обработчик, если общий
+            # if not self._shared_handler:
+            #     # Проверяем эффективное состояние файлового логирования
+            #     if self.effective_enable_file_logging:
+            #         self._file_handler_update_if_on()
+
+            # Файловый обработчик – только если не используется общий и файловое логирование включено
+            if not self._shared_handler and self._file_enabled:
+                self.file_handler = self._create_file_handler()
+                self.logger.addHandler(self.file_handler)
+                # Важно: после создания обработчика проверяем существование файла
+                # и при необходимости переоткрываем (восстановление после удаления)
+                self._reopen_file_handler_if_needed()
+
+            elif self._shared_handler and self._master_logger:
+                # Если обработчик мастера существует, используем его
+                if self._master_logger.file_handler is not None:
+                    if self.file_handler != self._master_logger.file_handler:
+                        # удаляем старый обработчик, если был
+                        if self.file_handler and self.file_handler in self.logger.handlers:
+                            self.logger.removeHandler(self.file_handler)
+
+                        self.file_handler = self._master_logger.file_handler
+                        self._sync_all_from_master()   # синхронизируем все параметры
+
+                        if self.file_handler not in self.logger.handlers:
+                            self.logger.addHandler(self.file_handler)
+
+                        self._reopen_file_handler_if_needed()
+                                        
+            else:
+                # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
+                # Ничего не делаем, просто убеждаемся, что self.file_handler ссылается на него
+                # У мастера нет обработчика – значит, мы больше не слейв
+                self._shared_handler = False
+                self._master_logger = None
+                # Пересоздаём собственный обработчик, если нужно
+                if self._file_enabled:
+                    self.file_handler = self._create_file_handler()
+                    self.logger.addHandler(self.file_handler)
+                    self._reopen_file_handler_if_needed()
+
+
+            # Добавляем глобальные обработчики обратно (например, для GUI-логов)
+            # Убедимся, что глобальные обработчики присутствуют (они не удалялись, но на всякий случай)
+            for handler in self._global_handlers:
+                if handler not in self.logger.handlers:
+                    self.logger.addHandler(handler)
+
+            # Синхронизируем зависимые логгеры (которые используют наш файловый обработчик)
+            if self._shared_slaves:
+                self._update_shared_slaves()
+
+            self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)               
 
     def _create_file_handler(self):
         """Создаёт файловый обработчик на основе текущих настроек."""
@@ -931,28 +1072,6 @@ class BaseAppLogger:
 
         # Иначе предполагаем, что пользователь указал директорию (без слеша)
         return self._build_log_file_in_dir(path)
-
-        # if os.path.exists(path):
-        #     if os.path.isdir(path):
-        #         # Это существующая директория
-        #         return self._build_log_file_in_dir(path)
-        #     else:
-        #         # Это существующий файл (или симлинк) – используем как есть
-        #         return path
-
-        # # Если base_log_file – это директория, а не файл
-        # if os.path.isdir(self.base_log_file):
-        #     log_dir = self.base_log_file
-        #     if self.use_name_in_filename:
-        #         timestamp = time.strftime("%Y%m%d_%H%M%S") if self.use_timestamp else ""
-        #         base_name = f"{self.name}_{timestamp}" if timestamp else self.name
-        #         filename = f"{base_name}.log"
-        #     else:
-        #         filename = f"{self.name}.log"
-        #     return os.path.join(log_dir, filename)
-        # else:
-        #     # Обратная совместимость: если передан полный путь, используем его
-        #     return self.base_log_file
 
     def _build_log_file_in_dir(self, dir_path: str) -> str:
         """Формирует имя файла внутри директории с учётом use_name_in_filename и use_timestamp."""
@@ -1085,6 +1204,7 @@ class BaseAppLogger:
 
     def get_shared_group(self) -> List['BaseAppLogger']:
         """Возвращает список всех логгеров, использующих тот же файловый обработчик."""
+
         if self._shared_handler and self._master_logger:
             return [self] + self._master_logger._shared_slaves
         
@@ -1137,6 +1257,7 @@ class BaseAppLogger:
         Обновляет всех зависимых логгеров (которые используют наш файловый обработчик)
         при изменении параметров мастера (уровень, путь, лимиты и т.д.).
         """
+
         if not self._shared_slaves:
             return
         
@@ -1161,6 +1282,7 @@ class BaseAppLogger:
             slave.base_log_file = self.base_log_file
             slave._use_name_in_filename = self._use_name_in_filename
             slave.use_timestamp = self.use_timestamp
+            slave._show_call_depth = self._show_call_depth
             
             slave.log_args = self.log_args
 
@@ -1256,6 +1378,7 @@ class BaseAppLogger:
                 self._use_name_in_filename = self.effective_use_name_in_filename
             else:
                 self._use_name_in_filename = bool(kwargs['use_name_in_filename'])
+
             need_rebuild = True
 
         if 'enable_file_logging' in kwargs:
@@ -1348,108 +1471,6 @@ class BaseAppLogger:
             # Если менялся только уровень, но обработчик не пересоздавался, тоже нужно синхронизировать
             # if 'level' in kwargs:
             self._update_shared_slaves()
-
-        # need_rebuild = False
-        # if not self._shared_handler:
-        #     need_rebuild = self._update_file_params(**kwargs)
-
-        # # Обновление флагов консоли/файла/полного отключения
-        # need_rebuild = self._update_flags(**kwargs) or need_rebuild
-
-        # # Если используется общий обработчик, запрещаем изменение файловых параметров
-        # if self._shared_handler and self._master_logger:
-        #     # Запрещаем менять параметры файла
-        #     file_params = [
-        #         'base_log_file', 'log_max_bytes', 'log_backup_count',
-        #         'use_name_in_filename', 'enable_file_logging', 'file_enabled'
-        #     ]
-        #     if any(p in kwargs for p in file_params):
-        #         self.logger.warning(
-        #             f"Логгер '{self.name}' использует общий обработчик от '{self._master_logger.name}'. "
-        #             f"Перенаправляю вызов reconfigure мастеру."
-        #         )
-        #         self._master_logger.reconfigure(**kwargs)
-        #         return
-
-        #     # attempted = [p for p in file_params if p in kwargs]
-        #     # if attempted:
-        #     #     self.logger.warning(
-        #     #         f"Логгер '{self.name}' использует общий обработчик. "
-        #     #         f"Изменение параметров {attempted} игнорируется. "
-        #     #         f"Управляйте файловым логированием через исходный логгер."
-        #     #     )
-        #         # # Удаляем запрещённые ключи, чтобы не вызывать перестроение
-        #         # for p in attempted:
-        #         #     kwargs.pop(p, None)
-
-        #         # # Если после удаления нет других параметров, выходим
-        #         # if not kwargs:
-        #         #     return    
-                
-        #         # # Если после удаления не осталось параметров, требующих перестройки, выходим
-        #         # if not any(k in kwargs for k in ('console_enabled', 'file_enabled', 'enabled')):
-        #         #     # Но уровень менять можно
-        #         #     if 'level' in kwargs:
-        #         #         self.logger.setLevel(self._parse_log_level(kwargs['level']))
-        #         #         for handler in self.logger.handlers:
-        #         #             handler.setLevel(self.log_level)
-        #         #     return
-
-        # else:
-        #     # Обрабатываем параметры файла (только если не были удалены на шаге 3)
-        #     if 'base_log_file' in kwargs:
-        #         self.base_log_file = kwargs['base_log_file']
-        #         need_rebuild = True
-
-        #     if 'log_max_bytes' in kwargs:
-        #         self.log_max_bytes = int(kwargs['log_max_bytes'])
-        #         need_rebuild = True
-
-        #     if 'log_backup_count' in kwargs:
-        #         self.log_backup_count = int(kwargs['log_backup_count'])
-        #         need_rebuild = True
-
-        #     if 'use_name_in_filename' in kwargs:
-        #         self._use_name_in_filename = kwargs['use_name_in_filename']
-        #         need_rebuild = True
-
-        #     if 'enable_file_logging' in kwargs:
-        #         warnings.warn("'enable_file_logging' устарел, используйте 'file_enabled'", DeprecationWarning)
-        #         self._file_enabled = kwargs['enable_file_logging']
-        #         need_rebuild = True
-
-        #     # Обновляем флаги включения/отключения
-        #     if 'console_enabled' in kwargs:
-        #         self._console_enabled = kwargs['console_enabled']
-        #         need_rebuild = True
-
-        #     if 'file_enabled' in kwargs:
-        #         self._file_enabled = kwargs['file_enabled']
-        #         need_rebuild = True
-
-        #     if 'enabled' in kwargs:
-        #         self._enabled = kwargs['enabled']
-        #         need_rebuild = True
-
-            
-        #     if 'use_timestamp' in kwargs:
-        #         self.use_timestamp = kwargs['use_timestamp']
-        #         need_rebuild = True
-
-        # # Отдельная настройка уровней для консоли и файла
-        # if 'console_level' in kwargs:
-        #     self.set_console_level(kwargs['console_level'])
-        # if 'file_level' in kwargs:
-        #     self.set_file_level(kwargs['file_level'])
-
-        # Если что-то изменилось, перестраиваем обработчики
-        # if need_rebuild:
-        #     self._update_handlers()
-        # else:
-        #     # Если менялся только уровень, обновляем обработчики на месте
-        #     if 'level' in kwargs:
-        #         for handler in self.logger.handlers:
-        #             handler.setLevel(self.log_level)
     
     @classmethod
     def disable_group_console(cls, name_prefix: str):
@@ -1674,6 +1695,7 @@ class BaseAppLogger:
     # ----------------------------------------------------------------------
     # Свойство enable_file_logging (для обратной совместимости)
     # ----------------------------------------------------------------------
+
     @property
     def enable_file_logging(self) -> bool:
         """Возвращает текущее состояние файлового логирования (bool)."""
@@ -1695,8 +1717,8 @@ class BaseAppLogger:
         else:
             self.turn_off_file_logging()
 
-
  # --- Свойства для динамического получения значений от родителя ---
+
     @property
     def use_name_in_filename(self) -> bool:
         """Возвращает текущее состояние флага использования имени экземпляра в имени файла."""
@@ -1751,6 +1773,7 @@ class BaseAppLogger:
         config, # конфигурация логгера (словарь)
         enable_file_logging=True, # включить файловое логирование 
         use_name_in_filename=False,  # использовать имя экземпляра в имени файла
+        show_call_depth=False, # показывать глубину вызова
         auto_share=True, # автоматический шаринг
     ):
         with cls._instances_lock:
@@ -1759,7 +1782,8 @@ class BaseAppLogger:
                 name=name,
                 config=config,
                 enable_file_logging=enable_file_logging,
-                use_name_in_filename=use_name_in_filename
+                use_name_in_filename=use_name_in_filename,
+                show_call_depth=show_call_depth, 
             )
             cls._instances[name] = instance
 
@@ -1778,7 +1802,6 @@ class BaseAppLogger:
                     ):
                         instance.share_file_handler_with(other)
                         break
-
 
             return instance
 
@@ -1805,7 +1828,8 @@ class BaseAppLogger:
         enable_file_logging: Union[str,bool] = False,
         use_name_in_filename: Union[str,bool] = False,
         share_file_with: Optional[str] = None,
-        auto_share: bool = False,
+        show_call_depth: bool = False,
+        auto_share: bool = False, # Пока не используется
     ) -> 'BaseAppLogger':
         """
         Возвращает экземпляр логгера с указанным именем.
@@ -1845,6 +1869,7 @@ class BaseAppLogger:
                 config=config,
                 enable_file_logging=enable_file_logging,
                 use_name_in_filename=use_name_in_filename,
+                show_call_depth=show_call_depth,
 
                 auto_share=False
             )
@@ -1943,101 +1968,146 @@ class BaseAppLogger:
         
         return modeles 
         
-    def _thec_skip_patterns_modeles(
-        self,
-        patterns_modeles
-    ):  
-        """
-        Проверяет, если при указанных параметрах modeles стоит пропустить
-        логирование.
+    # def _thec_skip_patterns_modeles(
+    #     self,
+    #     patterns_modeles
+    # ):  
+    #     """
+    #     Проверяет, если при указанных параметрах modeles стоит пропустить
+    #     логирование.
 
-        :param patterns_modeles: Словарь с параметрами для фильтрации.
-        :return: True - указатель есть в блок листе, False - нет в блок листе.
-        """
+    #     :param patterns_modeles: Словарь с параметрами для фильтрации.
+    #     :return: True - указатель есть в блок листе, False - нет в блок листе.
+    #     """
 
-        # Проверяем, если указатель на место вызова есть в общем блоке лист
-        for skip_patterns_modele in self.skip_patterns_modeles: 
-            # общий блок лист
-            for i in [
-                'filename', 
-                'function',
-            ]:
-                # Флаг, указывающий на то, что мы проверяем filename или function
-                if_filename  = (i == 'filename')
+
+
+    #     # Проверяем, если указатель на место вызова есть в общем блоке лист
+    #     for skip_patterns_modele in self.skip_patterns_modeles: 
+    #         # общий блок лист
+    #         for i in [
+    #             'filename', 
+    #             'function',
+    #         ]:
+    #             # Флаг, указывающий на то, что мы проверяем filename или function
+    #             if_filename  = (i == 'filename')
                 
-                # Проверяем, есть ли указатель на место вызова в skip
-                thec_skip = self._thec_patterns_modeles( 
-                    modeles     = skip_patterns_modele.get(i,{}) ,
-                    if_err_tip  = if_filename,
-                )
-                if thec_skip is None:
-                    # если нет в skip указателя на function, блок лист (так как filename пройден)
-                    # то возвращаем True
-                    return True  
+    #             # Проверяем, есть ли указатель на место вызова в skip
+    #             thec_skip = self._thec_patterns_modeles( 
+    #                 modeles     = skip_patterns_modele.get(i,{}) ,
+    #                 if_err_tip  = if_filename,
+    #             )
+    #             if thec_skip is None:
+    #                 # если нет в skip указателя на function, блок лист (так как filename пройден)
+    #                 # то возвращаем True
+    #                 return True  
                 
-                # Проверяем, есть ли указатель на место вызова в patterns_modeles
-                thec_modeles = self._thec_patterns_modeles(
-                    modeles     = patterns_modeles.get(i,{}) ,
-                    if_err_tip  = if_filename,
-                )
-                if thec_modeles is None:
-                    # если нет в skip указателя на function, блок лист (так как filename пройден)
-                    # то возвращаем True
-                    return True  
+    #             # Проверяем, есть ли указатель на место вызова в patterns_modeles
+    #             thec_modeles = self._thec_patterns_modeles(
+    #                 modeles     = patterns_modeles.get(i,{}) ,
+    #                 if_err_tip  = if_filename,
+    #             )
+    #             if thec_modeles is None:
+    #                 # если нет в skip указателя на function, блок лист (так как filename пройден)
+    #                 # то возвращаем True
+    #                 return True  
                     
-                # Проверяем, если указатель на место вызова есть в блок листе
-                for modele in thec_modeles: 
-                    # что проверяем на наличие в блок листе  
+    #             # Проверяем, если указатель на место вызова есть в блок листе
+    #             for modele in thec_modeles: 
+    #                 # что проверяем на наличие в блок листе  
                 
-                    if self._thec_patterns_modeles_is_none(
-                        modeles     = modele ,
-                        if_err_tip  = if_filename  , 
-                    ):
-                        # если нет в skip указателя на function, блок лист (так как filename пройден)
-                        # то возвращаем True
-                        return True
+    #                 if self._thec_patterns_modeles_is_none(
+    #                     modeles     = modele ,
+    #                     if_err_tip  = if_filename  , 
+    #                 ):
+    #                     # если нет в skip указателя на function, блок лист (так как filename пройден)
+    #                     # то возвращаем True
+    #                     return True
 
-                    if ( # проверка на наличие в блок листе
-                        modele in thec_skip
-                    ) or (
-                        modele == thec_skip
-                    ) :
-                        # если указатель на место вызова есть в общем блоке лист, то возвращаем True
-                        return True  
-                    else:
-                        # иначе мы проверяем, если указатель на место вызова есть в skip
-                        skip_thec = True
-                        for skip in thec_skip:
-                            if self._thec_patterns_modeles_is_none(
-                                modeles     = skip ,   
-                                if_err_tip  = if_filename  , 
-                            ):
-                                # если нет в skip указателя на function, блок лист (так как filename пройден)
-                                # то возвращаем True
-                                return True 
+    #                 if ( # проверка на наличие в блок листе
+    #                     modele in thec_skip
+    #                 ) or (
+    #                     modele == thec_skip
+    #                 ) :
+    #                     # если указатель на место вызова есть в общем блоке лист, то возвращаем True
+    #                     return True  
+    #                 else:
+    #                     # иначе мы проверяем, если указатель на место вызова есть в skip
+    #                     skip_thec = True
+    #                     for skip in thec_skip:
+    #                         if self._thec_patterns_modeles_is_none(
+    #                             modeles     = skip ,   
+    #                             if_err_tip  = if_filename  , 
+    #                         ):
+    #                             # если нет в skip указателя на function, блок лист (так как filename пройден)
+    #                             # то возвращаем True
+    #                             return True 
 
-                            # проверка на наличие каждого элимента по пути
-                            skip_thec_ = (
-                                (skip in modele) or (skip == modele)
-                            )
+    #                         # проверка на наличие каждого элимента по пути
+    #                         skip_thec_ = (
+    #                             (skip in modele) or (skip == modele)
+    #                         )
                             
-                            if if_filename or ( skip_thec) : 
-                                # если filename, то нудно проверить нахождение каждого элимента по пути. Если все есть, то переход на проверку function
-                                skip_thec = skip_thec and skip_thec_
-                            else: 
-                                # возможно вернуть  skip_thec_, а не continue
-                                continue
+    #                         if if_filename or ( skip_thec) : 
+    #                             # если filename, то нудно проверить нахождение каждого элимента по пути. Если все есть, то переход на проверку function
+    #                             skip_thec = skip_thec and skip_thec_
+    #                         else: 
+    #                             # возможно вернуть  skip_thec_, а не continue
+    #                             continue
 
-                        if not skip_thec:
-                            # если указатель на место вызова не находится в skip, то возвращаем False
-                            return False   
-            if not skip_thec:
-                # если указатель на место вызова не находится в skip, то возвращаем False
-                return False 
+    #                     if not skip_thec:
+    #                         # если указатель на место вызова не находится в skip, то возвращаем False
+    #                         return False   
+    #         if not skip_thec:
+    #             # если указатель на место вызова не находится в skip, то возвращаем False
+    #             return False 
 
-        # если указатель на место вызова не находится в общем блоке лист, то возвращаем True
-        return True
+    #     # если указатель на место вызова не находится в общем блоке лист, то возвращаем True
+    #     return True
+    def _thec_skip_patterns_modeles(self, patterns_modeles: dict) -> bool:
+        """
+        Проверяет, нужно ли пропустить фрейм (т.е. является ли он внутренним для логгера).
         
+        :param patterns_modeles: словарь с ключами 'filename' и 'function',
+                                каждый значение — кортеж из одного элемента (строка).
+        :return: True — фрейм нужно пропустить, False — не пропускать.
+        """
+        # Извлекаем filename и function из переданного словаря
+        frame_filename_tuple = patterns_modeles.get('filename')
+        frame_function_tuple = patterns_modeles.get('function')
+        
+        # Если нет ни того, ни другого — не пропускаем
+        if not frame_filename_tuple and not frame_function_tuple:
+            return False
+        
+        # Берём первый (и единственный) элемент
+        filename = frame_filename_tuple[0] if frame_filename_tuple else None
+        function = frame_function_tuple[0] if frame_function_tuple else None
+        
+        # Перебираем все правила пропуска
+        for rule in self.skip_patterns_modeles:
+            # Части пути, которые должны ВСЕ присутствовать в filename
+            required_parts = rule.get('filename', ())
+            # Имена функций, которые должны совпадать
+            required_functions = rule.get('function', ())
+            
+            # Проверка по filename: все required_parts должны быть подстроками в filename
+            if required_parts:
+                if not filename:
+                    continue   # нет filename, а правило требует — пропускаем правило
+                if not all(part in filename for part in required_parts):
+                    continue   # не все части найдены — правило не подходит
+            
+            # Проверка по function: если правило требует конкретные имена функций
+            if required_functions:
+                if not function or function not in required_functions:
+                    continue
+            
+            # Если дошли сюда — правило сработало, фрейм нужно пропустить
+            return True
+        
+        # Ни одно правило не подошло
+        return False    
 
 
 
@@ -2058,7 +2128,8 @@ class BaseAppLogger:
         вызовы изнутри модулей логирования. Если таких фреймов не найдено, берем последний
         фрейм (в конце стека).
         """
-        import inspect
+
+        # import inspect
         stack = inspect.stack()
         frame_info = stack[-1]
 
@@ -2092,9 +2163,15 @@ class BaseAppLogger:
         filename = frame_info.filename
         lineno = frame_info.lineno
         funcname = frame_info.function
+
         return f'File "{filename}", line {lineno}, in <{funcname}>'
     
-    def _format_message(self, caller_info: str, message: str) -> str:
+    def _format_message(
+        self, 
+        caller_info: str,
+        message: str,
+        depth: Optional[int] = None
+    ) -> str:
         """
         Форматирует итоговое сообщение, добавляя имя логгера и указатель.
 
@@ -2105,18 +2182,30 @@ class BaseAppLogger:
 
         message - текст сообщения, который будет добавлен к caller_info
 
-        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом табуляции '\t'
+        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом ">"
         """
-        return f"[{self.name}]\t{caller_info}:\t{message}"
+        if depth is None:
+            # Нет переданной глубины – определяем автоматически
+            if self._show_call_depth:
+                effective_depth = self._get_call_depth()
+            else:
+                effective_depth = self._get_current_depth()   # ручная глубина от декоратора (0 по умолчанию)
+        else:
+            # Переданная глубина (обычно из декоратора) имеет приоритет
+            effective_depth = depth
+
+        indent = ">" * effective_depth  #  уровень вложенности
+        
+        return f"[{self.name}]\t{indent} {caller_info}:\t{message}"
 
     # --------------------------------------------------------------------------
     # Прямые методы логирования
     # --------------------------------------------------------------------------
     
     def _formatted(
-            self,
-            message: str,  # текст сообщения, которое будет добавлено к caller_info
-            levels_up: int = None,  # глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
+        self,
+        message: str,  # текст сообщения, которое будет добавлено к caller_info
+        levels_up: int = None,  # глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
     ):
         """
         Форматирует итоговое сообщение, добавляя имя логгера и указатель.
@@ -2126,15 +2215,23 @@ class BaseAppLogger:
 
         Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом табуляции '\t'
         """
+
+        if not self._enabled:
+            return ""
+        
         if levels_up is None:
             levels_up = self._levels_up
 
         caller = self._get_caller_info(
             levels_up=levels_up
         )
+
+        depth = self._get_call_depth() if self._show_call_depth else None
+
         return self._format_message(
             caller, 
             message,
+            depth,
         )
         
     
@@ -2149,6 +2246,9 @@ class BaseAppLogger:
 
         message - текст сообщения, которое будет добавлено к caller_info
         """
+
+        if not self._enabled:
+            return
         self.logger.debug(
             self._formatted(
                 message = message,   
@@ -2166,6 +2266,10 @@ class BaseAppLogger:
 
         message - текст сообщения, которое будет добавлено к caller_info
         """
+
+        if not self._enabled:
+            return
+        
         self.logger.info(
             self._formatted(
                 message = message,   
@@ -2183,6 +2287,10 @@ class BaseAppLogger:
 
         message - текст сообщения, которое будет добавлено к caller_info
         """
+
+        if not self._enabled:
+            return
+        
         self.logger.warning(
             self._formatted(
                 message = message,   
@@ -2200,6 +2308,10 @@ class BaseAppLogger:
 
         message - текст сообщения, которое будет добавлено к caller_info
         """
+
+        if not self._enabled:
+            return
+        
         self.logger.error(
             self._formatted(
                 message = message,   
@@ -2217,6 +2329,10 @@ class BaseAppLogger:
 
         message - текст сообщения, которое будет добавлено к caller_info
         """
+
+        if not self._enabled:
+            return
+        
         self.logger.critical(
             self._formatted(
                 message = message,   
@@ -2236,6 +2352,10 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         exc_info - флаг, указывающий, нужно ли добавлять информацию об ошибке
         """
+
+        if not self._enabled:
+            return message
+    
         self.logger.error(
             self._formatted(
                 message = message,   
@@ -2249,12 +2369,13 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
 
     def log_execution_time(
-            self, 
-            description: str = "", 
-            level: int = logging.DEBUG,
-            log_args: Optional[bool] = None,
-            log_return: bool = False,
-        ) -> Callable:
+        self, 
+        description: str = "", 
+        level: int = logging.DEBUG,
+        log_args: Optional[bool] = None,
+        log_return: bool = False,
+        show_depth: bool = False, 
+    ) -> Callable:
         """
         Декоратор для логирования времени выполнения функции или метода.
 
@@ -2263,6 +2384,7 @@ class BaseAppLogger:
         :param log_args: если True, в начало логирования добавляются переданные аргументы.
                          Если None, используется значение из конфигурации логгера (self.log_args).
         """
+
         logger_instance = self
 
         if log_args is None:
@@ -2282,11 +2404,12 @@ class BaseAppLogger:
             level - уровень логирования
             log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
             """
+
             # func_filename = inspect.getfile(func)
             # func_lineno = func.__code__.co_firstlineno
             # func_name = func.__name__
             # is_async = inspect.iscoroutinefunction(func)
-        
+            
             # Если указанный уровень логирования не активен, возвращаем исходную функцию без обёртки
             if not logger_instance.logger.isEnabledFor(level):
                 return func
@@ -2314,6 +2437,9 @@ class BaseAppLogger:
                 caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
                 desc_part = f"{description} " if description else ""
 
+                # Определяем, нужно ли показывать глубину
+                _show_depth = show_depth
+
                 # Определяем, нужно ли логировать аргументы
                 effective_log_args = log_args
                 if func.__name__ == '__init__':
@@ -2321,20 +2447,31 @@ class BaseAppLogger:
 
                 def format_args(args, kwargs):
                     """Форматирует аргументы для логирования."""
+
                     if not effective_log_args:
                         return ""
+                    
                     display_args = args
+
                     if args and inspect.ismethod(func) and func.__self__ is not None:
                         display_args = args[1:]  # убираем self
+
                     args_str = ', '.join(repr(a) for a in display_args)
                     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())
                     all_args = ', '.join(filter(None, [args_str, kwargs_str]))
+
                     return f" with args: ({all_args})"
 
                 def log_start(args, kwargs):
                     args_part = format_args(args, kwargs)
                     start_msg = f"{desc_part}[Начало]{args_part}"
-                    formatted = logger_instance._format_message(caller_info, start_msg)
+
+                    if _show_depth:
+                        depth = logger_instance._get_current_depth()
+                        formatted = logger_instance._format_message(caller_info, start_msg, depth)
+                    else:
+                        formatted = logger_instance._format_message(caller_info, start_msg)
+
                     logger_instance.logger.log(level, formatted)
 
                 def log_end(
@@ -2357,7 +2494,12 @@ class BaseAppLogger:
                         #     ret_str = ret_str[:197] + "..."
                         end_msg += f" -> {ret_str}"
 
-                    formatted = logger_instance._format_message(caller_info, end_msg)
+                    if _show_depth:
+                        depth = logger_instance._get_current_depth()
+                        formatted = logger_instance._format_message(caller_info, end_msg, depth)
+                    else:
+                        formatted = logger_instance._format_message(caller_info, end_msg)
+
                     logger_instance.logger.log(level, formatted)
 
                 # Создаём синхронную обёртку
@@ -2372,49 +2514,72 @@ class BaseAppLogger:
                     #     raise e
                     #     # func_qualname
                     # return result
-                    
-                    log_start(args, kwargs)
-                    start_time = time.time()
-                    result = None
-                    error = None
-                    
-                    try:
-                        result = func(*args, **kwargs)
-                    except Exception as e:
-                        error = e
-                        # raise
-                    finally:
-                        execution_time = time.time() - start_time
-                        log_end(execution_time, error, result)
 
-                    if error:
-                        raise error
+                    if not logger_instance._enabled:
+                        return func(*args, **kwargs)
+
+                    if _show_depth:
+                        logger_instance._increase_depth()
+                    try:
+
+                        log_start(args, kwargs)
+                        start_time = time.time()
+                        result = None
+                        error = None
                         
-                    return result
+                        try:
+                            result = func(*args, **kwargs)
+                        except Exception as e:
+                            error = e
+                            # raise
+                        finally:
+                            execution_time = time.time() - start_time
+                            log_end(execution_time, error, result)
+
+                        if error:
+                            raise error
+                            
+                        return result
+                    
+                    finally:
+                        if _show_depth:
+                            logger_instance._decrease_depth()
 
                 # Создаём асинхронную обёртку
                 @wraps(func)
                 async def async_wrapper(*args, **kwargs):
-                    log_start(args, kwargs)
-                    start_time = time.time()
-                    result = None
-                    error = None
+                    
+                    if not logger_instance._enabled:
+                        return await func(*args, **kwargs)
+                    
+                    if _show_depth:
+                        logger_instance._increase_depth()
 
                     try:
-                        result = await func(*args, **kwargs)
-                    except Exception as e:
-                        error = e
-                        # raise
-                    finally:
-                        execution_time = time.time() - start_time
-                        log_end(execution_time, error, result)
+                        log_start(args, kwargs)
+                        start_time = time.time()
+                        result = None
+                        error = None
 
-                    if error:
-                        raise error
-                    
-                    return result
+                        try:
+                            result = await func(*args, **kwargs)
+                        except Exception as e:
+                            error = e
+                            # raise
+                        finally:
+                            execution_time = time.time() - start_time
+                            log_end(execution_time, error, result)
+
+                        if error:
+                            raise error
+                        
+                        return result
+                    finally:
+                        if _show_depth:
+                            logger_instance._decrease_depth()
                 
                 return async_wrapper if is_async else sync_wrapper
+            
             return make_wrapper()
         
             # @wraps(func)

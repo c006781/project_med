@@ -117,6 +117,10 @@ from typing import  Dict, Any
 
 # try:
 from app.utils.logger.base_logger import BaseAppLogger
+
+
+from app.config.config_manager.manager import get_config_env
+
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -159,22 +163,31 @@ class AppLogger(BaseAppLogger):
         # tt = sys.modules['app.config.config_manager.manager']
         return config
     
+    @classmethod
+    def reload_all_from_app_config(cls):
+        """Загружает текущую конфигурацию приложения и применяет ко всем логгерам."""
+        # from app.config.config_manager.manager import get_config_env
+        full_config = get_config_env()
+        cls.reload_all_from_config(full_config)
 
 # Автоматическое создание экземпляров при импорте
-if not AppLogger.thec_craete('system'):
+if not AppLogger.thec_create('system'):
     AppLogger.get_instance(
         name='system',
         # enable_file_logging=False,
         enable_file_logging=True,
-        use_name_in_filename=False   # используем общий файл из конфига
+        use_name_in_filename=False,   # используем общий файл из конфига
+        # share_file_with='system',
     )
 
-if not AppLogger.thec_craete('user'):
+if not AppLogger.thec_create('user'):
     AppLogger.get_instance(
         name='user',
         # enable_file_logging=False,    
-        enable_file_logging=True,    
-        use_name_in_filename=False # используем общий файл из конфига
+        # enable_file_logging=True,    
+        enable_file_logging='system',   # строка – значит использовать общий обработчик system
+        use_name_in_filename=False, # используем общий файл из конфига
+        # share_file_with='system',
     )
     
 if __name__ == '__main__':

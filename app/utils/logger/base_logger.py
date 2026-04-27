@@ -40,7 +40,7 @@ import sys
 import time
 from typing import (
     List, Optional, Dict, 
-    Any, Callable, Union
+    Any, Callable, Tuple, Union
 )
 
 import warnings
@@ -52,6 +52,7 @@ import contextvars
 
 from functools import wraps
 from logging.handlers import RotatingFileHandler
+import weakref
 
 class RobustRotatingFileHandler(RotatingFileHandler):
     """
@@ -73,18 +74,25 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                now = time.time()
-                # Проверяем существование файла, если прошло достаточно времени
-                if now - self._last_check > self._check_interval:
-                    with self._lock:
+                need_reopen = False
+                with self._lock:
+                    now = time.time()
+                    # Проверяем существование файла, если прошло достаточно времени
+                    if now - self._last_check > self._check_interval:
                         if not os.path.exists(self.baseFilename):
                             # Файл удалён – переоткрываем
-                            self._reopen()
+                            need_reopen = True
+                            # self._reopen()
 
                         self._last_check = now 
-                        
+
+                if need_reopen: # Файл удалён – переоткрываем
+                    with self._lock:
+                        self._reopen() 
+
                 super().emit(record)
                 return
+            
             except (FileNotFoundError, PermissionError) as e:
                 # Если файл внезапно исчез между проверкой и записью
                 # self.handleError(record)
@@ -181,6 +189,8 @@ class BaseAppLogger:
         'CRITICAL': logging.CRITICAL
     }
 
+    _watchdog_started = False
+    _watchdog_started_lock = threading.Lock()
 
     @classmethod
     def disable_exact(cls, name: str):
@@ -250,6 +260,11 @@ class BaseAppLogger:
     def start_file_watchdog(cls, interval_sec: float = 5.0):
         """Запускает фоновый поток, проверяющий существование файлов логов."""
         # import threading
+        with cls._watchdog_started_lock:
+            if cls._watchdog_started:
+                return
+            cls._watchdog_started = True
+
         def watch():
             while True:
                 time.sleep(interval_sec)  
@@ -313,9 +328,10 @@ class BaseAppLogger:
         with cls._instances_lock:
             # Добавляем ко всем уже созданным экземплярам
             for instance in cls._instances.values():
-                instance.logger.addHandler(handler)
-                # Обновляем список обработчиков экземпляра (опционально)
-                instance.handlers = instance.logger.handlers[:]
+                with instance._handler_lock:
+                    instance.logger.addHandler(handler)
+                    # Обновляем список обработчиков экземпляра (опционально)
+                    instance.handlers = instance.logger.handlers[:]
 
     @classmethod
     def remove_global_handler(cls, handler):
@@ -333,10 +349,11 @@ class BaseAppLogger:
         with cls._instances_lock:
             # Удаляем обработчик из каждого существующего экземпляра
             for instance in cls._instances.values():
-                instance.logger.removeHandler(handler)
+                with instance._handler_lock:
+                    instance.logger.removeHandler(handler)
 
-                # Обновляем список обработчиков экземпляра (опционально)
-                instance.handlers = instance.logger.handlers[:]
+                    # Обновляем список обработчиков экземпляра (опционально)
+                    instance.handlers = instance.logger.handlers[:]
             
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
@@ -411,6 +428,7 @@ class BaseAppLogger:
         enable_file_logging: Union[str,bool] = False,
         use_name_in_filename: Union[str,bool] = False,
         show_call_depth: bool = False,
+        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения 
     ): 
         """
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
@@ -436,16 +454,19 @@ class BaseAppLogger:
         """
 
         self.name = name
+        self._start_timestamp = time.strftime("%Y%m%d_%H%M%S")
 
         self._shared_handler = False    # флаг, что используется общий обработчик
         self._master_logger = None      # ссылка на логгер, предоставивший общий обработчик
         self._shared_slaves = []        # логгеры, которые используют мой обработчик
 
-        self._sync_full_state = True   # по умолчанию копируем флаги консоли/включения
+        # self._sync_full_state = True   # по умолчанию копируем флаги консоли/включения
 
         self._show_call_depth = show_call_depth
 
         self._handler_lock = threading.RLock()
+
+        self._sync_full_state = sync_full_state  # по умолчанию копируем флаги консоли/включения
 
         # self._console_enabled = True   # флаг для консольного вывода
         # self._enabled = True            # полное отключение логирования
@@ -455,19 +476,34 @@ class BaseAppLogger:
 
         # Сохраняем ссылки, если переданы строки
         if isinstance(enable_file_logging, str):
-            self._enable_file_logging_ref = enable_file_logging
-            self._enable_file_logging = False  # placeholder
+            # self._enable_file_logging_ref = enable_file_logging
+            # self._enable_file_logging = False  # placeholder
+            low = enable_file_logging.lower()
+            if low in ('true', 'false'):
+                enable_file_logging = low == 'true'
+                
+            else:
+                self._enable_file_logging_ref = enable_file_logging
+                enable_file_logging = True # файловое логирование включаем, но обработчик будет общим  
+
         else:
             self._enable_file_logging_ref = None
-            self._enable_file_logging = enable_file_logging
+
+        self._enable_file_logging = enable_file_logging
 
         if isinstance(use_name_in_filename, str):
-            self._use_name_in_filename_ref = use_name_in_filename
-            self._use_name_in_filename = False
+            low = use_name_in_filename.lower()
+            if low in ('true', 'false'):
+                use_name_in_filename = low == 'true'
+
+            else:
+                self._use_name_in_filename_ref = use_name_in_filename
+                use_name_in_filename = False             
+
         else:
             self._use_name_in_filename_ref = None
-            self._use_name_in_filename = use_name_in_filename
-
+            
+        self._use_name_in_filename = use_name_in_filename
         
         config = self._load_config(config)  # Обработка config: если строка, берём из другого экземпляра
         self._validate_config(config)       # Проверяем наличие обязательных ключей
@@ -620,10 +656,10 @@ class BaseAppLogger:
                 self.log_backup_count = int(config_dict['LOG_BACKUP_COUNT'])
 
             if 'LOG_ARGS' in config_dict:
-                self.log_args = config_dict['LOG_ARGS']
+                self.log_args = self._to_bool(config_dict['LOG_ARGS'])
 
             if 'show_call_depth' in config_dict:
-                self._show_call_depth = config_dict['show_call_depth']
+                self._show_call_depth = self._to_bool(config_dict['show_call_depth'])
 
             # if self._shared_slaves:
             #     self._update_shared_slaves()
@@ -718,6 +754,25 @@ class BaseAppLogger:
 
         return self._enable_file_logging
 
+    # def effective_enable_file_logging(self, _visited=None):
+    #     visited = set()
+    #     current = self
+    #     while True:
+    #         if current.name in visited:
+    #             current.logger.error(f"Циклическая ссылка в effective_enable_file_logging для {current.name}")
+    #             return current._enable_file_logging
+            
+    #         visited.add(current.name)
+    #         if current._enable_file_logging_ref is None:
+    #             return current._enable_file_logging
+            
+    #         parent = current._get_parent(current._enable_file_logging_ref)
+    #         if parent is None:
+    #             return current._enable_file_logging
+            
+    #         current = parent
+
+
     # @property # убираем изза циклических ссылок _visited
     def effective_use_name_in_filename(self, _visited=None) -> bool:
         if _visited is None:
@@ -758,7 +813,8 @@ class BaseAppLogger:
     def _get_parent(self, key) -> Optional['BaseAppLogger']:
         with BaseAppLogger._instances_lock:
         # with type(self)._instances_lock:
-            return self._instances.get(
+            # return self._instances.get(
+            return BaseAppLogger._instances.get(
                 key 
             )
         
@@ -767,15 +823,16 @@ class BaseAppLogger:
 
     def set_formatter(self, formatter: logging.Formatter):
         """Устанавливает новый форматтер для всех обработчиков."""
-
-        self.formatter = formatter
-        
-        for handler in self.logger.handlers:
-            handler.setFormatter(formatter)
+        with self._handler_lock:
+            self.formatter = formatter
+            
+            for handler in self.logger.handlers:
+                handler.setFormatter(formatter)
 
         if self._shared_slaves:
-            for slave in self._shared_slaves:
-                slave.set_formatter(formatter)
+            self._update_shared_slaves()
+            # for slave in self._shared_slaves:
+            #     slave.set_formatter(formatter)
 
     # def _reopen_file_handler(self):
     #     """Принудительно переоткрывает файловый обработчик (удаляет и создаёт заново)."""
@@ -804,6 +861,9 @@ class BaseAppLogger:
         Уровень logging, который будет использоваться для логгера, определяется параметром level.
         """
         self.logger.setLevel(level)
+        # super().setLevel(level)
+        if self._shared_slaves:
+            self._update_shared_slaves()
 
     def _validate_config (self, config):
         required_keys = [
@@ -840,6 +900,7 @@ class BaseAppLogger:
                 }
             else:
                 # родитель не найден – используем дефолт
+                print(f"WARNING: Logger '{self.name}' references unknown config '{config}'", file=sys.stderr)
                 config = None
 
         # Загружаем конфигурацию
@@ -847,6 +908,12 @@ class BaseAppLogger:
             config = self.get_default_config()
 
         return config
+
+    @staticmethod
+    def _to_bool(value):
+        if isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes')
+        return bool(value)
 
     def _init_config_load (self, config, enable_file_logging, use_name_in_filename):
         # Чтение флагов из конфигурации (с значениями по умолчанию)
@@ -857,14 +924,18 @@ class BaseAppLogger:
         # self.use_timestamp = config.get('use_timestamp', False)
 
         # Общие флаги (если есть специфичные для имени)
-        self._enabled = config.get(
-            f'{self.name}_enabled', 
-            config.get('enabled', True)
+        self._enabled = self._to_bool(
+            config.get(
+                f'{self.name}_enabled', 
+                config.get('enabled', True)
+            )
         )
 
-        self._console_enabled = config.get(
-            f'{self.name}_console_enabled', 
-            config.get('console_enabled', True)
+        self._console_enabled = self._to_bool(
+            config.get(
+                f'{self.name}_console_enabled', 
+                config.get('console_enabled', True)
+            )
         )
 
         # Определяем эффективное значение флагов (с учётом ссылок)
@@ -872,24 +943,34 @@ class BaseAppLogger:
         effective_name = self.effective_use_name_in_filename(_visited=None)
 
         # Берём значение из конфига, если нет — используем эффективное
-        self._file_enabled = config.get(
-            f'{self.name}_file_enabled', 
-            # config.get('file_enabled', enable_file_logging)
-            config.get('file_enabled', effective_file)
+        self._file_enabled = self._to_bool(
+            config.get(
+                f'{self.name}_file_enabled', 
+                # config.get('file_enabled', enable_file_logging)
+                config.get('file_enabled', effective_file)
+            )
         )
-        self._use_name_in_filename = config.get(
-            f'{self.name}_use_name_in_filename', 
-            # use_name_in_filename
-            effective_name
+        self._use_name_in_filename = self._to_bool(
+            config.get(
+                f'{self.name}_use_name_in_filename', 
+                # use_name_in_filename
+                effective_name
+            )
         )
 
         # Приводим к bool (на случай, если в конфиге оказалась строка)
         self._file_enabled = bool(self._file_enabled)
         self._use_name_in_filename = bool(self._use_name_in_filename)
 
-        self.use_timestamp = config.get(
-            f'{self.name}_use_timestamp', 
-            config.get('use_timestamp', False)
+        self.use_timestamp = self._to_bool(
+            config.get(
+                f'{self.name}_use_timestamp', 
+                config.get('use_timestamp', False)
+            )
+        )
+
+        self.log_args = self._to_bool(
+            config.get('LOG_ARGS', False)
         )
 
     def get_config(self) -> Dict[str, Any]:
@@ -1016,18 +1097,24 @@ class BaseAppLogger:
     def _update_file_handler_if_not_shared(
         self,
     ):
-        # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
-        # У мастера нет обработчика – значит, мы больше не слейв
+        with self._handler_lock:
+            if self.file_handler and self.file_handler in self.logger.handlers:
+                self.logger.removeHandler(self.file_handler)
 
-        self._shared_handler = False
-        self._master_logger = None
-        
-        # Пересоздаём собственный обработчик, если нужно
-        if self._file_enabled:
-            self._update_file_handler()
-            # self.file_handler = self._create_file_handler()
-            # self.logger.addHandler(self.file_handler)
-            # self._reopen_file_handler_if_needed()
+            self.file_handler = None
+
+            # Если используется общий обработчик, он уже присутствует (был добавлен через share_file_handler_with)
+            # У мастера нет обработчика – значит, мы больше не слейв
+
+            self._shared_handler = False
+            self._master_logger = None
+            
+            # Пересоздаём собственный обработчик, если нужно
+            if self._file_enabled:
+                self._update_file_handler()
+                # self.file_handler = self._create_file_handler()
+                # self.logger.addHandler(self.file_handler)
+                # self._reopen_file_handler_if_needed()
 
     # def _copy_master(self, master):
     #     if not master:
@@ -1067,8 +1154,10 @@ class BaseAppLogger:
         if self.file_handler != master_handler:
             if self.file_handler and self.file_handler in self.logger.handlers:
                 self.logger.removeHandler(self.file_handler)
+                # self.file_handler.close() # Не закрываем обработчик – он может использоваться другими слейвами
 
             self.file_handler = master_handler
+            self._reopen_file_handler_if_needed()
 
             self.log_level = master_log_level
             self.logger.setLevel(self.log_level)
@@ -1093,7 +1182,6 @@ class BaseAppLogger:
                 self.logger.addHandler(self.file_handler)
                 self._save_handlers()
 
-            self._reopen_file_handler_if_needed()
 
         else:
             # ничего не делается
@@ -1167,14 +1255,21 @@ class BaseAppLogger:
         self,
     ):
         if self._shared_handler:
-            self.logger.warning("_update_file_handler вызван для логгера с общим обработчиком")
+            self.logger.warning(
+                "_update_file_handler вызван для логгера с общим обработчиком"
+            )
             return
         
-        self.file_handler = self._create_file_handler()
-        self.logger.addHandler(self.file_handler)
-        # Важно: после создания обработчика проверяем существование файла
-        # и при необходимости переоткрываем (восстановление после удаления)
-        self._reopen_file_handler_if_needed()
+        try:
+            self.file_handler = self._create_file_handler()
+            self.logger.addHandler(self.file_handler)
+            # Важно: после создания обработчика проверяем существование файла
+            # и при необходимости переоткрываем (восстановление после удаления)
+            self._reopen_file_handler_if_needed()
+
+        except Exception as e:
+            self.logger.error(f"Не удалось создать файловый обработчик: {e}")
+            self._file_enabled = False
 
     def _update_console_handler (
         self,
@@ -1215,6 +1310,7 @@ class BaseAppLogger:
             if handler not in self.logger.handlers:
                 self.logger.addHandler(handler)
                 
+    
     def _update_handlers(self):
         """
         Обновляет набор обработчиков (консольный и файловый) в соответствии с текущими флагами:
@@ -1229,62 +1325,64 @@ class BaseAppLogger:
 
         Пытаться НЕ вызывать в блокировках. Блокировка self._handler_lock уже есть
         """
-        with self._handler_lock:
-            # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
-            #    Закрываем их только если они не являются общими с другими логгерами.
-            self._del_console_handler_and_file_handler(
-                if_close_console_handler=True,
-                if_close_file_handler=True,
-            )
-
-            # Если логгер полностью отключён – больше ничего не добавляем
-            if not self._enabled:
-                self._save_handlers()
-                return
-
-            
-            self._update_console_handler() # Консольный обработчик (всегда создаётся заново, если включён)
-
-            # Добавляем глобальные обработчики (под блокировкой)
-            
-            handlers_copy = self._get_all_handlers()
-            self._set_all_handlers(handlers_copy)
-
-            # self._save_handlers()
-            # if not self._shared_handler and self._file_enabled:
-            #     self._update_file_handler()
-
-            # Создаём свой файловый обработчик, если не общий и включён
-            # Файловый обработчик – только если не используется общий и файловое логирование включено
-
-            if not self._shared_handler and self._file_enabled:
-                self._update_file_handler()
-                
-            # Для остальных случаев (общий обработчик или потеря мастера) – не создаём,
-            # так как они будут обработаны позже без блокировки
-            # self._save_handlers()   # сохраняем состояние после базовой настройки
-
-        with BaseAppLogger._share_lock:
-            # Обновление общего обработчика (без удержания self._handler_lock)
-            if self._shared_handler and self._master_logger:
-                # Если обработчик мастера существует, используем его
-                self._update_file_handler_if_on()
-
-            elif self._shared_handler and not self._master_logger:
-                # Аномалия: флаг установлен, а мастера нет – сбрасываем
-                self.logger.warning(
-                    f"Логгер '{self.name}' имеет _shared_handler=True, но _master_logger отсутствует. Сбрасываю флаг."
+        def _tt():
+            with self._handler_lock:
+                # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
+                #    Закрываем их только если они не являются общими с другими логгерами.
+                self._del_console_handler_and_file_handler(
+                    if_close_console_handler=True,
+                    if_close_file_handler=True,
                 )
-                self._update_file_handler_if_not_shared()
+
+                # Если логгер полностью отключён – больше ничего не добавляем
+                if not self._enabled:
+                    return
                 
-            elif not self._shared_handler and self._file_enabled:
-                # уже создали, ничего не делаем
-                pass
+                self._update_console_handler() # Консольный обработчик (всегда создаётся заново, если включён)
 
-            else:
-                # Случай, когда не общий и файловое логирование выключено – ничего не делаем
-                pass                            
+                # Добавляем глобальные обработчики (под блокировкой)
+                
+                handlers_copy = self._get_all_handlers()
+                self._set_all_handlers(handlers_copy)
 
+                # self._save_handlers()
+                # if not self._shared_handler and self._file_enabled:
+                #     self._update_file_handler()
+
+                # Создаём свой файловый обработчик, если не общий и включён
+                # Файловый обработчик – только если не используется общий и файловое логирование включено
+
+                if not self._shared_handler and self._file_enabled:
+                    self._update_file_handler()
+                    
+                # Для остальных случаев (общий обработчик или потеря мастера) – не создаём,
+                # так как они будут обработаны позже без блокировки
+                # self._save_handlers()   # сохраняем состояние после базовой настройки
+
+            with BaseAppLogger._share_lock:
+                # Обновление общего обработчика (без удержания self._handler_lock)
+                if self._shared_handler and self._master_logger:
+                    # Если обработчик мастера существует, используем его
+                    self._update_file_handler_if_on()
+                    
+                    self._reopen_file_handler_if_needed()# Добавлено: при переключении на общий обработчик проверяем существование файла
+        
+                elif self._shared_handler and not self._master_logger:
+                    # Аномалия: флаг установлен, а мастера нет – сбрасываем
+                    self.logger.warning(
+                        f"Логгер '{self.name}' имеет _shared_handler=True, но _master_logger отсутствует. Сбрасываю флаг."
+                    )
+                    self._update_file_handler_if_not_shared()
+                    
+                elif not self._shared_handler and self._file_enabled:
+                    # уже создали, ничего не делаем
+                    pass
+
+                else:
+                    # Случай, когда не общий и файловое логирование выключено – ничего не делаем
+                    pass     
+
+        _tt()                
 
         # Добавляем глобальные обработчики обратно (например, для GUI-логов) (безопасное копирование)
         # Убедимся, что глобальные обработчики присутствуют (они не удалялись, но на всякий случай)
@@ -1299,12 +1397,9 @@ class BaseAppLogger:
 
         # for handler in handlers_copy:
         #     if handler not in self.logger.handlers:
-        #         self.logger.addHandler(handler)
-        
+        #         self.logger.addHandler(handler)        
         
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)  
-
-
         
         # Синхронизируем зависимые логгеры (которые используют наш файловый обработчик)  (уже вне блокировки) # намеренно тут, что бы 1н раз после всех условий...
         if self._shared_slaves: # Если есть зависимые логгеры
@@ -1394,13 +1489,20 @@ class BaseAppLogger:
 
     def _build_log_file_in_dir(self, dir_path: str) -> str:
         """Формирует имя файла внутри директории с учётом use_name_in_filename и use_timestamp."""
+        
+        timestamp = self._start_timestamp
+        
+        name =  f"{self.name}" if self.use_name_in_filename else f"app"
+        
         if self.use_name_in_filename:
-            timestamp = time.strftime("%Y%m%d_%H%M%S") if self.use_timestamp else ""
-            base_name = f"{self.name}_{timestamp}" if timestamp else self.name
-            filename = f"{base_name}.log"
-
+            timestamp = timestamp if self.use_timestamp else ""
+            name = f"{name}_{timestamp}" if timestamp else name
+            # filename = f"{base_name}.log"
         else:
-            filename = f"{self.name}.log"
+            if self.use_timestamp:
+                name = f"{name}_{timestamp}"
+
+        filename = f"{name}.log" 
 
         return os.path.join(dir_path, filename)    
 
@@ -1469,6 +1571,22 @@ class BaseAppLogger:
             return
 
         with BaseAppLogger._share_lock:
+        
+            if self._shared_handler:
+                # self.unshare_file_handler(if_update_handlers=False)
+                # Ручная отвязка без дополнительных блокировок
+                self._unshare_file_handler_master_logger()
+                with self._handler_lock:
+                    # При отвязке от старого мастера изменение self._shared_handler, self._master_logger, self.file_handler 
+                    # происходит без захвата self._handler_lock. Хотя эти поля защищены _share_lock (который уже захвачен), 
+                    # в других методах они могут читаться без _share_lock. Во избежание неконсистентности рекомендуется 
+                    # обернуть эти операции в self._handler_lock
+                    
+                    self._remove_file_handler(if_close_file_handler=False)
+                    self._shared_handler = False
+                    self._master_logger = None
+                    self.file_handler = None
+
             # Упорядочиваем локи по id объектов
             first, second = sorted([self, other], key=id)
             with first._handler_lock, second._handler_lock:
@@ -1541,8 +1659,10 @@ class BaseAppLogger:
                 #     other._shared_slaves.append(self)
 
                 # Регистрируем себя как слейва у мастера
-                if self not in other._shared_slaves:
-                    other._shared_slaves.append(self)
+                # if self not in other._shared_slaves:
+                if not any(ref() is self for ref in other._shared_slaves):
+                    # other._shared_slaves.append(self)
+                    other._shared_slaves.append(weakref.ref(self))
 
                 # self._sync_log_level_and_formatters() # Синхронизируем уровень и формат для файлового обработчика
 
@@ -1553,62 +1673,68 @@ class BaseAppLogger:
     def get_shared_group(self) -> List['BaseAppLogger']:
         """Возвращает список всех логгеров, использующих тот же файловый обработчик."""
         with BaseAppLogger._share_lock:
+            # if self._shared_handler and self._master_logger:
+            #     # слейв: возвращаем мастера и всех его слейвов
+            #     result = {self._master_logger}.union(self._master_logger._shared_slaves)
+            #     return list(result)
+            
+            # elif self._shared_slaves:
+            #     # мастер: возвращаем себя и всех слейвов
+            #     return [self] + self._shared_slaves
+            
+            # return [self]
             if self._shared_handler and self._master_logger:
-                # слейв: возвращаем мастера и всех его слейвов
-                # return [self] + self._master_logger._shared_slaves
-                # return [self._master_logger] + self._master_logger._shared_slaves
+                # Собираем мастера и всех живых слейвов
+                result = {self._master_logger}
+                for ref in self._master_logger._shared_slaves:
+                    slave = ref()
+                    if slave is not None:
+                        result.add(slave)
 
-                # result = {self._master_logger}
-                # result.update(self._master_logger._shared_slaves)
-                # return list(result)
-
-                # slaves = self._master_logger._shared_slaves.copy()
-                # if self not in slaves:
-                #     slaves.append(self)
-                    
-                # return [self._master_logger] + slaves
-
-                result = {self._master_logger}.union(self._master_logger._shared_slaves)
                 return list(result)
-
             
             elif self._shared_slaves:
-                # мастер: возвращаем себя и всех слейвов
-                return [self] + self._shared_slaves
+                result = {self}
+                for ref in self._shared_slaves:
+                    slave = ref()
+                    if slave is not None:
+                        result.add(slave)
+
+                return list(result)
             
             return [self]
     
-    def _sync_console_handler (self, slave) -> None:
-        # Если у зависимого логгера включён консольный вывод, убедимся, что его уровень совпадает
-        with self._handler_lock:                # блокировка мастера
-            level = self.log_level
+    # def _sync_console_handler (self, slave) -> None:
+    #     # Если у зависимого логгера включён консольный вывод, убедимся, что его уровень совпадает
+    #     with self._handler_lock:                # блокировка мастера
+    #         level = self.log_level
 
-        with slave._handler_lock:
-            if slave._console_enabled and slave.console_handler:
-                # slave.console_handler.setLevel(self.log_level)
-                slave.console_handler.setLevel(level)
+    #     with slave._handler_lock:
+    #         if slave._console_enabled and slave.console_handler:
+    #             # slave.console_handler.setLevel(self.log_level)
+    #             slave.console_handler.setLevel(level)
 
-    def _sync_formatters_slave (self, slave, formatter) :
-        with slave._handler_lock:
-            if slave.formatter != formatter:
-                slave.formatter = formatter
+    # def _sync_formatters_slave (self, slave, formatter) :
+    #     with slave._handler_lock:
+    #         if slave.formatter != formatter:
+    #             slave.formatter = formatter
 
-                # Для консольного обработчика тоже нужно обновить формат (если он есть)
-                if slave.console_handler:
-                    slave.console_handler.setFormatter(formatter)
+    #             # Для консольного обработчика тоже нужно обновить формат (если он есть)
+    #             if slave.console_handler:
+    #                 slave.console_handler.setFormatter(formatter)
 
-                if slave.file_handler:
-                    slave.file_handler.setFormatter(formatter)
+    #             if slave.file_handler:
+    #                 slave.file_handler.setFormatter(formatter)
 
-    def _sync_log_formatters(self, slave) -> None:
-        # Синхронизируем формат сообщений (если изменился у мастера)
-        with self._handler_lock:                # блокировка мастера
-            formatter = self.formatter
+    # def _sync_log_formatters(self, slave) -> None:
+    #     # Синхронизируем формат сообщений (если изменился у мастера)
+    #     with self._handler_lock:                # блокировка мастера
+    #         formatter = self.formatter
 
-        self._sync_formatters_slave(
-            slave = slave,
-            formatter = formatter
-        )  
+    #     self._sync_formatters_slave(
+    #         slave = slave,
+    #         formatter = formatter
+    #     )  
                 
     def _update_shared_slave(self, slave, master_state: dict) -> None:
         """
@@ -1623,7 +1749,9 @@ class BaseAppLogger:
             'use_name_in_filename', 'sync_full_state', 'show_call_depth', 'log_args'
             - 'console_enabled' (опционально, для консольного уровня)
         """
-
+        if slave is None:
+            return
+        
         with slave._handler_lock:
             master_handler = master_state['file_handler']
             if master_handler is None:
@@ -1634,6 +1762,8 @@ class BaseAppLogger:
                 if slave.file_handler and slave.file_handler in slave.logger.handlers:
                     slave.logger.removeHandler(slave.file_handler)
                 slave.file_handler = master_handler
+
+                slave._reopen_file_handler_if_needed()
 
             # 2. Добавляем обработчик, если его нет
             if master_handler not in slave.logger.handlers:
@@ -1666,9 +1796,49 @@ class BaseAppLogger:
             if slave._console_enabled and slave.console_handler:
                 slave.console_handler.setLevel(slave.log_level)
 
+            # 5.1. Синхронизация флагов консоли и включения, если требуется полная синхронизация
+            if master_state.get('sync_full_state', False):
+                slave._console_enabled = master_state['console_enabled']
+                slave._enabled = master_state['enabled']
+
             # 6. Сохраняем список обработчиков для GUI
             slave._save_handlers()
 
+
+    def _get_shared_slaves(self) -> Tuple[List, List]: 
+        # Разыменовываем слабые ссылки, удаляем мёртвые
+        active_slaves = []
+        dead_refs = []
+
+        for ref in self._shared_slaves[:]:
+            slave = ref()
+            if slave is not None:
+                active_slaves.append(slave)
+            else:
+                dead_refs.append(ref)
+        
+        return active_slaves, dead_refs
+    
+
+    def _get_master_state(self) -> Dict[str, Any]:
+        with self._handler_lock:
+            return  {
+                'file_handler': self.file_handler,
+                'log_level': self.log_level,
+                'formatter': self.formatter,
+                'base_log_file': self.base_log_file,
+                'log_max_bytes': self.log_max_bytes,
+                'log_backup_count': self.log_backup_count,
+                'use_timestamp': self.use_timestamp,
+                'use_name_in_filename': self._use_name_in_filename,
+                'sync_full_state': self._sync_full_state,
+                'show_call_depth': self._show_call_depth,
+                'log_args': self.log_args,
+
+                'console_enabled': self._console_enabled,
+                'enabled': self._enabled,
+                # 'sync_full_state': self._sync_full_state,
+            }  
     def _update_shared_slaves(self) -> None:
         """
         Обновляет всех зависимых логгеров (которые используют наш файловый обработчик)
@@ -1676,39 +1846,36 @@ class BaseAppLogger:
         """
 
         with BaseAppLogger._share_lock:
+
             if not self._shared_slaves:
                 return
             
-            slaves_copy = list(self._shared_slaves)   # делаем копию
+            # Разыменовываем слабые ссылки, удаляем мёртвые
+            active_slaves, dead_refs = self._get_shared_slaves() 
 
-        # Копируем параметры мастера (без блокировки, они меняются редко)
-        # или с блокировкой: with self._handler_lock: .
-        master_state = {
-            'file_handler': self.file_handler,
-            'log_level': self.log_level,
-            'formatter': self.formatter,
-            'base_log_file': self.base_log_file,
-            'log_max_bytes': self.log_max_bytes,
-            'log_backup_count': self.log_backup_count,
-            'use_timestamp': self.use_timestamp,
-            'use_name_in_filename': self._use_name_in_filename,
-            'sync_full_state': self._sync_full_state,
-            'show_call_depth': self._show_call_depth,
-            'log_args': self.log_args,
-        }    
+            for ref in dead_refs:
+                # Ссылка мертва – удаляем её из списка
+                self._shared_slaves.remove(ref)
 
-        for slave in slaves_copy:  # копия на случай изменения списка
+            if not active_slaves:
+                return
+            
+            # slaves_copy = list(active_slaves)   # делаем копию
+
+        master_state = self._get_master_state()
+        
+        if master_state['file_handler'] is None:
+            # У мастера нет файлового обработчика – ничего не синхронизируем
+            return
+
+        for slave in active_slaves:  # копия на случай изменения списка
             # Если зависимый логгер уже неактивен или отключил файловое логирование – пропускаем
             # if not slave._enabled or not slave._file_enabled:
             if not slave._enabled or not slave.effective_enable_file_logging(_visited=None):
                 continue
 
-
             self._update_shared_slave(slave, master_state )# Убедимся, что он всё ещё использует наш обработчик # внутри будет захвачен slave._handler_lock, но _share_lock уже свободен
 
-
-
-        
             # self._sync_log_formatters(slave) # Синхронизируем формат сообщений (если изменился у мастера)
         
             # self._sync_console_handler(slave) # Если у зависимого логгера включён консольный вывод, убедимся, что его уровень совпадает
@@ -1722,7 +1889,13 @@ class BaseAppLogger:
         if master is not None:
             # Удаляем текущий логгер из списка зависимых у мастера
             try:
-                master._shared_slaves.remove(self)
+                # master._shared_slaves.remove(self)
+                # Ищем слабую ссылку на self в списке мастера
+                for ref in master._shared_slaves[:]:
+                    if ref() is self:
+                        master._shared_slaves.remove(ref)
+                        break
+
             except ValueError:
                 # Если по какой-то причине нас там нет – игнорируем
                 self.logger.warning(
@@ -1791,27 +1964,45 @@ class BaseAppLogger:
 
         if 'use_timestamp' in kwargs:
             # self.use_timestamp = kwargs['use_timestamp']
-            self.use_timestamp = bool(kwargs['use_timestamp'])
+            self.use_timestamp = self._to_bool(kwargs['use_timestamp'])
             need_rebuild = True
 
         if 'use_name_in_filename' in kwargs:
             # self._use_name_in_filename = kwargs['use_name_in_filename']
-            if isinstance(kwargs['use_name_in_filename'], str):
-                self._use_name_in_filename = self.effective_use_name_in_filename(_visited=None)
-            else:
-                self._use_name_in_filename = bool(kwargs['use_name_in_filename'])
+            # if isinstance(kwargs['use_name_in_filename'], str):
+            #     self._use_name_in_filename = self.effective_use_name_in_filename(_visited=None)
+            # else:
+            #     self._use_name_in_filename = bool(kwargs['use_name_in_filename'])
 
+            # need_rebuild = True
+
+
+            val = kwargs['use_name_in_filename']
+            if isinstance(val, str):
+                self._use_name_in_filename = self._to_bool(val)
+            else:
+                self._use_name_in_filename = bool(val)
             need_rebuild = True
 
         if 'enable_file_logging' in kwargs:
             # warnings.warn("'enable_file_logging' устарел, используйте 'file_enabled'", DeprecationWarning)
             # self._file_enabled = bool(kwargs['enable_file_logging'])
-            if isinstance(kwargs['enable_file_logging'], str):
-                self._file_enabled = self.effective_enable_file_logging(_visited=None) 
-            else:
-                self._file_enabled = bool(kwargs['enable_file_logging'])
+            # if isinstance(kwargs['enable_file_logging'], str):
+            #     self._file_enabled = self.effective_enable_file_logging(_visited=None) 
+            # else:
+            #     self._file_enabled = bool(kwargs['enable_file_logging'])
       
+            # need_rebuild = True
+            val = kwargs['enable_file_logging']
+            if isinstance(val, str):
+                self._file_enabled = self._to_bool(val)
+            else:
+                self._file_enabled = bool(val)
             need_rebuild = True
+
+        if need_rebuild and self.file_handler:
+            # После изменения параметров, если обработчик существует, переоткрываем его
+            self._reopen_file_handler_if_needed()
 
         return need_rebuild
 
@@ -1823,15 +2014,15 @@ class BaseAppLogger:
         level_changed = False
 
         if 'console_enabled' in kwargs:
-            self._console_enabled = kwargs['console_enabled']
+            self._console_enabled = self._to_bool(kwargs['console_enabled'])
             need_rebuild = True
 
         if 'file_enabled' in kwargs:
-            self._file_enabled = kwargs['file_enabled']
+            self._file_enabled = self._to_bool(kwargs['file_enabled'])
             need_rebuild = True
 
         if 'enabled' in kwargs:
-            self._enabled = kwargs['enabled']
+            self._enabled = self._to_bool(kwargs['enabled'])
             need_rebuild = True
 
         # Отдельные уровни для консоли и файла (не требуют перестройки)
@@ -1875,6 +2066,10 @@ class BaseAppLogger:
         # Обновляем log_args (не влияет на обработчики, просто сохраняем)
         if 'log_args' in kwargs:
             self.log_args = kwargs['log_args']
+
+        if 'show_call_depth' in kwargs:
+            self._show_call_depth = self._to_bool(kwargs['show_call_depth'])
+            # не требует перестройки обработчиков
  
         # Обновляем параметры файла (сохраняем всегда, пересоздадим обработчики в конце)
 
@@ -1961,6 +2156,11 @@ class BaseAppLogger:
             old_file_enabled = self._file_enabled
             old_console_enabled = self._console_enabled
             old_enabled = self._enabled
+            old_base_log_file = self.base_log_file
+            old_max_bytes = self.log_max_bytes
+            old_backup_count = self.log_backup_count
+            old_use_timestamp = self.use_timestamp
+            old_use_name = self._use_name_in_filename
 
             # Применяем новые настройки
             # self._init_config_load(new_config, self._file_enabled, self._use_name_in_filename)
@@ -1981,12 +2181,22 @@ class BaseAppLogger:
                 self.log_backup_count = int(new_config['LOG_BACKUP_COUNT'])
 
             if 'LOG_ARGS' in new_config:
-                self.log_args = new_config['LOG_ARGS']
+                self.log_args = self._to_bool(new_config['LOG_ARGS'])
 
-            need_rebuild = (
+            if 'show_call_depth' in new_config:
+                self._show_call_depth = self._to_bool(new_config['show_call_depth'])
+            if 'use_timestamp' in new_config:
+                self.use_timestamp = self._to_bool(new_config['use_timestamp'])
+
+            need_rebuild = ( # Проверяем, изменились ли параметры, требующие перестройки обработчиков
                 self._file_enabled != old_file_enabled or
                 self._console_enabled != old_console_enabled or
-                self._enabled != old_enabled
+                self._enabled != old_enabled or
+                self.base_log_file != old_base_log_file or
+                self.log_max_bytes != old_max_bytes or
+                self.log_backup_count != old_backup_count or
+                self.use_timestamp != old_use_timestamp or
+                self._use_name_in_filename != old_use_name
             )
 
         # применение изменений БЕЗ блокировки
@@ -2097,12 +2307,11 @@ class BaseAppLogger:
         if self.effective_enable_file_logging(_visited=None):
             # логирование уже включено, вызвать self._reopen_file_handler_if_needed() и затем вернуться
 
-            if self.file_handler:
-                self._reopen_file_handler_if_needed()
-            else:
-                # Обработчик отсутствует – пересоздаём
+            if self.file_handler is None:
+                # Обработчик отсутствует – создаём его без перестройки всего
                 self._update_handlers()  
-                self._reopen_file_handler_if_needed()
+
+            self._reopen_file_handler_if_needed()
 
             return
     
@@ -2127,6 +2336,13 @@ class BaseAppLogger:
         """
         Отключает файловое логирование.
         """
+        if self._shared_slaves:
+            with BaseAppLogger._share_lock:
+                # Используем копию списка, так как он будет изменяться
+                for slave_ref in self._shared_slaves[:]:
+                    slave = slave_ref()
+                    if slave is not None:
+                        slave.unshare_file_handler(if_update_handlers=True)
 
         # Если файловое логирование уже отключено, ничего не делаем
         if not self.effective_enable_file_logging(_visited=None):
@@ -2267,7 +2483,7 @@ class BaseAppLogger:
 
 
     @classmethod
-    def thec_craete(
+    def thec_create(
         cls,
         name: str,
     ) -> bool:
@@ -2300,6 +2516,7 @@ class BaseAppLogger:
                 enable_file_logging=enable_file_logging,
                 use_name_in_filename=use_name_in_filename,
                 show_call_depth=show_call_depth, 
+                sync_full_state=sync_full_state,
             )
             instance._sync_full_state = sync_full_state
             cls._instances[name] = instance
@@ -2379,13 +2596,30 @@ class BaseAppLogger:
 
         # Если enable_file_logging – строка и это не 'true'/'false', используем как имя для шаринга
         if (
-            isinstance(enable_file_logging, str) and 
-            enable_file_logging.lower() not in ('true', 'false')
+            isinstance(enable_file_logging, str) 
+            # and enable_file_logging.lower() not in ('true', 'false')
         ):
-            share_file_with = enable_file_logging
-            enable_file_logging = True   # файловое логирование включаем, но обработчик будет общим
+            low = enable_file_logging.lower()
+            if low in ('true', 'false'):
+                enable_file_logging = low == 'true'
+                
+            else:
+                share_file_with = enable_file_logging
+                enable_file_logging = True # файловое логирование включаем, но обработчик будет общим  
+
+        if isinstance(use_name_in_filename, str):
+            low = use_name_in_filename.lower()
+            if low in ('true', 'false'):
+                use_name_in_filename = low == 'true'
+            else:
+                # небулева строка – оставляем как есть, конструктор разберётся
+                pass
         
         with cls._instances_lock:
+
+            if not cls._instances:
+                cls.start_file_watchdog()
+
             if not force_new and name in cls._instances:
                 # Если экземпляр с таким именем уже существует и force_new=False, возвращается существующий
                 return cls._get_instance(
@@ -2393,7 +2627,7 @@ class BaseAppLogger:
                     share_file_with=share_file_with,
                     sync_full_state=sync_full_state,
                 )
-
+            auto_share_flag = share_file_with is None
             instance = cls._create_instance_and_share( # Создаём новый экземпляр и применяем шаринг
                 name=name,
                 config=config,
@@ -2402,17 +2636,22 @@ class BaseAppLogger:
                 show_call_depth=show_call_depth,
                 sync_full_state=sync_full_state,
 
-                auto_share=False
+                # auto_share=False,
+                auto_share=auto_share_flag
             )
 
             # После создания – если нужен шаринг, применяем
             if share_file_with:
                 other = cls._instances.get(share_file_with)
-                if other and other.file_handler:
+                # if other and other.file_handler:
+                if other and other._file_enabled and other.file_handler:
                     instance.share_file_handler_with(
                         other,
                         sync_full_state=sync_full_state,
                     )
+                else:
+                    # Логгируем предупреждение, но продолжаем
+                    print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}'", file=sys.stderr)
 
             return instance
 
@@ -2696,8 +2935,8 @@ class BaseAppLogger:
 
                 if self._thec_skip_patterns_modeles( # если входит в список пропуска, то след итерация
                     patterns_modeles={
-                        'filename':(frame_info.filename),
-                        'function':(frame_info.function),  
+                        'filename':(frame_info.filename,),
+                        'function':(frame_info.function,),  
                     }
                 ):
                     continue

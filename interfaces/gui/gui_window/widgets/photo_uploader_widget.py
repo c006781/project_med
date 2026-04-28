@@ -43,7 +43,7 @@ class PhotoDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -55,13 +55,13 @@ class PhotoDelegate(QStyledItemDelegate):
         self.logger = AppLogger.get_instance(
             name=f"gui.PhotoDelegate",
             enable_file_logging='user',
-            use_name_in_filename='user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
 
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -97,7 +97,7 @@ class PhotoDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
         enable_file_logging  = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -130,7 +130,7 @@ class TextEditDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -140,14 +140,14 @@ class TextEditDelegate(QStyledItemDelegate):
         self.logger = AppLogger.get_instance(
             name='gui.TextEditDelegate',
             enable_file_logging='user',
-            use_name_in_filename='user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
         self.logger.debug("TextEditDelegate инициализирован")
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -165,7 +165,7 @@ class TextEditDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -179,7 +179,7 @@ class TextEditDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -203,7 +203,7 @@ class TextEditDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -214,7 +214,7 @@ class TextEditDelegate(QStyledItemDelegate):
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -251,7 +251,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -267,7 +267,7 @@ class PhotoUploaderWidget(QWidget):
         self.logger = AppLogger.get_instance(
             name='gui.PhotoUploaderWidget',
             enable_file_logging='user',
-            use_name_in_filename='user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
         self.logger.debug("Инициализация PhotoUploaderWidget")
 
@@ -290,7 +290,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -301,7 +301,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -321,7 +321,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -354,7 +354,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -381,7 +381,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -405,7 +405,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -441,7 +441,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -517,7 +517,7 @@ class PhotoUploaderWidget(QWidget):
     AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -533,7 +533,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -556,7 +556,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -584,7 +584,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -597,7 +597,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -699,7 +699,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -715,7 +715,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -733,7 +733,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -753,7 +753,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -769,7 +769,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -788,7 +788,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -810,7 +810,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -861,7 +861,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -889,7 +889,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -961,7 +961,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1000,7 +1000,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1019,7 +1019,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1030,7 +1030,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1054,7 +1054,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1073,7 +1073,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1110,7 +1110,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1164,7 +1164,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1232,7 +1232,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1288,7 +1288,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1334,7 +1334,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1396,7 +1396,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1437,7 +1437,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1454,7 +1454,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1505,7 +1505,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1521,7 +1521,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1537,7 +1537,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
         enable_file_logging='system',
-        use_name_in_filename='system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1562,7 +1562,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1597,7 +1597,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1639,7 +1639,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1694,7 +1694,7 @@ class PhotoUploaderWidget(QWidget):
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )

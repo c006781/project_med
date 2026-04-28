@@ -164,34 +164,71 @@ class AppConfigManager(BaseConfigManager):
     конфигурации .env (старый способ), но могут быть переопределены в файле.
     """
     _config_path = 'config.msgpack'
-    _defaults = {}
+    # _defaults = {}
     # Значения по умолчанию (копия того, что сейчас возвращает get_config_env)
+    # _defaults = {
+    #     'YANDEX_TOKEN': '----',
+    #     # 'database_local_path': './clinic.db',
+    #     'database_local_path': os.path.join(
+    #         '.',
+    #         'clinic.db'
+    #     ),
+    #     'database_remote_path': 'Проекты/test/bd/clinic.db',
+    #     # 'database_remote_path': 'Проекты/test/bd/clinic.db',
+    #     'LOG_LEVEL': 'DEBUG',
+    #     # 'LOG_LEVEL': 'INFO',
+    #     # 'LOG_FILE': './logs/app.log',
+    #     'LOG_FILE': os.path.join(
+    #         '.',
+    #         'logs',
+    #         'app.log'
+    #     ),
+    #     'LOG_MAX_BYTES': str(10 * 1024 * 1024),  # 10 MB
+    #     'LOG_BACKUP_COUNT': '5',
+    #     # 'PHOTOS_STORAGE_PATH': './photos',
+    #     'PHOTOS_STORAGE_PATH': os.path.join(
+    #         '.', 
+    #         'photos'
+    #     ),
+    #     # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
+    #     'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
+    # }
+
+    # app/config/config_manager/manager.py
+
     _defaults = {
         'YANDEX_TOKEN': '----',
-        # 'database_local_path': './clinic.db',
-        'database_local_path': os.path.join(
-            '.',
-            'clinic.db'
-        ),
+        'database_local_path': os.path.join('.', 'clinic.db'),
         'database_remote_path': 'Проекты/test/bd/clinic.db',
-        # 'database_remote_path': 'Проекты/test/bd/clinic.db',
+        
+        # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
+        'LOG_DIR': os.path.join('.', 'logs'),          # вместо LOG_FILE
         'LOG_LEVEL': 'DEBUG',
-        # 'LOG_LEVEL': 'INFO',
-        # 'LOG_FILE': './logs/app.log',
-        'LOG_FILE': os.path.join(
-            '.',
-            'logs',
-            'app.log'
-        ),
-        'LOG_MAX_BYTES': str(10 * 1024 * 1024),  # 10 MB
+        'LOG_MAX_BYTES': str(10 * 1024 * 1024),       # 10 MB
         'LOG_BACKUP_COUNT': '5',
-        # 'PHOTOS_STORAGE_PATH': './photos',
-        'PHOTOS_STORAGE_PATH': os.path.join(
-            '.', 
-            'photos'
-        ),
-        # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
-        'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
+        'LOG_ARGS': 'False',
+        
+        # Для системного логгера
+        'system_enabled': 'True',
+        'system_console_enabled': 'True',
+        'system_file_enabled': 'True',
+        'system_LEVEL': 'DEBUG',
+        
+        # Для пользовательского логгера
+        'user_enabled': 'True',
+        'user_console_enabled': 'True',
+        'user_file_enabled': 'True',
+        'user_LEVEL': 'DEBUG',
+        
+        # Общие флаги (могут быть переопределены специфичными)
+        'enabled': 'True',
+        'console_enabled': 'True',
+        'file_enabled': 'True',
+        'use_timestamp': 'False',      # добавлять ли дату в имя файла лога
+        
+        # Остальные настройки
+        'PHOTOS_STORAGE_PATH': os.path.join('.', 'photos'),
+        'APP_CONFIG_PATH': 'config.msgpack', # путь по умолчанию для файла конфигурации
     }
 
     # Хранилище для экземпляров (Multiton)

@@ -44,7 +44,7 @@ def main():
     logger = AppLogger.get_instance(
         name = 'gui',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     )
     logger.info("GUI приложение запущено")
 

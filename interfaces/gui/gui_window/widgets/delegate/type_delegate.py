@@ -314,7 +314,7 @@ class CompleterStringDelegate(QStyledItemDelegate):
         self.logger = AppLogger.get_instance(
             name='gui.CompleterStringDelegate',
             enable_file_logging='user',
-            use_name_in_filename='user'
+           use_name_in_filename =  False, #  True, # 'user'
         )
         self._get_unique_values_func = get_unique_values_func
         self._column = column

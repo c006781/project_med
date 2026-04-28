@@ -32,7 +32,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -43,7 +43,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
         self.logger = AppLogger.get_instance(
             name = f"gui.AdvancedFilterProxyModel",
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
 
         self._column_filters: Dict[int, Dict[str, Any]] = {}  # column -> {active, operator, value, value2}  # номер столбца
@@ -54,7 +54,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name='AdvancedFilterProxyModel',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -95,7 +95,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -129,7 +129,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -147,7 +147,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )        
@@ -158,7 +158,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -173,7 +173,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -190,7 +190,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -206,7 +206,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -272,7 +272,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -327,7 +327,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance(
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -360,7 +360,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     @AppLogger.get_instance( 
         name = 'AdvancedFilterProxyModel',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -383,7 +383,7 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
     # @AppLogger.get_instance(
     #     name = 'AdvancedFilterProxyModel',
     #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
+    #    use_name_in_filename =  False, #  True, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )

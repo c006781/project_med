@@ -17,7 +17,7 @@
     logger.info("Сообщение")
 
     # Логгер, который пишет в отдельный файл с именем экземпляра
-    logger_db = BaseAppLogger.get_instance(name='db', use_name_in_filename=True)
+    logger_db = BaseAppLogger.get_instance(name='db', use_name_in_filename = True)
     logger_db.info("Сообщение для db")
 
     # Логгер только в консоль (без файла)
@@ -73,9 +73,9 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         """
         max_retries = 3
         for attempt in range(max_retries):
-            try:
-                need_reopen = False
-                with self._lock:
+            with self._lock:
+                try:
+                    need_reopen = False
                     now = time.time()
                     # Проверяем существование файла, если прошло достаточно времени
                     if now - self._last_check > self._check_interval:
@@ -86,26 +86,26 @@ class RobustRotatingFileHandler(RotatingFileHandler):
 
                         self._last_check = now 
 
-                if need_reopen: # Файл удалён – переоткрываем
-                    with self._lock:
-                        self._reopen() 
+                    if need_reopen: # Файл удалён – переоткрываем
+                        with self._lock:
+                            self._reopen() 
 
-                super().emit(record)
-                return
-            
-            except (FileNotFoundError, PermissionError) as e:
-                # Если файл внезапно исчез между проверкой и записью
-                # self.handleError(record)
-                if attempt == max_retries - 1:
-                    self.handleError(record)
+                    super().emit(record)
                     return
                 
-                with self._lock:
-                    self._reopen()
+                except (FileNotFoundError, PermissionError) as e:
+                    # Если файл внезапно исчез между проверкой и записью
+                    # self.handleError(record)
+                    if attempt == max_retries - 1:
+                        self.handleError(record)
+                        return
+                    
+                    with self._lock:
+                        self._reopen()
 
-            except Exception:
-                self.handleError(record)
-                return
+                except Exception:
+                    self.handleError(record)
+                    return
 
     def _reopen(self):
         """Принудительно закрывает и открывает файл."""
@@ -136,7 +136,7 @@ class BaseAppLogger:
 
     Методы класса:
         get_instance(name='default', force_new=False, config=None,
-                     enable_file_logging=True, use_name_in_filename=False) -> BaseAppLogger:
+                     enable_file_logging=True, use_name_in_filename = False) -> BaseAppLogger:
             Возвращает экземпляр логгера с указанным именем.
 
 
@@ -426,7 +426,7 @@ class BaseAppLogger:
         name: str,
         config: Optional[Union[str,Dict[str, Any]]] = None,
         enable_file_logging: Union[str,bool] = False,
-        use_name_in_filename: Union[str,bool] = False,
+        use_name_in_filename: Union[str,bool] = False, # 
         show_call_depth: bool = False,
         sync_full_state = True,    # по умолчанию копируем флаги консоли/включения 
     ): 
@@ -455,6 +455,11 @@ class BaseAppLogger:
 
         self.name = name
         self._start_timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+        # Создаём логгер немедленно
+        self.logger = logging.getLogger(name)
+        self.logger.propagate = False
+        self.logger.setLevel(logging.DEBUG)  # временно
 
         self._shared_handler = False    # флаг, что используется общий обработчик
         self._master_logger = None      # ссылка на логгер, предоставивший общий обработчик
@@ -508,7 +513,7 @@ class BaseAppLogger:
         config = self._load_config(config)  # Обработка config: если строка, берём из другого экземпляра
         self._validate_config(config)       # Проверяем наличие обязательных ключей
 
-        self._init_config_load( # Чтение флагов из конфигурации (с значениями по умолчанию)
+        _config = self._init_config_load( # Чтение флагов из конфигурации (с значениями по умолчанию)
             config, 
             # enable_file_logging, 
             # use_name_in_filename
@@ -516,23 +521,37 @@ class BaseAppLogger:
             None
         )
 
-        # Преобразуем строковые значения в нужные типы
-        try:
-            self.log_level = self._parse_log_level(config['LOG_LEVEL'])
-            self.base_log_file = config['LOG_FILE']
-            self.log_max_bytes = int(config['LOG_MAX_BYTES'])
-            self.log_backup_count = int(config['LOG_BACKUP_COUNT'])
-            self.log_args = config.get('LOG_ARGS', False)   # новый атрибут
-        except ValueError as e:
-            raise ValueError(f"Ошибка преобразования параметров логирования: {e}")
 
+
+        # # Преобразуем строковые значения в нужные типы
+        # try:
+        #     self.log_level = self._parse_log_level(config['LOG_LEVEL'])
+        #     self.base_log_file = config['LOG_FILE']
+        #     self.log_max_bytes = int(config['LOG_MAX_BYTES'])
+        #     self.log_backup_count = int(config['LOG_BACKUP_COUNT'])
+        #     self.log_args = config.get('LOG_ARGS', False)   # новый атрибут
+        # except ValueError as e:
+        #     raise ValueError(f"Ошибка преобразования параметров логирования: {e}")
+        self._apply_config(_config) 
+
+        # self.log_level = _config['LEVEL']
+        # self.base_log_file = _config['FILE']
+        # self.log_max_bytes = _config['MAX_BYTES']
+        # self.log_backup_count = _config['BACKUP_COUNT']
+        # self.log_args = _config['ARGS']   # новый атрибут
 
 
         # Создаём логгер (без обработчиков)
-        self.logger = logging.getLogger(name)
+        # self.logger = logging.getLogger(name)
+
         self.logger.setLevel(self.log_level)
+        # if 'LEVEL' in _config:
+        #     self.logger.setLevel(self.log_level)
+
         self.logger.propagate = False  # предотвращаем дублирование, если есть корневой логгер
         self.formatter = logging.Formatter(self.LOG_FORMAT)# Формат сообщений
+
+
 
         # # Консольный обработчик (всегда)
         # self.console_handler = logging.StreamHandler()
@@ -555,6 +574,94 @@ class BaseAppLogger:
 
         
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
+
+    def _get_settings_parent(self) -> Optional['BaseAppLogger']:
+        """Возвращает логгер, от которого следует наследовать настройки (конфиг)."""
+        with self._handler_lock:
+            # Приоритет: мастер файлового обработчика > ссылка enable_file_logging > ссылка use_name_in_filename
+            if self._master_logger:
+                return self._master_logger
+            
+            if self._enable_file_logging_ref:
+                return self._get_parent(self._enable_file_logging_ref)
+            
+            if self._use_name_in_filename_ref:
+                return self._get_parent(self._use_name_in_filename_ref)
+        
+        return None
+
+    def _get_config_with_inheritance(
+        self,
+        config: Dict[str, Any],
+        key: str,
+        default: Any = None,
+        _visited: Optional[set] = None
+    ) -> Any:
+        """
+        Возвращает значение параметра из конфига с учётом иерархии мастер-слейв.
+        Приоритет (по убыванию):
+        1. {self.name}_{key}
+        2. если есть мастер, значение от мастера (рекурсивно, с его именем)
+        3. LOG_{key}
+        4. key
+        5. default
+        """
+        
+        if _visited is None:
+            _visited = set()
+
+        # if self.name in _visited:
+        #     # защита от циклической ссылки
+        #     return default
+        
+        if id(self) in _visited:          # используем id для защиты от циклов
+            return default
+        
+        _visited.add(id(self))
+
+        # 1. Специфичный ключ для текущего логгера
+        specific_key = f"{self.name}_{key}"
+        if specific_key in config:
+            return config[specific_key]
+
+        # # 2. Если есть мастер, запросить у него (рекурсивно)
+        # if self._master_logger:
+        #     return self._master_logger._get_config_with_inheritance(
+        #         config, key, default, _visited
+        #     )
+
+        # 2. Родитель по настройкам (мастер файлового обработчика или ссылка enable_file_logging)
+        parent = self._get_settings_parent()
+        if parent:
+            return parent._get_config_with_inheritance(config, key, default, _visited)
+
+        # 3. Общий префикс LOG_
+        log_key = f"LOG_{key}"
+        if log_key in config:
+            return config[log_key]
+
+        # 4. Простой ключ
+        if key in config:
+            return config[key]
+
+        # 5. default
+        return default
+
+    def _apply_config(self, config_dict: Dict[str, Any]) -> None:
+        """Применяет настройки из словаря, полученного от _init_config_load."""
+        self._enabled = config_dict['enabled']
+        self._console_enabled = config_dict['console_enabled']
+        self._file_enabled = config_dict['file_enabled']
+        self._use_name_in_filename = config_dict['use_name_in_filename']
+        self.use_timestamp = config_dict['use_timestamp']
+        self.log_args = config_dict['ARGS']
+        self.log_level = config_dict['LEVEL']
+        self.base_log_file = config_dict['FILE']
+        self.log_max_bytes = config_dict['MAX_BYTES']
+        self.log_backup_count = config_dict['BACKUP_COUNT']
+        self._show_call_depth = config_dict['show_call_depth']
+
+        self.logger.setLevel(self.log_level)
 
     def _get_call_depth(self) -> int:
         """
@@ -619,10 +726,10 @@ class BaseAppLogger:
 
     def apply_config_from_dict(self, config_dict: Dict[str, Any]):
         """Применяет настройки из словаря (аналогично reload_from_config, но без перенаправления мастеру)."""
-        # Если используем общий обработчик, перенаправляем мастеру
-        if self._shared_handler and self._master_logger:
-            self._master_logger.apply_config_from_dict(config_dict)
-            return
+        # # Если используем общий обработчик, перенаправляем мастеру
+        # if self._shared_handler and self._master_logger:
+        #     self._master_logger.apply_config_from_dict(config_dict)
+        #     return
         
         need_rebuild = False
         with self._handler_lock:      
@@ -638,28 +745,30 @@ class BaseAppLogger:
 
             # Обновляем текущие параметры
 
-            self._init_config_load(config_dict, None, None)
+            self._update_config_from(config_dict)
+    
+            # self._init_config_load(config_dict, None, None)
 
-            # обновление остальных параметров
+            # # обновление остальных параметров
 
-            if 'LOG_LEVEL' in config_dict:
-                self.log_level = self._parse_log_level(config_dict['LOG_LEVEL'])
-                self.logger.setLevel(self.log_level)
+            # if 'LOG_LEVEL' in config_dict:
+            #     self.log_level = self._parse_log_level(config_dict['LOG_LEVEL'])
+            #     self.logger.setLevel(self.log_level)
 
-            if 'LOG_FILE' in config_dict:
-                self.base_log_file = config_dict['LOG_FILE']
+            # if 'LOG_FILE' in config_dict:
+            #     self.base_log_file = config_dict['LOG_FILE']
 
-            if 'LOG_MAX_BYTES' in config_dict:
-                self.log_max_bytes = int(config_dict['LOG_MAX_BYTES'])
+            # if 'LOG_MAX_BYTES' in config_dict:
+            #     self.log_max_bytes = int(config_dict['LOG_MAX_BYTES'])
 
-            if 'LOG_BACKUP_COUNT' in config_dict:
-                self.log_backup_count = int(config_dict['LOG_BACKUP_COUNT'])
+            # if 'LOG_BACKUP_COUNT' in config_dict:
+            #     self.log_backup_count = int(config_dict['LOG_BACKUP_COUNT'])
 
-            if 'LOG_ARGS' in config_dict:
-                self.log_args = self._to_bool(config_dict['LOG_ARGS'])
+            # if 'LOG_ARGS' in config_dict:
+            #     self.log_args = self._to_bool(config_dict['LOG_ARGS'])
 
-            if 'show_call_depth' in config_dict:
-                self._show_call_depth = self._to_bool(config_dict['show_call_depth'])
+            # if 'show_call_depth' in config_dict:
+            #     self._show_call_depth = self._to_bool(config_dict['show_call_depth'])
 
             # if self._shared_slaves:
             #     self._update_shared_slaves()
@@ -866,17 +975,45 @@ class BaseAppLogger:
             self._update_shared_slaves()
 
     def _validate_config (self, config):
-        required_keys = [
-            'LOG_LEVEL', 
-            'LOG_FILE', 
-            'LOG_MAX_BYTES', 
-            'LOG_BACKUP_COUNT'
-        ]
+        """
+        Проверка конфигурации на наличие обязательных ключей
+        """
+        # required_keys = [
+        #     'LOG_LEVEL', 
+        #     'LOG_FILE', 
+        #     'LOG_MAX_BYTES', 
+        #     'LOG_BACKUP_COUNT'
+        # ]
 
-        missing_keys = [key for key in required_keys if key not in config]
 
-        if missing_keys:
-            raise ValueError(f"Отсутствуют обязательные ключи конфигурации: {missing_keys}")        
+        required_keys = ['LEVEL', 'FILE', 'MAX_BYTES', 'BACKUP_COUNT']
+        for key in required_keys:
+            # Проверяем, есть ли хотя бы один из возможных вариантов ключа
+            variants = self._get_key_name_config(key)
+            if not any(v in config for v in variants):
+                raise ValueError(f"Отсутствует обязательный ключ '{key}' (ни один из вариантов {variants})")     
+
+        # required_keys = []
+
+        # for key in [
+        #     'LEVEL', 
+        #     'FILE', 
+        #     'MAX_BYTES', 
+        #     'BACKUP_COUNT'
+        # ]:
+        #     thec = False
+        #     for key2 in self._get_key_name_config(key):
+        #         if key2  in config:
+        #             required_keys.append(key2)
+        #             thec = True
+
+        #     if not thec:
+        #         raise ValueError(f"Отсутствует обязательный ключ '{key}' в конфигурации")
+
+        # missing_keys = [key for key in required_keys if key not in config]
+
+        # if missing_keys:
+        #     raise ValueError(f"Отсутствуют обязательные ключи конфигурации: {missing_keys}")        
 
     def _load_config (self, config):
         # Обработка config: если строка, берём из другого экземпляра
@@ -887,17 +1024,35 @@ class BaseAppLogger:
             parent = self._get_parent(config)
 
             if parent is not None:
+                # config = {
+                #     'LOG_LEVEL' : dict(
+                #         zip(
+                #             BaseAppLogger.level_map.values(), 
+                #             BaseAppLogger.level_map.keys()
+                #         )
+                #     )[parent.log_level],
+                #     'LOG_FILE' : parent.base_log_file,
+                #     'LOG_MAX_BYTES' : parent.log_max_bytes,
+                #     'LOG_BACKUP_COUNT' : parent.log_backup_count,
+                # }
                 config = {
-                    'LOG_LEVEL' : dict(
-                        zip(
-                            BaseAppLogger.level_map.values(), 
-                            BaseAppLogger.level_map.keys()
-                        )
-                    )[parent.log_level],
-                    'LOG_FILE' : parent.base_log_file,
-                    'LOG_MAX_BYTES' : parent.log_max_bytes,
-                    'LOG_BACKUP_COUNT' : parent.log_backup_count,
-                }
+                'LOG_LEVEL': dict(
+                    zip(
+                        BaseAppLogger.level_map.values(), 
+                        BaseAppLogger.level_map.keys()
+                    )
+                )[parent.log_level],
+                'LOG_FILE': parent.base_log_file,
+                'LOG_MAX_BYTES': parent.log_max_bytes,
+                'LOG_BACKUP_COUNT': parent.log_backup_count,
+                'enabled': parent._enabled,
+                'console_enabled': parent._console_enabled,
+                'file_enabled': parent._file_enabled,
+                'use_name_in_filename': parent._use_name_in_filename,
+                'use_timestamp': parent.use_timestamp,
+                'LOG_ARGS': parent.log_args,
+                'show_call_depth': parent._show_call_depth,
+            }
             else:
                 # родитель не найден – используем дефолт
                 print(f"WARNING: Logger '{self.name}' references unknown config '{config}'", file=sys.stderr)
@@ -914,8 +1069,34 @@ class BaseAppLogger:
         if isinstance(value, str):
             return value.lower() in ('true', '1', 'yes')
         return bool(value)
+    
+    def _get_config_param (
+            self, 
+            config: Dict[str, Any],
+            key: str, 
+            default: Any=None, 
+            fun: Callable=None
+        )-> Any:
 
-    def _init_config_load (self, config, enable_file_logging, use_name_in_filename):
+        if key == 'LEVEL':
+            0==0
+
+        temp = self._get_config(
+            config= config, 
+            key= key, 
+            default= default,
+        )
+
+        if fun is not None:
+            try:
+                temp = fun(temp)
+            except ValueError as e:
+                raise ValueError(f"Ошибка преобразования параметров логирования: {e}")
+            
+        return temp
+
+        
+    def _init_config_load (self, config, enable_file_logging, use_name_in_filename)-> Dict[str, Any]:
         # Чтение флагов из конфигурации (с значениями по умолчанию)
         # self._enabled = config.get('enabled', True)
         # self._console_enabled = config.get('console_enabled', True)
@@ -923,64 +1104,175 @@ class BaseAppLogger:
         # self._use_name_in_filename = config.get('use_name_in_filename', bool(use_name_in_filename))
         # self.use_timestamp = config.get('use_timestamp', False)
 
-        # Общие флаги (если есть специфичные для имени)
-        self._enabled = self._to_bool(
-            config.get(
-                f'{self.name}_enabled', 
-                config.get('enabled', True)
-            )
-        )
-
-        self._console_enabled = self._to_bool(
-            config.get(
-                f'{self.name}_console_enabled', 
-                config.get('console_enabled', True)
-            )
-        )
 
         # Определяем эффективное значение флагов (с учётом ссылок)
         effective_file = self.effective_enable_file_logging(_visited=None)
         effective_name = self.effective_use_name_in_filename(_visited=None)
 
-        # Берём значение из конфига, если нет — используем эффективное
-        self._file_enabled = self._to_bool(
-            config.get(
-                f'{self.name}_file_enabled', 
-                # config.get('file_enabled', enable_file_logging)
-                config.get('file_enabled', effective_file)
-            )
-        )
-        self._use_name_in_filename = self._to_bool(
-            config.get(
-                f'{self.name}_use_name_in_filename', 
-                # use_name_in_filename
-                effective_name
-            )
-        )
+        # Общие флаги (если есть специфичные для имени)
+        result = {}
+        
+        # temp = self._get_config(config, 'FILE', None)
+        temp = self._get_config_with_inheritance(config, 'FILE', None)
+        if temp is None:
+            # temp = self._get_config(config, 'DIR', 'logs')
+            temp = self._get_config_with_inheritance(config, 'DIR', 'logs')
 
-        # Приводим к bool (на случай, если в конфиге оказалась строка)
-        self._file_enabled = bool(self._file_enabled)
-        self._use_name_in_filename = bool(self._use_name_in_filename)
+        result['FILE'] = temp
 
-        self.use_timestamp = self._to_bool(
-            config.get(
-                f'{self.name}_use_timestamp', 
-                config.get('use_timestamp', False)
-            )
-        )
+        del temp  
 
-        self.log_args = self._to_bool(
-            config.get('LOG_ARGS', False)
-        )
+        for key, default, fun  in [
+            ['enabled',True,self._to_bool],
+            ['console_enabled',True,self._to_bool],
+            ['file_enabled',effective_file, self._to_bool],
+            ['use_name_in_filename',effective_name, self._to_bool],
+            ['use_timestamp',False, self._to_bool],
+            ['ARGS', False, self._to_bool],
+
+            ['LEVEL', 'DEBUG', self._parse_log_level],
+            # ['FILE', None, None],
+            # ['DIR', None, None],
+            ['MAX_BYTES', 10*1024*1024, int],
+            ['BACKUP_COUNT', 5, int],
+            ['show_call_depth', False, self._to_bool],
+        ]:  
+            if key == 'LEVEL':
+                0==0
+            
+            # result[key] = self._get_config_param(
+            #     config= config, 
+            #     key= key, 
+            #     default= default,
+            #     fun= fun,
+            # )
+
+            raw = self._get_config_with_inheritance(config, key, default)
+            result[key] = fun(raw) if fun is not None else raw
+            
+
+     
+
+        # self._enabled = self._to_bool(
+        #     # config.get(
+        #     #     f'{self.name}_enabled', 
+        #     #     config.get('enabled', True)
+        #     # )
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key= 'enabled', 
+        #     #     default= True,
+        #     # )    
+        #     # 
+        #     _config['enabled']            
+        # )
+
+        # self._console_enabled = self._to_bool(
+        #     # config.get(
+        #     #     f'{self.name}_console_enabled', 
+        #     #     config.get('console_enabled', True)
+        #     # )
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key= 'console_enabled', 
+        #     #     default= True,
+        #     # )  
+        #     _config['console_enabled']
+        # )
+
+
+        # # Берём значение из конфига, если нет — используем эффективное
+        # self._file_enabled = self._to_bool(
+        #     # config.get(
+        #     #     f'{self.name}_file_enabled', 
+        #     #     # config.get('file_enabled', enable_file_logging)
+        #     #     config.get('file_enabled', effective_file)
+        #     # )
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key= 'file_enabled',
+        #     #     default= effective_file,
+        #     # )  
+        #     _config['file_enabled']
+        # )
+        # self._use_name_in_filename = self._to_bool(
+        #     # config.get(
+        #     #     f'{self.name}_use_name_in_filename', 
+        #     #     # use_name_in_filename
+        #     #     effective_name
+        #     # )
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key= 'use_name_in_filename',
+        #     #     default= effective_name,
+        #     # )  
+        #     _config['use_name_in_filename']
+        # )
+
+        # # Приводим к bool (на случай, если в конфиге оказалась строка)
+        # self._file_enabled = bool(self._file_enabled)
+        # self._use_name_in_filename = bool(self._use_name_in_filename)
+
+        # self.use_timestamp = self._to_bool(
+        #     # config.get(
+        #     #     f'{self.name}_use_timestamp', 
+        #     #     config.get('use_timestamp', False)
+        #     # )
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key= 'use_timestamp', 
+        #     #     default= False,
+        #     # )  
+        #     _config['use_timestamp']
+        # )
+
+        # self.log_args = self._to_bool(
+        #     # config.get('LOG_ARGS', False)
+        #     # self._get_config(
+        #     #     config= config, 
+        #     #     key=  'ARGS', 
+        #     #     default= False,
+        #     # )  
+        #     _config['ARGS']
+        # )
+
+        # # сохраняем во внутренние атрибуты
+        # self._enabled = result['enabled']
+        # self._console_enabled = result['console_enabled']
+        # self._file_enabled = result['file_enabled']
+        # self._use_name_in_filename = result['use_name_in_filename']
+        # self.use_timestamp = result['use_timestamp']
+        # self.log_args = result['ARGS']
+        
+        # self.log_level = result['LEVEL']
+        # self.base_log_file = result['FILE']
+        # self.log_max_bytes = result['MAX_BYTES']
+        # self.log_backup_count = result['BACKUP_COUNT']
+        # self._show_call_depth = result['show_call_depth']
+
+
+        return result
+
+    def dump_config(self) -> Dict[str, Any]:
+        return {
+            'name': self.name,
+            'enabled': self._enabled,
+            'console_enabled': self._console_enabled,
+            'file_enabled': self._file_enabled,
+            'level': logging.getLevelName(self.log_level),
+            'use_name_in_filename': self._use_name_in_filename,
+            'use_timestamp': self.use_timestamp,
+            'log_FILE': self._get_log_file(),
+        }
 
     def get_config(self) -> Dict[str, Any]:
         """Возвращает текущую конфигурацию логгера."""
         return {
             'level': logging.getLevelName(self.log_level),
-            'base_log_file': self.base_log_file,
-            'log_max_bytes': self.log_max_bytes,
-            'log_backup_count': self.log_backup_count,
-            'log_args': self.log_args,
+            'base_log_FILE': self.base_log_file,
+            'log_MAX_BYTES': self.log_max_bytes,
+            'log_BACKUP_COUNT': self.log_backup_count,
+            'log_ARGS': self.log_args,
             'enabled': self._enabled,
             'console_enabled': self._console_enabled,
             'file_enabled': self._file_enabled,
@@ -1067,6 +1359,7 @@ class BaseAppLogger:
         
         self.log_level = self._master_logger.log_level # устанавливаем уровень
         self.logger.setLevel(self.log_level) # устанавливаем уровень
+
         self.formatter = self._master_logger.formatter # устанавливаем формат
         self.base_log_file = self._master_logger.base_log_file # устанавливаем имя файла
         self.log_max_bytes = self._master_logger.log_max_bytes # устанавливаем максимальный размер файла
@@ -1127,18 +1420,18 @@ class BaseAppLogger:
     #         visited = set()
     #         # Копируем все настройки мастера, которые могут измениться
     #         return {
-    #             'master_log_level': master.log_level,
+    #             'master_log_LEVEL': master.log_level,
     #             'master_formatter': master.formatter,
-    #             'master_base_log_file': master.base_log_file,
-    #             'master_max_bytes': master.log_max_bytes,
-    #             'master_backup_count': master.log_backup_count,
+    #             'master_base_log_FILE': master.base_log_file,
+    #             'master_MAX_BYTES': master.log_max_bytes,
+    #             'master_BACKUP_COUNT': master.log_backup_count,
     #             'master_timestamp': master.use_timestamp,
     #             # 'master_file_enabled': master.effective_enable_file_logging(),
     #             'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
     #             # 'master_use_name': master.effective_use_name_in_filename(),
     #             'master_use_name': master.effective_use_name_in_filename(_visited=visited),
     #             'master_sync_full': master._sync_full_state,
-    #             'master_args': master.log_args,
+    #             'master_ARGS': master.log_args,
     #             'master_show_depth': master._show_call_depth,
     #         }
 
@@ -1228,6 +1521,21 @@ class BaseAppLogger:
                 
                 visited = set()
                 # Копируем все настройки мастера, которые могут измениться
+                # master_ =  {
+                #     'master_log_LEVEL': master.log_level,
+                #     'master_formatter': master.formatter,
+                #     'master_base_log_FILE': master.base_log_file,
+                #     'master_MAX_BYTES': master.log_max_bytes,
+                #     'master_BACKUP_COUNT': master.log_backup_count,
+                #     'master_timestamp': master.use_timestamp,
+                #     # 'master_file_enabled': master.effective_enable_file_logging(),
+                #     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                #     # 'master_use_name': master.effective_use_name_in_filename(),
+                #     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                #     'master_sync_full': master._sync_full_state,
+                #     'master_ARGS': master.log_args,
+                #     'master_show_depth': master._show_call_depth,
+                # }
                 master_ =  {
                     'master_log_level': master.log_level,
                     'master_formatter': master.formatter,
@@ -1235,9 +1543,7 @@ class BaseAppLogger:
                     'master_max_bytes': master.log_max_bytes,
                     'master_backup_count': master.log_backup_count,
                     'master_timestamp': master.use_timestamp,
-                    # 'master_file_enabled': master.effective_enable_file_logging(),
                     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                    # 'master_use_name': master.effective_use_name_in_filename(),
                     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
                     'master_sync_full': master._sync_full_state,
                     'master_args': master.log_args,
@@ -1649,6 +1955,9 @@ class BaseAppLogger:
                 self._shared_handler = True     # признак общего обработчика
                 self._master_logger = other     # запоминаем, от кого взяли обработчик (мастер)
 
+                # # Применяем уровень к логгеру
+                # self.logger.setLevel(self.log_level)
+
                 self._sync_all_from_master() # Синхронизируем уровень и формат для файлового обработчика # копирует все параметры, включая _sync_full_state от мастера
                 
                 if sync_full_state is not None:
@@ -1667,8 +1976,13 @@ class BaseAppLogger:
                 # self._sync_log_level_and_formatters() # Синхронизируем уровень и формат для файлового обработчика
 
                 self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
+
+                # Перестраиваем обработчики, чтобы новый уровень применился к консоли и файлу
+                self._update_handlers()
                 
                 self._reopen_file_handler_if_needed() # Проверяем, нужно ли переоткрыть файловый обработчик
+
+
 
     def get_shared_group(self) -> List['BaseAppLogger']:
         """Возвращает список всех логгеров, использующих тот же файловый обработчик."""
@@ -1743,10 +2057,10 @@ class BaseAppLogger:
         :param slave: экземпляр слейва (BaseAppLogger)
         :param master_state: словарь с ключами:
             - 'file_handler': файловый обработчик мастера
-            - 'log_level': уровень логирования мастера
+            - 'log_LEVEL': уровень логирования мастера
             - 'formatter': форматтер мастера
-            - 'base_log_file', 'log_max_bytes', 'log_backup_count', 'use_timestamp',
-            'use_name_in_filename', 'sync_full_state', 'show_call_depth', 'log_args'
+            - 'base_log_FILE', 'log_MAX_BYTES', 'log_BACKUP_COUNT', 'use_timestamp',
+            'use_name_in_filename', 'sync_full_state', 'show_call_depth', 'log_ARGS'
             - 'console_enabled' (опционально, для консольного уровня)
         """
         if slave is None:
@@ -1770,19 +2084,19 @@ class BaseAppLogger:
                 slave.logger.addHandler(master_handler)
 
             # 3. Синхронизируем параметры (уровень, формат, лимиты и т.д.)
-            slave.log_level = master_state['log_level']
+            slave.log_level = master_state['log_LEVEL']
             slave.logger.setLevel(slave.log_level)
             if slave.file_handler:
                 slave.file_handler.setLevel(slave.log_level)
 
-            slave.log_max_bytes = master_state['log_max_bytes']
-            slave.log_backup_count = master_state['log_backup_count']
-            slave.base_log_file = master_state['base_log_file']
+            slave.log_max_bytes = master_state['log_MAX_BYTES']
+            slave.log_backup_count = master_state['log_BACKUP_COUNT']
+            slave.base_log_file = master_state['base_log_FILE']
             slave._use_name_in_filename = master_state['use_name_in_filename']
             slave.use_timestamp = master_state['use_timestamp']
             slave._sync_full_state = master_state['sync_full_state']
             slave._show_call_depth = master_state['show_call_depth']
-            slave.log_args = master_state['log_args']
+            slave.log_args = master_state['log_ARGS']
 
             # 4. Форматтер
             if slave.formatter != master_state['formatter']:
@@ -1824,16 +2138,16 @@ class BaseAppLogger:
         with self._handler_lock:
             return  {
                 'file_handler': self.file_handler,
-                'log_level': self.log_level,
+                'log_LEVEL': self.log_level,
                 'formatter': self.formatter,
-                'base_log_file': self.base_log_file,
-                'log_max_bytes': self.log_max_bytes,
-                'log_backup_count': self.log_backup_count,
+                'base_log_FILE': self.base_log_file,
+                'log_MAX_BYTES': self.log_max_bytes,
+                'log_BACKUP_COUNT': self.log_backup_count,
                 'use_timestamp': self.use_timestamp,
                 'use_name_in_filename': self._use_name_in_filename,
                 'sync_full_state': self._sync_full_state,
                 'show_call_depth': self._show_call_depth,
-                'log_args': self.log_args,
+                'log_ARGS': self.log_args,
 
                 'console_enabled': self._console_enabled,
                 'enabled': self._enabled,
@@ -1950,16 +2264,16 @@ class BaseAppLogger:
         Возвращает True, если требуется перестроить обработчики.
         """
         need_rebuild = False
-        if 'base_log_file' in kwargs:
-            self.base_log_file = kwargs['base_log_file']
+        if 'base_log_FILE' in kwargs:
+            self.base_log_file = kwargs['base_log_FILE']
             need_rebuild = True
 
-        if 'log_max_bytes' in kwargs:
-            self.log_max_bytes = int(kwargs['log_max_bytes'])
+        if 'log_MAX_BYTES' in kwargs:
+            self.log_max_bytes = int(kwargs['log_MAX_BYTES'])
             need_rebuild = True
 
-        if 'log_backup_count' in kwargs:
-            self.log_backup_count = int(kwargs['log_backup_count'])
+        if 'log_BACKUP_COUNT' in kwargs:
+            self.log_backup_count = int(kwargs['log_BACKUP_COUNT'])
             need_rebuild = True
 
         if 'use_timestamp' in kwargs:
@@ -2064,8 +2378,8 @@ class BaseAppLogger:
             level_changed = True
 
         # Обновляем log_args (не влияет на обработчики, просто сохраняем)
-        if 'log_args' in kwargs:
-            self.log_args = kwargs['log_args']
+        if 'log_ARGS' in kwargs:
+            self.log_args = kwargs['log_ARGS']
 
         if 'show_call_depth' in kwargs:
             self._show_call_depth = self._to_bool(kwargs['show_call_depth'])
@@ -2140,15 +2454,121 @@ class BaseAppLogger:
                 if inst.name.startswith(name_prefix):
                     inst.set_file_level(lvl)
 
+    def _get_key_name_config (self, key, list_name:List = None) -> List:
+        """
+        Возвращает список ключей для конфига с учётом префиксов.
+        Приоритет: {self.name}_{key} -> LOG_{key} -> key
+        """
+        rezult = []
+
+        if list_name is None:
+            list_name = [
+                self.name,  # Сначала ищем специфичный для этого логгера
+                'LOG',      # Затем общий для всех логгеров (с префиксом LOG_)
+                None,       # Наконец, просто ключ (без префикса)
+            ]
+
+        for i in list_name:
+            name_key = "_".join(
+                [i, key]
+            ) if i else key
+
+            rezult.append(name_key)
+
+        return rezult
+
+    def _get_config (
+        self, 
+        config: Dict[str, Any], 
+        key: str, 
+        default: Any = None,
+        if_lower: bool = False,
+    ) -> Any:
+        """
+        Возвращает значение параметра из конфига с учётом префиксов.
+        Приоритет: {self.name}_{key} -> LOG_{key} -> key -> default
+        """
+        if key == 'LEVEL':
+            0==0
+
+        if if_lower:
+            list_key = list(config.keys())
+            lowercase_dict = list(map(str.lower, list_key))
+
+        for name_key in self._get_key_name_config(key):
+            if if_lower:
+                try:
+                    index= lowercase_dict.index(name_key.lower())
+                except ValueError:
+                    index= None
+
+                if index is not None:
+                    return config[list_key[index]]
+            else:
+                if name_key in config :
+                    return config[name_key]
+                      
+        else:
+            return default
+
+
+    def _update_config_from (self, config_dict):
+        # Обновляем текущие параметры
+
+            _config = self._init_config_load(config_dict, None, None)
+
+            self._apply_config(_config)   # вместо ручного присваивания
+
+            # # обновление остальных параметров
+            # self._enabled = _config['enabled']
+            # self._console_enabled = _config['console_enabled']
+            # self._file_enabled = _config['file_enabled']
+            # self._use_name_in_filename = _config['use_name_in_filename']
+            # self.use_timestamp = _config['use_timestamp']
+            # self.log_args = _config['ARGS']
+            
+            # self.log_level = _config['LEVEL']
+            # self.base_log_file = _config['FILE']
+            # self.log_max_bytes = _config['MAX_BYTES']
+            # self.log_backup_count = _config['BACKUP_COUNT']
+            # self._show_call_depth = _config['show_call_depth']
+
+            # if 'LEVEL' in _config:
+            #     # self.log_level = self._parse_log_level(config_dict['LOG_LEVEL'])
+            #     # self.log_level = self._parse_log_level(_config['LEVEL'])
+            #     self.logger.setLevel(self.log_level)
+
+            # if 'FILE' in config_dict:
+            #     # self.base_log_file = config_dict['LOG_FILE']
+            #     self.base_log_file = _config['FILE']
+
+
+            # if 'BYTES' in config_dict:
+            #     # self.log_max_bytes = int(config_dict['LOG_MAX_BYTES'])
+            #     self.log_max_bytes = int(_config['MAX_BYTES'])
+
+            # if 'BACKUP_COUNT' in config_dict:
+            #     # self.log_backup_count = int(config_dict['LOG_BACKUP_COUNT'])
+            #     self.log_backup_count = int(_config['BACKUP_COUNT'])
+
+            # if 'ARGS' in config_dict:
+            #     # self.log_args = self._to_bool(config_dict['LOG_ARGS'])
+            #     self.log_args = self._to_bool(_config['ARGS'])
+
+            # if 'show_call_depth' in config_dict:
+            #     # self._show_call_depth = self._to_bool(config_dict['show_call_depth'])
+            #     self._show_call_depth = self._to_bool(_config['show_call_depth'])
+
+
     def reload_from_config(self, new_config: Dict[str, Any]):
         """
         Полностью перезагружает настройки логгера из словаря.
         Удобно вызывать после изменения конфигурации приложения.
         """
-        # Если используем общий обработчик, перенаправляем вызов мастеру
-        if self._shared_handler and self._master_logger:
-            self._master_logger.reload_from_config(new_config)
-            return
+        # # Если используем общий обработчик, перенаправляем вызов мастеру
+        # if self._shared_handler and self._master_logger:
+        #     self._master_logger.reload_from_config(new_config)
+        #     return
         
         need_rebuild = False
         with self._handler_lock:
@@ -2162,31 +2582,75 @@ class BaseAppLogger:
             old_use_timestamp = self.use_timestamp
             old_use_name = self._use_name_in_filename
 
-            # Применяем новые настройки
-            # self._init_config_load(new_config, self._file_enabled, self._use_name_in_filename)
-            self._init_config_load(new_config, None, None)
+            self._update_config_from(new_config)
 
-            # Обновляем остальные параметры
-            if 'LOG_LEVEL' in new_config:
-                self.log_level = self._parse_log_level(new_config['LOG_LEVEL'])
-                self.logger.setLevel(self.log_level)
+            # # Применяем новые настройки
+            # # self._init_config_load(new_config, self._file_enabled, self._use_name_in_filename)
+            # self._init_config_load(new_config, None, None)
 
-            if 'LOG_FILE' in new_config:
-                self.base_log_file = new_config['LOG_FILE']
+            # # Обновляем остальные параметры
+            # if 'LOG_LEVEL' in new_config:
+            #     # self.log_level = self._parse_log_level(new_config['LOG_LEVEL'])
+            #     self.log_level = self._parse_log_level(
+            #         self._get_config(
+            #             config=new_config, 
+            #             key='LEVEL',
+            #         )
+            #     )
+            #     self.logger.setLevel(self.log_level)
 
-            if 'LOG_MAX_BYTES' in new_config:
-                self.log_max_bytes = int(new_config['LOG_MAX_BYTES'])
+            # if 'LOG_FILE' in new_config:
+            #     # self.base_log_file = new_config['LOG_FILE']
+            #     self.base_log_file = self._get_config(
+            #         config= new_config, 
+            #         key= 'FILE',
+            #     )
 
-            if 'LOG_BACKUP_COUNT' in new_config:
-                self.log_backup_count = int(new_config['LOG_BACKUP_COUNT'])
+            # if 'LOG_MAX_BYTES' in new_config:
+            #     # self.log_max_bytes = int(new_config['LOG_MAX_BYTES'])
+            #     self.log_max_bytes = int(
+            #         self._get_config(
+            #             config= new_config, 
+            #             key= 'MAX_BYTES',
+            #         )
+            #     )
 
-            if 'LOG_ARGS' in new_config:
-                self.log_args = self._to_bool(new_config['LOG_ARGS'])
+            # if 'LOG_BACKUP_COUNT' in new_config:
+            #     # self.log_backup_count = int(new_config['LOG_BACKUP_COUNT'])
+            #     self.log_backup_count = int(
+            #         self._get_config(
+            #             config= new_config, 
+            #             key= 'BACKUP_COUNT',
+            #         )
+            #     )
 
-            if 'show_call_depth' in new_config:
-                self._show_call_depth = self._to_bool(new_config['show_call_depth'])
-            if 'use_timestamp' in new_config:
-                self.use_timestamp = self._to_bool(new_config['use_timestamp'])
+            # if 'LOG_ARGS' in new_config:
+            #     # self.log_args = self._to_bool(new_config['LOG_ARGS'])
+            #     self.log_args = self._to_bool(
+            #         self._get_config(
+            #             config= new_config, 
+            #             key= 'ARGS',
+            #         )
+            #     )
+
+            # if 'show_call_depth' in new_config:
+            #     # self._show_call_depth = self._to_bool(new_config['show_call_depth'])
+            #     self._show_call_depth = self._to_bool(
+            #         self._get_config(
+            #             config= new_config, 
+            #             key= 'show_call_depth',
+            #         )
+            #     )
+
+            # if 'use_timestamp' in new_config:
+            #     # self.use_timestamp = self._to_bool(new_config['use_timestamp'])
+            #     self.use_timestamp = self._to_bool(
+            #         self._get_config(
+            #             config= new_config, 
+            #             key= 'use_timestamp',
+            #         )
+            #     )
+
 
             need_rebuild = ( # Проверяем, изменились ли параметры, требующие перестройки обработчиков
                 self._file_enabled != old_file_enabled or
@@ -2503,7 +2967,7 @@ class BaseAppLogger:
         name, # имя экземпляра логгера (строка)
         config, # конфигурация логгера (словарь)
         enable_file_logging=True, # включить файловое логирование 
-        use_name_in_filename=False,  # использовать имя экземпляра в имени файла
+        use_name_in_filename = False,  # использовать имя экземпляра в имени файла
         show_call_depth=False, # показывать глубину вызова
         sync_full_state=False, # синхронизировать полное состояние
         auto_share=True, # автоматический шаринг
@@ -2514,7 +2978,7 @@ class BaseAppLogger:
                 name=name,
                 config=config,
                 enable_file_logging=enable_file_logging,
-                use_name_in_filename=use_name_in_filename,
+                use_name_in_filename = use_name_in_filename,
                 show_call_depth=show_call_depth, 
                 sync_full_state=sync_full_state,
             )
@@ -2632,7 +3096,7 @@ class BaseAppLogger:
                 name=name,
                 config=config,
                 enable_file_logging=enable_file_logging,
-                use_name_in_filename=use_name_in_filename,
+                use_name_in_filename = use_name_in_filename,
                 show_call_depth=show_call_depth,
                 sync_full_state=sync_full_state,
 
@@ -2649,6 +3113,10 @@ class BaseAppLogger:
                         other,
                         sync_full_state=sync_full_state,
                     )
+                    # # Немедленно перезагружаем настройки с учётом нового мастера
+                    # instance.reload_from_config(
+                    #     instance.get_default_config()
+                    # )
                 else:
                     # Логгируем предупреждение, но продолжаем
                     print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}'", file=sys.stderr)
@@ -2667,7 +3135,11 @@ class BaseAppLogger:
             raise ValueError(f"Неизвестный уровень логирования: {level_str}. Допустимые: DEBUG, INFO, WARNING, ERROR, CRITICAL")
         
         return BaseAppLogger.level_map[upper_str]
-
+    
+    @staticmethod
+    def parse_log_level(level_str: str) -> int:
+        return BaseAppLogger._parse_log_level(level_str)    
+    
     # --------------------------------------------------------------------------
     # Вспомогательные методы для формирования указателя на место вызова
     # --------------------------------------------------------------------------
@@ -3215,7 +3687,14 @@ class BaseAppLogger:
                 func_filename = "<built-in>"
 
             # Получаем номер строки в файле, в которой находится вызов функции
+
+            if isinstance(func, staticmethod):
+                func = func.__func__
+            elif isinstance(func, classmethod):
+                func = func.__func__
+
             func_lineno = func.__code__.co_firstlineno
+
             # Определяем, является ли функция асинхронной
             is_async = inspect.iscoroutinefunction(func)
 

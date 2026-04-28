@@ -65,7 +65,7 @@ def get_db() -> Database:
     AppLogger.get_instance(
         name = 'dependencies',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
     )

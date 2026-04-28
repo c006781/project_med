@@ -107,7 +107,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -123,13 +123,13 @@ class BaseRepository(Generic[ModelType], ABC):
         self.logger = AppLogger.get_instance(
             name = self.__class__.__name__,
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
 
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(        
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -171,7 +171,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(        
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -195,7 +195,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -210,7 +210,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -230,7 +230,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -265,7 +265,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -298,7 +298,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -337,7 +337,7 @@ class BaseRepository(Generic[ModelType], ABC):
     @AppLogger.get_instance(
         name = 'BaseRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -365,7 +365,7 @@ class AppointmentNoteRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentNoteRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -391,7 +391,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -408,7 +408,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -428,7 +428,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -451,7 +451,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -495,7 +495,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -535,7 +535,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -573,7 +573,7 @@ class AppointmentRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -613,7 +613,7 @@ class PhotoRepository(BaseRepository):
     @AppLogger.get_instance(
         name = 'PhotoRepository',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

@@ -31,7 +31,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -56,7 +56,7 @@ class PageManager(QObject):
         self.logger = AppLogger.get_instance(
             name = 'gui.PageManager',
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
         )
 
         # QStackedWidget, содержащий страницы
@@ -96,7 +96,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -125,7 +125,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -181,7 +181,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -216,7 +216,7 @@ class PageManager(QObject):
     # @AppLogger.get_instance(
     #     name = 'PageManager',
     #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
+    #    use_name_in_filename =  False, #  True, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level(
     #         # 'INFO'
@@ -236,7 +236,7 @@ class PageManager(QObject):
     # @AppLogger.get_instance(
     #     name = 'PageManager',
     #     enable_file_logging = 'system',
-    #     use_name_in_filename = 'system',
+    #    use_name_in_filename =  False, #  True, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level(
     #         # 'INFO'
@@ -257,7 +257,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -276,7 +276,7 @@ class PageManager(QObject):
     @AppLogger.get_instance(
         name = 'PageManager',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

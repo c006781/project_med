@@ -45,7 +45,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -75,7 +75,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     ) 
@@ -115,7 +115,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -131,7 +131,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )            
@@ -144,7 +144,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -246,7 +246,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -272,7 +272,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -293,7 +293,7 @@ class FilterColumnDialog(QDialog):
     # @AppLogger.get_instance(
     #     name='FilterColumnDialog',
     #     enable_file_logging='system',
-    #     use_name_in_filename='system'
+    #    use_name_in_filename =  False, #  True, # 'system'
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
@@ -303,7 +303,7 @@ class FilterColumnDialog(QDialog):
     # @AppLogger.get_instance(
     #     name='FilterColumnDialog',
     #     enable_file_logging='system',
-    #     use_name_in_filename='system'
+    #    use_name_in_filename =  False, #  True, # 'system'
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
@@ -333,7 +333,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -347,7 +347,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -388,7 +388,7 @@ class FilterColumnDialog(QDialog):
     @AppLogger.get_instance(
         name='FilterColumnDialog',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -449,7 +449,7 @@ class FilterBar(QFrame):
     @AppLogger.get_instance(
         name='FilterBar',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -458,7 +458,7 @@ class FilterBar(QFrame):
         self.logger = AppLogger.get_instance(
             name='gui.FilterBar',
             enable_file_logging='user',
-            use_name_in_filename='user'
+           use_name_in_filename =  False, #  True, # 'user'
         )
         self.setVisible(False)  # изначально скрыта
         self.setFrameShape(QFrame.StyledPanel)
@@ -493,7 +493,7 @@ class FilterBar(QFrame):
     @AppLogger.get_instance(
         name='FilterBar',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -524,7 +524,7 @@ class FilterBar(QFrame):
     @AppLogger.get_instance(
         name='FilterBar',
         enable_file_logging='system',
-        use_name_in_filename='system'
+       use_name_in_filename =  False, #  True, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

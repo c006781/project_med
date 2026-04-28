@@ -112,7 +112,7 @@ def populate_test_data(session):
         AppLogger.get_instance(
             name = 'db_test_data',
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
         ).debug(
             f"База данных уже содержит данные. Пропускаем заполнение."
         )
@@ -122,7 +122,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
             name = 'db_test_data',
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Заполнение базы тестовыми данными..."
     )    
@@ -131,7 +131,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
             name = 'db_test_data',
             enable_file_logging = 'user',
-            use_name_in_filename = 'user',
+           use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Заполнение ТБ 'Пациенты' тестовыми данными..."
     ) 
@@ -171,7 +171,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
         name = 'db_test_data',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Заполнение ТБ 'Заметки' тестовыми данными..."
     ) 
@@ -191,7 +191,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
         name = 'db_test_data',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Заполнение ТБ 'Приёмы' тестовыми данными..."
     ) 
@@ -247,7 +247,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
         name = 'db_test_data',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Заполнение ТБ 'Фотографии' тестовыми данными..."
     ) 
@@ -274,7 +274,7 @@ def populate_test_data(session):
     AppLogger.get_instance(
         name = 'db_test_data',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Тестовые данные добавлены и сохранены."
     ) 
@@ -300,7 +300,7 @@ def generate_test_data(db_path:str="clinic.db"):
     AppLogger.get_instance(
         name = 'db_test_data',
         enable_file_logging = 'user',
-        use_name_in_filename = 'user',
+       use_name_in_filename =  False, #  True, # 'user',
     ).debug(
         f"Создание сессии к БД: {db_path} ({os.path.abspath(db_path)})"
     ) 

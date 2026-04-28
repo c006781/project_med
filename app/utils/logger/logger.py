@@ -37,6 +37,7 @@
 
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+import os
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 from typing import  Dict, Any
@@ -148,20 +149,43 @@ class AppLogger(BaseAppLogger):
 
     _instances = {}  # переопределяем, чтобы был свой пул
 
-    # Словарь экземпляров (ключ - имя логгера)
-    @classmethod
-    def get_default_config(cls) -> Dict[str, Any]: # переопределяем,
-        if 'app.config.config_manager.manager' not in sys.modules:
-            from app.config.config_manager.manager import get_config_env
-        else:
-            get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
+    # # Словарь экземпляров (ключ - имя логгера)
+    # @classmethod
+    # def get_default_config(cls) -> Dict[str, Any]: # переопределяем,
+    #     if 'app.config.config_manager.manager' not in sys.modules:
+    #         from app.config.config_manager.manager import get_config_env
+    #     else:
+    #         get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
         
-        config = get_config_env()
-        # Добавляем ключ LOG_ARGS, если его нет (по умолчанию False)
-        config.setdefault('LOG_ARGS', False)
+    #     config = get_config_env()
+    #     # Добавляем ключ LOG_ARGS, если его нет (по умолчанию False)
+    #     config.setdefault('LOG_ARGS', False)
 
-        # tt = sys.modules['app.config.config_manager.manager']
-        return config
+    #     # tt = sys.modules['app.config.config_manager.manager']
+    #     return config
+    @classmethod
+    def get_default_config(cls) -> Dict[str, Any]:
+        # from app.config.config_manager.manager import get_config_env
+        config = get_config_env()
+        
+        # Используем LOG_DIR, если есть, иначе LOG_FILE (для обратной совместимости)
+        log_path = config.get('LOG_DIR', config.get('LOG_FILE', 'logs'))
+        # Если путь не оканчивается на разделитель, считаем его директорией
+        if not log_path.endswith(('/', '\\')) and not log_path.lower().endswith('.log'):
+            log_path = log_path + os.sep
+        
+        return {
+            'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
+            'LOG_FILE': log_path,                     # именно LOG_FILE ожидает BaseAppLogger
+            'LOG_MAX_BYTES': config.get('LOG_MAX_BYTES', 10*1024*1024),
+            'LOG_BACKUP_COUNT': config.get('LOG_BACKUP_COUNT', 5),
+            'LOG_ARGS': config.get('LOG_ARGS', False),
+            'enabled': config.get('enabled', True),
+            'console_enabled': config.get('console_enabled', True),
+            'file_enabled': config.get('file_enabled', True),
+            'use_timestamp': config.get('use_timestamp', False),
+            # Специфичные для system и user будут добавлены в reload_from_config
+        }
     
     @classmethod
     def reload_all_from_app_config(cls):
@@ -176,7 +200,7 @@ if not AppLogger.thec_create('system'):
         name='system',
         # enable_file_logging=False,
         enable_file_logging=True,
-        use_name_in_filename=False,   # используем общий файл из конфига
+       use_name_in_filename =  False, #  True, # False,   # используем общий файл из конфига
         # share_file_with='system',
     )
 
@@ -184,9 +208,9 @@ if not AppLogger.thec_create('user'):
     AppLogger.get_instance(
         name='user',
         # enable_file_logging=False,    
-        # enable_file_logging=True,    
-        enable_file_logging='system',   # строка – значит использовать общий обработчик system
-        use_name_in_filename=False, # используем общий файл из конфига
+        enable_file_logging=True,    
+        # enable_file_logging='system',   # строка – значит использовать общий обработчик system
+       use_name_in_filename =  False, #  True, # False, # используем общий файл из конфига
         # share_file_with='system',
     )
     
@@ -265,7 +289,7 @@ if __name__ == '__main__':
     ).info("test2")
     AppLogger.get_instance(
         name='test3',
-        use_name_in_filename='default1',
+       use_name_in_filename =  False, #  True, # 'default1',
     ).info("test3")
 
 
@@ -273,7 +297,7 @@ if __name__ == '__main__':
         name='test4',
         config='default1',
         enable_file_logging='default1',
-        use_name_in_filename='default1',
+       use_name_in_filename =  False, #  True, # 'default1',
     ).info("test4")
 
     0==0

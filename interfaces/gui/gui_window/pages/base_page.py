@@ -18,7 +18,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -39,7 +39,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -60,7 +60,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -74,7 +74,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -90,7 +90,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -106,7 +106,7 @@ class BasePage(QWidget):
     @AppLogger.get_instance(
         name = 'BasePage',
         enable_file_logging = 'system',
-        use_name_in_filename = 'system',
+       use_name_in_filename =  False, #  True, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )

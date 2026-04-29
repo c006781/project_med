@@ -82,13 +82,14 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                         if not os.path.exists(self.baseFilename):
                             # Файл удалён – переоткрываем
                             need_reopen = True
-                            # self._reopen()
 
                         self._last_check = now 
 
                     if need_reopen: # Файл удалён – переоткрываем
                         with self._lock:
                             self._reopen() 
+                            #  После переоткрытия принудительно сбросим таймер, чтобы следующая запись не ждала
+                            self._last_check = 0
 
                     super().emit(record)
                     return
@@ -109,11 +110,18 @@ class RobustRotatingFileHandler(RotatingFileHandler):
 
     def _reopen(self):
         """Принудительно закрывает и открывает файл."""
-        # Файл удалён – закрываем текущий поток и открываем заново
-        if self.stream:
-            self.stream.close()
-            self.stream = None
-        self._open() # открывает файл заново (определён в базовом классе)
+        with self._lock:
+            # Файл удалён – закрываем текущий поток и открываем заново
+            if self.stream:
+                self.stream.close()
+                self.stream = None
+
+            # Создаём директорию для файла лога, если её нет
+            log_dir = os.path.dirname(self.baseFilename)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True) 
+
+            self._open() # открывает файл заново (определён в базовом классе)
 
     def reopen_if_needed(self):
         """Принудительно проверяет и переоткрывает файл, если он отсутствует."""

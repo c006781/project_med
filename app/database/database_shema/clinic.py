@@ -407,8 +407,9 @@ def create_db(
     if recreate and os.path.exists(abs_path):
         AppLogger.get_instance(
             name = 'db',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Удаление существующего файла БД: {abs_path}"
             # level = AppLogger._parse_log_level(
@@ -423,8 +424,9 @@ def create_db(
     if os.path.exists(abs_path):
         AppLogger.get_instance(
             name = 'db',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Файл БД {abs_path} уже существует. Таблицы будут созданы, если их нет."
             # level = AppLogger._parse_log_level(
@@ -437,8 +439,9 @@ def create_db(
 
         AppLogger.get_instance(
             name = 'db',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Создание нового файла БД: {abs_path}"
             # level = AppLogger._parse_log_level(
@@ -465,8 +468,9 @@ def create_db(
 
     AppLogger.get_instance(
             name = 'db',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
     ).debug(
         f"Таблицы успешно созданы (или уже существовали): {abs_path}"
         # level = AppLogger._parse_log_level(

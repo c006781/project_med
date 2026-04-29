@@ -27,8 +27,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -68,8 +69,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -79,8 +81,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -90,8 +93,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -101,8 +105,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -112,8 +117,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -127,8 +133,9 @@ class CompleterEdit(QWidget):
 
     @AppLogger.get_instance(
         name='CompleterEdit',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

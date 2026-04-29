@@ -51,8 +51,9 @@ class PagesCreationMixin:
 
     @AppLogger.get_instance(
         name='PagesCreationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -89,8 +90,9 @@ class PagesCreationMixin:
 
     @AppLogger.get_instance(
         name='PagesCreationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -129,8 +131,9 @@ class PagesCreationMixin:
 
     @AppLogger.get_instance(
         name='PagesCreationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -163,8 +166,9 @@ class PagesCreationMixin:
 
     @AppLogger.get_instance(
         name='PagesCreationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -197,8 +201,9 @@ class PagesCreationMixin:
 
     @AppLogger.get_instance(
         name='PagesCreationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -253,8 +258,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -281,8 +287,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -297,8 +304,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -328,8 +336,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -362,8 +371,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -387,8 +397,9 @@ class ConnectionsMixin:
 
     @AppLogger.get_instance(
         name='ConnectionsMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -417,8 +428,9 @@ class DeleteHandlersMixin:
 
     @AppLogger.get_instance(
         name='DeleteHandlersMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -449,8 +461,9 @@ class DeleteHandlersMixin:
 
     @AppLogger.get_instance(
         name='DeleteHandlersMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -478,8 +491,9 @@ class DeleteHandlersMixin:
 
     @AppLogger.get_instance(
         name='DeleteHandlersMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -507,8 +521,9 @@ class DeleteHandlersMixin:
 
     @AppLogger.get_instance(
         name='DeleteHandlersMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -545,8 +560,9 @@ class NavigationMixin:
 
     @AppLogger.get_instance(
         name='NavigationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -608,8 +624,9 @@ class NavigationMixin:
 
     @AppLogger.get_instance(
         name='NavigationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -620,8 +637,9 @@ class NavigationMixin:
 
     @AppLogger.get_instance(
         name='NavigationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -637,8 +655,9 @@ class NavigationMixin:
 
     @AppLogger.get_instance(
         name='NavigationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -663,8 +682,9 @@ class NavigationMixin:
 
     @AppLogger.get_instance(
         name='NavigationMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -689,8 +709,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -713,8 +734,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -747,8 +769,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -778,8 +801,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -797,8 +821,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -817,8 +842,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -832,8 +858,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -850,8 +877,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -865,8 +893,9 @@ class SyncMixin:
 
     @AppLogger.get_instance(
         name='SyncMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -907,8 +936,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -931,8 +961,9 @@ class MainWindow(
         # Логгер для данного класса (используется во всех миксинах через self.logger)
         self.logger = AppLogger.get_instance(
             name='gui.MainWindow',
-            enable_file_logging='user',
-           use_name_in_filename =  False, #  True, # 'user'
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user'
         )
 
         # Атрибуты для потоков синхронизации (будут использоваться в SyncMixin)
@@ -952,8 +983,14 @@ class MainWindow(
         self._connect_signals()
 
         # Определяем, существует ли файл конфигурации
-        from app.config.config_manager.manager import AppConfigManager
+        # from app.config.config_manager.manager import AppConfigManager
         config_manager = AppConfigManager.get_instance()
+        
+        # Применяем сохранённые настройки ко всем логгерам (если файл существует)
+        if config_manager.config_exists:
+            # from app.utils.logger.logger import AppLogger
+            AppLogger.reload_all_from_app_config()
+
         if not config_manager.config_exists:
             # Первый запуск – открываем настройки с флагом first_start
             self.page_manager.switch_to(
@@ -973,8 +1010,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -987,8 +1025,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1007,8 +1046,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1018,8 +1058,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1033,8 +1074,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1062,8 +1104,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1118,8 +1161,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1139,8 +1183,9 @@ class MainWindow(
 
     @AppLogger.get_instance(
         name='MainWindow',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

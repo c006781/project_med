@@ -135,8 +135,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -159,8 +160,9 @@ class DynamicEditForm(QWidget):
 
         self.logger = AppLogger.get_instance(
             name='gui.DynamicEditForm',
-            enable_file_logging='user',
-           use_name_in_filename =  False, #  True, # 'system'
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'system'
         )
 
         self.dto_class = dto_class
@@ -177,8 +179,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -211,8 +214,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -231,8 +235,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -253,8 +258,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -303,8 +309,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -332,8 +339,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -389,8 +397,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -405,8 +414,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -421,8 +431,9 @@ class DynamicEditForm(QWidget):
     
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -434,8 +445,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -454,8 +466,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -470,8 +483,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -486,8 +500,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -500,8 +515,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -519,8 +535,9 @@ class DynamicEditForm(QWidget):
 
     @AppLogger.get_instance(
         name='DynamicEditForm',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system'
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

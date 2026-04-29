@@ -87,11 +87,13 @@ class BaseConfigManager:
         # try:
         with open(self._config_path, 'rb') as f:
             data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+
         if not isinstance(data, dict):
             # Если файл содержит не словарь, игнорируем его
             return
         # Обновляем кеш: значения из файла перезаписывают defaults
         self._config.update(data)
+        # 0==0
         # except (msgpack.UnpackException, EOFError, OSError) as e:
         #     # В случае ошибки чтения (повреждённый файл) оставляем defaults
         #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
@@ -203,27 +205,41 @@ class AppConfigManager(BaseConfigManager):
         
         # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
         'LOG_DIR': os.path.join('.', 'logs'),          # вместо LOG_FILE
-        'LOG_LEVEL': 'DEBUG',
+        # 'LOG_LEVEL': 'DEBUG',
+        'LOG_LEVEL': 'INFO',
         'LOG_MAX_BYTES': str(10 * 1024 * 1024),       # 10 MB
         'LOG_BACKUP_COUNT': '5',
         'LOG_ARGS': 'False',
         
+        
         # Для системного логгера
-        'system_enabled': 'True',
+        'system_enabled': 'True', 
         'system_console_enabled': 'True',
         'system_file_enabled': 'True',
         'system_LEVEL': 'DEBUG',
+        # 'system_enabled': 'False', 
+        # 'system_console_enabled': 'False',
+        # 'system_file_enabled': 'False',
+        # 'system_LEVEL': 'INFO',
         
         # Для пользовательского логгера
         'user_enabled': 'True',
         'user_console_enabled': 'True',
         'user_file_enabled': 'True',
         'user_LEVEL': 'DEBUG',
+        # 'user_enabled': 'False',
+        # 'user_console_enabled': 'False',
+        # 'user_file_enabled': 'False',
+        # 'user_LEVEL': 'INFO',
         
         # Общие флаги (могут быть переопределены специфичными)
         'enabled': 'True',
         'console_enabled': 'True',
         'file_enabled': 'True',
+        # 'enabled': 'False',
+        # 'console_enabled': 'False',
+        # 'file_enabled': 'False',
+
         'use_timestamp': 'False',      # добавлять ли дату в имя файла лога
         
         # Остальные настройки
@@ -277,7 +293,7 @@ class AppConfigManager(BaseConfigManager):
 # ----------------------------------------------------------------------
 # Функция для обратной совместимости со старым кодом
 # ----------------------------------------------------------------------
-def get_config_env() -> Dict[str, Any]:
+def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Возвращает словарь с текущей конфигурацией, используя новый менеджер.
 
@@ -289,7 +305,9 @@ def get_config_env() -> Dict[str, Any]:
     а затем вызываем у него метод get_all(), который возвращает копию текущего
     кеша конфигурации.
     """
-    manager = AppConfigManager.get_instance()
+    manager = AppConfigManager.get_instance(
+        config_path=config_path,
+    )
     return manager.get_all()
 
 if __name__ == '__main__':

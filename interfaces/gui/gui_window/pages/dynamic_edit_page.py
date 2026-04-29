@@ -48,8 +48,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -81,8 +82,9 @@ class DynamicEditPage(BasePage):
         # логгер
         self.logger = AppLogger.get_instance(
             name = f"gui.{self.__class__.__name__}",
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         )
 
         # self.patient_svc = None  # сервис для работы с пациентами (например, для создания приёма)
@@ -130,8 +132,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name='DynamicEditPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -163,8 +166,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -200,8 +204,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -247,8 +252,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -265,8 +271,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -371,8 +378,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -392,8 +400,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -425,8 +434,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -442,8 +452,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -474,8 +485,9 @@ class DynamicEditPage(BasePage):
     
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -514,8 +526,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -627,8 +640,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -650,8 +664,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -705,8 +720,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -746,8 +762,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -782,8 +799,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -798,8 +816,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -831,8 +850,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -898,8 +918,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -948,8 +969,9 @@ class DynamicEditPage(BasePage):
             
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -964,8 +986,9 @@ class DynamicEditPage(BasePage):
     
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1006,8 +1029,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1025,8 +1049,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1065,8 +1090,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1085,8 +1111,9 @@ class DynamicEditPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )

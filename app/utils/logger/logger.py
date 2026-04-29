@@ -166,7 +166,7 @@ class AppLogger(BaseAppLogger):
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         # from app.config.config_manager.manager import get_config_env
-        config = get_config_env()
+        config = get_config_env() # уже содержит все настройки из msgpack (или .env по умолчанию)
         
         # Используем LOG_DIR, если есть, иначе LOG_FILE (для обратной совместимости)
         log_path = config.get('LOG_DIR', config.get('LOG_FILE', 'logs'))
@@ -174,18 +174,33 @@ class AppLogger(BaseAppLogger):
         if not log_path.endswith(('/', '\\')) and not log_path.lower().endswith('.log'):
             log_path = log_path + os.sep
         
-        return {
-            'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
+        result =  {
+            # 'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
+            'LOG_LEVEL': config.get('LOG_LEVEL', 'INFO'),
             'LOG_FILE': log_path,                     # именно LOG_FILE ожидает BaseAppLogger
             'LOG_MAX_BYTES': config.get('LOG_MAX_BYTES', 10*1024*1024),
             'LOG_BACKUP_COUNT': config.get('LOG_BACKUP_COUNT', 5),
             'LOG_ARGS': config.get('LOG_ARGS', False),
+            # Общие флаги
             'enabled': config.get('enabled', True),
-            'console_enabled': config.get('console_enabled', True),
+            'console_enabled': config.get('console_enabled', True), # 
             'file_enabled': config.get('file_enabled', True),
             'use_timestamp': config.get('use_timestamp', False),
-            # Специфичные для system и user будут добавлены в reload_from_config
         }
+        
+        
+        # Добавляем специфичные для разных логгеров ключи (чтобы BaseAppLogger мог их прочитать через _get_config_with_inheritance)
+        # Они нужны для того, чтобы при создании логгера 'system' его настройки были взяты из system_LEVEL и т.д.
+        for key, value in config.items():
+            if (
+                key.startswith('system_') 
+                or key.startswith('user_') 
+                or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
+            ):
+                if key not in result:
+                    result[key] = value
+        
+        return result
     
     @classmethod
     def reload_all_from_app_config(cls):
@@ -196,23 +211,25 @@ class AppLogger(BaseAppLogger):
 
 # Автоматическое создание экземпляров при импорте
 if not AppLogger.thec_create('system'):
-    AppLogger.get_instance(
+    ее = AppLogger.get_instance(
         name='system',
-        # enable_file_logging=False,
-        enable_file_logging=True,
-       use_name_in_filename =  False, #  True, # False,   # используем общий файл из конфига
+        # enable_file_logging = False,
+        # enable_file_logging = True,
+        use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
         # share_file_with='system',
     )
+    0==0
 
 if not AppLogger.thec_create('user'):
     AppLogger.get_instance(
         name='user',
-        # enable_file_logging=False,    
-        enable_file_logging=True,    
-        # enable_file_logging='system',   # строка – значит использовать общий обработчик system
-       use_name_in_filename =  False, #  True, # False, # используем общий файл из конфига
+        # enable_file_logging = False,    
+        # enable_file_logging = True,    
+        # enable_file_logging = 'system',   # строка – значит использовать общий обработчик system
+        use_name_in_filename = False, # True, # False, # используем общий файл из конфига
         # share_file_with='system',
     )
+    0==0
     
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
@@ -285,19 +302,21 @@ if __name__ == '__main__':
     ).info("test1")
     AppLogger.get_instance(
         name='test2',
-        enable_file_logging='default1',
+        # # share_file_with = 'default1',
+        enable_file_logging = 'default1',
     ).info("test2")
     AppLogger.get_instance(
         name='test3',
-       use_name_in_filename =  False, #  True, # 'default1',
+        use_name_in_filename = False, # 'default1',
     ).info("test3")
 
 
     AppLogger.get_instance(
         name='test4',
         config='default1',
-        enable_file_logging='default1',
-       use_name_in_filename =  False, #  True, # 'default1',
+        # # share_file_with = 'default1',
+        enable_file_logging = 'default1',
+        use_name_in_filename = False, # 'default1',
     ).info("test4")
 
     0==0

@@ -91,8 +91,9 @@ class DynamicDetailListPage(DynamicListPage):
 
     @AppLogger.get_instance(
         name='DynamicDetailListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -122,8 +123,9 @@ class DynamicDetailListPage(DynamicListPage):
 
     @AppLogger.get_instance(
         name='DynamicDetailListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -146,8 +148,9 @@ class DynamicDetailListPage(DynamicListPage):
          
     @AppLogger.get_instance(
         name='DynamicDetailListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )       
@@ -188,8 +191,9 @@ class DynamicDetailListPage(DynamicListPage):
         
     @AppLogger.get_instance(
         name='DynamicDetailListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -219,8 +223,9 @@ class DraftMixin:
 
     @AppLogger.get_instance(
         name='DraftMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -260,8 +265,9 @@ class DraftMixin:
 
     @AppLogger.get_instance(
         name='DraftMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -308,8 +314,9 @@ class DraftMixin:
 
     @AppLogger.get_instance(
         name='DraftMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -366,8 +373,9 @@ class DraftMixin:
 
     @AppLogger.get_instance(
         name='DraftMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -415,8 +423,9 @@ class PatientInfoMixin:
 
     @AppLogger.get_instance(
         name='PatientInfoMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -476,8 +485,9 @@ class PatientInfoMixin:
 
     @AppLogger.get_instance(
         name='PatientInfoMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -526,8 +536,9 @@ class RightPanelMixin:
 
     @AppLogger.get_instance(
         name='RightPanelMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -569,8 +580,9 @@ class RightPanelMixin:
 
     @AppLogger.get_instance(
         name='RightPanelMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -584,8 +596,9 @@ class RightPanelMixin:
 
     @AppLogger.get_instance(
         name='RightPanelMixin',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -613,8 +626,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -637,8 +651,9 @@ class AppointmentListPage(
         
         self.logger = AppLogger.get_instance(
             name = 'gui.AppointmentListPage',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         )
 
         self._current_patient_dto = None
@@ -699,7 +714,7 @@ class AppointmentListPage(
     # @AppLogger.get_instance(
     #     name = 'ListSelectionMixin',
     #     enable_file_logging = 'system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
@@ -715,8 +730,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -741,8 +757,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -765,8 +782,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -783,8 +801,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -889,8 +908,8 @@ class AppointmentListPage(
 
     # @AppLogger.get_instance(
     #     name='AppointmentListPage',
-    #     enable_file_logging='system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #     enable_file_logging = 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
@@ -906,8 +925,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -957,8 +977,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -976,7 +997,7 @@ class AppointmentListPage(
             return
 
         # existing_photos уже обновляются по ссылке в _on_item_changed
-        self.selected_dto.photos = self.photo_widget.get_existing_photos()[:] # Копируем список, чтобы не было проблем с ссылками
+        self.selected_dto.photos = self.photo_widget.get_existing_photos()#[:] # Копируем список, чтобы не было проблем с ссылками
 
         self.logger.debug(
             f"_sync_draft_to_selected_dto: synced {len(self.selected_dto.photos)} photos to selected_dto"
@@ -984,8 +1005,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1018,8 +1040,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1064,8 +1087,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1081,8 +1105,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1106,8 +1131,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1148,8 +1174,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1162,8 +1189,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1193,8 +1221,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1207,8 +1236,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1260,8 +1290,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -1297,8 +1328,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1376,8 +1408,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1394,8 +1427,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1433,8 +1467,9 @@ class AppointmentListPage(
     
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1460,8 +1495,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1491,8 +1527,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1517,8 +1554,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1567,8 +1605,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1616,8 +1655,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1636,8 +1676,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1671,8 +1712,9 @@ class AppointmentListPage(
     # --- Вспомогательные методы для сохранения одного приёма ---
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1684,8 +1726,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1709,8 +1752,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1721,8 +1765,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1751,8 +1796,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1768,8 +1814,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1787,8 +1834,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1849,8 +1897,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1923,8 +1972,9 @@ class AppointmentListPage(
     
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1941,8 +1991,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -1987,8 +2038,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -2021,8 +2073,9 @@ class AppointmentListPage(
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

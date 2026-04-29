@@ -14,8 +14,9 @@ class CustomDateEdit(QDateEdit):
 
     @AppLogger.get_instance(
         name = 'CustomDateEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -34,8 +35,9 @@ class CustomDateEdit(QDateEdit):
 
     @AppLogger.get_instance(
         name = 'CustomDateEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -69,8 +71,9 @@ class CustomDateEdit(QDateEdit):
         
     @AppLogger.get_instance(
         name = 'CustomDateEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -87,8 +90,9 @@ class CustomDateEdit(QDateEdit):
         
     @AppLogger.get_instance(
         name = 'CustomDateEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -113,8 +117,9 @@ class CustomTimeEdit(QTimeEdit):
         
     @AppLogger.get_instance(
         name = 'CustomTimeEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -134,8 +139,9 @@ class CustomTimeEdit(QTimeEdit):
         
     @AppLogger.get_instance(
         name = 'CustomTimeEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -169,8 +175,9 @@ class CustomTimeEdit(QTimeEdit):
         
     @AppLogger.get_instance(
         name = 'CustomTimeEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -188,8 +195,9 @@ class CustomTimeEdit(QTimeEdit):
         
     @AppLogger.get_instance(
         name = 'CustomTimeEdit',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )

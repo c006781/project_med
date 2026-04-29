@@ -23,7 +23,7 @@ class SettingsPage(BasePage):
     # @AppLogger.get_instance(
     #     name = 'SettingsPage',
     #     enable_file_logging = 'system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
@@ -40,8 +40,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -60,8 +61,9 @@ class SettingsPage(BasePage):
 
         self.logger = AppLogger.get_instance(
             name = 'gui.SettingsPage',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         )
 
         self.page_title = page_title
@@ -78,8 +80,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -223,8 +226,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -245,8 +249,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -269,8 +274,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -310,8 +316,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -371,8 +378,9 @@ class SettingsPage(BasePage):
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

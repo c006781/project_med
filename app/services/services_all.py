@@ -181,8 +181,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(        
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -221,14 +222,16 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
         self.logger = AppLogger.get_instance(
             name = logger_name,
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         )
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -246,8 +249,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -271,8 +275,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -314,8 +319,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -332,8 +338,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -350,8 +357,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -379,8 +387,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -398,8 +407,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -442,8 +452,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -467,8 +478,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -521,8 +533,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -542,8 +555,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -582,8 +596,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -613,8 +628,9 @@ class PatientService(
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(        
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -651,8 +667,9 @@ class PatientService(
     # Переопределяем create, так как логика создания специфична
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )   
@@ -700,8 +717,9 @@ class PatientService(
            
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )  
@@ -754,8 +772,9 @@ class PatientService(
         
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -774,8 +793,9 @@ class PatientService(
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -795,8 +815,9 @@ class PatientService(
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -819,8 +840,9 @@ class PatientService(
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -858,8 +880,9 @@ class PatientService(
    
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -892,8 +915,9 @@ class PatientService(
    
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -910,8 +934,9 @@ class PatientService(
 
     @AppLogger.get_instance(
         name = 'BaseService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -937,8 +962,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -969,8 +995,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -990,8 +1017,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1009,8 +1037,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1030,8 +1059,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1049,8 +1079,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1067,8 +1098,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1089,8 +1121,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1110,8 +1143,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1139,8 +1173,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level(
             # 'INFO'
@@ -1202,8 +1237,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1222,8 +1258,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1263,8 +1300,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1292,8 +1330,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1322,8 +1361,9 @@ class NoteService(
 
     @AppLogger.get_instance(
         name = 'NoteService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1356,8 +1396,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1406,8 +1447,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1426,8 +1468,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )  
@@ -1503,9 +1546,15 @@ class AppointmentService(
         else:
             try:
                 dto = self._dto_class.model_validate(item_s)
-                self.logger.debug(f"item_s: type={type(item_s).__name__}, id={getattr(item_s, 'id', None)}")
+                self.logger.debug(
+                    f"item_s: "
+                    f"type={type(item_s).__name__}, "
+                    f"id={getattr(item_s, 'id', None)}"
+                )
+                
                 if dto.photos:
                     self.logger.debug(f"  первый элемент: {type(dto.photos[0])}")
+
             except Exception as e:
                 self.logger.error(f"Ошибка валидации для объекта: {item_s}")
                 raise e
@@ -1513,24 +1562,36 @@ class AppointmentService(
             # Явное преобразование photos в PhotoDTO
             if dto.photos:
                 self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
-                from app.dto import PhotoDTO
-                dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
+
+                # from app.dto import PhotoDTO
+                # dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
+                dto.photos = [ # Если элемент уже PhotoDTO, оставляем как есть; иначе преобразуем
+                    p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
+                    for p in dto.photos
+                ]
+
                 self.logger.debug(
-                    f"После преобразования: тип dto.photos = {type(dto.photos)}, первый элемент = {type(dto.photos[0]) if dto.photos else None}"
+                    f"После преобразования: "
+                    f"тип dto.photos = {type(dto.photos)}, "
+                    f"первый элемент = {type(dto.photos[0]) if dto.photos else None}"
                 )
 
             # Обогащаем DTO вычисленными полями
             enriched_dto = enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+
             self.logger.debug(f"После enrich: тип enriched_dto.photos = {type(enriched_dto.photos)}")
+
             if enriched_dto.photos:
                 self.logger.debug(f"  первый элемент: {type(enriched_dto.photos[0])}")
+
             return enriched_dto
 
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1555,8 +1616,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1590,8 +1652,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1633,8 +1696,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1675,8 +1739,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1718,8 +1783,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1764,8 +1830,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1820,8 +1887,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1886,8 +1954,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -1931,8 +2000,9 @@ class AppointmentService(
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )           
@@ -1955,8 +2025,9 @@ class AppointmentService(
         
     @AppLogger.get_instance(
         name = 'AppointmentService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2021,8 +2092,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(   
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2061,8 +2133,9 @@ class PhotoService(
 
         self.logger = AppLogger.get_instance(
             name = 'gui.PhotoService',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         )
 
         # Устанавливаем путь к директории для хранения фотографий
@@ -2073,8 +2146,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(  
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2097,8 +2171,9 @@ class PhotoService(
             
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(    
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2119,8 +2194,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time( 
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2178,8 +2254,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(        
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2286,8 +2363,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2337,8 +2415,9 @@ class PhotoService(
     
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2400,8 +2479,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(   
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2445,8 +2525,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name = 'PhotoService',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(      
         level=AppLogger._parse_log_level('DEBUG')
     )  
@@ -2456,8 +2537,9 @@ class PhotoService(
 
     @AppLogger.get_instance(
         name='PhotoService',
-        enable_file_logging='system',
-       use_name_in_filename =  False, #  True, # 'system',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

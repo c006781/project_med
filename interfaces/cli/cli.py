@@ -312,8 +312,9 @@ def create_cli():
         """
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Медицинское приложение - управление данными из консоли"
         )
@@ -350,8 +351,9 @@ def create_cli():
         """
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( 
             f"Вывести список пациентов с возможностью фильтрации. filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
         )
@@ -420,8 +422,9 @@ def create_cli():
         """Вывести информацию о пациенте по ID."""
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( 
             f"Создвести информацию о пациенте по ID. id={id}" 
         )
@@ -475,8 +478,9 @@ def create_cli():
         """Создать нового пациента."""
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(f"Создание пациента: {kwargs}")
         service = get_patient_service()
         # Преобразуем дату, если передана строка
@@ -539,8 +543,9 @@ def create_cli():
         """Удалить пациента по ID."""
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( 
             f"Удалить пациента по ID id={id}" 
         )
@@ -583,8 +588,9 @@ def create_cli():
         """
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( 
             f"Вывести список приёмов с возможностью фильтрации patient_id={patient_id}, filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
         )
@@ -659,8 +665,9 @@ def create_cli():
         """
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Вывести информацию о приёме id={id}, ..." )
 
         service = get_appointment_service()
@@ -730,8 +737,9 @@ def create_cli():
         """Создать новый приём. Заметка будет найдена или создана автоматически."""
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(f"Создание приёма: {kwargs}")
         service = get_appointment_service()
 
@@ -847,8 +855,9 @@ def create_cli():
         """
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Удалить приём id={id}" )
         service = get_appointment_service()
         try:
@@ -893,8 +902,9 @@ def create_cli():
 
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Вывести все заметки" )
         service = get_note_service()
         try:
@@ -940,8 +950,9 @@ def create_cli():
         # Логирование
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Показать заметку id={id}" )
 
         # Получаем сервис для работы с заметками
@@ -1060,8 +1071,9 @@ def create_cli():
         """
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Удалить заметку id={id}" )
         service = get_note_service()
         try:
@@ -1102,8 +1114,9 @@ def create_cli():
         """
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(f"Запрос списка фото, appointment_id={appointment_id}")
 
         # Получаем сервис для работы с фотографиями
@@ -1178,8 +1191,9 @@ def create_cli():
         """
         AppLogger.get_instance( 
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug( f"Удалить фото (файл и запись) id={id}" )
         service = get_photo_service()
         try:
@@ -1251,8 +1265,9 @@ def create_cli():
         """
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Инициализировать базу данных (создать таблицы, опционально тестовые данные)"
         )
@@ -1282,8 +1297,9 @@ def create_cli():
 
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Скачать базу данных с Яндекс.Диска (асинхронно с отображением прогресса))"
         )
@@ -1329,8 +1345,9 @@ def create_cli():
 
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Загрузить локальную базу данных на Яндекс.Диск"
         )
@@ -1370,8 +1387,9 @@ def create_cli():
         """
         AppLogger.get_instance(
             name = 'cli',
+            # share_file_with = 'user',
             enable_file_logging = 'user',
-           use_name_in_filename =  False, #  True, # 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Показать статистику по базе данных"
         )
@@ -1458,8 +1476,9 @@ def create_cli():
 
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Меню управления пациентами: choice={choice}" )
 
             ctx = click.get_current_context()
@@ -1592,8 +1611,9 @@ def create_cli():
 
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Меню управления приёмами: choice={choice}" )
 
             ctx = click.get_current_context()
@@ -1754,8 +1774,9 @@ def create_cli():
 
             AppLogger.get_instance(
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug(f"Меню управления заметками: choice={choice}")
             ctx = click.get_current_context()
 
@@ -1835,8 +1856,9 @@ def create_cli():
             
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Меню управления фотографиями: choice={choice}" )
 
             ctx = click.get_current_context()
@@ -1888,8 +1910,9 @@ def create_cli():
             
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Меню управления базой данных: choice={choice}" )
 
             ctx = click.get_current_context()
@@ -1934,8 +1957,9 @@ def create_cli():
             
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Меню синхронизации: choice={choice}" )
 
             ctx = click.get_current_context()
@@ -1989,8 +2013,9 @@ def create_cli():
 
             AppLogger.get_instance( 
                 name = 'cli',
+                # share_file_with = 'user',
                 enable_file_logging = 'user',
-               use_name_in_filename =  False, #  True, # 'user',
+                use_name_in_filename = False, # 'user',
             ).debug( f"Интерактивный режим с выбором действия по номеру: choice={choice}" )
 
             if choice == 1:

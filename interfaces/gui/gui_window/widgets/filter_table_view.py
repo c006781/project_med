@@ -32,8 +32,9 @@ class FilterHeaderView(QHeaderView):
     
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -58,8 +59,9 @@ class FilterHeaderView(QHeaderView):
 
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -69,8 +71,9 @@ class FilterHeaderView(QHeaderView):
 
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -83,8 +86,9 @@ class FilterHeaderView(QHeaderView):
  
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -112,8 +116,9 @@ class FilterHeaderView(QHeaderView):
     
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -126,8 +131,9 @@ class FilterHeaderView(QHeaderView):
 
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -201,8 +207,9 @@ class FilterHeaderView(QHeaderView):
 
     @AppLogger.get_instance( 
         name = 'FilterHeaderView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -263,7 +270,7 @@ class FilterHeaderView(QHeaderView):
     # @AppLogger.get_instance( 
     #     name = 'FilterHeaderView',
     #     enable_file_logging = 'system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
@@ -350,7 +357,7 @@ class FilterHeaderView(QHeaderView):
     # @AppLogger.get_instance( 
     #     name = 'FilterHeaderView',
     #     enable_file_logging = 'system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
@@ -374,8 +381,9 @@ class FilterTableView(QTableView):
 
     @AppLogger.get_instance( 
         name = 'FilterTableView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
@@ -395,7 +403,7 @@ class FilterTableView(QTableView):
     # @AppLogger.get_instance( 
     #     name = 'FilterTableView',
     #     enable_file_logging = 'system',
-    #    use_name_in_filename =  False, #  True, # 'system',
+    #    use_name_in_filename = False, # 'system',
     # ).log_execution_time(
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
@@ -406,8 +414,9 @@ class FilterTableView(QTableView):
 
     @AppLogger.get_instance( 
         name = 'FilterTableView',
+        # share_file_with = 'system',
         enable_file_logging = 'system',
-       use_name_in_filename =  False, #  True, # 'system',
+        use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )

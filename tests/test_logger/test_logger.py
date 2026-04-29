@@ -51,7 +51,12 @@ def test_logger_file_creation(tmp_path):
         'LOG_MAX_BYTES': '1048576',
         'LOG_BACKUP_COUNT': '3'
     }
-    logger = BaseAppLogger.get_instance('file_test', force_new=True, config=config, enable_file_logging=True)
+    logger = BaseAppLogger.get_instance(
+        'file_test', 
+        force_new=True, 
+        config=config, 
+        enable_file_logging = True
+    )
     logger.info("Test message")
     log_file = tmp_path / 'app.log'
     assert log_file.exists()
@@ -65,7 +70,11 @@ def test_logger_levels(caplog):
     Проверяет, что после настройки уровня логирования сообщения ниже уровня не попадают в лог.
     """
     # Создаем экземпляр логгера
-    logger = AppLogger.get_instance('level_test', force_new=True, enable_file_logging=False)
+    logger = AppLogger.get_instance(
+        'level_test', 
+        force_new=True, 
+        enable_file_logging = False
+    )
 
     # Установка уровня логирования
     # Установка уровня ERROR, чтобы информационные сообщения не попадали в лог
@@ -99,7 +108,11 @@ def test_logger_levels(caplog):
     Проверяет, что после настройки уровня логирования сообщения ниже уровня не попадают в лог.
     """
     # Создаем экземпляр логгера
-    logger = AppLogger.get_instance('level_test', force_new=True, enable_file_logging=False)
+    logger = AppLogger.get_instance(
+        'level_test', 
+        force_new=True, 
+        enable_file_logging = False
+    )
     
     # Устанавливаем уровень ERROR
     logger.setLevel(logging.ERROR)
@@ -140,7 +153,7 @@ def test_logger_levels(caplog):
 #         'LOG_MAX_BYTES': '0',
 #         'LOG_BACKUP_COUNT': '0'
 #     }
-#     logger = AppLogger.get_instance('decorator_test', config=config, force_new=True, enable_file_logging=False)
+#     logger = AppLogger.get_instance('decorator_test', config=config, force_new=True, enable_file_logging = False)
 #     @logger.log_execution_time(description="Тестовая функция")
 #     def func():
 #         """
@@ -179,7 +192,12 @@ def test_logger_decorator(capsys):
         'LOG_MAX_BYTES': '0',
         'LOG_BACKUP_COUNT': '0'
     }
-    logger = AppLogger.get_instance('decorator_test', config=config, force_new=True, enable_file_logging=False)
+    logger = AppLogger.get_instance(
+        'decorator_test', 
+        config=config, 
+        force_new=True, 
+        enable_file_logging = False
+    )
     
     @logger.log_execution_time(description="Тестовая функция")
     def func():

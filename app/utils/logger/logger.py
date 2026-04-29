@@ -36,67 +36,68 @@
 
 
 # Стандартные библиотеки Python
-import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+# import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
+import os
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 from typing import  Dict, Any
 
 # Импорты модулей
-def _add_package_name(
-    file_module: str = None,
-    levels_up: int = 3,           # <-- сколько уровней вверх до корня проекта
-) -> None:
+# def _add_package_name(
+#     file_module: str = None,
+#     levels_up: int = 3,           # <-- сколько уровней вверх до корня проекта
+# ) -> None:
     
-    """
-    Что это (кратко): Добавляет корень проекта в sys.path и устанавливает правильный __package__.
+#     """
+#     Что это (кратко): Добавляет корень проекта в sys.path и устанавливает правильный __package__.
 
-    Что это (максимально подробно): Эта функция настраивает окружение Python таким образом, чтобы можно было использовать относительные импорты (например, from .module import something) без необходимости запускать скрипт с флагом "-m" (как модуль). Она работает только если скрипт запущен напрямую (не импортирован). Функция получает абсолютный путь к текущему файлу, добавляет родительскую директорию в sys.path (список путей для поиска модулей), и устанавливает глобальную переменную __package__ как имя текущей директории. Это полезно в проектах с nested папками, где импорты могут сломаться.
+#     Что это (максимально подробно): Эта функция настраивает окружение Python таким образом, чтобы можно было использовать относительные импорты (например, from .module import something) без необходимости запускать скрипт с флагом "-m" (как модуль). Она работает только если скрипт запущен напрямую (не импортирован). Функция получает абсолютный путь к текущему файлу, добавляет родительскую директорию в sys.path (список путей для поиска модулей), и устанавливает глобальную переменную __package__ как имя текущей директории. Это полезно в проектах с nested папками, где импорты могут сломаться.
 
-    Как работает: Сначала объявляется global __package__ для изменения системной переменной. Затем os.path.abspath(__file__) дает полный путь к скрипту, os.path.dirname убирает имя файла, оставляя папку. sys.path.append добавляет родительскую папку (dirname еще раз). Наконец, __package__ = basename(package_dir) — имя папки. Вызывается только в if __name__ == '__main__', чтобы не мешать, если скрипт импортирован.
+#     Как работает: Сначала объявляется global __package__ для изменения системной переменной. Затем os.path.abspath(__file__) дает полный путь к скрипту, os.path.dirname убирает имя файла, оставляя папку. sys.path.append добавляет родительскую папку (dirname еще раз). Наконец, __package__ = basename(package_dir) — имя папки. Вызывается только в if __name__ == '__main__', чтобы не мешать, если скрипт импортирован.
 
-    Примеры запуска:
-    # В скрипте: if __name__ == '__main__': _add_package_name()
-    # После вызова: sys.path включает родительскую папку (например, '/path/to/modules'), __package__ = 'parsers_sheregeh'. Теперь относительные импорты работают.
-    # Если запустить как модуль (python -m script), функция не нужна, но она не навредит.
-    # Если не вызвать: относительный импорт from .module... может вызвать ImportError: attempted relative import with no known parent package.
+#     Примеры запуска:
+#     # В скрипте: if __name__ == '__main__': _add_package_name()
+#     # После вызова: sys.path включает родительскую папку (например, '/path/to/modules'), __package__ = 'parsers_sheregeh'. Теперь относительные импорты работают.
+#     # Если запустить как модуль (python -m script), функция не нужна, но она не навредит.
+#     # Если не вызвать: относительный импорт from .module... может вызвать ImportError: attempted relative import with no known parent package.
 
-    :param file_module: (str) = обычно __file__  - указатель на путь к модулю, папку которого делаем пакетом для относительных импортов (содержит путь к текущему скрипту)
-    :param levels_up: (int) - на сколько уровней подниматься вверх до корня проекта
-                       (подберите под структуру вашего проекта)
-                       Примеры:
-                         2 → до папки app
-    """
-    if file_module is None:
-        file_module = __file__
+#     :param file_module: (str) = обычно __file__  - указатель на путь к модулю, папку которого делаем пакетом для относительных импортов (содержит путь к текущему скрипту)
+#     :param levels_up: (int) - на сколько уровней подниматься вверх до корня проекта
+#                        (подберите под структуру вашего проекта)
+#                        Примеры:
+#                          2 → до папки app
+#     """
+#     if file_module is None:
+#         file_module = __file__
 
-    # Получаем директорию текущего файла
-    current_dir = os.path.dirname(os.path.abspath(file_module))
+#     # Получаем директорию текущего файла
+#     current_dir = os.path.dirname(os.path.abspath(file_module))
 
-    # Поднимаемся на levels_up уровней вверх — это и будет корень проекта
-    project_root = current_dir
-    for _ in range(levels_up):
-        project_root = os.path.dirname(project_root)
+#     # Поднимаемся на levels_up уровней вверх — это и будет корень проекта
+#     project_root = current_dir
+#     for _ in range(levels_up):
+#         project_root = os.path.dirname(project_root)
 
-    # Добавляем корень проекта в начало sys.path (высокий приоритет)
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
+#     # Добавляем корень проекта в начало sys.path (высокий приоритет)
+#     if project_root not in sys.path:
+#         sys.path.insert(0, project_root)
 
-    # Вычисляем правильное значение __package__
-    # Пример: /project_med/app/models/bd → "app.models.bd"
-    rel_path = os.path.relpath(current_dir, project_root)
+#     # Вычисляем правильное значение __package__
+#     # Пример: /project_med/app/models/bd → "app.models.bd"
+#     rel_path = os.path.relpath(current_dir, project_root)
     
-    if rel_path == '.':
-        package_name = ''
-    else:
-        package_name = rel_path.replace(os.sep, '.').strip('.')
+#     if rel_path == '.':
+#         package_name = ''
+#     else:
+#         package_name = rel_path.replace(os.sep, '.').strip('.')
 
-    # Устанавливаем __package__
-    global __package__
-    if package_name:
-        __package__ = package_name
-    else:
-        # Если мы в корне — можно оставить None или пустую строку
-        __package__ = None
+#     # Устанавливаем __package__
+#     global __package__
+#     if package_name:
+#         __package__ = package_name
+#     else:
+#         # Если мы в корне — можно оставить None или пустую строку
+#         __package__ = None
 
 # try:
     # from ...controllers.conf.get_config import get_config_env
@@ -117,6 +118,10 @@ def _add_package_name(
 
 # try:
 from app.utils.logger.base_logger import BaseAppLogger
+
+
+from app.config.config_manager.manager import get_config_env
+
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -144,18 +149,88 @@ class AppLogger(BaseAppLogger):
 
     _instances = {}  # переопределяем, чтобы был свой пул
 
-    # Словарь экземпляров (ключ - имя логгера)
-    @classmethod
-    def get_default_config(cls) -> Dict[str, Any]: # переопределяем,
-        if 'app.config.config_manager.manager' not in sys.modules:
-            from app.config.config_manager.manager import get_config_env
-        else:
-            get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
+    # # Словарь экземпляров (ключ - имя логгера)
+    # @classmethod
+    # def get_default_config(cls) -> Dict[str, Any]: # переопределяем,
+    #     if 'app.config.config_manager.manager' not in sys.modules:
+    #         from app.config.config_manager.manager import get_config_env
+    #     else:
+    #         get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
         
-        # tt = sys.modules['app.config.config_manager.manager']
-        return get_config_env()
+    #     config = get_config_env()
+    #     # Добавляем ключ LOG_ARGS, если его нет (по умолчанию False)
+    #     config.setdefault('LOG_ARGS', False)
 
+    #     # tt = sys.modules['app.config.config_manager.manager']
+    #     return config
+    @classmethod
+    def get_default_config(cls) -> Dict[str, Any]:
+        # from app.config.config_manager.manager import get_config_env
+        config = get_config_env() # уже содержит все настройки из msgpack (или .env по умолчанию)
+        
+        # Используем LOG_DIR, если есть, иначе LOG_FILE (для обратной совместимости)
+        log_path = config.get('LOG_DIR', config.get('LOG_FILE', 'logs'))
+        # Если путь не оканчивается на разделитель, считаем его директорией
+        if not log_path.endswith(('/', '\\')) and not log_path.lower().endswith('.log'):
+            log_path = log_path + os.sep
+        
+        result =  {
+            # 'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
+            'LOG_LEVEL': config.get('LOG_LEVEL', 'INFO'),
+            'LOG_FILE': log_path,                     # именно LOG_FILE ожидает BaseAppLogger
+            'LOG_MAX_BYTES': config.get('LOG_MAX_BYTES', 10*1024*1024),
+            'LOG_BACKUP_COUNT': config.get('LOG_BACKUP_COUNT', 5),
+            'LOG_ARGS': config.get('LOG_ARGS', False),
+            # Общие флаги
+            'enabled': config.get('enabled', True),
+            'console_enabled': config.get('console_enabled', True), # 
+            'file_enabled': config.get('file_enabled', True),
+            'use_timestamp': config.get('use_timestamp', False),
+        }
+        
+        
+        # Добавляем специфичные для разных логгеров ключи (чтобы BaseAppLogger мог их прочитать через _get_config_with_inheritance)
+        # Они нужны для того, чтобы при создании логгера 'system' его настройки были взяты из system_LEVEL и т.д.
+        for key, value in config.items():
+            if (
+                key.startswith('system_') 
+                or key.startswith('user_') 
+                or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
+            ):
+                if key not in result:
+                    result[key] = value
+        
+        return result
+    
+    @classmethod
+    def reload_all_from_app_config(cls):
+        """Загружает текущую конфигурацию приложения и применяет ко всем логгерам."""
+        # from app.config.config_manager.manager import get_config_env
+        full_config = get_config_env()
+        cls.reload_all_from_config(full_config)
 
+# Автоматическое создание экземпляров при импорте
+if not AppLogger.thec_create('system'):
+    ее = AppLogger.get_instance(
+        name='system',
+        # enable_file_logging = False,
+        # enable_file_logging = True,
+        use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
+        # share_file_with='system',
+    )
+    0==0
+
+if not AppLogger.thec_create('user'):
+    AppLogger.get_instance(
+        name='user',
+        # enable_file_logging = False,    
+        # enable_file_logging = True,    
+        # enable_file_logging = 'system',   # строка – значит использовать общий обработчик system
+        use_name_in_filename = False, # True, # False, # используем общий файл из конфига
+        # share_file_with='system',
+    )
+    0==0
+    
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
     #     level=logging.DEBUG,
@@ -227,19 +302,21 @@ if __name__ == '__main__':
     ).info("test1")
     AppLogger.get_instance(
         name='test2',
-        enable_file_logging='default1',
+        # # share_file_with = 'default1',
+        enable_file_logging = 'default1',
     ).info("test2")
     AppLogger.get_instance(
         name='test3',
-        use_name_in_filename='default1',
+        use_name_in_filename = False, # 'default1',
     ).info("test3")
 
 
     AppLogger.get_instance(
         name='test4',
         config='default1',
-        enable_file_logging='default1',
-        use_name_in_filename='default1',
+        # # share_file_with = 'default1',
+        enable_file_logging = 'default1',
+        use_name_in_filename = False, # 'default1',
     ).info("test4")
 
     0==0

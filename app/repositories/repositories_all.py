@@ -103,29 +103,153 @@ ModelType = TypeVar('ModelType')
 
 class BaseRepository(Generic[ModelType], ABC):
     """Все репозитории должны наследовать этот класс."""
+
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, session: Session):
+        """
+        Инициализирует репозиторий.
+
+        :param session: сессия для работы с БД
+        :type session: Session
+        """
         self._session = session
 
-        self.logger = AppLogger.get_instance(self.__class__.__name__)
+        self.logger = AppLogger.get_instance(
+            name = self.__class__.__name__,
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        )
 
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def get_with_relations(
+        self,
+        entity_id: int, 
+        relations: List[str]
+    ):
+        """
+        Возвращает объект по ID с подгруженными связями.
+
+        :param entity_id: ID объекта
+        :type entity_id: int
+        :param relations: список связей, которые нужно подгрузить
+        :type relations: List[str]
+        :return: объект с подгруженными связями
+        :rtype: self.model_class
+        """
+        query = self._session.query(self.model_class)
+
+        self.logger.debug(f"get_with_relations: entity_id {entity_id} query {query} self.model_class {self.model_class}")
+
+        for rel in relations:
+            self.logger.debug(f"get_with_relations: rel {rel}")
+
+            if hasattr(self.model_class, rel):
+                query = query.options(
+                    joinedload(
+                        getattr(self.model_class, rel)
+                    )
+                )   
+                
+                self.logger.debug(f"get_with_relations: rel {rel} query {query}")
+        
+        self.logger.debug(f'self.model_class.id {self.model_class.id} entity_id {entity_id}')
+
+        return query.filter(self.model_class.id == entity_id).first()
+
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(        
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def get_by_id(self, entity_id: int) -> Optional[ModelType]:
+        """
+        Возвращает запись по ID.
+
+        :param entity_id: ID записи
+        :type entity_id: int
+        :return: запись, если найдена, иначе None
+        :rtype: Optional[ModelType]
+        """
         self.logger.debug(f"get_by_id: {entity_id}")
+        
         return self._session.get(self.model_class, entity_id)
     
     # def get_all(self) -> List[ModelType]:
     #     self.logger.debug(f"get_all")
     #     return self._session.get(self.model_class).all()
     
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all(self) -> List[ModelType]:
+        """
+        Возвращает список всех записей в БД.
+        :return: список записей в виде объектов ModelType
+        """
         self.logger.debug(f"get_all")
         return self._session.query(self.model_class).all()
 
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add(self, entity: ModelType) -> ModelType:
+        """
+        Добавляет запись в БД.
+
+        :param entity: запись для добавления
+        :type entity: ModelType
+        :return: добавленная запись
+        :rtype: ModelType
+        """
         self.logger.debug(f"add: {entity}")
         self._session.add(entity)
         return entity
 
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def delete(self, entity: ModelType) -> None:
+        """
+        Удаляет запись из БД.
+
+        :param entity: запись для удаления
+        :type entity: ModelType
+        :return: None
+        """
+        
         self.logger.debug(f"delete: {entity}")
         self._session.delete(entity)
 
@@ -145,13 +269,29 @@ class BaseRepository(Generic[ModelType], ABC):
         """Должен быть переопределён в наследниках."""
         raise NotImplementedError("Подклассы должны определить model_class")
     
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_unique_values(self, column_name: str) -> List[Any]:
         """
-        Возвращает список уникальных значений для указанного столбца.
+        Возвращает список уникальных значений столбца.
+
+        :param column_name: имя столбца
+        :type column_name: str
+        :return: список уникальных значений
+        :rtype: List[Any]
         """
+        
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
         if self.model_class is None:
-            raise NotImplementedError("model_class не определён в репозитории")
+            err_ = NotImplementedError("model_class не определён в репозитории")
+            self.logger.exception(err_.message)
+            raise err_
         try:
             column = getattr(self.model_class, column_name, None)
             if column is None:
@@ -163,16 +303,36 @@ class BaseRepository(Generic[ModelType], ABC):
             self.logger.exception(f"Ошибка в get_unique_values (столбец '{column_name}'): {e}")
             raise  # пробрасываем исключение, чтобы не скрывать проблемы 
 
-    def get_page(self, offset: int, limit: int,
-                 filters: Optional[List[Dict[str, Any]]] = None,
-                 order_by: Optional[List] = None) -> List[ModelType]:
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_page(
+        self, 
+        offset: int, 
+        limit: int,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None
+    ) -> List[ModelType]:
         """
-        Возвращает страницу записей.
-        :param offset: смещение
-        :param limit: размер страницы
-        :param filters: список фильтров (без fuzzy)
-        :param order_by: список условий сортировки (например, [Patient.last_name.asc()])
+        Возвращает страницу записей с учётом SQL-фильтров.
+
+        :param offset: смещение страницы (начиная с 0)
+        :type offset: int
+        :param limit: количество записей на странице
+        :type limit: int
+        :param filters: список словарей с фильтрами для записей
+        :type filters: Optional[List[Dict[str, Any]]]
+        :param order_by: список полей для сортировки записей
+        :type order_by: Optional[List]
+        :return: список записей на странице
+        :rtype: List[ModelType]
         """
+        
         query = self._session.query(self.model_class)
         if filters:
             # Отфильтровываем fuzzy-операторы, они не поддерживаются на уровне SQL
@@ -183,8 +343,23 @@ class BaseRepository(Generic[ModelType], ABC):
             query = query.order_by(*order_by)
         return query.offset(offset).limit(limit).all()
 
+    @AppLogger.get_instance(
+        name = 'BaseRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def count(self, filters: Optional[List[Dict[str, Any]]] = None) -> int:
-        """Возвращает общее количество записей с учётом SQL-фильтров."""
+        """
+        Возвращает количество записей в базе данных с учётом фильтров.
+        
+        :param filters: список словарей с фильтрами для записей
+        :type filters: Optional[List[Dict[str, Any]]]
+        :return: количество записей
+        :rtype: int
+        """
         query = self._session.query(self.model_class)
         if filters:
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
@@ -197,11 +372,24 @@ class BaseRepository(Generic[ModelType], ABC):
 class AppointmentNoteRepository(BaseRepository):
     model_class =  AppointmentNote
     
+    @AppLogger.get_instance(
+        name = 'AppointmentNoteRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_by_text_exact(self, text: str):
         """
-        Возвращает заметку с точно таким же текстом (чувствительно к регистру).
-        Если не найдено, возвращает None.
+        Возвращает запись с точным текстом или None, если не найдено.  (чувствительно к регистру)
+
+        :param text: текст для поиска
+        :type text: str
+        :return: запись или None
+        :rtype: Optional[AppointmentNote]
         """
+    
         self.logger.debug(f"get_by_text_exact: text = {text}")
         return self._session.query(AppointmentNote).filter(AppointmentNote.text == text).first()
 
@@ -210,38 +398,144 @@ class AppointmentNoteRepository(BaseRepository):
 class AppointmentRepository(BaseRepository):
     model_class =  Appointment
     
+
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all_with_note(self):
+        """
+        Возвращает все приёмы с подгруженной заметкой.
+
+        :return: список приёмов
+        :rtype: List[Appointment]
+        """
         self.logger.debug(f"get_all_with_note")
         return self._session.query(Appointment).options(joinedload(Appointment.note)).all()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all_with_relations(self) -> List[Appointment]:
-        """Возвращает все приёмы с подгруженными пациентом и заметкой."""
+        """
+        Возвращает все приёмы с подгруженными пациентом и заметкой.
+
+        :return: список приёмов
+        :rtype: List[Appointment]
+        """
         self.logger.debug("get_all_with_relations")
         return self._session.query(Appointment).options(
             joinedload(Appointment.patient),
             joinedload(Appointment.note)
         ).all()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_by_patient_with_relations(self, patient_id: int) -> List[Appointment]:
-        """Возвращает приёмы пациента с подгруженными пациентом и заметкой."""
+        """
+        Возвращает приёмы пациента с подгруженными пациентом и заметкой.
+
+        :param patient_id: ID пациента
+        :type patient_id: int
+        :return: список приёмов
+        :rtype: List[Appointment]
+        """
         self.logger.debug(f"get_by_patient_with_relations: patient_id={patient_id}")
         return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
             joinedload(Appointment.patient),
-            joinedload(Appointment.note)
+            joinedload(Appointment.note),
+            joinedload(Appointment.photos),
         ).all()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_by_id_with_relations(self, appointment_id: int) -> Optional[Appointment]:
-        """Возвращает приём по ID с подгруженными связями."""
-        self.logger.debug(f"get_by_id_with_relations: appointment_id={appointment_id}")
-        return self._session.query(Appointment).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note)
-        ).filter(Appointment.id == appointment_id).first()   
+        """
+        Возвращает приём по ID с подгруженными связями (пациентом и заметкой).
 
-    def get_page(self, offset: int, limit: int,
-                 filters: Optional[List[Dict[str, Any]]] = None,
-                 order_by: Optional[List] = None) -> List[Appointment]:
-        """Возвращает страницу приёмов с подгруженными пациентом и заметкой."""
+        :param appointment_id: ID приёма
+        :type appointment_id: int
+        :return: приём или None, если не найдено
+        :rtype: Optional[Appointment]
+        """
+        # Получаем приём с подгруженными связями (пациентом и заметкой)
+        # с помощью метода joinedload, который подгруживает связанные таблицы
+        # для получения полного объекта приёма с подгруженными связями
+        # мы используем метод options с параметром joinedload
+        #
+        # В методе joinedload мы указываем связанные таблицы, которые
+        # необходимо подгружить для получения полного объекта приёма
+        # с подгруженными связями
+        # в этом случае, мы подгруживаем таблицы patients и notes
+        #
+        # Затем мы используем метод filter для фильтрации результатов
+        # по ID приёма
+        #
+        # В конце мы используем метод first, чтобы получить первый
+        # результат фильтрации (иначе None, если не найдено)
+        
+        self.logger.debug(f"get_by_id_with_relations: appointment_id={appointment_id}")
+        
+        # Получаем приём с подгруженными связями
+        return self._session.query(Appointment).options(# Получаем приём с подгруженными связями
+            joinedload(Appointment.patient),
+            joinedload(Appointment.note),
+
+            joinedload(Appointment.photos) 
+        ).filter( # Фильтруем результаты по ID приёма
+            Appointment.id == appointment_id
+        ).first()   # Возвращаем первый результат фильтрации (иначе None)
+
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_page(
+        self, 
+        offset: int, 
+        limit: int, 
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None
+    ) -> List[Appointment]:
+        """
+        Возвращает страницу приёмов с подгруженными связями. (пациентом и заметкой)
+
+        :param offset: смещение страницы (начиная с 0)
+        :type offset: int
+        :param limit: количество записей на странице
+        :type limit: int
+        :param filters: список словарей с фильтрами для записей
+        :type filters: Optional[List[dict[str, Any]]]
+        :param order_by: список полей для сортировки записей
+        :type order_by: Optional[List]
+        :return: список записей на странице
+        :rtype: List[Appointment]
+        """
         query = self._session.query(Appointment).options(
             joinedload(Appointment.patient),
             joinedload(Appointment.note)
@@ -254,10 +548,38 @@ class AppointmentRepository(BaseRepository):
             query = query.order_by(*order_by)
         return query.offset(offset).limit(limit).all()
 
-    def get_page_by_patient(self, patient_id: int, offset: int, limit: int,
-                            filters: Optional[List[Dict[str, Any]]] = None,
-                            order_by: Optional[List] = None) -> List[Appointment]:
-        """Возвращает страницу приёмов конкретного пациента с подгрузкой связей."""
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_page_by_patient(
+        self, 
+        patient_id: int, 
+        offset: int, 
+        limit: int,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None
+    ) -> List[Appointment]:
+        """
+        Возвращает страницу приёмов для указанного пациента с подгруженными связями.
+        
+        :param patient_id: ID пациента, для которого хотим получить страницу приёмов
+        :type patient_id: int
+        :param offset: смещение страницы (начиная с 0)
+        :type offset: int
+        :param limit: количество записей на странице
+        :type limit: int
+        :param filters: список словарей с фильтрами для записей
+        :type filters: Optional[List[dict[str, Any]]]
+        :param order_by: список полей для сортировки записей
+        :type order_by: Optional[List]
+        :return: список записей на странице
+        :rtype: List[Appointment]
+        """
         base_filters = [{'column': 'patient_id', 'operator': 'eq', 'value': patient_id}]
         if filters:
             all_filters = base_filters + filters
@@ -265,32 +587,65 @@ class AppointmentRepository(BaseRepository):
             all_filters = base_filters
         return self.get_page(offset, limit, filters=all_filters, order_by=order_by)
     
-    def count_by_patient(self, patient_id: int, filters: Optional[List[Dict[str, Any]]] = None) -> int:
-        """Количество приёмов пациента с учётом дополнительных фильтров."""
-        base_filters = [{'column': 'patient_id', 'operator': 'eq', 'value': patient_id}]
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def count_by_patient(
+        self, 
+        patient_id: int, 
+        filters: Optional[List[Dict[str, Any]]] = None
+    ) -> int:
+        """
+        Возвращает количество приёмов конкретного пациента с подгрузкой связей.
+        
+        :param patient_id: ID пациента
+        :type patient_id: int
+        :param filters: список словарей с фильтрами для приёмов
+        :type filters: Optional[List[Dict[str, Any]]]
+        :return: количество приёмов
+        :rtype: int
+        """
+        base_filters = [
+            {
+                'column': 'patient_id', 
+                'operator': 'eq', 
+                'value': patient_id
+            }
+        ]
+
         if filters:
             all_filters = base_filters + filters
         else:
             all_filters = base_filters
+
         return self.count(filters=all_filters)
 
 class PhotoRepository(BaseRepository):
     model_class =  Photo
 
+    @AppLogger.get_instance(
+        name = 'PhotoRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_by_appointment(self, appointment_id: int) -> List[Photo]:
-        """
-        Возвращает все фотографии, привязанные к указанному приёму.
-
-        Параметры:
-            appointment_id: ID приёма.
-
-        Возвращает:
-            Список объектов Photo (может быть пустым).
-
-        Исключения:
-            Не выбрасывает, возвращает пустой список, если фото не найдены.
-        """
         
+        """
+        Возвращает список фотографий приёма с указанным ID.
+
+        :param appointment_id: ID приёма
+        :type appointment_id: int
+        :return: список фотографий приёма(может быть пустым)
+        :rtype: List[Photo]
+        """
         self.logger.debug(f"get_by_appointment: appointment_id = {appointment_id}")
         try:
             return self._session.query(Photo).filter_by(appointment_id=appointment_id).all()

@@ -291,7 +291,11 @@ import click # pip install click
 # ----------------------------------------------------------------------
 # Функция-фабрика, создающая группу команд
 # ----------------------------------------------------------------------
-
+@AppLogger.get_instance(
+    name = 'system'
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)  
 def create_cli():
     """
     Создаёт и возвращает группу команд Click для CLI.
@@ -307,7 +311,10 @@ def create_cli():
         Она группирует все команды, доступные из консоли.
         """
         AppLogger.get_instance(
-            name = 'system'
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Медицинское приложение - управление данными из консоли"
         )
@@ -342,7 +349,12 @@ def create_cli():
         3. Вызываем метод get_patients_filtered у PatientService, передавая туда полученный список фильтров и порог схожести
         4. Выводим список пациентов, если он не пустой
         """
-        AppLogger.get_instance( name = 'system' ).debug( 
+        AppLogger.get_instance(
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( 
             f"Вывести список пациентов с возможностью фильтрации. filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
         )
 
@@ -408,7 +420,12 @@ def create_cli():
     @click.option('--id', required=True, type=int, help='ID пациента')
     def patient_get(id):
         """Вывести информацию о пациенте по ID."""
-        AppLogger.get_instance( name = 'system' ).debug( 
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( 
             f"Создвести информацию о пациенте по ID. id={id}" 
         )
         service = get_patient_service()
@@ -459,7 +476,12 @@ def create_cli():
     @create_click_options(PatientDTO, action='create')
     def patient_create(**kwargs):
         """Создать нового пациента."""
-        AppLogger.get_instance(name='system').debug(f"Создание пациента: {kwargs}")
+        AppLogger.get_instance(
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug(f"Создание пациента: {kwargs}")
         service = get_patient_service()
         # Преобразуем дату, если передана строка
         if kwargs.get('birth_date'):
@@ -519,7 +541,12 @@ def create_cli():
     @click.option('--id', required=True, type=int, help='ID пациента')
     def patient_delete(id):
         """Удалить пациента по ID."""
-        AppLogger.get_instance( name = 'system' ).debug( 
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( 
             f"Удалить пациента по ID id={id}" 
         )
         service = get_patient_service()
@@ -559,7 +586,12 @@ def create_cli():
 
         Порог схожести для нечеткого поиска указывается в fuzzy_threshold (0-100).
         """
-        AppLogger.get_instance( name = 'system' ).debug( 
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( 
             f"Вывести список приёмов с возможностью фильтрации patient_id={patient_id}, filter={filter}, fuzzy_threshold={fuzzy_threshold}" 
         )
         service = get_appointment_service()
@@ -631,7 +663,13 @@ def create_cli():
         
         id - ID приёма, информацию о котором нужно вывести.
         """
-        AppLogger.get_instance( name = 'system' ).debug( f"Вывести информацию о приёме id={id}, ..." )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Вывести информацию о приёме id={id}, ..." )
+
         service = get_appointment_service()
         try:
             # Получаем информацию о приёме с указанным ID
@@ -687,22 +725,40 @@ def create_cli():
     # @click.option('--note-text', help='Текст заметки (будет создана или использована существующая)')
     @create_click_options(AppointmentDTO, action='create')
     def appointment_create(**kwargs):
+        """
+        Создать новый приём. Заметка будет найдена или создана автоматически.
+
+        1. Берем ID пациента из kwargs и создаем DTO для приема.
+        2. Если передана дата или время, преобразуем их в datetime.date и datetime.time.
+        3. Если передан текст заметки, то создаем новую заметку или используем существующую.
+        4. Создаем новый приём с помощью сервиса.
+        5. Выводим ID созданного приема.
+        """
         """Создать новый приём. Заметка будет найдена или создана автоматически."""
-        AppLogger.get_instance(name='system').debug(f"Создание приёма: {kwargs}")
+        AppLogger.get_instance(
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug(f"Создание приёма: {kwargs}")
         service = get_appointment_service()
 
         # Преобразование даты и времени
         if 'date' in kwargs and isinstance(kwargs['date'], str):
             try:
+                # Преобразуем строку в datetime.date
                 kwargs['date'] = date.fromisoformat(kwargs['date'])
             except ValueError:
+                # Если не удалось преобразовать, выводим ошибку
                 click.echo("Неверный формат даты. Используйте ГГГГ-ММ-ДД.", err=True)
                 return
         if 'time' in kwargs and kwargs['time'] and  isinstance(kwargs['time'], str):
             try:
+                # Преобразуем строку в datetime.time
                 h, m = map(int, kwargs['time'].split(':'))
                 kwargs['time'] = time(h, m)
             except:
+                # Если не удалось преобразовать, выводим ошибку
                 click.echo("Неверный формат времени. Используйте ЧЧ:ММ.", err=True)
                 return
 
@@ -710,11 +766,15 @@ def create_cli():
         note_text = kwargs.pop('note_text', None)
         dto_in = AppointmentDTO(**kwargs)
         try:
+            # Создаем новый приём с помощью сервиса
             dto_out = service.create_appointment(dto_in, note_text=note_text)
+            # Выводим ID созданного приема
             click.echo(f"Приём создан с ID: {dto_out.id}")
         except PatientNotFoundError as e:
+            # Если пациент с указанным ID не найден, то вывести ошибку
             click.echo(str(e), err=True)
         except Exception as e:
+            # Если произошла какая-то другая ошибка, то вывести ее текст
             click.echo(f"Ошибка: {e}", err=True)
 
     @appointment.command('update')
@@ -726,43 +786,59 @@ def create_cli():
     # @click.option('--id', required=True, type=int, help='ID приёма')
     @create_click_options(AppointmentDTO, action='update')
     def appointment_update(**kwargs):
-        """Обновить приём."""
+        """
+        Обновить приём.
 
+        Обновляет данные приёма с указанным ID.
+        Если приём с указанным ID существует, то он будет обновлён.
+        Если приём с указанным ID не существует, то будет выведена ошибка.
+        """
+        # Получаем ID приёма из аргументов
         id = kwargs.pop('id', None)
         if id is None:
             click.echo("Ошибка: не указан ID приёма", err=True)
             return
+        # Преобразуем ID в int
         id = int(id)
 
+        # Создаем сервис для работы с приёмами
         service = get_appointment_service()
         try:
+            # Получаем существующий приём по ID
             existing = service.get_appointment(id)
-            
-            # Преобразование даты/времени, если переданы
-            if 'date' in kwargs and kwargs['date']:
-                try:
-                    kwargs['date'] = date.fromisoformat(kwargs['date'])
-                except ValueError:
-                    click.echo("Неверный формат даты.", err=True)
-                    return
-            if 'time' in kwargs and kwargs['time']:
-                try:
-                    h, m = map(int, kwargs['time'].split(':'))
-                    kwargs['time'] = time(h, m)
-                except:
-                    click.echo("Неверный формат времени.", err=True)
-                    return
 
+            # Преобразование даты/времени, если переданы
+            # if 'date' in kwargs and kwargs['date']:
+            #     try:
+            #         kwargs['date'] = date.fromisoformat(kwargs['date'])
+            #     except ValueError:
+            #         click.echo("Неверный формат даты.", err=True)
+            #         return
+            # if 'time' in kwargs and kwargs['time']:
+            #     try:
+            #         h, m = map(int, kwargs['time'].split(':'))
+            #         kwargs['time'] = time(h, m)
+            #     except:
+            #         click.echo("Неверный формат времени.", err=True)
+            #         return
+            
+            # Получаем текст новой заметки
             note_text = kwargs.pop('note_text', None)
+
             # Обновляем существующий DTO
             for key, value in kwargs.items():
                 if value is not None:
+                    # Если поле не является None, то обновляем его
                     setattr(existing, key, value)
+            # Обновляем приём с помощью сервиса
             updated = service.update_appointment(existing, note_text=note_text)
+            # Выводим ID обновлённого приема
             click.echo(f"Приём ID {updated.id} обновлён.")
         except AppointmentNotFoundError as e:
+            # Если приём с указанным ID не существует, то выводим ошибку
             click.echo(str(e), err=True)
         except Exception as e:
+            # Если произошла какая-то другая ошибка, то выводим ее текст
             click.echo(f"Ошибка: {e}", err=True)
 
     @appointment.command('delete')
@@ -777,7 +853,12 @@ def create_cli():
         :param id: ID приёма
         :return: None
         """
-        AppLogger.get_instance( name = 'system' ).debug( f"Удалить приём id={id}" )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Удалить приём id={id}" )
         service = get_appointment_service()
         try:
             # Получаем приём с указанным ID
@@ -819,7 +900,12 @@ def create_cli():
         """
         # print('1')
 
-        AppLogger.get_instance( name = 'system' ).debug( f"Вывести все заметки" )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Вывести все заметки" )
         service = get_note_service()
         try:
             # print('2')
@@ -862,7 +948,12 @@ def create_cli():
         :return: None
         """
         # Логирование
-        AppLogger.get_instance( name = 'system' ).debug( f"Показать заметку id={id}" )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Показать заметку id={id}" )
 
         # Получаем сервис для работы с заметками
         service = get_note_service()
@@ -978,7 +1069,12 @@ def create_cli():
         Она удаляет заметку с указанным ID.
         Если какая-то ошибка происходит при попытке удаления заметки, то она выводится на экран.
         """
-        AppLogger.get_instance( name = 'system' ).debug( f"Удалить заметку id={id}" )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Удалить заметку id={id}" )
         service = get_note_service()
         try:
             # Удаляем заметку с указанным ID
@@ -1016,7 +1112,12 @@ def create_cli():
         Если указан ID приёма, то выводятся только фото этого приёма.
         Если не указан, то выводятся все фото.
         """
-        AppLogger.get_instance(name='system').debug(f"Запрос списка фото, appointment_id={appointment_id}")
+        AppLogger.get_instance(
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug(f"Запрос списка фото, appointment_id={appointment_id}")
 
         # Получаем сервис для работы с фотографиями
         service = get_photo_service()
@@ -1088,7 +1189,12 @@ def create_cli():
         5. Если запись не существует, то выводится ошибка.
         6. Если произошла какая-то другая ошибка, то выводится ее текст.
         """
-        AppLogger.get_instance( name = 'system' ).debug( f"Удалить фото (файл и запись) id={id}" )
+        AppLogger.get_instance( 
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
+        ).debug( f"Удалить фото (файл и запись) id={id}" )
         service = get_photo_service()
         try:
             # Удаляем запись о фотографии с указанным ID
@@ -1158,7 +1264,10 @@ def create_cli():
             Exception - если произошла какая-то ошибка при инициализации базы данных.
         """
         AppLogger.get_instance(
-            name = 'system'
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Инициализировать базу данных (создать таблицы, опционально тестовые данные)"
         )
@@ -1187,7 +1296,10 @@ def create_cli():
         """
 
         AppLogger.get_instance(
-            name = 'system'
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Скачать базу данных с Яндекс.Диска (асинхронно с отображением прогресса))"
         )
@@ -1232,7 +1344,10 @@ def create_cli():
         """
 
         AppLogger.get_instance(
-            name = 'system'
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Загрузить локальную базу данных на Яндекс.Диск"
         )
@@ -1271,7 +1386,10 @@ def create_cli():
         Она содержит информацию о количестве пациентов, приёмов, заметок и фотографий в базе данных.
         """
         AppLogger.get_instance(
-            name = 'system'
+            name = 'cli',
+            # share_file_with = 'user',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'user',
         ).debug(
             f"Показать статистику по базе данных"
         )
@@ -1356,7 +1474,12 @@ def create_cli():
             # Вернуться в главное меню
             choice = click.prompt("Выберите действие", type=int)
 
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню управления пациентами: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Меню управления пациентами: choice={choice}" )
 
             ctx = click.get_current_context()
 
@@ -1389,39 +1512,12 @@ def create_cli():
 
                 # # Создать нового пациента
 
-                # first_name = click.prompt("Имя", type=str)
-                # last_name = click.prompt("Фамилия", type=str)
-                # birth_date = click.prompt("Дата рождения (ГГГГ-ММ-ДД, оставьте пустым)", default="")
-                # phone = click.prompt("Телефон (оставьте пустым)", default="")
-                # email = click.prompt("Email (оставьте пустым)", default="")
-
-
-
-                # ctx.invoke(
-                #     patient_create,
-                #     first_name=first_name,
-                #     last_name=last_name,
-                #     birth_date=birth_date if birth_date else None,
-                #     phone=phone if phone else None,
-                #     email=email if email else None
-                # )
-                # click.pause()
-
             elif choice == 4:
                 pid = click.prompt("ID пациента для обновления", type=int)
                 service = get_patient_service()
                 try:
                     current = service.get_patient_by_id(pid)
                     click.echo("\n--- Текущие данные ---")
-
-                    # rename_map_patients = {
-                    #     'id': 'ID',
-                    #     'first_name': 'Имя',
-                    #     'last_name': 'Фамилия',
-                    #     'birth_date': 'Дата рождения (ГГГГ-ММ-ДД)',
-                    #     'phone': 'Телефон',
-                    #     'email': 'Email'
-                    # }
 
                     # Выводим текущие данные с русскими названиями
                     for line in get_text_echo(
@@ -1457,76 +1553,11 @@ def create_cli():
                             update_data[f['name']] = val
                         # 0==0
                         # при необходимости добавьте другие типы
-                    
-                # click.echo(f"update_data keys: {list(update_data.keys())}")
-                # click.echo(f"update_data values: {update_data}")
 
                 ctx.invoke(patient_update, id=pid, **update_data)
                 
                 click.pause()
-            # elif choice == 4:
-            #     pid = click.prompt("ID пациента для обновления", type=int)
-            #     service = get_patient_service()
-            #     try:
-            #         current = service.get_patient_by_id(pid)
-            #         click.echo("\n--- Текущие данные ---")
-            #         for k, v in current.model_dump().items():
-            #             if k != 'id':
-            #                 click.echo(f"{k}: {v}")
-            #         click.echo("----------------------\n")
-            #     except PatientNotFoundError as e:
-            #         click.echo(str(e))
-            #         click.pause()
-            #         continue
-
-            #     # Собираем новые значения (пустые строки игнорируем)
-            #     fields = get_dto_fields(PatientDTO, exclude=['id'])
-            #     update_data = {}
-            #     for f in fields:
-            #         prompt = f"Новое значение для '{f['description']}' (Enter - оставить текущее)"
-            #         val = click.prompt(prompt, default="")
-            #         if val:
-            #             # Преобразуем тип
-            #             if f['type'] == int:
-            #                 update_data[f['name']] = int(val)
-            #             elif f['type'] == date:
-            #                 try:
-            #                     update_data[f['name']] = date.fromisoformat(val)
-            #                 except ValueError:
-            #                     click.echo("Неверный формат даты. Пропускаем поле.")
-            #             elif f['type'] == str:
-            #                 update_data[f['name']] = val
-            #             # и т.д.
-            #     ctx.invoke(patient_update, id=pid, **update_data)
-            #     click.pause()
-
-                # # Обновить данные пациента
-                # pid = click.prompt("ID пациента для обновления", type=int)
-
-                # # Можно показать текущие данные (дополнительно)
-                # click.echo("Оставьте поле пустым, если не хотите его менять.")
-
-                # first_name = click.prompt("Новое имя", default="")
-                # last_name = click.prompt("Новая фамилия", default="")
-                # birth_date = click.prompt("Новая дата рождения", default="")
-                # phone = click.prompt("Новый телефон", default="")
-                # email = click.prompt("Новый email", default="")
-                
-                # kwargs = {}
-                # if first_name:
-                #     kwargs['first_name'] = first_name
-                # if last_name:
-                #     kwargs['last_name'] = last_name
-                # if birth_date:
-                #     kwargs['birth_date'] = birth_date
-                # if phone:
-                #     kwargs['phone'] = phone
-                # if email:
-                #     kwargs['email'] = email
-
-                # ctx.invoke(patient_update, id=pid, **kwargs)
-
-                # click.pause()
+           
             elif choice == 5:
                 # Удалить пациента
                 pid = click.prompt("ID пациента для удаления", type=int)
@@ -1578,7 +1609,12 @@ def create_cli():
             click.echo("0. Вернуться в главное меню")
             choice = click.prompt("Выберите действие", type=int)
 
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню управления приёмами: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Меню управления приёмами: choice={choice}" )
 
             ctx = click.get_current_context()
 
@@ -1736,7 +1772,12 @@ def create_cli():
             click.echo("0. Вернуться в главное меню")
             choice = click.prompt("Выберите действие", type=int)
 
-            AppLogger.get_instance(name='system').debug(f"Меню управления заметками: choice={choice}")
+            AppLogger.get_instance(
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug(f"Меню управления заметками: choice={choice}")
             ctx = click.get_current_context()
 
             if choice == 1:
@@ -1813,7 +1854,12 @@ def create_cli():
             click.echo("0. Вернуться в главное меню")
             choice = click.prompt("Выберите действие", type=int)
             
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню управления фотографиями: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Меню управления фотографиями: choice={choice}" )
 
             ctx = click.get_current_context()
 
@@ -1862,7 +1908,12 @@ def create_cli():
             click.echo("0. Вернуться в главное меню")
             choice = click.prompt("Выберите действие", type=int)
             
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню управления базой данных: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Меню управления базой данных: choice={choice}" )
 
             ctx = click.get_current_context()
 
@@ -1904,7 +1955,12 @@ def create_cli():
             click.echo("   - Возвращает в главное меню")
             choice = click.prompt("Выберите действие", type=int)
             
-            AppLogger.get_instance( name = 'system' ).debug( f"Меню синхронизации: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Меню синхронизации: choice={choice}" )
 
             ctx = click.get_current_context()
 
@@ -1955,7 +2011,12 @@ def create_cli():
             click.echo("0. Выход")
             choice = click.prompt("Ваш выбор", type=int)
 
-            AppLogger.get_instance( name = 'system' ).debug( f"Интерактивный режим с выбором действия по номеру: choice={choice}" )
+            AppLogger.get_instance( 
+                name = 'cli',
+                # share_file_with = 'user',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'user',
+            ).debug( f"Интерактивный режим с выбором действия по номеру: choice={choice}" )
 
             if choice == 1:
                 patient_menu()

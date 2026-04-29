@@ -88,7 +88,7 @@ from app.config.conf.getenv import get_getenv as get_getenv
 #         pass #  raise # e # pass
 # del temp_from
 
-def get_config_env():
+def get_config_env(path: str = None)-> dict:
     """
     Получение конфигураций из  .env, если нет – создаём.
     Возвращает словарь с конфигурациями:
@@ -104,11 +104,13 @@ def get_config_env():
         # port - www5
 
     """
+    if not path:
+        path = os.path.join(*['config.msgpack']) # путь к файлу лога (например, logs/app.log)
 
     return {
         'APP_CONFIG_PATH': get_getenv( 
             key =   'APP_CONFIG_PATH',
-            start_value= os.path.join(*['config.msgpack']), # путь к файлу лога (например, logs/app.log)
+            start_value= path, # путь к файлу лога (например, logs/app.log)
         ),
 
         # 'password': get_getenv(

@@ -23,7 +23,12 @@ def test_logger_rotation(tmp_path):
         'LOG_BACKUP_COUNT': '2'
     }
     # Создаём логгер с настройками
-    logger = BaseAppLogger.get_instance('rotation_test', force_new=True, config=config, enable_file_logging=True)
+    logger = BaseAppLogger.get_instance(
+        'rotation_test', 
+        force_new=True, 
+        config=config, 
+        enable_file_logging = True
+    )
     # Пишем много сообщений, чтобы превысить лимит
     for i in range(50):
         logger.debug(f"Message {i} with enough length to exceed limit quickly")
@@ -42,8 +47,16 @@ def test_logger_close_all():
     Наконец, проверяем, что можно создать новый логгер.
     """
     # Создаём два логгера
-    logger1 = AppLogger.get_instance('close_test1', force_new=True, enable_file_logging=False)
-    logger2 = AppLogger.get_instance('close_test2', force_new=True, enable_file_logging=False)
+    logger1 = AppLogger.get_instance(
+        'close_test1', 
+        force_new=True, 
+        enable_file_logging = False
+        )
+    logger2 = AppLogger.get_instance(
+        'close_test2', 
+        force_new=True, 
+        enable_file_logging = False
+        )
     # Проверяем, что они добавляются в словарь экземпляров
     assert len(AppLogger._instances) >= 2
     # Закрываем все логгеры
@@ -74,8 +87,18 @@ def test_logger_different_levels(tmp_path):
         'LOG_MAX_BYTES': '1048576',
         'LOG_BACKUP_COUNT': '1'
     }
-    debug_logger = BaseAppLogger.get_instance('debug_logger', force_new=True, config=config_debug, enable_file_logging=True)
-    info_logger = BaseAppLogger.get_instance('info_logger', force_new=True, config=config_info, enable_file_logging=True)
+    debug_logger = BaseAppLogger.get_instance(
+        'debug_logger', 
+        force_new=True,
+          config=config_debug, 
+          enable_file_logging = True
+        )
+    info_logger = BaseAppLogger.get_instance(
+        'info_logger', 
+        force_new=True, 
+        config=config_info, 
+        enable_file_logging = True
+    )
 
     debug_logger.debug("This is debug")
     debug_logger.info("This is info")
@@ -99,7 +122,7 @@ def test_logger_without_file(capsys):
 
     Создаём логгер без файлового логирования и проверяем, что сообщения попадают в stderr.
     """
-    logger = AppLogger.get_instance('console_only', force_new=True, enable_file_logging=False)
+    logger = AppLogger.get_instance('console_only', force_new=True, enable_file_logging = False)
     logger.info("Console message")
     captured = capsys.readouterr()
     assert "Console message" in captured.err  # логи идут в stderr 

@@ -49,15 +49,18 @@ def compute_virtual_fields(
         args = []
         for arg_name in compute.get('args', []): # получаем позиционные аргументы
             AppLogger.get_instance( name = 'user').debug(
-                f"""
-                arg_name = {arg_name} in result ({result}) = {arg_name in result}
-                arg_name = {arg_name} in extra_data ({extra_data}) = {arg_name in extra_data}
-                """
+                f"arg_name = {arg_name}: "
+                # f"in result ({result}) = {arg_name in result} "
+                f"in result = {arg_name in result} "
+                # f"| in extra_data ({extra_data}) = {arg_name in extra_data}"
+                f"| in extra_data = {arg_name in extra_data}"
             )
             if arg_name in result: # если аргумент есть в исходном словаре
                 args.append(result[arg_name])
+
             elif extra_data and (arg_name in extra_data): # если аргумент есть в дополнительном словаре
                 args.append(extra_data[arg_name])
+
             else: 
                 args.append(None)
 
@@ -104,9 +107,12 @@ def enrich_dto_with_computed_fields(
     # AppLogger.get_instance( name='user',  ).debug(
     #     f" model_obj: {model_obj} field_configs: {field_configs} extra_data: {extra_data}"
     # )
-    AppLogger.get_instance( name='user',  ).debug(
+    AppLogger.get_instance( 
+        name='user',  
+    ).debug(
         f"extra_data: {extra_data}"
     )
+
     if extra_data is None:
         extra_data = {}
 
@@ -114,14 +120,22 @@ def enrich_dto_with_computed_fields(
     for config in field_configs.values():
         source_attr = config.get('source_attr')
 
-        AppLogger.get_instance( name='user',  ).debug(
-            f"config: {config} source_attr: {source_attr} result: {source_attr and source_attr not in extra_data}"
+        AppLogger.get_instance( 
+            name='user',  
+        ).debug(
+            f"config: {config} "
+            f"source_attr: {source_attr} "
+            f"result: {source_attr and source_attr not in extra_data}"
         )
         if source_attr and source_attr not in extra_data:
             val = getattr(model_obj, source_attr, None)
             if val is not None:
                 extra_data[source_attr] = val
-                AppLogger.get_instance( name='user',  ).debug(f"Добавлен {source_attr} в extra_data")
+                AppLogger.get_instance( 
+                    name='user',  
+                ).debug(
+                    f"Добавлен {source_attr} в extra_data"
+                )
 
     # Текущие данные DTO (только поля, не None)
     current_data = dto.model_dump(exclude_none=True)
@@ -136,7 +150,13 @@ def enrich_dto_with_computed_fields(
     # Применяем к DTO
     for field_name, value in computed.items():
 
-        AppLogger.get_instance( name='user',  ).debug(f"field_name: {field_name} value: {value} result: {value is not None and hasattr(dto, field_name)}")
+        AppLogger.get_instance(
+             name='user',  
+        ).debug(
+            f"field_name: {field_name} "
+            # f"value: {value} "
+            f"result: {value is not None and hasattr(dto, field_name)}"
+        )
         if value is not None and hasattr(dto, field_name):
             setattr(dto, field_name, value)
 

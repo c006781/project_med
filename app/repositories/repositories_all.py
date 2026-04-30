@@ -435,11 +435,12 @@ class AppointmentRepository(BaseRepository):
         :rtype: List[Appointment]
         """
         self.logger.debug("get_all_with_relations")
+
         return self._session.query(Appointment).options(
             joinedload(Appointment.patient),
             joinedload(Appointment.note)
         ).all()
-
+    
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         # share_file_with = 'system',
@@ -457,11 +458,15 @@ class AppointmentRepository(BaseRepository):
         :return: список приёмов
         :rtype: List[Appointment]
         """
-        self.logger.debug(f"get_by_patient_with_relations: patient_id={patient_id}")
+        self.logger.debug(
+            f"get_by_patient_with_relations: "
+            f"patient_id={patient_id}"
+        )
+
         return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
             joinedload(Appointment.patient),
             joinedload(Appointment.note),
-            joinedload(Appointment.photos),
+            # joinedload(Appointment.photos),
         ).all()
 
     @AppLogger.get_instance(

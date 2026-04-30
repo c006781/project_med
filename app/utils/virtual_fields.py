@@ -70,11 +70,14 @@ def compute_virtual_fields(
             AppLogger.get_instance( name = 'user').debug(
                 f"compute_virtual_fields: вычисление виртуального поля {field_name}: args = {args}, kwargs = {kwargs}, value = {value}"
             )
-            0==0
+
+            # 0==0
+
         except Exception as e:
             AppLogger.get_instance( name = 'user').error(f"Ошибка вычисления виртуального поля {field_name}: {e}")
             # при ошибке оставляем None
             result[field_name] = None
+            
     return result
 
 @AppLogger.get_instance(

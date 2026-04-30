@@ -1,4 +1,5 @@
 # app/services/__init__.py
+
 """
 Пакет app.services — бизнес-логика приложения (сервисы).
 

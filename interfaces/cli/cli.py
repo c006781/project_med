@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# interfaces/cli/cli.py
 
 """
 Консольный интерфейс для управления данными приложения.

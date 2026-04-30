@@ -128,7 +128,16 @@ class DynamicEditPage(BasePage):
         # # настройка интерфейса страницы
         self._setup_ui()
 
-
+    # @AppLogger.get_instance(
+    #     name='DynamicEditPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def reload_config(self):
+    #     """Перезагружает конфигурацию страницы: обновляет photo_service."""
+    #     # from app.dependencies import get_photo_service
+    #     self.photo_service = get_photo_service()
+    #     self.logger.info("DynamicEditPage: photo_service обновлён")
 
     @AppLogger.get_instance(
         name='DynamicEditPage',

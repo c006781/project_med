@@ -1,3 +1,5 @@
+# app/network/thread_network.py
+
 # import os
 from PySide6.QtCore import QThread, Signal # pip install PySide6
 
@@ -15,7 +17,13 @@ class DownloadThread(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, token: str, remote_path: str, local_path: str, parent=None):
+    def __init__(
+        self, 
+        token: str, 
+        remote_path: str, 
+        local_path: str, 
+        parent=None
+    ):
         """
         Инициализация потока для скачивания файла с Диска.
 
@@ -24,7 +32,9 @@ class DownloadThread(QThread):
         :param local_path: (str) Локальный путь для сохранения файла.
         :param parent: (QObject/None) Родительский объект (по умолчанию None).
         """
+
         super().__init__(parent)
+
         # сохраняем параметры для использования в run
         self.token = token
         self.remote_path = remote_path

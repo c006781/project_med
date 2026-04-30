@@ -8,6 +8,7 @@
 а также методы загрузки данных для списков (load_patients, load_appointments и т.д.).
 """
 
+import os
 import sys
 
 from app.utils.logger.logger import AppLogger
@@ -16,7 +17,7 @@ from app.config.config_manager.manager import AppConfigManager
 from app.network.thread_network import DownloadThread, UploadThread
 from app.dependencies import (
     get_patient_service, get_appointment_service,
-    get_note_service, get_photo_service
+    get_note_service, get_photo_service, get_sync_service
 )
 
 from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
@@ -42,6 +43,8 @@ from PySide6.QtWidgets import (
     QStackedWidget, QFrame
 )
 from PySide6.QtCore import Qt, Slot
+
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 
 class PagesCreationMixin:
@@ -979,6 +982,8 @@ class MainWindow(
         # Создание страниц и менеджера страниц
         self._init_page_manager()
 
+        self.sync_service = get_sync_service()
+
         # Подключение основных сигналов (кнопки, комбобокс, навигация)
         self._connect_signals()
 
@@ -1196,3 +1201,103 @@ class MainWindow(
         """
         handler = LogViewerHandler(self.log_viewer)
         AppLogger.add_global_handler(handler)
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def on_settings_changed(self):
+        """
+        Слот, вызываемый при изменении настроек приложения.
+        Перезагружает сервисы, обновляет пути и перезагружает текущую страницу.
+        """
+        self.logger.info("Применение новых настроек...")
+        
+        # 1. Перезагружаем сервисы у всех страниц
+        pages_with_service = [
+            (self.patient_list_page, 'patient'),
+            (self.patient_edit_page, 'patient'),
+            (self.appointment_list_page, 'appointment'),
+            (self.appointment_edit_page, 'appointment'),
+            (self.note_list_page, 'note'),
+            (self.note_edit_page, 'note'),
+            (self.photo_list_page, 'photo'),
+            (self.photo_edit_page, 'photo'),
+        ]
+        for page, _ in pages_with_service:
+            if hasattr(page, 'service') and hasattr(page.service, 'reload_config'):
+                page.service.reload_config()
+        
+        # 2. Обновляем SyncService (если используется)
+        if hasattr(self, 'sync_service'):
+            self.sync_service.reload_config()
+        
+        # 3. Обновляем пути к фото во всех PhotoUploaderWidget
+        config = AppConfigManager.get_instance()
+        storage_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+
+        # Берём любой доступный экземпляр PhotoService
+        photo_service = None
+        if hasattr(self, 'photo_list_page') and self.photo_list_page.service:
+            photo_service = self.photo_list_page.service
+
+        elif hasattr(self, 'photo_edit_page') and self.photo_edit_page.service:
+            photo_service = self.photo_edit_page.service,
+        
+        else:
+            # from app.dependencies import get_photo_service
+            photo_service = get_photo_service()
+
+        # Устанавливаем путь через свойство – оно обновит классовый атрибут
+        photo_service._storage_path = storage_path
+
+        # + ДОПОЛНИТЕЛЬНО: перезагружаем patient_service и photo_service в AppointmentListPage и AppointmentEditPage
+        if hasattr(self.appointment_list_page, 'patient_service'):
+            self.appointment_list_page.patient_service.reload_config()
+
+        if hasattr(self.appointment_list_page, 'photo_service'):
+            self.appointment_list_page.photo_service.reload_config()
+            
+        if hasattr(self.appointment_edit_page, 'photo_service'):
+            self.appointment_edit_page.photo_service.reload_config()
+
+        # Виджеты в AppointmentListPage и AppointmentEditPage
+        for page in [self.appointment_list_page, self.appointment_edit_page]:
+            if hasattr(page, 'photo_widget'):
+                page.photo_widget.set_storage_path(storage_path)
+
+            if hasattr(page, 'form') and hasattr(page.form, 'widgets'):
+                for w in page.form.widgets.values():
+                    if isinstance(w, PhotoUploaderWidget):
+                        w.set_storage_path(storage_path)
+        
+        # # 4. Перезагружаем данные на текущей странице, если она поддерживает _load_data
+        # current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        # if current_page and hasattr(current_page, '_load_data'):
+        #     current_page._load_data()
+        
+        # self.logger.info("Применение настроек завершено")
+        
+        # 4. Перезагружаем данные на всех страницах-списках
+        list_pages = [
+            self.patient_list_page,
+            self.appointment_list_page,
+            self.note_list_page,
+            self.photo_list_page,
+        ]
+        for page in list_pages:
+            if page and hasattr(page, '_load_data'):
+                page._load_data()
+        
+        # 5. Если текущая страница — не список, но может показывать данные (например, edit)
+        #    перезагружаем её данные, если она поддерживает on_enter с extra_data
+        current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        if current_page and current_page not in list_pages:
+            # Для страниц редактирования: если открыта какая-то запись, перезагрузим её
+            if hasattr(current_page, 'on_enter'):
+                # Передаём те же extra_data, что были при входе, чтобы не сбросить id
+                extra = self.page_manager.get_current_extra_data()
+                current_page.on_enter(extra)
+        
+        self.logger.info("Применение настроек завершено")

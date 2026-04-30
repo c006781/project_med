@@ -1,3 +1,5 @@
+# app/database/database.py
+
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
@@ -194,6 +196,8 @@ class Database:
     def close(self):
         """Закрывает все сессии и удаляет привязку к потокам."""
         self.Session.remove()
+        self.engine.dispose()
+        self.logger.debug("Database engine disposed")
 
     @AppLogger.get_instance(
         name = 'Database',

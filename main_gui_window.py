@@ -1,3 +1,5 @@
+# main_gui_window.py
+
 import interfaces.gui.gui_window.main as main_gui_window
 
 

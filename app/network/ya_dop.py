@@ -1,4 +1,6 @@
 
+# app/network/ya_dop.py
+
 # Стандартные библиотеки Python
 import os
 

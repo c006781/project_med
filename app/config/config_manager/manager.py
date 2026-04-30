@@ -1,4 +1,5 @@
 # app/controllers/config_manager/manager.py
+
 """
 Модуль управления конфигурацией приложения с использованием MessagePack.
 
@@ -112,6 +113,7 @@ class BaseConfigManager:
         dirname = os.path.dirname(self._config_path)
         if dirname:  # только если есть директория
             os.makedirs(dirname, exist_ok=True)
+
         # Сохраняем в бинарном режиме
         with open(self._config_path, 'wb') as f:
             msgpack.pack(self._config, f)
@@ -310,7 +312,9 @@ def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     return manager.get_all()
 
 if __name__ == '__main__':
+
     global env_key
     env_key = get_config_env()
-    0==0
+
+    # 0==0
     pass

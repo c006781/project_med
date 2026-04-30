@@ -1,6 +1,5 @@
 # interfaces/gui/gui_window/widgets/delegate/type_delegate.py
 
-
 from datetime import (
     date, 
     time

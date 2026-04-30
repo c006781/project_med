@@ -1,6 +1,5 @@
 # interfaces/gui/gui_window/pages/dynamic_list_page.py
 
-
 from functools import wraps
 
 from typing import (
@@ -1540,6 +1539,7 @@ class ListSaveMixin:
                 created = self.service.create(dto)
                 self.source_model.update_row(row, created)
                 self.logger.info(f"Создана новая запись ID={created.id}")
+
         self.new_rows.clear()
 
     @AppLogger.get_instance(
@@ -1591,7 +1591,7 @@ class ListSaveMixin:
             # Удаление
             self._save_deleted()
 
-            self._load_data()
+            self._load_data() # загружаем обновленные данные
 
             QMessageBox.information(self, "Успех", "Изменения сохранены.")
 
@@ -2426,7 +2426,8 @@ class DynamicListPage(
 
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
-        0==0
+
+        # 0==0
 
         # Включаем/отключаем видимость чекбокс-столбца
         self.source_model.set_checkbox_column_visible(self.edit_mode)

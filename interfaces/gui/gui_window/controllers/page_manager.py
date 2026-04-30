@@ -1,4 +1,5 @@
 # interfaces/gui/gui_window/controllers/page_manager.py
+
 """
 Менеджер навигации между страницами.
 Хранит историю посещений (с заголовками), управляет переключением в QStackedWidget,

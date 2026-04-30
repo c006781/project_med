@@ -1,4 +1,5 @@
 # app/utils/filtering/__init__.py
+
 """
 Модуль для фильтрации данных в SQLAlchemy запросах 
 """

@@ -1,4 +1,4 @@
-
+# app/services/sync_service.py
 
 # # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -68,6 +68,12 @@
 #         # Если мы в корне — можно оставить None или пустую строку
 #         __package__ = None
 
+
+
+
+
+from app.utils.logger.logger import AppLogger
+
 # try:
 from app.network.thread_network import DownloadThread, UploadThread
 # except ImportError as e:
@@ -91,7 +97,7 @@ from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
 
 # try:
     # from ..controllers.conf.get_config import get_config_env
-from app.config.config_manager.manager import get_config_env
+from app.config.config_manager.manager import AppConfigManager, get_config_env
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -108,6 +114,12 @@ from app.config.config_manager.manager import get_config_env
 
 
 class SyncService:
+
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def __init__(self):
         """
         Инициализация объекта SyncService:
@@ -115,14 +127,29 @@ class SyncService:
             - получение пути к файлу на Яндекс.Диске
             - получение пути к локальному файлу
         """
+
         config = get_config_env()
+
         # получение токена Яндекс.Диска из .env
         self.token = config['YANDEX_TOKEN']
+
         # получение пути к файлу на Яндекс.Диске
         self.remote_path = config['database_remote_path']
+
         # получение пути к локальному файлу
         self.local_path = config['database_local_path']
 
+        self.logger = AppLogger.get_instance(
+            name='api.SyncService',
+            enable_file_logging='user',
+            use_name_in_filename=False,
+        )
+
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def download_sync(self, progress_callback=None):
         """
         Синхронное скачивание файла с Яндекс.Диска.
@@ -155,6 +182,11 @@ class SyncService:
             progress_callback=progress_callback
         )
 
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def upload_sync(self, progress_callback=None):
         """
         Синхронная загрузка файла на Яндекс.Диск.
@@ -186,6 +218,12 @@ class SyncService:
             if_err=True,
             progress_callback=progress_callback
         )
+    
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def prepare_download(self) -> DownloadThread:
         """
         Возвращает настроенный, но ещё не запущенный поток для скачивания.
@@ -195,11 +233,22 @@ class SyncService:
         Он будет вызывать функцию _progress_callback для обновления прогресса.
         """
         # Создаем настроенный, но не запущенный поток DownloadThread
-        thread = DownloadThread(self.token, self.remote_path, self.local_path)
+        thread = DownloadThread(
+            token=self.token, 
+            remote_path=self.remote_path, 
+            local_path=self.local_path
+        )
+
         # Можно добавить общие обработчики, но лучше оставить GUI подключаться
         # к сигналам и слотам потока
+        
         return thread
 
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def prepare_upload(self) -> UploadThread:
         """
         Возвращает настроенный, но ещё не запущенный поток для загрузки.
@@ -208,5 +257,26 @@ class SyncService:
         Поток будет загружать файл из локальной файловой системы на Яндекс.Диск.
         Он будет вызывать функцию _progress_callback для обновления прогресса.
         """
-        thread = UploadThread(self.token, self.local_path, self.remote_path)
+        thread = UploadThread(
+            token=self.token, 
+            local_path=self.local_path, 
+            remote_path=self.remote_path
+        )
+
         return thread
+    
+    @AppLogger.get_instance(
+        name='SyncService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_config(self) -> None:
+        """Перезагружает токен и пути из текущей конфигурации."""
+        # from app.config.config_manager.manager import AppConfigManager
+        config = AppConfigManager.get_instance()
+
+        self.token = config.get('YANDEX_TOKEN')
+        self.remote_path = config.get('database_remote_path')
+        self.local_path = config.get('database_local_path')
+
+        self.logger.info("Конфигурация SyncService обновлена")

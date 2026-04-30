@@ -249,6 +249,21 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             use_name_in_filename = False, # 'user',
         )
 
+        # Подписываемся на изменения конфигурации
+        AppConfigManager.add_change_listener(self._on_config_changed)
+
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_config_changed(self):
+        """Вызывается при изменении конфигурации – перезагружает сервис."""
+        self.reload_config()
+
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',

@@ -48,7 +48,32 @@ class BaseConfigManager:
 
     _config_path = 'config.msgpack'
     _defaults = {}
-    
+
+    _listeners = []   # список callable-функций
+
+    @classmethod
+    def add_change_listener(cls, callback):
+        """Добавляет слушатель, вызываемый при сохранении конфигурации."""
+        if callback not in cls._listeners:
+            cls._listeners.append(callback)
+
+    @classmethod
+    def remove_change_listener(cls, callback):
+        """Удаляет слушатель."""
+        if callback in cls._listeners:
+            cls._listeners.remove(callback)
+
+    @classmethod
+    def _notify_change(cls):
+        """Оповещает всех зарегистрированных слушателей об изменении конфига."""
+        for cb in cls._listeners:
+            try:
+                cb()
+            except Exception as e:
+                # Логируем ошибку, но не прерываем цепочку
+                print(f"Ошибка в слушателе конфигурации: {e}")
+
+                
     def __init__(
         self, 
         config_path: str = None, 
@@ -117,6 +142,9 @@ class BaseConfigManager:
         # Сохраняем в бинарном режиме
         with open(self._config_path, 'wb') as f:
             msgpack.pack(self._config, f)
+        
+        # Уведомляем всех подписчиков
+        self.__class__._notify_change()
 
     def load(self) -> Dict[str, Any]:
         """

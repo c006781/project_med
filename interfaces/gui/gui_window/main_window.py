@@ -1214,63 +1214,71 @@ class MainWindow(
         """
         self.logger.info("Применение новых настроек...")
         
-        # 1. Перезагружаем сервисы у всех страниц
-        pages_with_service = [
-            (self.patient_list_page, 'patient'),
-            (self.patient_edit_page, 'patient'),
-            (self.appointment_list_page, 'appointment'),
-            (self.appointment_edit_page, 'appointment'),
-            (self.note_list_page, 'note'),
-            (self.note_edit_page, 'note'),
-            (self.photo_list_page, 'photo'),
-            (self.photo_edit_page, 'photo'),
-        ]
-        for page, _ in pages_with_service:
-            if hasattr(page, 'service') and hasattr(page.service, 'reload_config'):
-                page.service.reload_config()
-        
-        # 2. Обновляем SyncService (если используется)
-        if hasattr(self, 'sync_service'):
-            self.sync_service.reload_config()
+        # убираем, так как Убираем явные вызовы reload_config для сервисов, 
+        # так как они теперь обновляются автоматически. Оставляем только обновление UI и перезагрузку данных:
+        #
+        # # 1. Перезагружаем сервисы у всех страниц
+        # pages_with_service = [
+        #     (self.patient_list_page, 'patient'),
+        #     (self.patient_edit_page, 'patient'),
+        #     (self.appointment_list_page, 'appointment'),
+        #     (self.appointment_edit_page, 'appointment'),
+        #     (self.note_list_page, 'note'),
+        #     (self.note_edit_page, 'note'),
+        #     (self.photo_list_page, 'photo'),
+        #     (self.photo_edit_page, 'photo'),
+        # ]
+        # for page, _ in pages_with_service:
+        #     if hasattr(page, 'service') and hasattr(page.service, 'reload_config'):
+        #         page.service.reload_config()
+        # 
+        # # 2. Обновляем SyncService (если используется)
+        # if hasattr(self, 'sync_service'):
+        #     self.sync_service.reload_config()
         
         # 3. Обновляем пути к фото во всех PhotoUploaderWidget
         config = AppConfigManager.get_instance()
         storage_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
 
-        # Берём любой доступный экземпляр PhotoService
-        photo_service = None
-        if hasattr(self, 'photo_list_page') and self.photo_list_page.service:
-            photo_service = self.photo_list_page.service
+        # # Берём любой доступный экземпляр PhotoService
+        # photo_service = None
+        # if hasattr(self, 'photo_list_page') and self.photo_list_page.service:
+        #     photo_service = self.photo_list_page.service
 
-        elif hasattr(self, 'photo_edit_page') and self.photo_edit_page.service:
-            photo_service = self.photo_edit_page.service,
+        # elif hasattr(self, 'photo_edit_page') and self.photo_edit_page.service:
+        #     photo_service = self.photo_edit_page.service,
         
-        else:
-            # from app.dependencies import get_photo_service
-            photo_service = get_photo_service()
+        # else:
+        #     # from app.dependencies import get_photo_service
+        #     # Обновляем путь через PhotoService (классовый атрибут)
+        #     photo_service = get_photo_service()
+
+        # Обновляем путь через PhotoService (классовый атрибут)
+        photo_service = get_photo_service()
+
 
         # Устанавливаем путь через свойство – оно обновит классовый атрибут
         photo_service._storage_path = storage_path
 
-        # + ДОПОЛНИТЕЛЬНО: перезагружаем patient_service и photo_service в AppointmentListPage и AppointmentEditPage
-        if hasattr(self.appointment_list_page, 'patient_service'):
-            self.appointment_list_page.patient_service.reload_config()
+        # # + ДОПОЛНИТЕЛЬНО: перезагружаем patient_service и photo_service в AppointmentListPage и AppointmentEditPage
+        # if hasattr(self.appointment_list_page, 'patient_service'):
+        #     self.appointment_list_page.patient_service.reload_config()
 
-        if hasattr(self.appointment_list_page, 'photo_service'):
-            self.appointment_list_page.photo_service.reload_config()
+        # if hasattr(self.appointment_list_page, 'photo_service'):
+        #     self.appointment_list_page.photo_service.reload_config()
             
-        if hasattr(self.appointment_edit_page, 'photo_service'):
-            self.appointment_edit_page.photo_service.reload_config()
+        # if hasattr(self.appointment_edit_page, 'photo_service'):
+        #     self.appointment_edit_page.photo_service.reload_config()
 
-        # Виджеты в AppointmentListPage и AppointmentEditPage
-        for page in [self.appointment_list_page, self.appointment_edit_page]:
-            if hasattr(page, 'photo_widget'):
-                page.photo_widget.set_storage_path(storage_path)
+        # # Виджеты в AppointmentListPage и AppointmentEditPage
+        # for page in [self.appointment_list_page, self.appointment_edit_page]:
+        #     if hasattr(page, 'photo_widget'):
+        #         page.photo_widget.set_storage_path(storage_path)
 
-            if hasattr(page, 'form') and hasattr(page.form, 'widgets'):
-                for w in page.form.widgets.values():
-                    if isinstance(w, PhotoUploaderWidget):
-                        w.set_storage_path(storage_path)
+        #     if hasattr(page, 'form') and hasattr(page.form, 'widgets'):
+        #         for w in page.form.widgets.values():
+        #             if isinstance(w, PhotoUploaderWidget):
+        #                 w.set_storage_path(storage_path)
         
         # # 4. Перезагружаем данные на текущей странице, если она поддерживает _load_data
         # current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
@@ -1278,6 +1286,10 @@ class MainWindow(
         #     current_page._load_data()
         
         # self.logger.info("Применение настроек завершено")
+
+        # 2. Принудительно обновляем все виджеты PhotoUploaderWidget
+        for widget in self._find_all_photo_widgets():
+            widget.set_storage_path(storage_path)
         
         # 4. Перезагружаем данные на всех страницах-списках
         list_pages = [
@@ -1301,3 +1313,15 @@ class MainWindow(
                 current_page.on_enter(extra)
         
         self.logger.info("Применение настроек завершено")
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _find_all_photo_widgets(self):
+        """Рекурсивно собирает все виджеты PhotoUploaderWidget в окне."""
+        result = []
+        for child in self.findChildren(PhotoUploaderWidget):
+            result.append(child)
+        return result

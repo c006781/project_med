@@ -145,6 +145,9 @@ class SyncService:
             use_name_in_filename=False,
         )
 
+        # Подписываемся на изменения конфига
+        AppConfigManager.add_change_listener(self.reload_config)
+
     @AppLogger.get_instance(
         name='SyncService',
         enable_file_logging='system',
@@ -273,6 +276,7 @@ class SyncService:
     def reload_config(self) -> None:
         """Перезагружает токен и пути из текущей конфигурации."""
         # from app.config.config_manager.manager import AppConfigManager
+        
         config = AppConfigManager.get_instance()
 
         self.token = config.get('YANDEX_TOKEN')

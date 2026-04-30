@@ -20,6 +20,8 @@ import time as time_module
 
 from contextlib import contextmanager
 
+from sqlalchemy import func
+
 
 from app.utils.logger import AppLogger
 
@@ -146,8 +148,9 @@ from app.dto import (
 
 # try:
 from app.exceptions import (
-    PatientNotFoundError, PatientValidationError, AppointmentNotFoundError,
-      AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, 
+    PatientNotFoundError, PatientValidationError, 
+    AppointmentNotFoundError, AppointmentNoteNotFoundError, 
+    PhotoNotFoundError, PhotoFileError, 
     #   AppException
 )
 # except ImportError as e:
@@ -568,10 +571,20 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class)
             # apply_filters теперь возвращает кортеж
-            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+            query, post_filters = apply_filters(
+                query, 
+                self._model_class, 
+                filters, 
+                fuzzy_threshold
+            )
+            
             items = query.all()
             if post_filters:
-                items = apply_post_filters(items, post_filters, self._model_class)
+                items = apply_post_filters(
+                    items, 
+                    post_filters, 
+                    self._model_class
+                )
 
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
@@ -644,8 +657,17 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_page(offset, limit, filters=filters, order_by=order_by)
-            total = repo.count(filters=filters)
+
+            items = repo.get_page(
+                offset, 
+                limit, 
+                filters=filters,
+                order_by=order_by
+            )
+            total = repo.count(
+                filters=filters
+            )
+
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
 
@@ -1581,6 +1603,36 @@ class AppointmentService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_photo_counts(self, appointments: List[Appointment], sess) -> None:
+        """Добавляет каждому приёму временный атрибут _photo_count с количеством фото."""
+
+        if not appointments:
+            return
+        
+        # from sqlalchemy import func
+        # from app.database.database_shema.clinic import Photo
+        app_ids = [app.id for app in appointments]
+
+        # Запрос количества фото по каждому приёму
+        counts = sess.query(
+            Photo.appointment_id,
+            func.count(Photo.id).label('cnt')
+        ).filter(
+            Photo.appointment_id.in_(app_ids)
+        ).group_by(
+            Photo.appointment_id
+        ).all()
+
+        count_map = {c[0]: c[1] for c in counts}
+
+        for app in appointments:
+            setattr(app, '_photo_count', count_map.get(app.id, 0))
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def reload_config(self) -> None:
         """
         Перезагружает конфигурацию AppointmentService.
@@ -1690,10 +1742,16 @@ class AppointmentService(
     #         return dto
     def get_dtos(
         self, 
-        item_s: Union[List[Appointment], Appointment]
+        item_s: Union[List[Appointment], Appointment],
+        # extra_data_for_photos:bool = False,
     ) -> Union[List[AppointmentDTO], AppointmentDTO]:
         if isinstance(item_s, list):
-            return [self.get_dtos(item) for item in item_s]
+            return [ # Для списка вызываем рекурсивно с тем же флагом
+                self.get_dtos(
+                    item,
+                    # extra_data_for_photos=extra_data_for_photos
+                ) for item in item_s
+            ]
         
         else:
             try:
@@ -1712,7 +1770,7 @@ class AppointmentService(
                 self.logger.error(f"Ошибка валидации для объекта: {item_s} : {e}")
                 raise e
 
-            # Явное преобразование photos в PhotoDTO
+            # Преобразование photos в PhotoDTO (если есть и это не DTO)
             if dto.photos:
                 self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
 
@@ -1729,8 +1787,22 @@ class AppointmentService(
                     f"первый элемент = {type(dto.photos[0]) if dto.photos else None}"
                 )
 
+            extra_data = {}
+            # Определяем количество фото
+            if hasattr(item_s, 'photos') and item_s.photos is not None:
+                extra_data['photo_count'] = len(item_s.photos)
+            elif hasattr(item_s, '_photo_count'):
+                extra_data['photo_count'] = item_s._photo_count
+            else:
+                extra_data['photo_count'] = 0
+
             # Обогащаем DTO вычисленными полями
-            enriched_dto = enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+            enriched_dto = enrich_dto_with_computed_fields(
+                dto, 
+                model_obj = item_s, 
+                field_configs = self._field_configs,
+                extra_data = extra_data,
+            )
 
             self.logger.debug(
                 f"После enrich: тип enriched_dto.photos = {type(enriched_dto.photos)}"
@@ -1833,25 +1905,18 @@ class AppointmentService(
         :rtype: List[AppointmentDTO]
         """
         self.logger.debug("get_all (with relations)")
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_all_with_relations()  # метод репозитория с подгрузкой
-            # return [self._dto_class.from_orm(item) for item in items]
-            # dtos = [self._dto_class.from_orm(item) for item in items]
-            # dtos = [self._dto_class.model_validate(item) for item in items]
-            dtos = self.get_dtos(items)
-            # self.logger.debug(f"Получено {len(dtos)} записей")
 
-            # dtos = []
-            # for item in items:
-            #     # dto = self.get_dtos(item)
-            #     dto = self._dto_class.model_validate(item)
-                
-            #     # Заполняем виртуальные поля
-            #     if item.patient:
-            #         dto.patient_name = f"{item.patient.last_name} {item.patient.first_name}"
-            #     if item.note:
-            #         dto.note_text = item.note.text
+            items = repo.get_all_with_relations()  # метод репозитория с подгрузкой
+
+            self._add_photo_counts(items, sess)
+
+            dtos = self.get_dtos(
+                items,
+                # extra_data_for_photos=True,
+            )
 
             return dtos
         
@@ -1879,7 +1944,10 @@ class AppointmentService(
         :return: список приёмов пациента с подгруженными связями
         :rtype: List[AppointmentDTO]
         """
-        self.logger.debug(f"get_appointments_by_patient: patient_id={patient_id}")
+        self.logger.debug(
+            f"get_appointments_by_patient: "
+            f"patient_id={patient_id}"
+        )
 
         # 1. Создаем сессию для работы в одной транзакции (если не указана)
         with self._session_scope(session) as sess:
@@ -1890,11 +1958,17 @@ class AppointmentService(
             # 3. Вызываем метод get_by_patient_with_relations у репозитория, передавая ID пациента
             items = repo.get_by_patient_with_relations(patient_id)
 
+            self._add_photo_counts(items, sess)
+
             # 4. Создаем список DTO из полученных записей
             # return [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.model_validate(item) for item in items]
-            dtos = self.get_dtos(items)
+            
+            dtos = self.get_dtos(
+                items,
+                # extra_data_for_photos=True,
+            )
             # self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
             
             return dtos
@@ -1975,21 +2049,43 @@ class AppointmentService(
 
         # from ..utils.filtering import apply_filters, apply_post_filters
 
-        self.logger.debug(f"get_filtered (with relations) filters={filters}")
+        self.logger.debug(
+            f"get_filtered (with relations) "
+            f"filters={filters}"
+        )
+
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class).options(
                 joinedload(Appointment.patient),
                 joinedload(Appointment.note)
             )
 
-            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+            query, post_filters = apply_filters(
+                query, 
+                self._model_class, 
+                filters, 
+                fuzzy_threshold,
+            )
+
             items = query.all()
+
             if post_filters:
-                items = apply_post_filters(items, post_filters, self._model_class)
+                items = apply_post_filters(
+                    items, 
+                    post_filters, 
+                    self._model_class
+                )
 
             # return [self._dto_class.from_orm(item) for item in items]
+        
+            self._add_photo_counts(items, sess)
 
-            return self.get_dtos(items)
+            dtos = self.get_dtos(
+                items, 
+                # extra_data_for_photos=True, 
+            )
+
+            return dtos
 
     # ----------------------------------------------------------------------
     # Методы создания, обновления и удаления (без изменений)
@@ -2541,7 +2637,7 @@ class PhotoService(
                 # Создаём папку назначения, если её нет
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 shutil.copy2(source_file_path, target_path)
-                
+
                 self.logger.debug(
                     f"Файл скопирован: "
                     f"{source_file_path} -> {target_path}"

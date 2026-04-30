@@ -1940,9 +1940,8 @@ class PhotoUploaderWidget(QWidget):
             photo = self.existing_photos[row]
 
             self.logger.debug(
-                f"""
-                if photo.id in self.deleted_photo_ids = {photo.id in self.deleted_photo_ids}
-                if photo.id in self.modified_photo_ids = {photo.id in self.modified_photo_ids}"""
+                f"if photo.id : in self.deleted_photo_ids = {photo.id in self.deleted_photo_ids} "
+                f"| in self.modified_photo_ids = {photo.id in self.modified_photo_ids}"
             )
 
             if photo.id in self.deleted_photo_ids:

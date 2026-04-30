@@ -148,8 +148,12 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'source_attr'   : 'photos',     # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
         'order'         : 0,            # порядок в таблице
         'compute': {  # как вычислить
-            'func'  : lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
-            'args'  : ['photos'],
+            # фактический подсчёт
+            # 'func'  : lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
+            # 'args'  : ['photos'],
+            # через запрос
+            'func': lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
+            'args': ['photo_count'],   # будет браться из extra_data
         }
     },
 }

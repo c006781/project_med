@@ -1,3 +1,5 @@
+# app/exceptions/exceptions_all.py
+
 class AppException(Exception):
     """
     Базовое исключение для всех ошибок приложения.

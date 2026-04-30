@@ -1,4 +1,5 @@
 # app/dto/dto_all.py
+
 """
 DTO (Data Transfer Objects) на базе Pydantic.
 Обеспечивают автоматическую валидацию и сериализацию.
@@ -12,7 +13,7 @@ from typing import (
     Tuple
 )
 
-from pydantic import (# pip install pydantic>=2.0
+from pydantic import ( # pip install pydantic>=2.0
     BaseModel, 
     ConfigDict, 
     Field

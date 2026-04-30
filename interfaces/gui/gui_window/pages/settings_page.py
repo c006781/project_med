@@ -1,5 +1,4 @@
 # interfaces/gui/gui_window/pages/settings_page.py
-# -*- coding: utf-8 -*-
 
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.pages.base_page import BasePage
@@ -12,8 +11,6 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QGroupBox
 )
 from PySide6.QtCore import Slot, Qt
-
-
 
 class SettingsPage(BasePage):
     """
@@ -360,6 +357,9 @@ class SettingsPage(BasePage):
 
             QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены, логгеры перезагружены")
+
+            if self.main_window and hasattr(self.main_window, 'on_settings_changed'):
+                self.main_window.on_settings_changed()
 
             # Если это был первый запуск (настройки открыты при старте) – переходим на список пациентов
             if self.first_start:

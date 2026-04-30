@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# app/utils/logger/base_logger.py
 
 """
 Базовый модуль логирования.
@@ -271,6 +270,7 @@ class BaseAppLogger:
         with cls._watchdog_started_lock:
             if cls._watchdog_started:
                 return
+            
             cls._watchdog_started = True
 
         def watch():
@@ -1087,8 +1087,8 @@ class BaseAppLogger:
             fun: Callable=None
         )-> Any:
 
-        if key == 'LEVEL':
-            0==0
+        # if key == 'LEVEL':
+        #     0==0
 
         temp = self._get_config(
             config= config, 
@@ -1118,11 +1118,12 @@ class BaseAppLogger:
         effective_file = self.effective_enable_file_logging(_visited=None)
         effective_name = self.effective_use_name_in_filename(_visited=None)
 
-        if self.name in (
-            'Database',
-            'DynamicTableModel',
-        ):
-            0==0
+        # if self.name in (
+        #     'Database',
+        #     'DynamicTableModel',
+        # ):
+        #     0==0
+
         # Общие флаги (если есть специфичные для имени)
         result = {}
         
@@ -1151,8 +1152,8 @@ class BaseAppLogger:
             ['BACKUP_COUNT', 5, int],
             ['show_call_depth', False, self._to_bool],
         ]:  
-            if key == 'LEVEL':
-                0==0
+            # if key == 'LEVEL':
+            #     0==0
             
             # result[key] = self._get_config_param(
             #     config= config, 
@@ -1737,6 +1738,7 @@ class BaseAppLogger:
         if log_dir and not os.path.exists(log_dir): # Если директория не существует
             try:
                 os.makedirs(log_dir, exist_ok=True)
+
             except OSError as e:
                 raise RuntimeError(f"Не удалось создать директорию для логов {log_dir}: {e}") from e
 
@@ -2523,8 +2525,8 @@ class BaseAppLogger:
         Возвращает значение параметра из конфига с учётом префиксов.
         Приоритет: {self.name}_{key} -> LOG_{key} -> key -> default
         """
-        if key == 'LEVEL':
-            0==0
+        # if key == 'LEVEL':
+        #     0==0
 
         if if_lower:
             list_key = list(config.keys())

@@ -1,8 +1,6 @@
-
 # app/dto/compute_fields.py
+
 from app.utils.logger.logger import AppLogger 
-
-
 
 @AppLogger.get_instance(
     name = 'system',

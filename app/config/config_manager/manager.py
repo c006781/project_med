@@ -1,4 +1,5 @@
 # app/controllers/config_manager/manager.py
+
 """
 Модуль управления конфигурацией приложения с использованием MessagePack.
 
@@ -31,6 +32,8 @@ from app.config.conf.get_config import get_config_env as _old_get_config_env
 
 import msgpack # pip install msgpack
 
+# from cryptography.fernet import Fernet # pip install cryptography
+
 
 
 class BaseConfigManager:
@@ -51,6 +54,7 @@ class BaseConfigManager:
         config_path: str = None, 
         defaults: Dict[str, Any] = None,
         # logger:logging = None,
+        encrypt: bool = True, # по умолчанию включено шифрование
     ):
         """
         Инициализирует менеджер.
@@ -61,19 +65,17 @@ class BaseConfigManager:
         self._config_path = config_path or self._config_path
         self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
         self._config = self._defaults.copy()  # начинаем с умолчаний
+
+        # # Определяем, нужно ли шифрование
+        # self._encrypt_enabled = encrypt
+
+        # # Инициализируем шифратор
+        # self._cipher = None
+        # if self._encrypt_enabled:
+        #     self._setup_cipher()
+
         self._load()  # загружаем из файла, если он существует
-         # Логирование, если доступно
-        
-        # if not logger:
-        #     logger = logging.Logger(f"{self.__class__.__name__}_{self._config_path}")
-        #     if 'app.utils.logger.logger' not in sys.modules:
-        #         from app.utils.logger.logger import AppLogger
-        #     else:
-        #         AppLogger = sys.modules['project_med.app.utils.logger.logger'].AppLogger
-        #     logger = AppLogger.get_instance(name=f"{self.__class__.__name__}_{self._config_path}")
-
-        # self.logger = logger 
-
+    
     def _load(self) -> None:
         """
         Загружает конфигурацию из файла и обновляет кеш (_config).
@@ -111,6 +113,7 @@ class BaseConfigManager:
         dirname = os.path.dirname(self._config_path)
         if dirname:  # только если есть директория
             os.makedirs(dirname, exist_ok=True)
+
         # Сохраняем в бинарном режиме
         with open(self._config_path, 'wb') as f:
             msgpack.pack(self._config, f)
@@ -195,8 +198,6 @@ class AppConfigManager(BaseConfigManager):
     #     # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
     #     'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
     # }
-
-    # app/config/config_manager/manager.py
 
     _defaults = {
         'YANDEX_TOKEN': '----',
@@ -311,7 +312,9 @@ def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     return manager.get_all()
 
 if __name__ == '__main__':
+
     global env_key
     env_key = get_config_env()
-    0==0
+
+    # 0==0
     pass

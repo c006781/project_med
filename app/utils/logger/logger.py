@@ -218,7 +218,7 @@ if not AppLogger.thec_create('system'):
         use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
         # share_file_with='system',
     )
-    0==0
+    # 0==0
 
 if not AppLogger.thec_create('user'):
     AppLogger.get_instance(
@@ -229,7 +229,7 @@ if not AppLogger.thec_create('user'):
         use_name_in_filename = False, # True, # False, # используем общий файл из конфига
         # share_file_with='system',
     )
-    0==0
+    # 0==0
     
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
@@ -319,7 +319,7 @@ if __name__ == '__main__':
         use_name_in_filename = False, # 'default1',
     ).info("test4")
 
-    0==0
+    # 0==0
 
     pass
 # ------------------------------------------------------------------------------

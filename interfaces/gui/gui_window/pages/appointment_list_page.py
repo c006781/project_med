@@ -13,13 +13,19 @@
 - её высоту можно изменять с помощью разделителя (QSplitter)
 """
 
-from functools import wraps
+
+
 import os
 import datetime
 
+from functools import wraps
+
 from app.utils.logger.logger import AppLogger
 
-from app.config.config_manager.manager import get_config_env
+from app.config.config_manager.manager import (
+    # AppConfigManager, 
+    get_config_env
+)
 from app.dto.field_configs import PATIENT_CONFIG
 
 from app.dependencies import (
@@ -727,6 +733,24 @@ class AppointmentListPage(
     #     self.deleted_rows.clear()
     #     self.new_rows.clear()
 
+    # @AppLogger.get_instance(
+    #     name='AppointmentListPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def reload_config(self):
+    #     """Обновляет сервис и photo_widget при изменении конфигурации."""
+    #     if hasattr(self, 'service') and hasattr(self.service, 'reload_config'):
+    #         self.service.reload_config()
+
+    #     # Пересоздаём photo_widget с новым путём
+    #     # from app.config.config_manager.manager import AppConfigManager
+
+    #     config = AppConfigManager.get_instance()
+    #     storage_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+    #     self.photo_widget.set_storage_path(storage_path)
+
+    #     self.logger.info(f"AppointmentListPage: photo_widget обновлён, путь {storage_path}")    
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -942,13 +966,11 @@ class AppointmentListPage(
 
         appointment_id = self.selected_dto.id
 
-
         self.logger.debug(f"Сброс приёма {appointment_id} из БД")
 
         # 1. Удаляем черновики для этого приёма
         self._clear_drafts(appointment_id)# Удаляем черновики для этого приёма
         # DraftMixin._clear_drafts(self, appointment_id) # Удаляем черновики для этого приёма
-        
 
         # 2. Загружаем свежие данные из БД
         try:
@@ -973,7 +995,6 @@ class AppointmentListPage(
 
         # 4. Обновляем правую панель (блокируем сигналы, чтобы не вызывать лишние изменения)
         self.update_details(fresh_dto)
-
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -1893,7 +1914,8 @@ class AppointmentListPage(
         # DraftMixin._clear_drafts(self) # Очистка черновиков (если они есть)
         self.logger.debug("_clear : self.photo_widget.clear()")
         self.photo_widget.clear()# Сбрасываем временные данные в photo_widget (pending, deleted, modified)
-        0==0
+
+        # 0==0
 
     @AppLogger.get_instance(
         name='AppointmentListPage',

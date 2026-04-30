@@ -1,7 +1,5 @@
 # app/database/__init__.py
 
-
-
 # Импортируем модели из подпакета bd
 from .database_shema import (
     Patient, 

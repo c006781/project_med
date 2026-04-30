@@ -28,3 +28,7 @@ __pycache__/*
 *.log
 
 *.msgpack
+
+photos/
+
+ййй.txt

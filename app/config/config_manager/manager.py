@@ -274,6 +274,9 @@ class AppConfigManager(BaseConfigManager):
         # Остальные настройки
         'PHOTOS_STORAGE_PATH': os.path.join('.', 'photos'),
         'APP_CONFIG_PATH': 'config.msgpack', # путь по умолчанию для файла конфигурации
+
+        # 'show_call_depth': 'True',  # или False, но с возможностью переключения
+        'show_call_depth': 'False',  # или False, но с возможностью переключения
     }
 
     # Хранилище для экземпляров (Multiton)

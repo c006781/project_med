@@ -170,33 +170,28 @@ class PhotoDelegate(QStyledItemDelegate):
         full_path = index.data(Qt.UserRole) # абсолютный путь к файлу изображения
 
         self.logger.debug(f"paint: full_path : {full_path}")
+        def _tt(painter_,option_, gray, AlignCenter, text ):
+            painter_.fillRect(option_.rect, gray)
+            painter_.drawText(option_.rect, AlignCenter, text)
 
         if not full_path:
-
             # Путь не задан – показываем заглушку
-            painter.fillRect(option.rect, Qt.gray)
-            painter.drawText(option.rect, Qt.AlignCenter, "Нет фото")
-
-            super().paint(painter, option, index)
-
+            _tt(painter, option, Qt.gray, Qt.AlignCenter, "Нет фото")
+            # super().paint(painter, option, index)
             return
         
         # Проверяем существование файла
         if not os.path.exists(full_path):
-            painter.fillRect(option.rect, Qt.lightGray)
-            painter.drawText(option.rect, Qt.AlignCenter, "Фото отсутствует в папке хранения фото")
-
-            super().paint(painter, option, index)
-
+            _tt(painter, option, Qt.lightGray, Qt.AlignCenter, "Фото отсутствует в папке хранения фото")
+            # super().paint(painter, option, index)
             return
         
         # Попытка взять из кэша
         # pixmap = self.photo_widget._get_pixmap(full_path)
         pixmap = self.photo_widget._image_cache.get(full_path)
+        self.logger.debug(f"paint: pixmap : {pixmap is not None and not pixmap.isNull()}")
 
-        self.logger.debug(f"paint: pixmap : {pixmap.isNull()}")
-            
-        if pixmap and not pixmap.isNull():
+        if pixmap is not None and not pixmap.isNull():
             rect = option.rect
             scaled = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
@@ -208,15 +203,10 @@ class PhotoDelegate(QStyledItemDelegate):
             painter.drawPixmap(x, y, scaled)
 
             return
-        
-        elif pixmap.isNull():
-            super().paint(painter, option, index)
 
-            return
-        
+        # Заглушка "Загрузка..."
         # Файл существует, но не загружен – показываем заглушку "Загрузка..."
-        painter.fillRect(option.rect, Qt.lightGray)
-        painter.drawText(option.rect, Qt.AlignCenter, "Загрузка...")
+        _tt(painter, option, Qt.lightGray, Qt.AlignCenter, "Загрузка...")
 
         # Запрашиваем асинхронную загрузку, если ещё не запрошено
         if full_path not in self.photo_widget._image_cache:
@@ -421,6 +411,8 @@ class PhotoUploaderWidget(QWidget):
         )
         self.logger.debug("Инициализация PhotoUploaderWidget")
 
+        self._readonly = True  # по умолчанию виджет только для просмотра
+
         # Данные
         self.pending_photos: List[Tuple[str, str]] = []   # (путь, описание)
         self.existing_photos: List[PhotoDTO] = []         # существующие фото
@@ -498,6 +490,8 @@ class PhotoUploaderWidget(QWidget):
 
         if not pixmap.isNull():
             self._image_cache[full_path] = pixmap
+            # После загрузки миниатюры обновляем высоту строки
+            self._adjust_row_heights()
 
         # Перерисовываем строку
         self.table.viewport().update()
@@ -620,7 +614,10 @@ class PhotoUploaderWidget(QWidget):
         self.pending_photos = state['pending_photos']
         self.deleted_photo_ids = set(state['deleted_photo_ids'])
         self.modified_photo_ids = set(state['modified_photo_ids'])
-        self._refresh_table()
+
+        self._refresh_table(
+            if_blockSignals = self._readonly, # Блокируем сигналы, если виджет в режиме только просмотр
+        )
 
     @AppLogger.get_instance(
         name='PhotoUploaderWidget',
@@ -1046,7 +1043,7 @@ class PhotoUploaderWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._adjust_column_widths()
-        self._adjust_row_heights()
+        # self._adjust_row_heights() # Убрано – высота будет корректироваться по необходимости
 
     # ----------------------------------------------------------------------
     # Обработчики событий таблицы
@@ -1536,7 +1533,7 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _refresh_table(self):
+    def _refresh_table(self, if_blockSignals:bool = False):
         """
         Полностью перестраивает таблицу фото и сбрасывает все цвета.
         Вызывается после set_existing_photos и load_state.
@@ -1553,31 +1550,42 @@ class PhotoUploaderWidget(QWidget):
         self.table.setRowCount(total_rows)
         self.table.setUpdatesEnabled(False)
 
-        # Заполняем строки 
-        for i, photo in enumerate(self.existing_photos):
-            self._set_table_row(
-                i, 
-                photo.file_path, 
-                photo.description or "", 
-                is_existing=True
-            )
-        
-        for i, (file_path, desc) in enumerate(self.pending_photos):
-            row = len(self.existing_photos) + i
-            self._set_table_row(
-                row, 
-                file_path, 
-                desc, 
-                is_existing=False
-            )
+        if if_blockSignals:
+            self.table.blockSignals(True) # отключение сигналов на время первичного заполнения
 
-        # Принудительно пересчитываем цвет КАЖДОЙ строки
-        for row in range(total_rows):
-            self._set_row_color(row)
+        try:
+            # Заполняем строки
+            for i, photo in enumerate(self.existing_photos):
+                self._set_table_row(
+                    i,
+                    photo.file_path,
+                    photo.description or "",
+                    is_existing=True
+                )
 
-        self._adjust_row_heights()
+            for i, (file_path, desc) in enumerate(self.pending_photos):
+                row = len(self.existing_photos) + i
+                self._set_table_row(
+                    row,
+                    file_path,
+                    desc,
+                    is_existing=False
+                )
 
-        self.table.setUpdatesEnabled(True)
+            # Принудительно пересчитываем цвет КАЖДОЙ строки
+            for row in range(total_rows):
+                self._set_row_color(row)
+
+        finally:
+            if if_blockSignals:
+                self.table.blockSignals(False)  # <-- Восстанавливаем сигналы  после отключение сигналов на время первичного заполнения
+            self.table.setUpdatesEnabled(True)
+
+        # # Цвета можно установить после восстановления сигналов
+        # for row in range(total_rows):
+        #     self._set_row_color(row)
+
+        # self._adjust_row_heights()  # Убрано – высота будет корректироваться динамически
 
         # Максимально агрессивная перерисовка
         self.table.viewport().update()
@@ -1679,14 +1687,25 @@ class PhotoUploaderWidget(QWidget):
                 continue
 
             pixmap = self._get_pixmap(full_path)
-            if pixmap.isNull():
-                icon_height = 100
-            else:
+            if pixmap and not pixmap.isNull():
+                # Миниатюра уже есть – вычисляем высоту на её основе
                 ratio = pixmap.width() / pixmap.height() if pixmap.height() > 0 else 1.0
                 scaled_width = min(col0_width, pixmap.width())
-                icon_height = int(scaled_width / ratio) if ratio > 0 else 100
-                icon_height = max(icon_height, 1)
+                icon_height = max(int(scaled_width / ratio) if ratio > 0 else 100 , 1)
+            else:
+                # Нет миниатюры – используем дефолтную высоту 100
+                icon_height = 100
 
+
+            # if pixmap.isNull():
+            #     icon_height = 100
+            # else:
+            #     ratio = pixmap.width() / pixmap.height() if pixmap.height() > 0 else 1.0
+            #     scaled_width = min(col0_width, pixmap.width())
+            #     icon_height = int(scaled_width / ratio) if ratio > 0 else 100
+            #     icon_height = max(icon_height, 1)
+
+            # Высота текста описания
             item_text = self.table.item(row, 1)
             text = item_text.text() if item_text else ""
 
@@ -1771,7 +1790,7 @@ class PhotoUploaderWidget(QWidget):
         use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
-    )
+    ) # !!! 16
     def set_existing_photos(self, photos: List[PhotoDTO]):
         """
         Устанавливает существующие фото из БД после сохранения.
@@ -1797,10 +1816,13 @@ class PhotoUploaderWidget(QWidget):
 
         # Сохраняем оригинальные описания
         self.original_descriptions.clear()
+
         for photo in self.existing_photos:
             self.original_descriptions[photo.id] = photo.description or ""
 
-        self._refresh_table()
+        self._refresh_table(
+            if_blockSignals = self._readonly, # Блокируем сигналы, если виджет в режиме только просмотр
+        )
 
         # Принудительно сбрасываем цвета всех строк (убираем зелёный)
         for row in range(self.table.rowCount()):
@@ -1809,12 +1831,12 @@ class PhotoUploaderWidget(QWidget):
         self.table.viewport().update()      # принудительная перерисовка
         self.table.repaint()
 
-        self.logger.debug(f"set_existing_photos ЗАВЕРШЁН. "
-                        f"existing={len(self.existing_photos)}, "
-                        f"pending={len(self.pending_photos)}, "
-                        f"строк в таблице={self.table.rowCount()}")
-
-
+        self.logger.debug(
+            f"set_existing_photos ЗАВЕРШЁН. "
+            f"existing={len(self.existing_photos)}, "
+            f"pending={len(self.pending_photos)}, "
+            f"строк в таблице={self.table.rowCount()}"
+        )
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1898,6 +1920,7 @@ class PhotoUploaderWidget(QWidget):
         Устанавливает режим «только просмотр»: отключает кнопки добавления/удаления.
         Если нужно, также можно заблокировать редактирование описаний.
         """
+        self._readonly = readonly
 
         self.action_combo.setEnabled(not readonly)
         self.view_btn.setEnabled(not readonly)

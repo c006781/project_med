@@ -1669,14 +1669,14 @@ class AppointmentService(
 
         return AppointmentNotFoundError(entity_id)
 
-    @AppLogger.get_instance(
-        name = 'AppointmentService',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )  
+    # @AppLogger.get_instance(
+    #     name = 'AppointmentService',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     # def get_dtos( # ф-ю требуется переделать в динамику
     #         self, 
     #         item_s:Union[List[AppointmentDTO], AppointmentDTO]  
@@ -1740,11 +1740,68 @@ class AppointmentService(
     #         #     raise e
             
     #         return dto
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_extra_data(self, item_s):
+        extra_data = {}
+        # Определяем количество фото
+        if hasattr(item_s, 'photos') and item_s.photos is not None:
+            extra_data['photo_count'] = len(item_s.photos)
+        elif hasattr(item_s, '_photo_count'):
+            extra_data['photo_count'] = item_s._photo_count
+        else:
+            extra_data['photo_count'] = 0
+
+        return extra_data
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _conwert_photos_in_PhotoDTO(self, photos):
+        # Преобразование photos в PhotoDTO (если есть и это не DTO)
+        if photos:
+            self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
+
+            # from app.dto import PhotoDTO
+            # dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
+            photos = [  # Если элемент уже PhotoDTO, оставляем как есть; иначе преобразуем
+                p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
+                for p in photos
+            ]
+
+            self.logger.debug(
+                f"После преобразования: "
+                f"тип dto.photos = {type(photos)}, "
+                f"первый элемент = {type(photos[0]) if photos else None}"
+            )
+
+        return photos
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_dtos(
         self, 
         item_s: Union[List[Appointment], Appointment],
         # extra_data_for_photos:bool = False,
     ) -> Union[List[AppointmentDTO], AppointmentDTO]:
+
         if isinstance(item_s, list):
             return [ # Для списка вызываем рекурсивно с тем же флагом
                 self.get_dtos(
@@ -1771,30 +1828,10 @@ class AppointmentService(
                 raise e
 
             # Преобразование photos в PhotoDTO (если есть и это не DTO)
-            if dto.photos:
-                self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
+            dto.photos = self._conwert_photos_in_PhotoDTO(dto.photos)
 
-                # from app.dto import PhotoDTO
-                # dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
-                dto.photos = [ # Если элемент уже PhotoDTO, оставляем как есть; иначе преобразуем
-                    p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
-                    for p in dto.photos
-                ]
-
-                self.logger.debug(
-                    f"После преобразования: "
-                    f"тип dto.photos = {type(dto.photos)}, "
-                    f"первый элемент = {type(dto.photos[0]) if dto.photos else None}"
-                )
-
-            extra_data = {}
             # Определяем количество фото
-            if hasattr(item_s, 'photos') and item_s.photos is not None:
-                extra_data['photo_count'] = len(item_s.photos)
-            elif hasattr(item_s, '_photo_count'):
-                extra_data['photo_count'] = item_s._photo_count
-            else:
-                extra_data['photo_count'] = 0
+            extra_data = self._get_extra_data(item_s)
 
             # Обогащаем DTO вычисленными полями
             enriched_dto = enrich_dto_with_computed_fields(

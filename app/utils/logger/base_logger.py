@@ -3824,7 +3824,8 @@ class BaseAppLogger:
                             result = func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise e
+                            raise err
+                        
                             # func_qualname
                         return result
 
@@ -3870,7 +3871,7 @@ class BaseAppLogger:
                             result = await func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise e
+                            raise err
                             # func_qualname
                         return result
 
@@ -3899,6 +3900,7 @@ class BaseAppLogger:
                             raise error
                         
                         return result
+                    
                     finally:
                         if _show_depth:
                             logger_instance._decrease_depth()

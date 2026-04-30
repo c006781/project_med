@@ -9,8 +9,11 @@ from app.dto import PhotoDTO
 
 from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table, install_standard_context_menu
 
+from interfaces.gui.gui_window.widgets.delegate.type_delegate import CompleterStringDelegate
+
 from PySide6.QtCore import (
-    QEvent, Signal, 
+    Q_ARG, QEvent, QMetaObject, 
+    QRunnable, QThreadPool, Signal, 
     Qt, QSize, Slot
 )
 from PySide6.QtGui import (
@@ -30,10 +33,90 @@ from PySide6.QtWidgets import (
     # QApplication
 )
 
-from interfaces.gui.gui_window.widgets.delegate.type_delegate import CompleterStringDelegate
 
 
+class AsyncImageLoader(QRunnable):
+    """Загружает миниатюру изображения в отдельном потоке."""
 
+    # @AppLogger.get_instance(
+    #     name = 'AsyncImageLoader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def __init__(self, path: str, target_size: QSize, callback):
+    #     super().__init__()
+    #     self.path = path
+    #     self.target_size = target_size
+    #     self.callback = callback   # callable, который будет вызван в главном потоке с QPixmap
+
+    # @AppLogger.get_instance(
+    #     name = 'AsyncImageLoader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def run(self):
+    #     pixmap = QPixmap(self.path)
+    #     if not pixmap.isNull():
+    #         pixmap = pixmap.scaled(
+    #             self.target_size, 
+    #             Qt.KeepAspectRatio,
+    #             Qt.SmoothTransformation
+    #         )
+
+    #     QMetaObject.invokeMethod(
+    #         self.callback, 
+    #         'on_image_loaded', 
+    #         Qt.QueuedConnection, 
+    #         Q_ARG(QPixmap, pixmap)
+    #     )
+
+    @AppLogger.get_instance(
+        name = 'AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, widget, row, full_path, target_size):
+        super().__init__()
+        self.widget = widget          # PhotoUploaderWidget (наследник QObject)
+        self.row = row
+        self.full_path = full_path
+        self.target_size = target_size
+
+    @AppLogger.get_instance(
+        name = 'AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def run(self):
+        pixmap = QPixmap(self.full_path)
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(
+                self.target_size, 
+                Qt.KeepAspectRatio, 
+                Qt.SmoothTransformation
+            )
+
+        # Вызовем метод _on_thumbnail_loaded в главном потоке
+        QMetaObject.invokeMethod(
+            self.widget,
+            "_on_thumbnail_loaded",
+            Qt.QueuedConnection,
+            Q_ARG(int, self.row),
+            Q_ARG(QPixmap, pixmap),
+            Q_ARG(str, self.full_path)
+        )
 
 class PhotoDelegate(QStyledItemDelegate):
     """
@@ -50,7 +133,10 @@ class PhotoDelegate(QStyledItemDelegate):
     )
     def __init__(self, parent, photo_widget):
         super().__init__(parent)
+        
         self.photo_widget = photo_widget
+
+        self._target_size = QSize(100, 100)  # желаемый размер миниатюры
 
         # логгер
         self.logger = AppLogger.get_instance(
@@ -68,7 +154,12 @@ class PhotoDelegate(QStyledItemDelegate):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+    def paint(
+        self, 
+        painter: QPainter, 
+        option: QStyleOptionViewItem, 
+        index
+    ):
         """
         Переопределяет метод для отрисовки масштабированной иконки в ячейке таблицы.
         
@@ -76,26 +167,60 @@ class PhotoDelegate(QStyledItemDelegate):
         :param option: QStyleOptionViewItem - параметры для отрисовки
         :param index: QModelIndex - индекс элемента в таблице
         """
-        full_path = index.data(Qt.UserRole)
-        self.logger.debug(f"full_path : {full_path}")
+        full_path = index.data(Qt.UserRole) # абсолютный путь к файлу изображения
+
+        self.logger.debug(f"paint: full_path : {full_path}")
+
         if not full_path:
+
+            # Путь не задан – показываем заглушку
+            painter.fillRect(option.rect, Qt.gray)
+            painter.drawText(option.rect, Qt.AlignCenter, "Нет фото")
+
             super().paint(painter, option, index)
+
             return
+        
+        # Проверяем существование файла
+        if not os.path.exists(full_path):
+            painter.fillRect(option.rect, Qt.lightGray)
+            painter.drawText(option.rect, Qt.AlignCenter, "Фото отсутствует в папке хранения фото")
 
-        pixmap = self.photo_widget._get_pixmap(full_path)
-
-        self.logger.debug(f"pixmap : {pixmap.isNull()}")
-        if pixmap.isNull():
             super().paint(painter, option, index)
+
             return
+        
+        # Попытка взять из кэша
+        # pixmap = self.photo_widget._get_pixmap(full_path)
+        pixmap = self.photo_widget._image_cache.get(full_path)
 
-        rect = option.rect
-        scaled_pixmap = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        x = rect.x() + (rect.width() - scaled_pixmap.width()) // 2
-        y = rect.y() + (rect.height() - scaled_pixmap.height()) // 2
+        self.logger.debug(f"paint: pixmap : {pixmap.isNull()}")
+            
+        if pixmap and not pixmap.isNull():
+            rect = option.rect
+            scaled = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
-        self.logger.debug(f"x, y : {x}, {y}")
-        painter.drawPixmap(x, y, scaled_pixmap)
+            x = rect.x() + (rect.width() - scaled.width()) // 2
+            y = rect.y() + (rect.height() - scaled.height()) // 2
+
+            self.logger.debug(f"paint: x, y : {x}, {y}")
+
+            painter.drawPixmap(x, y, scaled)
+
+            return
+        
+        elif pixmap.isNull():
+            super().paint(painter, option, index)
+
+            return
+        
+        # Файл существует, но не загружен – показываем заглушку "Загрузка..."
+        painter.fillRect(option.rect, Qt.lightGray)
+        painter.drawText(option.rect, Qt.AlignCenter, "Загрузка...")
+
+        # Запрашиваем асинхронную загрузку, если ещё не запрошено
+        if full_path not in self.photo_widget._image_cache:
+            self.photo_widget.request_thumbnail(index.row(), full_path, self._target_size)
 
     @AppLogger.get_instance(
         name = 'PhotoDelegate',
@@ -141,13 +266,16 @@ class TextEditDelegate(QStyledItemDelegate):
     )
     def __init__(self, parent=None, photo_widget=None):
         super().__init__(parent)
-        self.photo_widget = photo_widget  # <-- главное исправление
+
+        self.photo_widget = photo_widget 
+        
         self.logger = AppLogger.get_instance(
             name='gui.TextEditDelegate',
             # share_file_with = 'user',
             enable_file_logging = 'user',
             use_name_in_filename = False, # 'user',
         )
+
         self.logger.debug("TextEditDelegate инициализирован")
 
     @AppLogger.get_instance(
@@ -165,8 +293,11 @@ class TextEditDelegate(QStyledItemDelegate):
         editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         editor.setMinimumHeight(80)
+
         install_standard_context_menu(editor)
+
         self.logger.debug(f"createEditor: создан QTextEdit для строки {index.row()}")
+
         return editor
 
     @AppLogger.get_instance(
@@ -194,9 +325,15 @@ class TextEditDelegate(QStyledItemDelegate):
     )
     def setModelData(self, editor, model, index):
         """Сохраняет текст из редактора в модель."""
+
         new_text = editor.toPlainText()
         model.setData(index, new_text, Qt.EditRole)
-        self.logger.debug(f"setModelData: сохранён текст '{new_text[:50]}...' для строки {index.row()}")
+
+        self.logger.debug(
+            f"setModelData: "
+            f"сохранён текст '{new_text[:50]}...' "
+            f"для строки {index.row()}"
+        )
 
         # # Принудительно вызываем обработчик изменений в PhotoUploaderWidget
         # if self.photo_widget and hasattr(self.photo_widget, '_on_item_changed'):
@@ -294,12 +431,119 @@ class PhotoUploaderWidget(QWidget):
         self._storage_path: str = None                    # базовый путь к хранилищу
         self._image_cache: Dict[str, QPixmap] = {}        # кэш изображений
 
+        self._async_loader_pool = QThreadPool.globalInstance() # пул загрузчиков
+        self._pending_loaders = set() # 
+
         self.setAcceptDrops(True) # разрешить перетаскивание
 
-        self._setup_ui()
-        self._adjust_column_widths()
+        self._setup_ui() # инициализация интерфейса
+
+        self._adjust_column_widths() # настройка ширин столбцов
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def request_thumbnail(self, row: int, full_path: str, target_size: QSize):
+        """Асинхронно загружает миниатюру для указанной строки."""
+        if full_path in self._image_cache:
+            self._on_thumbnail_loaded(row, self._image_cache[full_path])
+            return
+        
+        # Предотвращаем повторные запросы для одного пути (опционально)
+        if hasattr(self, '_loading_paths') and full_path in self._loading_paths:
+            return
+        
+        if not hasattr(self, '_loading_paths'):
+            self._loading_paths = set()
+
+        self._loading_paths.add(full_path)
+
+        # loader = AsyncImageLoader(
+        #     full_path, 
+        #     target_size, 
+        #     lambda pixmap: self._on_thumbnail_loaded(
+        #         row, 
+        #         pixmap, 
+        #         full_path
+        #     )
+        # )
+
+        loader = AsyncImageLoader(self, row, full_path, target_size)
+
+        self._async_loader_pool.start(loader)
+        self._pending_loaders.add(loader)
 
 
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int, QPixmap, str)
+    def _on_thumbnail_loaded(self, row: int, pixmap: QPixmap, full_path: str):
+        """Вызывается в главном потоке после загрузки миниатюры."""
+        if row >= self.table.rowCount():
+            return
+        
+        if full_path in self._loading_paths:
+            self._loading_paths.discard(full_path)
+
+        if not pixmap.isNull():
+            self._image_cache[full_path] = pixmap
+
+        # Перерисовываем строку
+        self.table.viewport().update()
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_visible_thumbnails(self):
+        """Загружает миниатюры для строк, видимых в данный момент."""
+        if not self.table.isVisible():
+            return
+        
+        viewport = self.table.viewport()
+        first_row = self.table.rowAt(0)
+        last_row = self.table.rowAt(viewport.height())
+
+        if first_row < 0:
+            first_row = 0
+
+        if last_row < 0:
+            last_row = self.table.rowCount() - 1
+
+        for row in range(first_row, last_row + 1):
+            item = self.table.item(row, 0)
+            if item:
+                full_path = item.data(Qt.UserRole)
+                if full_path and full_path not in self._image_cache:
+                    self.request_thumbnail(row, full_path, QSize(100, 100))
+
+    @AppLogger.get_instance(
+        name = 'PhotoUploaderWidget',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_scroll(self, value):
+        """Обработчик прокрутки – подгружаем видимые миниатюры."""
+        self._load_visible_thumbnails()
+        
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
         # share_file_with = 'system',
@@ -647,6 +891,8 @@ class PhotoUploaderWidget(QWidget):
 
         # Таблица
         self.table = QTableWidget()
+        self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
+
         add_copy_paste_to_table(self.table)
         self.table.setColumnCount(2)
         self.table.setHorizontalHeaderLabels(["Фото", "Описание"])
@@ -1295,7 +1541,11 @@ class PhotoUploaderWidget(QWidget):
         Полностью перестраивает таблицу фото и сбрасывает все цвета.
         Вызывается после set_existing_photos и load_state.
         """
-        self.logger.debug(f"_refresh_table: existing={len(self.existing_photos)}, pending={len(self.pending_photos)}")
+        self.logger.debug(
+            f"_refresh_table: "
+            f"existing={len(self.existing_photos)}, "
+            f"pending={len(self.pending_photos)}"
+        )
 
         total_rows = len(self.existing_photos) + len(self.pending_photos)
 
@@ -1337,7 +1587,12 @@ class PhotoUploaderWidget(QWidget):
 
         self._update_undo_actions_state()
 
-        self.logger.debug(f"_refresh_table завершена. Строк в таблице: {total_rows}")
+        self.logger.debug(
+            f"_refresh_table завершена. "
+            f"Строк в таблице: {total_rows}"
+        )
+
+        self._load_visible_thumbnails()
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1616,8 +1871,14 @@ class PhotoUploaderWidget(QWidget):
         self.modified_photo_ids.clear()
         self._image_cache.clear()
 
+        if hasattr(self, '_loading_paths'):
+            self._loading_paths.clear()
+
+        self._pending_loaders.clear()
+        
         self.table.setRowCount(0)
         self.table.clearContents()
+
 
         self.logger.debug("PhotoUploaderWidget полностью очищен")
 

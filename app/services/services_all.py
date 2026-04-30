@@ -2541,6 +2541,7 @@ class PhotoService(
                 # Создаём папку назначения, если её нет
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 shutil.copy2(source_file_path, target_path)
+                
                 self.logger.debug(
                     f"Файл скопирован: "
                     f"{source_file_path} -> {target_path}"
@@ -2560,6 +2561,7 @@ class PhotoService(
 
             # dto_out = self._dto_class.from_orm(photo)
             dto_out = self.get_dto_out(photo)
+
             self.logger.info(
                 f"Добавлено фото "
                 f"id={dto_out.id} "

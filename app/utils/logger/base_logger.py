@@ -3048,7 +3048,7 @@ class BaseAppLogger:
         cls, 
         name, 
         share_file_with,
-        sync_full_state:bool=False, 
+        sync_full_state: bool = False,
     ):
         with cls._instances_lock:
             # экземпляр с таким именем уже существует - возвращается существующий
@@ -3145,25 +3145,53 @@ class BaseAppLogger:
             )
 
             # После создания – если нужен шаринг, применяем
+            # if share_file_with:
+            #     other = cls._instances.get(share_file_with)
+            #     # if other and other.file_handler:
+            #     if other and other._file_enabled and other.file_handler:
+            #         instance.share_file_handler_with(
+            #             other,
+            #             sync_full_state=sync_full_state,
+            #         )
+            #         # # Немедленно перезагружаем настройки с учётом нового мастера
+            #         # instance.reload_from_config(
+            #         #     instance.get_default_config()
+            #         # )
+            #     else:
+            #         # Логгируем предупреждение, но продолжаем
+            #         print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}' для логгера '{name}'.", file=sys.stderr)
+            #         # if instance.logger:
+            #         #     instance.logger.info(
+            #         #         f"Файловый обработчик не общий с '{share_file_with}': у мастера он отключён. Будет использоваться собственный."
+            #         #     )
+
             if share_file_with:
                 other = cls._instances.get(share_file_with)
-                # if other and other.file_handler:
-                if other and other._file_enabled and other.file_handler:
-                    instance.share_file_handler_with(
-                        other,
-                        sync_full_state=sync_full_state,
-                    )
-                    # # Немедленно перезагружаем настройки с учётом нового мастера
-                    # instance.reload_from_config(
-                    #     instance.get_default_config()
-                    # )
+                if other:
+                    # Проверяем, должен ли у other быть файловый обработчик
+                    # (учитываем эффективное состояние файлового логирования)
+                    if other.effective_enable_file_logging(_visited=None):
+                        # Файловое логирование включено, но обработчик отсутствует – это ошибка
+                        if other.file_handler is None:
+                            print(f"WARNING: У логгера '{share_file_with}' включено файловое логирование, "
+                                  f"но обработчик отсутствует. Расшаривание для '{name}' невозможно.",
+                                  file=sys.stderr)
+                        else:
+                            instance.share_file_handler_with(
+                                other,
+                                sync_full_state=sync_full_state,
+                            )
+                    else:
+                        # У other файловое логирование отключено – ничего не делаем, предупреждение не нужно
+                        pass
                 else:
-                    # Логгируем предупреждение, но продолжаем
-                    print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}' для логгера '{name}'.", file=sys.stderr)
-                    # if instance.logger:
-                    #     instance.logger.info(
-                    #         f"Файловый обработчик не общий с '{share_file_with}': у мастера он отключён. Будет использоваться собственный."
-                    #     )
+                    # Логгер с именем share_file_with не существует
+                    print(
+                        f"WARNING: Логгер '{share_file_with}', с которым требуется расшарить обработчик, не найден.",
+                        file=sys.stderr
+                    )
+
+
             return instance
 
     @staticmethod

@@ -37,44 +37,44 @@ from PySide6.QtWidgets import (
 
 class AsyncImageLoader(QRunnable):
     """Загружает миниатюру изображения в отдельном потоке."""
-
-    @AppLogger.get_instance(
-        name = 'AsyncImageLoader',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def __init__(self, path: str, target_size: QSize, callback):
-        super().__init__()
-        self.path = path
-        self.target_size = target_size
-        self.callback = callback   # callable, который будет вызван в главном потоке с QPixmap
-
-    @AppLogger.get_instance(
-        name = 'AsyncImageLoader',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def run(self):
-        pixmap = QPixmap(self.path)
-        if not pixmap.isNull():
-            pixmap = pixmap.scaled(
-                self.target_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-
-        QMetaObject.invokeMethod(
-            self.callback,
-            'on_image_loaded',
-            Qt.QueuedConnection,
-            Q_ARG(QPixmap, pixmap)
-        )
+    #
+    # @AppLogger.get_instance(
+    #     name = 'AsyncImageLoader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def __init__(self, path: str, target_size: QSize, callback):
+    #     super().__init__()
+    #     self.path = path
+    #     self.target_size = target_size
+    #     self.callback = callback   # callable, который будет вызван в главном потоке с QPixmap
+    #
+    # @AppLogger.get_instance(
+    #     name = 'AsyncImageLoader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def run(self):
+    #     pixmap = QPixmap(self.path)
+    #     if not pixmap.isNull():
+    #         pixmap = pixmap.scaled(
+    #             self.target_size,
+    #             Qt.KeepAspectRatio,
+    #             Qt.SmoothTransformation
+    #         )
+    #
+    #     QMetaObject.invokeMethod(
+    #         self.callback,
+    #         'on_image_loaded',
+    #         Qt.QueuedConnection,
+    #         Q_ARG(QPixmap, pixmap)
+    #     )
 
     @AppLogger.get_instance(
         name = 'AsyncImageLoader',
@@ -136,7 +136,7 @@ class PhotoDelegate(QStyledItemDelegate):
         
         self.photo_widget = photo_widget
 
-        self._target_size = QSize(100, 100)  # желаемый размер миниатюры
+        self._target_size = QSize(300, 300)  # желаемый размер миниатюры
 
         # логгер
         self.logger = AppLogger.get_instance(
@@ -423,6 +423,8 @@ class PhotoUploaderWidget(QWidget):
         self._storage_path: str = None                    # базовый путь к хранилищу
         self._image_cache: Dict[str, QPixmap] = {}        # кэш изображений
 
+        self._thumbnail_target_size = QSize(300, 300)
+
         self._async_loader_pool = QThreadPool.globalInstance() # пул загрузчиков
         self._pending_loaders = set() # 
 
@@ -491,7 +493,9 @@ class PhotoUploaderWidget(QWidget):
         if not pixmap.isNull():
             self._image_cache[full_path] = pixmap
             # После загрузки миниатюры обновляем высоту строки
-            self._adjust_row_heights()
+            self._adjust_row_heights(
+                row
+            )
 
         # Перерисовываем строку
         self.table.viewport().update()
@@ -524,7 +528,7 @@ class PhotoUploaderWidget(QWidget):
             if item:
                 full_path = item.data(Qt.UserRole)
                 if full_path and full_path not in self._image_cache:
-                    self.request_thumbnail(row, full_path, QSize(100, 100))
+                    self.request_thumbnail(row, full_path, self._thumbnail_target_size)
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -601,6 +605,12 @@ class PhotoUploaderWidget(QWidget):
 
         # Восстанавливаем существующие фото
         self.existing_photos = [PhotoDTO(**p) for p in state['existing_photos']]
+
+        # Дополнительная страховка: если вдруг элементы не PhotoDTO, преобразуем
+        self.existing_photos = [
+            p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
+            for p in self.existing_photos
+        ]
         
         # Восстанавливаем оригинальные описания из сохранённого состояния
         self.original_descriptions = state.get('original_descriptions', {}).copy()
@@ -1501,7 +1511,8 @@ class PhotoUploaderWidget(QWidget):
             self.logger.warning(f"Файл не найден: {full_path}")
             return
 
-        pixmap = self._get_pixmap(full_path)
+        # pixmap = self._get_pixmap(full_path)
+        pixmap = QPixmap(full_path)
         if pixmap.isNull():
             self.logger.warning(f"Не удалось загрузить: {full_path}")
             return
@@ -1657,7 +1668,7 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _adjust_row_heights(self):
+    def _adjust_row_heights(self, row: int = None):
         
         """
         Устанавливает высоту строк таблицы на основе ширины столбца 0.
@@ -1671,6 +1682,8 @@ class PhotoUploaderWidget(QWidget):
         Если пиксель не может быть загружен, то используется высота 100.
 
         Вычисляется максимальная высота для строки, учитывая высоту пикселя и высоту текста.
+
+        Пересчитывает высоту строк(и). Если row не указан – пересчитывает все строки
         """
         
         col0_width = self.table.columnWidth(0)
@@ -1679,37 +1692,33 @@ class PhotoUploaderWidget(QWidget):
 
         font = self.table.font()
         metrics = QFontMetrics(font)
+        rows = [row] if row is not None else range(self.table.rowCount())
 
-        for row in range(self.table.rowCount()):
-            item_icon = self.table.item(row, 0)
-            full_path = item_icon.data(Qt.UserRole) if item_icon else None
-            if not full_path:
+        for r in rows:
+            if r >= self.table.rowCount():
                 continue
 
+            item_icon = self.table.item(r, 0)
+            full_path = item_icon.data(Qt.UserRole) if item_icon else None
+
+            if not full_path:
+                continue
             pixmap = self._get_pixmap(full_path)
-            if pixmap and not pixmap.isNull():
+            if pixmap.isNull():
+                # Нет миниатюры – используем дефолтную высоту 100
+                icon_height = 100
+            else:
                 # Миниатюра уже есть – вычисляем высоту на её основе
                 ratio = pixmap.width() / pixmap.height() if pixmap.height() > 0 else 1.0
                 scaled_width = min(col0_width, pixmap.width())
                 icon_height = max(int(scaled_width / ratio) if ratio > 0 else 100 , 1)
-            else:
-                # Нет миниатюры – используем дефолтную высоту 100
-                icon_height = 100
 
-
-            # if pixmap.isNull():
-            #     icon_height = 100
-            # else:
-            #     ratio = pixmap.width() / pixmap.height() if pixmap.height() > 0 else 1.0
-            #     scaled_width = min(col0_width, pixmap.width())
-            #     icon_height = int(scaled_width / ratio) if ratio > 0 else 100
-            #     icon_height = max(icon_height, 1)
 
             # Высота текста описания
-            item_text = self.table.item(row, 1)
+            item_text = self.table.item(r, 1)
             text = item_text.text() if item_text else ""
-
             text_height = 0
+
             if text:
                 text_width = self.table.columnWidth(1) - 10
                 if text_width > 0:
@@ -1717,7 +1726,7 @@ class PhotoUploaderWidget(QWidget):
                     text_height = rect.height()
 
             row_height = max(icon_height, text_height) + 10
-            self.table.setRowHeight(row, row_height)
+            self.table.setRowHeight(r, row_height)
 
     # ----------------------------------------------------------------------
     # Кэширование
@@ -1799,7 +1808,7 @@ class PhotoUploaderWidget(QWidget):
         self.logger.debug(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
 
         # Полная очистка ВСЕГО состояния виджета
-        self.clear()#  полный сброс
+        self.clear() # полный сброс
         # self.pending_photos.clear()
         # self.deleted_photo_ids.clear()
         # self.modified_photo_ids.clear()
@@ -1808,11 +1817,22 @@ class PhotoUploaderWidget(QWidget):
 
         # Заполняем новыми данными
         # self.existing_photos = list(photos) if photos else []
-        if photos and isinstance(photos[0], dict):
-            self.existing_photos = [PhotoDTO(**p) for p in photos]
-            self.logger.debug("Фото преобразованы из dict → PhotoDTO")
-        else:
-            self.existing_photos = list(photos) if photos else []
+        # if photos and isinstance(photos[0], dict):
+        #     self.existing_photos = [PhotoDTO(**p) for p in photos]
+        #     self.logger.debug("Фото преобразованы из dict → PhotoDTO")
+        # else:
+        #     self.existing_photos = list(photos) if photos else []
+
+        # Нормализация: гарантируем, что все элементы – PhotoDTO
+        normalized = []
+        for p in (photos or []):
+            if isinstance(p, dict):
+                normalized.append(PhotoDTO(**p))
+            elif isinstance(p, PhotoDTO):
+                normalized.append(p)
+            else:
+                normalized.append(PhotoDTO.model_validate(p))
+        self.existing_photos = normalized
 
         # Сохраняем оригинальные описания
         self.original_descriptions.clear()

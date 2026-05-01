@@ -984,6 +984,21 @@ class PhotoUploaderWidget(QWidget):
 
         main_layout.addLayout(btn_layout)
 
+    @AppLogger.get_instance(
+        name='PhotoUploaderWidget',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _append_pending_row(self, file_path: str, description: str = ""):
+        """
+        Добавляет одну строку в конец таблицы для нового фото (pending).
+        Не перестраивает всю таблицу.
+        """
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self._set_table_row(row, file_path, description, is_existing=False)
+        self._set_row_color(row)
+        self._adjust_row_heights(row)  # пересчёт высоты только для новой строки
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -1285,11 +1300,12 @@ class PhotoUploaderWidget(QWidget):
                 break
             
             self.pending_photos.append((file_path, ""))
+            self._append_pending_row(file_path, "")
             added += 1
             self.logger.debug(f"Добавлено фото: {file_path}")
         
         if added:
-            self._refresh_table()
+            # self._refresh_table()
             self.photosChanged.emit()
             self._update_undo_actions_state()
 
@@ -1305,15 +1321,21 @@ class PhotoUploaderWidget(QWidget):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def dragEnterEvent(self, event):
+        if self._readonly:
+            event.ignore()
+            return
+
         mime_data = event.mimeData()
         if not mime_data.hasUrls():
             event.ignore()
             return
+
         for url in mime_data.urls():
             file_path = url.toLocalFile()
             if file_path and os.path.splitext(file_path)[1].lower() in self.VALID_EXTENSIONS:
                 event.acceptProposedAction()
                 return
+
         event.ignore()
 
     @AppLogger.get_instance(
@@ -1326,6 +1348,11 @@ class PhotoUploaderWidget(QWidget):
     )
     def dragMoveEvent(self, event):
         """Разрешает перемещение (повторяет логику dragEnter)."""
+        if self._readonly:
+            event.ignore()
+            return
+
+        # Если не readonly, можно разрешить перемещение
         self.dragEnterEvent(event)
 
     @AppLogger.get_instance(
@@ -1338,6 +1365,10 @@ class PhotoUploaderWidget(QWidget):
     )
     def dropEvent(self, event):
         """Обрабатывает сброшенные файлы, добавляя их через _add_photo_files."""
+        if self._readonly:
+            event.ignore()
+            return
+
         mime_data = event.mimeData()
         if not mime_data.hasUrls():
             event.ignore()
@@ -1351,6 +1382,7 @@ class PhotoUploaderWidget(QWidget):
         
         if file_paths:
             self._add_photo_files(file_paths)
+
         event.acceptProposedAction()   
 
     @AppLogger.get_instance(
@@ -1456,13 +1488,16 @@ class PhotoUploaderWidget(QWidget):
                 # если фото было изменено, убираем из modified (оно всё равно удалится)
                 self.modified_photo_ids.discard(photo.id)  # если было изменено, убираем из modified
 
+                self._set_row_color(row)  # перекрасить в красный
+
                 # не удаляем из existing_photos, чтобы сохранить возможность отмены
         else:
             # новые фото (pending) – удаляем сразу
             pending_index = row - len(self.existing_photos)
             if pending_index < len(self.pending_photos):
                 del self.pending_photos[pending_index]
-                self._refresh_table()
+                # self._refresh_table()
+                self.table.removeRow(row)
                 self.logger.debug("Удалено новое фото")
 
 
@@ -1596,7 +1631,7 @@ class PhotoUploaderWidget(QWidget):
         # for row in range(total_rows):
         #     self._set_row_color(row)
 
-        # self._adjust_row_heights()  # Убрано – высота будет корректироваться динамически
+        self._adjust_row_heights()
 
         # Максимально агрессивная перерисовка
         self.table.viewport().update()
@@ -1799,7 +1834,7 @@ class PhotoUploaderWidget(QWidget):
         use_name_in_filename = False, # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
-    ) # !!! 16
+    )
     def set_existing_photos(self, photos: List[PhotoDTO]):
         """
         Устанавливает существующие фото из БД после сохранения.
@@ -1832,6 +1867,7 @@ class PhotoUploaderWidget(QWidget):
                 normalized.append(p)
             else:
                 normalized.append(PhotoDTO.model_validate(p))
+
         self.existing_photos = normalized
 
         # Сохраняем оригинальные описания
@@ -1844,9 +1880,9 @@ class PhotoUploaderWidget(QWidget):
             if_blockSignals = self._readonly, # Блокируем сигналы, если виджет в режиме только просмотр
         )
 
-        # Принудительно сбрасываем цвета всех строк (убираем зелёный)
-        for row in range(self.table.rowCount()):
-            self._set_row_color(row)
+        # # Принудительно сбрасываем цвета всех строк (убираем зелёный)
+        # for row in range(self.table.rowCount()):
+        #     self._set_row_color(row)
 
         self.table.viewport().update()      # принудительная перерисовка
         self.table.repaint()
@@ -1941,6 +1977,7 @@ class PhotoUploaderWidget(QWidget):
         Если нужно, также можно заблокировать редактирование описаний.
         """
         self._readonly = readonly
+        self.setAcceptDrops(not readonly)  # запрещаем перетаскивание в режиме просмотра
 
         self.action_combo.setEnabled(not readonly)
         self.view_btn.setEnabled(not readonly)

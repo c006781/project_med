@@ -38,43 +38,43 @@ from PySide6.QtWidgets import (
 class AsyncImageLoader(QRunnable):
     """Загружает миниатюру изображения в отдельном потоке."""
 
-    # @AppLogger.get_instance(
-    #     name = 'AsyncImageLoader',
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level = AppLogger._parse_log_level('DEBUG')
-    # )
-    # def __init__(self, path: str, target_size: QSize, callback):
-    #     super().__init__()
-    #     self.path = path
-    #     self.target_size = target_size
-    #     self.callback = callback   # callable, который будет вызван в главном потоке с QPixmap
+    @AppLogger.get_instance(
+        name = 'AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, path: str, target_size: QSize, callback):
+        super().__init__()
+        self.path = path
+        self.target_size = target_size
+        self.callback = callback   # callable, который будет вызван в главном потоке с QPixmap
 
-    # @AppLogger.get_instance(
-    #     name = 'AsyncImageLoader',
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level = AppLogger._parse_log_level('DEBUG')
-    # )
-    # def run(self):
-    #     pixmap = QPixmap(self.path)
-    #     if not pixmap.isNull():
-    #         pixmap = pixmap.scaled(
-    #             self.target_size, 
-    #             Qt.KeepAspectRatio,
-    #             Qt.SmoothTransformation
-    #         )
+    @AppLogger.get_instance(
+        name = 'AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def run(self):
+        pixmap = QPixmap(self.path)
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(
+                self.target_size,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
 
-    #     QMetaObject.invokeMethod(
-    #         self.callback, 
-    #         'on_image_loaded', 
-    #         Qt.QueuedConnection, 
-    #         Q_ARG(QPixmap, pixmap)
-    #     )
+        QMetaObject.invokeMethod(
+            self.callback,
+            'on_image_loaded',
+            Qt.QueuedConnection,
+            Q_ARG(QPixmap, pixmap)
+        )
 
     @AppLogger.get_instance(
         name = 'AsyncImageLoader',

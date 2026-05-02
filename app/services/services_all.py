@@ -236,10 +236,10 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         """
 
         self._db            = db 
-        self._repo_class    = repo_class # репозиторий с которым работает сервис 
-        self._model_class   = model_class # ORM-модель для создания экземпляров 
-        self._dto_class     = dto_class # DTO класс для преобразования 
-        self._field_configs = field_configs or {} # конфигурация полей для сервиса (по умолчанию пустой словарь)
+        self._repo_class    = repo_class    # репозиторий с которым работает сервис
+        self._model_class   = model_class   # ORM-модель для создания экземпляров
+        self._dto_class     = dto_class     # DTO класс для преобразования
+        self._field_configs = field_configs or {}  # конфигурация полей для сервиса (по умолчанию пустой словарь)
 
         # Настройка логгера: если имя не передано, используем имя класса сервиса
         if logger_name is None:
@@ -249,7 +249,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             name = logger_name,
             # share_file_with = 'user',
             enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
+            use_name_in_filename = False,  # 'user',
         )
 
         # Подписываемся на изменения конфигурации
@@ -259,7 +259,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -271,7 +271,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -309,7 +309,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
 
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_all() # Предполагаем, что в репозитории есть метод get_all()
+            items = repo.get_all()  # Предполагаем, что в репозитории есть метод get_all()
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
             # self.logger.debug(f"Получено {len(dtos)} записей")
@@ -320,7 +320,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -364,7 +364,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -404,7 +404,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -2952,8 +2952,8 @@ class PhotoService(
         config = AppConfigManager.get_instance()
 
         new_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
-        self._storage_path = new_path # обновляем путь к хранилищу фото
+        self._storage_path = new_path  # обновляем путь к хранилищу фото
 
-        self._ensure_storage_exists() # создаём директорию для хранения, 
+        self._ensure_storage_exists()  # создаём директорию для хранения,
 
         self.logger.info(f"Путь к фото обновлён: {self._storage_path}")

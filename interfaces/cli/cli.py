@@ -20,7 +20,6 @@ import sys  # Импорт модуля sys для работы с систем�
 from datetime import date, time
 from typing import Optional
 
-
 # # Импорты модулей
 # def _add_package_name(
 #     file_module: str = None,
@@ -204,7 +203,10 @@ from app.exceptions import (
 # try:
     # from ..models.bd.models import init_db  # для инициализации БД
 # from app.backend.bd.clinic import create_db, generate_test_data, Patient, Appointment, AppointmentNote, Photo
-from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import (
+    Patient, Appointment,
+    AppointmentNote, Photo
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -242,6 +244,8 @@ from app.dependencies import (
 #         init_db,
 #     )
 
+from app.config.config_applier import ConfigApplier
+from app.config.config_manager import AppConfigManager
 
 # Сторонние библиотеки
 
@@ -1279,6 +1283,15 @@ def create_cli():
             # Если произошла какая-то ошибка, то выводим ее текст
             click.echo(f"Ошибка инициализации БД: {e}", err=True)
 
+    @cli.command()
+    def apply_settings():
+        """Применить текущие настройки из конфигурации (например, после ручного редактирования config.msgpack)."""
+        # from app.config.config_applier import ConfigApplier
+        manager = AppConfigManager.get_instance()
+        config = manager.get_all()
+        applier = ConfigApplier()
+        applier.apply_full_config(config)
+        click.echo("Настройки применены.")
 
     # @click.command()
     @cli.command()

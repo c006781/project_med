@@ -1,5 +1,5 @@
 # interfaces/gui/gui_window/pages/settings_page.py
-
+from app.config.config_applier import ConfigApplier
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from app.config.config_manager.manager import AppConfigManager
@@ -310,7 +310,6 @@ class SettingsPage(BasePage):
     # Сохранение настроек и перезагрузка логгеров
     # ----------------------------------------------------------------------
 
-
     @AppLogger.get_instance(
         name = 'SettingsPage',
         # share_file_with = 'system',
@@ -319,8 +318,9 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    @Slot()
-    def _save_settings(self):
+    def _sawe_new_config(
+        self
+    ):
         # Сохраняем основные настройки
         self.config_manager.set('database_local_path', self.db_path_edit.text())
         self.config_manager.set('PHOTOS_STORAGE_PATH', self.photos_path_edit.text())
@@ -346,20 +346,62 @@ class SettingsPage(BasePage):
         self.config_manager.set('LOG_MAX_BYTES', self.log_max_bytes_spin.value())
         self.config_manager.set('LOG_BACKUP_COUNT', self.log_backup_count_spin.value())
 
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _save_settings(self):
+        # Сохраняем старую конфигурацию для сравнения
+        old_config = self.config_manager.get_all().copy()
+
+        self._sawe_new_config()
+
         try:
             self.config_manager.save()
 
-            # ----------------------------------------------------------
-            # Ключевой момент: перезагружаем все логгеры из нового конфига
-            # ----------------------------------------------------------
-            # from app.utils.logger.logger import AppLogger
-            AppLogger.reload_all_from_app_config()
+            # Получаем новую конфигурацию и определяем изменившиеся блоки
+            new_config = self.config_manager.get_all()
+            # from app.config.config_applier import ConfigApplier
+            changed_blocks = ConfigApplier.get_changed_blocks(old_config, new_config)
+
+            # Применяем только изменённые блоки
+            applier = ConfigApplier()
+            if 'database' in changed_blocks:
+                applier.apply_database(new_config)
+
+            if 'photos' in changed_blocks:
+                applier.apply_photos_storage(new_config)
+
+            if 'sync' in changed_blocks:
+                applier.apply_sync(new_config)
+
+            if any(block.startswith('logging') for block in changed_blocks):
+                applier.apply_logging(new_config)
+
+            if 'backup' in changed_blocks:
+                applier.apply_backup(new_config)
+
+
+            # # ----------------------------------------------------------
+            # # Ключевой момент: перезагружаем все логгеры из нового конфига
+            # # ----------------------------------------------------------
+            # # from app.utils.logger.logger import AppLogger
+            # AppLogger.reload_all_from_app_config()
+
+
+            # Уведомляем главное окно о применённых изменениях (передаём список изменённых блоков)
+            if self.main_window and hasattr(self.main_window, 'on_settings_changed'):
+                self.main_window.on_settings_changed(
+                    changed_blocks
+                )
 
             QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены, логгеры перезагружены")
-
-            if self.main_window and hasattr(self.main_window, 'on_settings_changed'):
-                self.main_window.on_settings_changed()
 
             # Если это был первый запуск (настройки открыты при старте) – переходим на список пациентов
             if self.first_start:
@@ -367,6 +409,7 @@ class SettingsPage(BasePage):
                     'patient_list',
                     add_to_history=False,
                 )
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
             self.logger.exception(f"Ошибка сохранения настроек: {e}")
@@ -374,7 +417,6 @@ class SettingsPage(BasePage):
     # ----------------------------------------------------------------------
     # Метод, вызываемый при показе страницы
     # ----------------------------------------------------------------------
-
 
     @AppLogger.get_instance(
         name = 'SettingsPage',

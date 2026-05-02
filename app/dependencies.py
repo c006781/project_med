@@ -7,13 +7,13 @@
 import os
 from typing import (
     # get_type_hints,
-    Optional, 
+    # Optional,
     get_origin, 
-    get_args
+    get_args,
+    Union
 )
 import datetime
 # import inspect
-from typing import Union
 
 from app.utils.logger import AppLogger
 
@@ -37,14 +37,12 @@ from app.services import (
 # from .backend.bd.clinic import create_db
 # from .backend.bd.temp_data_bd import generate_test_data
 
-
-
-
-
 from pydantic import BaseModel
 
 @AppLogger.get_instance(
-    name = 'system',
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -67,7 +65,7 @@ def get_db() -> Database:
         name = 'dependencies',
         # share_file_with = 'user',
         enable_file_logging = 'user',
-        use_name_in_filename = False, # 'user',
+        use_name_in_filename = False,  # 'user',
     ).debug(
         f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
     )
@@ -75,7 +73,9 @@ def get_db() -> Database:
     return Database(db_url)
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -92,7 +92,9 @@ def get_patient_service() -> PatientService:
 #     return AppointmentService(db, note_service=note_service)
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -116,7 +118,9 @@ def get_appointment_service() -> AppointmentService:
     )
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -132,7 +136,9 @@ def get_note_service() -> NoteService:
     )
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -148,7 +154,8 @@ def get_photo_service() -> PhotoService:
             '.', 
             'photos'
         ),
-    ) # поправить на другой, что бы был адоптив 
+    )  # поправить на другой, что бы был адоптив
+
     return PhotoService(
         get_db(), 
         photos_path, 
@@ -156,7 +163,9 @@ def get_photo_service() -> PhotoService:
     )
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -167,14 +176,16 @@ def get_sync_service() -> SyncService:
     return SyncService()
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
 def init_db(
-        recreate: bool = False, 
-        test_data: bool = True
-    ):
+    recreate: bool = False,
+    test_data: bool = True
+):
     """
     Инициализировать базу данных (создать таблицы, опционально заполнить тестовыми данными).
 
@@ -211,15 +222,17 @@ def init_db(
 #     return return_
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
 def get_text_echo(
     data: dict,  # Pydantic DTO
-    exclude_fields: list = None , # список полей, которые не нужно выводить (например, ['id'])
-    if_str_limit : int = None,  # ограничение длины выводимого текста (например, 50)
-    rename_map: dict = None, # словарь переименований полей (например, {'first_name': 'First Name'})
+    exclude_fields: list = None,  # список полей, которые не нужно выводить (например, ['id'])
+    if_str_limit: int = None,  # ограничение длины выводимого текста (например, 50)
+    rename_map: dict = None,  # словарь переименований полей (например, {'first_name': 'First Name'})
 ):
     """
     Получает текст для вывода в термінал (например, click.echo).
@@ -234,14 +247,13 @@ def get_text_echo(
     if not if_str_limit:
         if_str_limit = 50
 
-
     # если ограничение длины выводимого текста установлено в 0, то не ограничиваем длину выводимого текста
     if if_str_limit <= 0:
         if_str_limit = None
 
     return_ = []  # список текстов для вывода в термінал
 
-    lists  = get_key_value_dto(  # преобразуем Pydantic DTO в словарь
+    lists = get_key_value_dto(  # преобразуем Pydantic DTO в словарь
         data,
         exclude_fields,  # список полей, которые не нужно выводить
         rename_map,
@@ -263,15 +275,17 @@ def get_text_echo(
     return return_  # возвращаем список текстов для вывода в термінал
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
 def get_key_value_dto(
-        list_, 
-        exclude_fields:list = None,
-        rename_map: dict = None  
-    ):
+    list_,
+    exclude_fields: list = None,
+    rename_map: dict = None
+):
     """
     Преобразует Pydantic DTO в словарь вида {человеко-читаемое название: значение}.
     
@@ -287,7 +301,7 @@ def get_key_value_dto(
             get_key_value_dto(i, exclude_fields, rename_map) for i in list_
         ]
     else:
-        data={}
+        data = {}
         # Если передан объект с методом model_dump (Pydantic модель), используем его
         if hasattr(list_, 'model_dump'):
             items = list_.model_dump(exclude_none=True).items()
@@ -313,7 +327,9 @@ def get_key_value_dto(
         return data
     
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -327,22 +343,26 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
     # исключаем поля из списка exclude
     exclude = exclude or []
     fields = []
+
     # перебираем все поля DTO
     for name, field in dto_class.model_fields.items():
         # если поле не должно быть исключено, то продолжаем
         if name in exclude:
             continue
+
         # получаем тип поля
         field_type = field.annotation
         # если тип поля Optional, то получаем реальный тип
         is_optional = False
         origin = get_origin(field_type)
+
         # if get_origin(field_type) is Optional:
         if origin is Union and type(None) in get_args(field_type):
             is_optional = True
             # получаем реальный тип
             args = get_args(field_type)
             field_type = args[0] if args else None
+
         # добавляем поле в список
         fields.append({
             # имя поля
@@ -354,11 +374,13 @@ def get_dto_fields(dto_class: BaseModel, exclude: list = None):
             # описание поля
             'description': field.description or name.replace('_', ' ').title()
         })
-    return fields
 
+    return fields
     
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -383,12 +405,16 @@ def create_click_options(dto_class: BaseModel, action='create'):
             # Определяем тип опции в click
             if field_type == str:
                 param_type = str
+
             elif field_type == int:
                 param_type = int
+
             elif field_type == datetime.date:
                 param_type = str  # будем парсить отдельно
+
             elif field_type == datetime.time:
                 param_type = str
+
             else:
                 param_type = str  # fallback
 
@@ -399,12 +425,17 @@ def create_click_options(dto_class: BaseModel, action='create'):
                 type=param_type,
                 help=description
             )
+
             func = decorator_func(func)
+
         return func
+
     return decorator
     
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -425,55 +456,78 @@ def collect_dto_from_input(
     
     # исключаем поля из списка exclude
     exclude = exclude or []
+
     # получаем список полей DTO с метаданными: имя, тип, обязательное ли
     fields = get_dto_fields(dto_class, exclude=exclude)
     data = {}
+
     # перебираем все поля DTO
     for f in fields:
         # если есть rename_map, используем его, иначе берем description из поля
         display_name = rename_map.get(f['name'], f['description']) if rename_map else f['description']
-        #формируем запрос для ввода
+        # формируем запрос для ввода
         prompt = f"{display_name}" + (" (обязательно)" if f['required'] else "")
+
         # цикл ввода
         while True:
             # просим пользователя ввести значение
-            value = click.prompt(prompt, default="", show_default=False)
+            value = click.prompt(
+                prompt,
+                default="",
+                show_default=False
+            )
+
             # если поле не является обязательным и пользователь ничего не ввёл
             if not value and not f['required']:
                 # добавляем поле в словарь с None
                 data[f['name']] = None
                 break
+
             # если поле является обязательным и пользователь ничего не ввёл
             if not value and f['required']:
                 # выводим сообщение об ошибке
                 click.echo("Поле обязательно. Повторите ввод.")
                 continue
+
             if not value and not f['required']:
                 data[f['name']] = None
                 break
+
             try:
                 # если тип поля int, то преобразуем строку в int
                 if f['type'] == int:
                     data[f['name']] = int(value)
+
                 # если тип поля datetime.date, то преобразуем строку в datetime.date
                 elif f['type'] == datetime.date:
                     data[f['name']] = datetime.date.fromisoformat(value)
+
                 # если тип поля datetime.time, то преобразуем строку в datetime.time
                 elif f['type'] == datetime.time:
                     data[f['name']] = datetime.time.fromisoformat(value)
+
                 else:
                     # если тип поля не int, datetime.date, datetime.time, то оставляем строку как есть
                     data[f['name']] = value
+
                 break
+
             except ValueError as e:
                 # выводим сообщение об ошибке
                 err_ = f"Неверный формат для типа {f['type'].__name__}. Попробуйте снова"
-                AppLogger.get_instance( name = 'user').exception(f"{err_}: {e}")
+
+                AppLogger.get_instance(
+                    name = 'user'
+                ).exception(f"{err_}: {e}")
+
                 click.echo(f"{err_}.")
+
     return data
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
@@ -481,6 +535,7 @@ def get_appointment_service() -> AppointmentService:
     db = get_db()
     note_service = get_note_service()
     photo_service = get_photo_service()
+
     return AppointmentService(
         db, 
         note_service=note_service, 

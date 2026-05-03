@@ -377,9 +377,24 @@ class TextEditDelegate(QStyledItemDelegate):
 class PhotoUploaderWidget(QWidget):
     """
     Виджет для управления фотографиями приёма.
-    Отображает фото в таблице: столбец 0 – масштабированная иконка,
-    столбец 1 – редактируемое описание с поддержкой переноса строк и многострочного редактирования.
+
+    Отображает таблицу с двумя столбцами:
+        - столбец 0: миниатюра фото (асинхронная загрузка)
+        - столбец 1: описание фото (редактируемое, с автодополнением)
+
+    Поддерживает:
+        - добавление фото через кнопку или drag-and-drop
+        - удаление фото (помечает на удаление, не удаляет сразу)
+        - редактирование описаний
+        - отмену изменений (всех или только для текущей строки)
+        - режим «только просмотр» (readonly)
+        - асинхронную загрузку миниатюр (ленивая загрузка при прокрутке)
+        - восстановление состояния (черновиков) через `dump_state` / `load_state`
+
+    Сигналы:
+        photosChanged: испускается при любом изменении состава фото или описаний.
     """
+
     MAX_PHOTOS = 0  # ограничить максимальное количество загружаемых фото в приём. 0 - без ограницений
 
     VALID_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'}
@@ -398,9 +413,20 @@ class PhotoUploaderWidget(QWidget):
         """
         Инициализирует виджет для управления фотографиями приёма.
 
-        :param parent: Родительский виджет
-        :type parent: QWidget
+        Создаёт необходимые структуры данных:
+            - pending_photos: новые фото (ещё не сохранены в БД)
+            - existing_photos: фото, загруженные из БД (список PhotoDTO)
+            - deleted_photo_ids: ID фото, помеченных на удаление
+            - modified_photo_ids: ID фото, у которых изменено описание
+            - original_descriptions: исходные описания для сравнения
+
+        Настраивает таблицу, делегаты, кэш изображений и пул потоков для асинхронной загрузки.
+        По умолчанию виджет находится в режиме «только просмотр» (`self._readonly = True`).
+
+        Args:
+            parent (QWidget, optional): Родительский виджет. По умолчанию None.
         """
+
         super().__init__(parent)
 
         self.logger = AppLogger.get_instance(
@@ -425,14 +451,14 @@ class PhotoUploaderWidget(QWidget):
 
         self._thumbnail_target_size = QSize(300, 300)
 
-        self._async_loader_pool = QThreadPool.globalInstance() # пул загрузчиков
-        self._pending_loaders = set() # 
+        self._async_loader_pool = QThreadPool.globalInstance()  # пул загрузчиков
+        self._pending_loaders = set()
 
-        self.setAcceptDrops(True) # разрешить перетаскивание
+        self.setAcceptDrops(True)       # разрешить перетаскивание
 
-        self._setup_ui() # инициализация интерфейса
+        self._setup_ui()                # инициализация интерфейса
 
-        self._adjust_column_widths() # настройка ширин столбцов
+        self._adjust_column_widths()    # настройка ширин столбцов
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -482,8 +508,24 @@ class PhotoUploaderWidget(QWidget):
         level = AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int, QPixmap, str)
-    def _on_thumbnail_loaded(self, row: int, pixmap: QPixmap, full_path: str):
-        """Вызывается в главном потоке после загрузки миниатюры."""
+    def _on_thumbnail_loaded(
+        self,
+        row: int,
+        pixmap: QPixmap,
+        full_path: str
+    ):
+        """
+        Вызывается в главном потоке после асинхронной загрузки миниатюры.
+
+        Сохраняет QPixmap в кэш (`self._image_cache`), затем запускает пересчёт
+        высоты строки (только для указанной строки) и обновляет viewport.
+
+        Параметры:
+            row (int): Индекс строки, для которой загружена миниатюра.
+            pixmap (QPixmap): Загруженная миниатюра (уже масштабирована).
+            full_path (str): Абсолютный путь к файлу.
+        """
+
         if row >= self.table.rowCount():
             return
         
@@ -596,9 +638,19 @@ class PhotoUploaderWidget(QWidget):
     )
     def load_state(self, state: dict) -> None:
         """
-        Восстанавливает состояние виджета из словаря, полученного от dump_state.
-        Полностью заменяет текущие данные.
+        Восстанавливает состояние виджета из словаря, полученного от `dump_state`.
+
+        Полностью заменяет текущие данные (очищает виджет, загружает существующие фото, черновики, удалённые ID и изменённые ID). После загрузки вызывает `_refresh_table(if_blockSignals=self._readonly)`, что улучшает производительность в режиме просмотра.
+
+        Параметры:
+            state (dict): Словарь, содержащий ключи:
+                - 'existing_photos': список словарей PhotoDTO (сериализованных)
+                - 'original_descriptions': словарь {photo_id: original_description}
+                - 'pending_photos': список кортежей (file_path, description)
+                - 'deleted_photo_ids': список int
+                - 'modified_photo_ids': список int
         """
+
         self.logger.debug(f"load_state: pending={state.get('pending_photos')}, existing={state.get('existing_photos')}")
         
         self.clear()
@@ -626,7 +678,7 @@ class PhotoUploaderWidget(QWidget):
         self.modified_photo_ids = set(state['modified_photo_ids'])
 
         self._refresh_table(
-            if_blockSignals = self._readonly, # Блокируем сигналы, если виджет в режиме только просмотр
+            if_blockSignals = self._readonly,  # Блокируем сигналы, если виджет в режиме только просмотр
         )
 
     @AppLogger.get_instance(
@@ -989,14 +1041,31 @@ class PhotoUploaderWidget(QWidget):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _append_pending_row(self, file_path: str, description: str = ""):
+    def _append_pending_row(
+        self,
+        file_path: str,
+        description: str = ""
+    ):
         """
-        Добавляет одну строку в конец таблицы для нового фото (pending).
-        Не перестраивает всю таблицу.
+        Добавляет одну строку в конец таблицы для нового фотографии (pending).
+
+        Используется вместо полной перестройки таблицы при добавлении одного фото.
+        Это предотвращает сброс уже загруженных миниатюр и повышает производительность.
+
+        Параметры:
+            file_path (str): Путь к исходному файлу (абсолютный).
+            description (str): Начальное описание фото (по умолчанию пустая строка).
         """
+
         row = self.table.rowCount()
+
         self.table.insertRow(row)
-        self._set_table_row(row, file_path, description, is_existing=False)
+        self._set_table_row(
+            row,
+            file_path,
+            description,
+            is_existing=False
+        )
         self._set_row_color(row)
         self._adjust_row_heights(row)  # пересчёт высоты только для новой строки
 
@@ -1279,29 +1348,44 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _add_photo_files(self, file_paths):
+    def _add_photo_files(
+        self,
+        file_paths
+    ) -> int:
         """
         Добавляет список файлов в pending_photos с проверкой расширений и лимита.
 
-        :param file_paths: список путей к файлам
-        :type file_paths: List[str]
-        :return: количество добавленных фото
-        :rtype: int
+        Для каждого валидного файла:
+            - добавляет запись в `self.pending_photos`
+            - вызывает `_append_pending_row` для добавления строки в таблицу
+
+        Параметры:
+            file_paths (List[str]): Список путей к файлам.
+
+        Returns:
+            int: Количество успешно добавленных фото.
         """
+
         added = 0
         for file_path in file_paths:
             ext = os.path.splitext(file_path)[1].lower()
             if ext not in self.VALID_EXTENSIONS:
-                self.logger.debug(f"Файл {file_path} имеет неподдерживаемое расширение, пропускаем")
+                self.logger.debug(
+                    f"Файл {file_path} имеет неподдерживаемое расширение, пропускаем"
+                )
                 continue
             
             if self.MAX_PHOTOS > 0 and len(self.pending_photos) + added >= self.MAX_PHOTOS:
-                self.logger.warning(f"Достигнут лимит фото ({self.MAX_PHOTOS}), остальные файлы не добавлены")
+                self.logger.warning(
+                    f"Достигнут лимит фото ({self.MAX_PHOTOS}), остальные файлы не добавлены"
+                )
                 break
             
             self.pending_photos.append((file_path, ""))
             self._append_pending_row(file_path, "")
+
             added += 1
+
             self.logger.debug(f"Добавлено фото: {file_path}")
         
         if added:
@@ -1321,6 +1405,15 @@ class PhotoUploaderWidget(QWidget):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def dragEnterEvent(self, event):
+        """
+        Обработчик начала перетаскивания. Если виджет в режиме readonly – игнорирует.
+        Иначе проверяет, есть ли среди перетаскиваемых URL-адресов файлы с допустимыми
+        расширениями (VALID_EXTENSIONS). Если есть – принимает действие.
+
+        Параметры:
+            event (QDragEnterEvent): Событие перетаскивания.
+        """
+
         if self._readonly:
             event.ignore()
             return
@@ -1347,7 +1440,14 @@ class PhotoUploaderWidget(QWidget):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def dragMoveEvent(self, event):
-        """Разрешает перемещение (повторяет логику dragEnter)."""
+        """
+        Обработчик перемещения при перетаскивании. Повторяет логику dragEnterEvent.
+        Если виджет в режиме readonly – игнорирует.
+
+        Параметры:
+            event (QDragMoveEvent): Событие перемещения.
+        """
+
         if self._readonly:
             event.ignore()
             return
@@ -1365,6 +1465,15 @@ class PhotoUploaderWidget(QWidget):
     )
     def dropEvent(self, event):
         """Обрабатывает сброшенные файлы, добавляя их через _add_photo_files."""
+        """
+        Обработчик сброса файлов.
+            Если виджет в режиме readonly – игнорирует.
+            Иначе извлекает пути из mimeData и передаёт их в `_add_photo_files`.
+
+        Параметры:
+            event (QDropEvent): Событие сброса.
+        """
+
         if self._readonly:
             event.ignore()
             return
@@ -1478,6 +1587,18 @@ class PhotoUploaderWidget(QWidget):
         Если строка соответствует новому фото (pending), то удаляет его из self.pending_photos и перестраивает таблицу.
         """
 
+        """
+        Помечает строку на удаление, но не удаляет её из таблицы.
+
+        Если строка соответствует существующему фото, её ID добавляется в `self.deleted_photo_ids`, а также убирается из `self.modified_photo_ids` (если было изменено описание). 
+        Сама строка не удаляется – удаление произойдёт при сохранении.
+
+        Если строка соответствует новому (pending) фото, то оно удаляется из `self.pending_photos` и строка удаляется из таблицы (вызовом `removeRow`), после чего таблица не перестраивается.
+
+        Параметры:
+            row (int): Индекс строки в таблице.
+        """
+
         if row < len(self.existing_photos):
             photo = self.existing_photos[row]
             if photo.id not in self.deleted_photo_ids:
@@ -1495,7 +1616,9 @@ class PhotoUploaderWidget(QWidget):
             # новые фото (pending) – удаляем сразу
             pending_index = row - len(self.existing_photos)
             if pending_index < len(self.pending_photos):
+
                 del self.pending_photos[pending_index]
+
                 # self._refresh_table()
                 self.table.removeRow(row)
                 self.logger.debug("Удалено новое фото")
@@ -1579,11 +1702,20 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _refresh_table(self, if_blockSignals:bool = False):
+    def _refresh_table(
+        self,
+        if_blockSignals: bool = False
+    ):
         """
         Полностью перестраивает таблицу фото и сбрасывает все цвета.
-        Вызывается после set_existing_photos и load_state.
+
+        Этот метод вызывается при массовой замене данных (например, из `set_existing_photos` или `load_state`).
+        Если `if_blockSignals=True`, то на время заполнения отключаются сигналы `itemChanged`, лишние вызовы `_on_item_changed`.
+
+        Параметры:
+            if_blockSignals (bool): Если True, сигналы таблицы блокируются на время вставки строк.
         """
+
         self.logger.debug(
             f"_refresh_table: "
             f"existing={len(self.existing_photos)}, "
@@ -1597,7 +1729,7 @@ class PhotoUploaderWidget(QWidget):
         self.table.setUpdatesEnabled(False)
 
         if if_blockSignals:
-            self.table.blockSignals(True) # отключение сигналов на время первичного заполнения
+            self.table.blockSignals(True)  # отключение сигналов на время первичного заполнения
 
         try:
             # Заполняем строки
@@ -1625,6 +1757,7 @@ class PhotoUploaderWidget(QWidget):
         finally:
             if if_blockSignals:
                 self.table.blockSignals(False)  # <-- Восстанавливаем сигналы  после отключение сигналов на время первичного заполнения
+
             self.table.setUpdatesEnabled(True)
 
         # # Цвета можно установить после восстановления сигналов
@@ -1716,9 +1849,15 @@ class PhotoUploaderWidget(QWidget):
         Берется пиксель из файла (если файл существует) и вычисляется соотношение ширины к высоте.
         Если пиксель не может быть загружен, то используется высота 100.
 
-        Вычисляется максимальная высота для строки, учитывая высоту пикселя и высоту текста.
+        Высота вычисляется как максимум из:
+            - высоты миниатюры (после масштабирования к ширине столбца 0)
+            - высоты текста описания (с учётом переноса слов)
+        плюс небольшой отступ (10 пикселей).
 
         Пересчитывает высоту строк(и). Если row не указан – пересчитывает все строки
+
+        Параметры:
+            row (Optional[int]): Если указан, пересчитывается только эта строка; если None – все строки таблицы.
         """
         
         col0_width = self.table.columnWidth(0)
@@ -1835,11 +1974,22 @@ class PhotoUploaderWidget(QWidget):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_existing_photos(self, photos: List[PhotoDTO]):
+    def set_existing_photos(
+        self,
+        photos: List[PhotoDTO]
+    ):
         """
-        Устанавливает существующие фото из БД после сохранения.
-        Полностью очищает все временные состояния и сбрасывает выделение новых фото.
+        Устанавливает существующие фото из БД (после сохранения или при загрузке приёма).
+
+        Полностью очищает все временные состояния (pending, deleted, modified),
+        кэш и таблицу, затем нормализует входные данные (преобразует dict → PhotoDTO),
+        сохраняет оригинальные описания и перестраивает таблицу с блокировкой сигналов,
+        если виджет находится в режиме просмотра.
+
+        Параметры:
+            photos (List[PhotoDTO]): Список DTO фотографий из БД.
         """
+
         self.logger.debug(f"set_existing_photos ЗАПУЩЕН. Получено {len(photos) if photos else 0} фото из БД")
 
         # Полная очистка ВСЕГО состояния виджета
@@ -1974,7 +2124,15 @@ class PhotoUploaderWidget(QWidget):
     ):
         """
         Устанавливает режим «только просмотр»: отключает кнопки добавления/удаления.
-        Если нужно, также можно заблокировать редактирование описаний.
+
+        В режиме readonly:
+            - отключаются кнопки добавления/удаления
+            - запрещается редактирование описаний (ячеек)
+            - запрещается drag-and-drop файлов
+            - таблица переводится в режим NoEditTriggers
+
+        Параметры:
+            readonly (bool): True – режим просмотра, False – режим редактирования.
         """
         self._readonly = readonly
         self.setAcceptDrops(not readonly)  # запрещаем перетаскивание в режиме просмотра
@@ -1992,8 +2150,9 @@ class PhotoUploaderWidget(QWidget):
         else:
             self.table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
 
-        self._update_undo_actions_state()   # обновить состояние пунктов (они станут неактивными, если комбобокс выключен, но это не нужно, т.к. комбобокс отключён целиком)
-            
+        # обновить состояние пунктов (они станут неактивными,
+        # если комбобокс выключен, но это не нужно, т.к. комбобокс отключён целиком)
+        self._update_undo_actions_state()
     # ----------------------------------------------------------------------
     # Вспомогательные методы для цвета строк
     # ----------------------------------------------------------------------

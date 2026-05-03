@@ -1,7 +1,8 @@
 # app/database/database_shema/clinic.py
+
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 # def _add_package_name(
 #     file_module: str = None,
@@ -104,21 +105,54 @@ from app.config.config_manager.manager import get_config_env
 
 
 
-from datetime import date, datetime, time
+from datetime import (
+    datetime,
+    # date, time
+)
 
 # Сторонние библиотеки
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, ForeignKey, Text, Time
+from sqlalchemy import (
+    create_engine, Column,
+    Integer, String, Date,
+    DateTime, ForeignKey,
+    Text, Time
+)
 # from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy import event, Index, func
+from sqlalchemy.orm import (
+    declarative_base, relationship,
+    # sessionmaker
+)
+from sqlalchemy import (
+    # event,
+    Index, func,
+)
 
 Base = declarative_base()
 
 class Patient(Base):
     """
     Таблица пациентов.
-    Хранит персональные данные пациентов.
+
+    Хранит персональные данные пациента: имя, фамилию, дату рождения,
+    контактную информацию. Связана с приёмами (Appointment) отношением one-to-many.
+
+    Атрибуты:
+        id (int): Первичный ключ, автоинкремент.
+        first_name (str): Имя пациента (обязательное).
+        last_name (str): Фамилия пациента (обязательное).
+        birth_date (date, optional): Дата рождения.
+        phone (str, optional): Номер телефона.
+        email (str, optional): Адрес электронной почты.
+        created_at (datetime): Дата и время создания записи (автоматически).
+        appointments (list[Appointment]): Список связанных приёмов (каскадное удаление).
+
+    Индексы:
+        ix_patient_last_name (last_name) – для ускорения поиска по фамилии.
+
+    Пример:
+        >>> patient = Patient(first_name="Иван", last_name="Петров")
+        >>> session.add(patient)
+        >>> session.commit()
     """
 
     __tablename__ = 'patients'
@@ -178,7 +212,12 @@ class Patient(Base):
     
     def __repr__(self):
         """
-        Возвращает строку-representation объекта Patient в виде "<Patient(id=1, name=Ivan Ivanov)>"
+        Возвращает строковое представление объекта Patient.
+
+        Формат: <Patient(id=1, name=Петров Иван)>
+
+        Возвращает:
+            str: Представление пациента.
         """
 
         try:
@@ -195,7 +234,19 @@ class Patient(Base):
 class AppointmentNote(Base):
     """
     Таблица заметок к приёмам.
-    Заметки могут быть общими для нескольких приёмов.
+
+    Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
+    через поле `note_id` в Appointment).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        text (str): Содержимое заметки (обязательное).
+        created_at (datetime): Дата создания.
+        appointments (list[Appointment]): Список приёмов, использующих эту заметку.
+
+    Пример:
+        >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
+        >>> session.add(note)
     """
 
     __tablename__ = 'appointments_notes'
@@ -241,7 +292,27 @@ class AppointmentNote(Base):
 class Appointment(Base):
     """
     Таблица приёмов.
+
     Связывает пациента с датой, временем и опциональной заметкой.
+    Может содержать несколько фотографий (Photo).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        patient_id (int): Внешний ключ на Patient.id.
+        date (date): Дата приёма (обязательное).
+        time (time, optional): Время приёма.
+        note_id (int, optional): Внешний ключ на AppointmentNote.id.
+        created_at (datetime): Дата создания записи.
+        patient (Patient): ORM-связь с пациентом.
+        note (AppointmentNote): ORM-связь с заметкой.
+        photos (list[Photo]): Список фотографий (каскадное удаление).
+
+    Индексы:
+        ix_appointment_date (date) – для ускорения фильтрации по дате.
+
+    Пример:
+        >>> app = Appointment(patient_id=1, date=date(2025,3,10), time=time(10,30))
+        >>> session.add(app)
     """
 
     __tablename__ = 'appointments'
@@ -327,7 +398,24 @@ class Appointment(Base):
 class Photo(Base):
     """
     Таблица фотографий, прикреплённых к приёмам.
-    Файлы хранятся в файловой системе, в таблице хранится путь.
+
+    Файлы изображений хранятся в файловой системе, в таблице сохраняется
+    относительный путь (относительно `PHOTOS_STORAGE_PATH`).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        appointment_id (int): Внешний ключ на Appointment.id (обязательное).
+        file_path (str): Относительный путь к файлу.
+        description (str, optional): Описание фотографии.
+        uploaded_at (datetime): Дата и время загрузки.
+        appointment (Appointment): ORM-связь с приёмом.
+
+    Индексы:
+        ix_photo_appointment (appointment_id) – для быстрого получения фото по приёму.
+
+    Пример:
+        >>> photo = Photo(appointment_id=1, file_path="app_1/1_face.jpg", description="Лицо")
+        >>> session.add(photo)
     """
 
     __tablename__ = 'photos'
@@ -392,64 +480,55 @@ class Photo(Base):
     level=AppLogger._parse_log_level('DEBUG')
 )
 def create_db(
-        db_path="clinic.db",
-        recreate=False,
-    ):
+    db_path: str = "clinic.db",
+    recreate=False,
+):
     """
-    Создаёт файл БД (если не существует), таблицы и заполняет тестовыми данными.
+    Создаёт файл базы данных и все таблицы.
 
-    :param db_path: путь к файлу БД
-    :param recreate: если True и файл существует, он будет удалён перед созданием таблиц
+    Параметры:
+        db_path (str): Путь к файлу БД. По умолчанию "clinic.db".
+        recreate (bool): Если True и файл существует, он будет удалён перед созданием таблиц.
+                         По умолчанию False.
+
+    Возвращает:
+        Engine: Движок SQLAlchemy, подключённый к созданной БД.
+
+    Примечание:
+        Если БД уже существует и `recreate=False`, таблицы создаются только при их отсутствии.
+        Для SQLite автоматически устанавливается `check_same_thread=False`.
+
+    Пример:
+        >>> engine = create_db("./data/clinic.db", recreate=False)
+        >>> with engine.connect() as conn:
+        ...     result = conn.execute(text("SELECT * FROM patients"))
     """
+
+    logger = AppLogger.get_instance(
+        name = 'db',
+        # share_file_with = 'user',
+        enable_file_logging = 'user',
+        use_name_in_filename = False, # 'user',
+    )
 
     abs_path = os.path.abspath(db_path)
 
     if recreate and os.path.exists(abs_path):
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Удаление существующего файла БД: {abs_path}"
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Удаление существующего файла БД: {abs_path}")
         os.remove(abs_path)
 
 
     if os.path.exists(abs_path):
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Файл БД {abs_path} уже существует. Таблицы будут созданы, если их нет."
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Файл БД {db_path} уже существует. Таблицы будут созданы, если их нет.")
     else:
 
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Создание нового файла БД: {abs_path}"
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Создание нового файла БД: {db_path}")
 
     # Создаём движок (будет использовать SQLite)
     # Движок SQLAlchemy: если файл не существует, он будет создан автоматически
@@ -462,24 +541,11 @@ def create_db(
     )
     # engine = create_engine(f"sqlite:///{abs_path}", echo=False)  # echo=True для отладки SQL
 
-    # Создаём таблицы, если их нет
-    
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)  # Создаём таблицы, если их нет
 
-    AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-    ).debug(
+    logger.debug(
         f"Таблицы успешно созданы (или уже существовали): {abs_path}"
-        # level = AppLogger._parse_log_level(
-        #     # 'INFO'
-        #     'DEBUG'
-        # )
     )
-
-    # print("Таблицы успешно созданы (или уже существовали).")
 
     return engine
 
@@ -492,6 +558,20 @@ def create_db(
 def init_db(
     db_path="clinic.db"
 ):
+    """
+    Полностью инициализирует БД: создаёт таблицы и заполняет тестовыми данными.
+
+    Параметры:
+        db_path (str): Путь к файлу БД.
+
+    Примечание:
+        Вызывает `create_db(recreate=True)` (перезаписывает существующую БД),
+        затем `generate_test_data()`.
+
+    Пример:
+        >>> init_db("test.db")
+        # После выполнения в БД будут созданы таблицы и добавлены тестовые пациенты, приёмы и фото.
+    """
 
     create_db(
         db_path = db_path ,  
@@ -500,11 +580,10 @@ def init_db(
     )
     
     from .temp_data_bd import generate_test_data   # локальный импорт
+
     generate_test_data(
         db_path = db_path    
     )
-
-
 
 if __name__ == "__main__":
     # При запуске этого файла напрямую создаём БД с тестовыми данными

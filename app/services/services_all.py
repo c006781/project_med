@@ -189,19 +189,40 @@ ModelType = TypeVar('ModelType')
 DTOType = TypeVar('DTOType')
 RepoType = TypeVar('RepoType', bound=BaseRepository)
 
-class BaseService(Generic[ModelType, DTOType, RepoType]):
+class BaseService(
+    Generic[
+        ModelType,
+        DTOType,
+        RepoType
+    ]
+):
     """
-    Абстрактный базовый сервис, предоставляющий стандартные методы работы с сущностями.
+    Абстрактный базовый сервис, предоставляющий стандартные методы CRUD,
+    фильтрацию, пагинацию и управление сессиями.
 
-    Параметры:
-        db (Database): экземпляр Database для получения сессий.
-        repo_class (Type[RepoType]): класс репозитория, с которым работает сервис.
-        model_class (Type[ModelType]): класс ORM-модели (нужен для создания экземпляров).
-        dto_class (Type[DTOType]): класс DTO (нужен для преобразования).
-        logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+    Параметры типа:
+        ModelType: Класс ORM-модели SQLAlchemy (например, Patient).
+        DTOType: Класс Pydantic DTO (например, PatientDTO).
+        RepoType: Класс репозитория, унаследованный от BaseRepository.
 
     Атрибуты:
-        logger (AppLogger): логгер для записи событий.
+        _db (Database): Экземпляр Database для получения сессий.
+        _repo_class (Type[RepoType]): Класс репозитория.
+        _model_class (Type[ModelType]): Класс ORM-модели.
+        _dto_class (Type[DTOType]): Класс DTO.
+        _field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей (для виртуальных полей).
+        logger (AppLogger): Логгер для записи событий.
+
+    Примечания:
+        - Подписывается на изменения конфигурации через AppConfigManager.add_change_listener.
+        - При изменении настроек (например, пути к БД) вызывается `reload_config()`.
+        - Все методы, работающие с БД, используют контекстный менеджер `_session_scope`.
+
+    Пример:
+        >>> class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
+        ...     pass
+        >>> service = PatientService(db, PatientRepository, Patient, PatientDTO)
+        >>> patients = service.get_all()
     """
 
     @AppLogger.get_instance(
@@ -224,15 +245,19 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         """
         Инициализирует экземпляр сервиса.
 
-        Parameters:
-            db (Database): экземпляр Database для получения сессий.
-            repo_class (Type[RepoType]): класс репозитория, с которым работает сервис.
-            model_class (Type[ModelType]): класс ORM-модели (нужен для создания экземпляров).
-            dto_class (Type[DTOType]): класс DTO (нужен для преобразования).
-            logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+        Параметры:
+            db (Database): Экземпляр Database для получения сессий.
+            repo_class (Type[RepoType]): Класс репозитория, с которым работает сервис.
+            model_class (Type[ModelType]): Класс ORM-модели (нужен для создания экземпляров).
+            dto_class (Type[DTOType]): Класс DTO (нужен для преобразования).
+            field_configs (Optional[Dict[str, Dict[str, Any]]]): Конфигурация полей (используется для виртуальных полей).
 
-        Attributes:
-            logger (AppLogger): логгер для записи событий.
+            logger_name (Optional[str]): Имя логгера. По умолчанию – имя класса сервиса.
+
+        Особенности:
+            - Подписывается на изменения конфигурации через
+              `AppConfigManager.add_change_listener(self._on_config_changed)`.
+              При изменении настроек автоматически вызывается `self.reload_config()`.
         """
 
         self._db            = db 
@@ -264,7 +289,17 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _on_config_changed(self):
-        """Вызывается при изменении конфигурации – перезагружает сервис."""
+        """
+        Вызывается при изменении конфигурации приложения  – перезагружает сервис.
+
+        Просто перенаправляет вызов на `self.reload_config()`, который должен быть
+        переопределён в наследниках или реализован в базовом классе.
+        Этот метод автоматически вызывается `AppConfigManager` при сохранении новых настроек.
+
+        Returns:
+            None
+        """
+
         self.reload_config()
 
     @AppLogger.get_instance(
@@ -299,12 +334,19 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     def get_all(self, session: Optional[Session] = None) -> List[DTOType]:
         """
         Возвращает список всех записей в виде DTO.
-        Логирует начало и конец операции.
-        :param session: сессия для работы с БД
-        :type session: Optional[Session]
-        :return: список записей в виде DTO
-        :rtype: List[DTOType]
+
+        Параметры:
+            session (Optional[Session]): Внешняя сессия. Если не указана, создаётся новая.
+
+        Возвращает:
+            List[DTOType]: Список DTO.
+
+        Пример:
+            >>> patients = patient_service.get_all()
+            >>> for p in patients:
+            ...     print(p.last_name, p.first_name)
         """
+
         self.logger.debug(f"Запрос всех записей {self._model_class.__name__}")
 
         with self._session_scope(session) as sess:
@@ -544,16 +586,15 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
                 - column (str): имя столбца модели.
                 - operator (str): оператор из FilterOperator (например, 'eq', 'like', 'fuzzy').
                 - value (any): значение для сравнения (зависит от оператора).
-            fuzzy_threshold: порог схожести для нечёткого поиска (0-100). Используется только
-                            для оператора 'fuzzy'.
-            session: опциональная сессия SQLAlchemy для выполнения запроса.
+            fuzzy_threshold (int): порог схожести для нечёткого поиска (0-100). Используется только для оператора 'fuzzy'. По умолчанию 60
+            session (Optional[Session]): опциональная сессия SQLAlchemy для выполнения запроса.
 
         Возвращает:
-            Список DTO, удовлетворяющих условиям фильтрации.
+            List[DTOType]: Отфильтрованный список DTO, удовлетворяющих условиям фильтрации.
 
         Примечание:
             - Для SQL-операторов фильтрация происходит на уровне БД.
-            - Для 'fuzzy' фильтрация выполняется в памяти после получения всех записей,
+            - Для 'fuzzy' фильтрация выполняется в памяти после получения всех записей (выполнения SQL-запроса),
             поэтому может быть медленной на больших объёмах данных.
         """
 
@@ -632,20 +673,23 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         session: Optional[Session] = None
     ) -> Tuple[List[DTOType], int]:
         """
-        Возвращает страницу DTO и общее количество записей.
+        Возвращает страницу записей и общее количество (с учётом фильтров).
 
-        :param offset: смещение страницы (начиная с 0)
-        :type offset: int
-        :param limit: количество записей на странице
-        :type limit: int
-        :param filters: список словарей с фильтрами для записей
-        :type filters: Optional[List[dict[str, Any]]]
-        :param order_by: список полей для сортировки записей
-        :type order_by: Optional[List]
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :return: список записей на странице и общее количество записей
-        :rtype: Tuple[List[DTOType], int]
+        Параметры:
+            offset (int): Количество пропускаемых записей (смещение).
+            limit (int): Размер страницы (максимум записей).
+            filters (Optional[List[Dict[str, Any]]]): Фильтры (аналогично `get_filtered`).
+            order_by (Optional[List]): Список полей для сортировки, например, ['date', '-time'].
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            Tuple[List[DTOType], int]:
+                - Список DTO на текущей странице.
+                - Общее количество записей, удовлетворяющих фильтрам.
+
+        Пример:
+            >>> page, total = service.get_page(offset=10, limit=25, order_by=['-date'])
+            >>> print(f"Показаны записи 11-35 из {total}")
         """
         
         self.logger.debug(
@@ -681,15 +725,29 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
+    def get_unique_values(
+        self,
+        column_name: str,
+        session: Optional[Session] = None
+    ) -> List[Any]:
         """
         Возвращает список уникальных значений для указанного столбца.
-        
-        :param column_name: имя столбца модели (атрибут ORM)
-        :param session: опциональная сессия
+
+        Параметры:
+            column_name (str): Имя столбца модели (атрибут ORM) (например, 'last_name').
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            List[Any]: Список уникальных значений (тип зависит от столбца).
+
+        Пример:
+            >>> unique_last_names = service.get_unique_values('last_name')
+            >>> # ['Петров', 'Иванов', ...]
         """
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
+
             return repo.get_unique_values(column_name)
         
     # в конце класса BaseService, после метода get_unique_values (или перед _session_scope)
@@ -702,7 +760,9 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     def reload_config(self) -> None:
         """
         Перезагружает конфигурацию сервиса: закрывает старый Database и создаёт новый.
-        Вызывается при изменении настроек приложения.
+
+        Вызывается автоматически при изменении настроек (через AppConfigManager.add_change_listener).
+        Также может вызываться вручную после ручного обновления конфигурации.
         """
         from app.dependencies import get_db # оставить тут, так как цикл
 
@@ -732,11 +792,11 @@ class PatientService(
         level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
-            self, 
-            db: Database,  
-            field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-            logger_name: Optional[str] = None, 
-        ):
+        self,
+        db: Database,
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        logger_name: Optional[str] = None,
+    ):
         """
         Инициализирует экземпляр сервиса.
 

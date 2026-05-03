@@ -628,18 +628,19 @@ class CheckboxSelectionMixin:
 
         if choice.action_type == 'all':
             ids_to_delete = self._get_all_visible_ids()
-            current_dto = None
-            # Если текущая строка входит в список, очистим правую панель
-            if self.selected_dto and self.selected_dto.id in ids_to_delete:
-                current_dto = self.selected_dto
         else:
             ids_to_delete = choice.ids
-            current_dto = self.selected_dto if (self.selected_dto and self.selected_dto.id in ids_to_delete) else None
 
         if not ids_to_delete:
             return
 
+        current_dto = None
+        # Если текущая строка входит в список, очистим правую панель
+        if self.selected_dto and self.selected_dto.id in ids_to_delete:
+            current_dto = self.selected_dto
+
         # Удаляем строки
+        # if not current_dto:
         self._perform_deletion(ids_to_delete, current_dto)
 
     @AppLogger.get_instance(
@@ -703,7 +704,11 @@ class CheckboxSelectionMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _perform_deletion(self, ids_to_delete: Set[int], current_dto_to_clear: Optional[Any]= None) -> None:
+    def _perform_deletion(
+        self,
+        ids_to_delete: Set[int],
+        current_dto_to_clear: Optional[Any]= None
+    ) -> None:
         """
         Помечает записи на удаление, удаляет из модели новые строки,
         сбрасывает чекбоксы для удалённых.
@@ -959,7 +964,48 @@ class ListSelectionMixin:
             if dto and getattr(dto, 'id', None) == entity_id:
                 return row
         return -1
-    
+
+    @AppLogger.get_instance(
+        name = 'ListSelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_selected_ids_from_view(self) -> Set[int]:
+        """
+        Возвращает множество ID сущностей, выбранных в таблице.
+        Учитывает:
+            - обычное выделение (клик + Shift/Ctrl)
+            - чекбоксы, если они активны в режиме редактирования
+        """
+        entity_ids = set()
+
+        # 1. Выделение через selectionModel (Shift/Ctrl)
+        selection_model = self.table_view.selectionModel()
+        if selection_model:
+            for proxy_index in selection_model.selectedRows():
+                source_index = self.proxy_model.mapToSource(proxy_index)
+                if source_index.isValid():
+                    dto = self.source_model.get_item_at_row(source_index.row())
+                    if dto and dto.id is not None:
+                        entity_ids.add(dto.id)
+
+        # 2. Чекбоксы (только в режиме редактирования, если включены)
+        if self.edit_mode and hasattr(
+                self.source_model,
+                '_checkbox_column_enabled'
+        ) and self.source_model._checkbox_column_enabled:
+            for row in range(self.source_model.rowCount()):
+                index = self.source_model.index(row, 0)
+                if self.source_model.data(index, Qt.CheckStateRole) == Qt.Checked:
+                    dto = self.source_model.get_item_at_row(row)
+                    if dto and dto.id is not None:
+                        entity_ids.add(dto.id)
+
+        return entity_ids
+
 class ListDataMixin:
     """
     Миксин для работы с данными в таблице.
@@ -1856,6 +1902,7 @@ class ListUIMixin:
         self.table_view.setSortingEnabled(True)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
         add_copy_paste_to_table(self.table_view) # Добавляем возможность копирования и вставки
 

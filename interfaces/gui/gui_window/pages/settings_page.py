@@ -1,5 +1,7 @@
 # interfaces/gui/gui_window/pages/settings_page.py
+
 from app.config.config_applier import ConfigApplier
+from app.network.ya_dop import check_and_create_path
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.pages.base_page import BasePage
 from app.config.config_manager.manager import AppConfigManager
@@ -10,7 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Slot, Qt
+from PySide6.QtCore import QThread, Signal, Slot, Qt
 
 class SettingsPage(BasePage):
     """
@@ -95,6 +97,7 @@ class SettingsPage(BasePage):
         self.db_path_edit = QLineEdit()
         self.db_path_btn = QPushButton("Обзор...")
         self.db_path_btn.setMaximumWidth(80)
+
         db_path_layout = QHBoxLayout()
         db_path_layout.addWidget(self.db_path_edit)
         db_path_layout.addWidget(self.db_path_btn)
@@ -110,13 +113,32 @@ class SettingsPage(BasePage):
         form_layout.addRow("Папка для фото:", photos_layout)
 
         # Токен Яндекс.Диска
+        # self.token_edit = QLineEdit()
+        # self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        # Токен с кнопкой проверки
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Токен Яндекс.Диска:", self.token_edit)
+        token_layout = QHBoxLayout()
+        token_layout.addWidget(self.token_edit)
+        self.check_token_btn = QPushButton("Проверить")
+        self.check_token_btn.setMaximumWidth(80)
+        self.check_token_btn.clicked.connect(self._check_token)
+        token_layout.addWidget(self.check_token_btn)                    
+        form_layout.addRow("Токен Яндекс.Диска:", token_layout)
 
-        # Удалённый путь БД на диске
+        # # Удалённый путь БД на диске
+        # self.remote_path_edit = QLineEdit()
+        # form_layout.addRow("Удалённый путь БД:", self.remote_path_edit)
+
+        # Удалённый путь с кнопкой проверки/создания
         self.remote_path_edit = QLineEdit()
-        form_layout.addRow("Удалённый путь БД:", self.remote_path_edit)
+        remote_layout = QHBoxLayout()
+        remote_layout.addWidget(self.remote_path_edit)
+        self.check_path_btn = QPushButton("Проверить/Создать")
+        self.check_path_btn.setMaximumWidth(120)
+        self.check_path_btn.clicked.connect(self._check_remote_path)
+        remote_layout.addWidget(self.check_path_btn)
+        form_layout.addRow("Удалённый путь БД:", remote_layout)
 
         # Папка для бекапов
         self.backup_path_edit = QLineEdit()
@@ -305,6 +327,99 @@ class SettingsPage(BasePage):
         # Ротация
         self.log_max_bytes_spin.setValue(int(self.config_manager.get('LOG_MAX_BYTES', 10 * 1024 * 1024)))
         self.log_backup_count_spin.setValue(int(self.config_manager.get('LOG_BACKUP_COUNT', 5)))
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _check_token(self):
+        """Проверяет токен Яндекс.Диска асинхронно."""
+        token = self.token_edit.text().strip()
+        
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Токен не задан.")
+            return
+
+        class TokenCheckThread(QThread):
+            result = Signal(bool, str)
+            def __init__(self, token):
+                super().__init__()
+                self.token = token
+            def run(self):
+                from app.network.ya_dop import check_token
+                ok = check_token(self.token)
+                msg = "Токен действителен" if ok else "Токен недействителен или нет соединения"
+                self.result.emit(ok, msg)
+
+        self.token_thread = TokenCheckThread(token)
+        self.token_thread.result.connect(self._on_token_checked)
+        self.token_thread.start()
+        self.check_token_btn.setEnabled(False)
+        self.check_token_btn.setText("Проверка...")
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_token_checked(self, ok: bool, message: str):
+        self.check_token_btn.setEnabled(True)
+        self.check_token_btn.setText("Проверить")
+
+        if ok:
+            QMessageBox.information(self, "Результат", message)
+        else:
+            QMessageBox.warning(self, "Результат", message)
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _check_remote_path(self):
+        """Проверяет существование удалённого пути на Яндекс.Диске, предлагает создать."""
+        token = self.token_edit.text().strip()
+        path = self.remote_path_edit.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Токен не задан.")
+            return
+        
+        if not path:
+            QMessageBox.warning(self, "Ошибка", "Удалённый путь не задан.")
+            return
+
+        class PathCheckThread(QThread):
+            result = Signal(bool, str)
+
+            def __init__(self, token, path):
+                super().__init__()
+                self.token = token
+                self.path = path
+
+            def run(self):
+                # from app.network.ya_dop import check_and_create_path
+                ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
+                self.result.emit(ok, msg)
+
+        self.path_thread = PathCheckThread(token, path)
+        self.path_thread.result.connect(self._on_path_checked)
+        self.path_thread.start()
+        self.check_path_btn.setEnabled(False)
+        self.check_path_btn.setText("Проверка...")
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_path_checked(self, ok: bool, message: str):
+        self.check_path_btn.setEnabled(True)
+        self.check_path_btn.setText("Проверить/Создать")
+        if ok:
+            QMessageBox.information(self, "Результат", message)
+        else:
+            QMessageBox.warning(self, "Результат", message)
 
     # ----------------------------------------------------------------------
     # Сохранение настроек и перезагрузка логгеров

@@ -3,6 +3,7 @@
 
 # Стандартные библиотеки Python
 import os
+from typing import Tuple
 
 # Сторонние библиотеки
 import yadisk # pip install yadisk requests
@@ -143,6 +144,7 @@ def yadisk_upload_file(
         ya_file_path: str,
         if_err: bool = False,
         progress_callback=None,
+        overwrite = False,
 ):
     """
     Загрузка файла на yandex.disk с поддержкой прогресса.
@@ -172,9 +174,56 @@ def yadisk_upload_file(
         if parent_dir and not y.exists(parent_dir):
             y.mkdir(parent_dir)
 
-        y.upload(local_file_path, ya_file_path, progress_callback=progress_callback)
+        y.upload(
+            local_file_path, 
+            ya_file_path, 
+            progress_callback=progress_callback,
+            overwrite=overwrite,
+        )
         return 0
     except Exception as e:
         if if_err:
             raise e
         return -3
+    
+
+def check_token(ya_token: str) -> bool:
+    """
+    Проверяет валидность токена Яндекс.Диска.
+
+    Args:
+        ya_token: OAuth-токен.
+
+    Returns:
+        True если токен действителен, иначе False.
+    """
+    y = yadisk.YaDisk(token=ya_token)
+    return y.check_token()
+
+
+def check_and_create_path(ya_token: str, ya_path: str, create_if_missing: bool = True) -> Tuple[bool, str]:
+    """
+    Проверяет существование пути на Яндекс.Диске.
+    Если create_if_missing=True и путь не существует, создаёт его (включая все родительские папки).
+
+    Args:
+        ya_token: OAuth-токен.
+        ya_path: Путь на Яндекс.Диске (например, '/Проекты/test/bd').
+        create_if_missing: Создавать ли путь при отсутствии.
+
+    Returns:
+        Кортеж (успех_операции, сообщение).
+    """
+    y = yadisk.YaDisk(token=ya_token)
+    if not y.check_token():
+        return False, "Неверный токен или нет соединения"
+    try:
+        if y.exists(ya_path):
+            return True, "Путь существует"
+        elif create_if_missing:
+            y.mkdir(ya_path, parents=True)
+            return True, f"Путь успешно создан: {ya_path}"
+        else:
+            return False, f"Путь не существует: {ya_path}"
+    except Exception as e:
+        return False, f"Ошибка при проверке/создании пути: {e}"

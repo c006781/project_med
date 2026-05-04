@@ -278,8 +278,8 @@ class ConnectionsMixin:
         # Кнопка возврата на предыдущую страницу
         self.back_btn.clicked.connect(self._on_back_clicked)
 
-        # Кнопка открытия страницы настроек
-        self.settings_btn.clicked.connect(self._on_settings_clicked)
+        # # Кнопка открытия страницы настроек
+        # self.settings_btn.clicked.connect(self._on_settings_clicked)
 
         # Выбор действия из выпадающего списка (скачать, сохранить, отправить)
         self.action_combo.currentIndexChanged.connect(self._on_action_selected)
@@ -726,14 +726,18 @@ class SyncMixin:
             index 1 → сохранить изменения (пока заглушка)
             index 2 → отправить БД на сервер
         """
-        if index == 0:
+        if index == 1:          # Настройки
+            self._on_settings_clicked()
+        elif index == 3:        # Скачать БД (если использовался insertSeparator, то индекс 2, иначе 3)
             self._start_download()
-        elif index == 1:
-            self._save_changes()
-        elif index == 2:
+        elif index == 4:        # Загрузить БД (индекс 3 или 4)
             self._start_upload()
+
         # Сбрасываем выбранный индекс, чтобы можно было повторно выбрать то же действие
-        self.action_combo.setCurrentIndex(-1)
+        # self.action_combo.setCurrentIndex(-1)
+        self.action_combo.blockSignals(True)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.blockSignals(False)
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -791,7 +795,7 @@ class SyncMixin:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
 
-        self.upload_thread = UploadThread(token, local, remote)
+        self.upload_thread = UploadThread(token, local, remote, overwrite=True)
         self.upload_thread.progress.connect(self._update_progress)
         self.upload_thread.finished.connect(self._on_upload_finished)
         self.upload_thread.error.connect(self._on_upload_error)
@@ -839,9 +843,61 @@ class SyncMixin:
         self.progress_bar.setVisible(False)
         if code == 0:
             QMessageBox.information(self, "Успех", "База данных успешно скачана.")
-            # После скачивания можно обновить текущие страницы, если нужно
+            # # Перезагружаем данные на всех страницах-списках
+            # self._reload_all_list_pages()
+            # Перезагружаем все данные через существующий механизм
+            self.on_settings_changed(changed_blocks={'database'})
         else:
             QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
+
+    # @AppLogger.get_instance(
+    #     name='MainWindow',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def _reload_all_list_pages(self):
+    #     """
+    #     Перезагружает данные на всех страницах-списках (пациенты, приёмы, заметки, фото).
+    #     Также, если текущая страница – это страница редактирования (DynamicEditPage),
+    #     перезагружает её с сохранением ID редактируемой записи.
+    #     """
+    #     self.logger.info("Перезагрузка всех страниц после синхронизации БД")
+
+    #     # Список страниц-списков
+    #     list_pages = [
+    #         self.patient_list_page,
+    #         self.appointment_list_page,
+    #         self.note_list_page,
+    #         self.photo_list_page,
+    #     ]
+
+    #     # Перезагружаем каждую страницу списка, если она существует и имеет метод _load_data
+    #     for page in list_pages:
+    #         if page and hasattr(page, '_load_data'):
+    #             # Временно блокируем сигналы выделения, чтобы не вызывать лишние обновления
+    #             if hasattr(page, 'table_view') and page.table_view.selectionModel():
+    #                 page.table_view.selectionModel().blockSignals(True)
+    #             try:
+    #                 page._load_data()
+    #             finally:
+    #                 if hasattr(page, 'table_view') and page.table_view.selectionModel():
+    #                     page.table_view.selectionModel().blockSignals(False)
+
+    #     # Если текущая страница – редактирование (DynamicEditPage) или другая детальная страница,
+    #     # перезагружаем её, сохраняя контекст (id записи)
+    #     current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+    #     if current_page and current_page not in list_pages:
+    #         if hasattr(current_page, 'on_enter'):
+    #             # Получаем те же extra_data, которые были переданы при входе на страницу
+    #             extra = self.page_manager.get_current_extra_data()
+    #             # Если extra_data не сохранялись, но у страницы есть атрибут current_id – используем его
+    #             if extra is None and hasattr(current_page, 'current_id') and current_page.current_id:
+    #                 extra = {'id': current_page.current_id}
+    #             # Вызываем on_enter для перезагрузки данных
+    #             current_page.on_enter(extra)
+    #             self.logger.info(f"Перезагружена страница {current_page.page_title}")
+
+    #     self.logger.info("Перезагрузка страниц завершена")
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -1129,17 +1185,26 @@ class MainWindow(
 
         # Выпадающий список действий
         self.action_combo = QComboBox()
-        self.action_combo.addItem("Скачать БД")
-        self.action_combo.addItem("Сохранить изменения")
-        self.action_combo.addItem("Отправить БД на сервер")
+        self.action_combo.addItem("Файл")          # индекс 0 – заглушка
+        self.action_combo.addItem("Настройки")     # индекс 1
+        self.action_combo.insertSeparator(2)       # разделитель 
+        self.action_combo.addItem("Скачать БД с сервера")   # индекс 3
+        self.action_combo.addItem("Загрузить БД на сервер") # индекс 4
         self.action_combo.setEditable(False)
         self.action_combo.setMaximumWidth(200)
+
+        # Делаем пункт "Файл" невыбираемым
+        self.action_combo.model().item(0).setEnabled(False)
+        # Пункт-разделитель (индекс 2) тоже делаем невыбираемым, можно пустую строку
+        # self.action_combo.model().item(2).setEnabled(False)
+        self.action_combo.setCurrentIndex(0)  # по умолчанию выбран заглушечный пункт
+
         self.header_layout.addWidget(self.action_combo)
 
         # Кнопка настроек
-        self.settings_btn = QPushButton("Настройки")
-        self.settings_btn.setMaximumWidth(100)
-        self.header_layout.addWidget(self.settings_btn)
+        # self.settings_btn = QPushButton("Настройки")
+        # self.settings_btn.setMaximumWidth(100)
+        # self.header_layout.addWidget(self.settings_btn)
 
         self.header_layout.addStretch()
 

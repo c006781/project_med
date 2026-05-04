@@ -1,4 +1,23 @@
 # app/services/services_all.py
+"""
+Бизнес-логика приложения (сервисный слой).
+
+Содержит абстрактный базовый класс :class:`BaseService` и конкретные сервисы:
+- :class:`PatientService` – управление пациентами.
+- :class:`AppointmentService` – управление приёмами (с заметками и фото).
+- :class:`NoteService` – управление заметками.
+- :class:`PhotoService` – управление фотографиями (хранение файлов, копирование).
+
+Все сервисы используют репозитории для доступа к БД, автоматически управляют сессиями,
+поддерживают фильтрацию, пагинацию и вычисление виртуальных полей.
+
+Пример использования:
+    >>> from app.dependencies import get_patient_service
+    >>> service = get_patient_service()
+    >>> patients = service.get_all_patients()
+    >>> for p in patients:
+    ...     print(p.last_name, p.first_name)
+"""
 
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).

@@ -1,4 +1,27 @@
 # app/repositories/repositories_all.py
+"""
+Слой доступа к данным (репозитории).
+
+Каждый репозиторий инкапсулирует запросы к конкретной таблице БД.
+Базовый класс :class:`BaseRepository` предоставляет общие методы:
+- get_by_id, get_all, add, delete
+- get_page (пагинация с фильтрацией)
+- get_unique_values (уникальные значения столбца)
+
+Конкретные репозитории:
+- :class:`PatientRepository`
+- :class:`AppointmentRepository`
+- :class:`AppointmentNoteRepository`
+- :class:`PhotoRepository`
+
+Пример использования:
+    >>> from app.database import Database
+    >>> db = Database("sqlite:///clinic.db")
+    >>> with db.session_scope() as session:
+    ...     repo = PatientRepository(session)
+    ...     patient = repo.get_by_id(1)
+    ...     print(patient.first_name)
+"""
 
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).

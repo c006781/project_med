@@ -1,15 +1,30 @@
 # interfaces/gui/gui_window/widgets/dynamic_table_model.py
-
 """
 Универсальная модель таблицы, строящаяся на основе списка DTO и описания колонок.
-Каждая колонка задаётся словарём:
-    {
-        'name': str,          # имя поля в DTO
-        'title': str,         # заголовок для отображения
-        'type': type,         # тип данных (int, str, date, time и т.д.)
-        'editable': bool,     # можно ли редактировать ячейку
-        'choices': list или callable  # опционально: список значений для выпадающего списка
-    }
+
+Поддерживает:
+    - Отображение полей, заданных в `columns`.
+    - Редактирование (если ячейка отмечена как editable).
+    - Чекбоксы в отдельном столбце (опционально).
+    - Установку цвета фона для строк.
+    - Сортировку.
+    - Получение уникальных значений для автодополнения.
+
+Атрибуты модели (QAbstractTableModel):
+    _data (List[Any]): Список DTO (исходные данные).
+    _columns (List[Dict]): Описание колонок.
+    _checkbox_column_enabled (bool): Включён ли столбец чекбоксов.
+    _checkbox_states (Dict[int, bool]): Состояния чекбоксов для строк.
+    _row_colors (Dict[int, QColor]): Цвета строк.
+    row_modified (Signal): Сигнал, испускаемый при изменении данных в строке.
+
+Пример:
+    >>> columns = [
+    ...     {'name': 'id', 'title': 'ID', 'type': int, 'editable': False},
+    ...     {'name': 'last_name', 'title': 'Фамилия', 'type': str, 'editable': True}
+    ... ]
+    >>> model = DynamicTableModel(patients, columns)
+    >>> tableView.setModel(model)
 """
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal

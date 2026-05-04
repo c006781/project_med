@@ -13,6 +13,11 @@ DTO (Data Transfer Objects) на базе Pydantic.
 
 Для каждого DTO установлена конфигурация `from_attributes = True`, что позволяет
 создавать DTO из ORM-объектов SQLAlchemy через `model_validate(obj)`.
+
+Пример:
+    >>> dto = PatientDTO(first_name="Иван", last_name="Петров")
+    >>> print(dto.model_dump())
+    {'first_name': 'Иван', 'last_name': 'Петров'}
 """
 
 import datetime

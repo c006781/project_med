@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Версия тега (например, v1.0.0)'
+        required: true
+
+jobs:
+  # Сборка .exe под Windows
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Установка Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Установка зависимостей
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+      - name: Сборка .exe
+        run: python build_exe.py
+      - name: Загрузка артефакта (.exe)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalApp-windows
+          path: dist/MedicalApp.exe
+
+  # Сборка архива для Linux (исходники + скрипты)
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Создание дистрибутива для Linux
+        run: |
+          mkdir MedicalApp-linux
+          # Копируем необходимые файлы
+          cp -r app interfaces run.sh requirements.txt README.md MedicalApp-linux/ 2>/dev/null || true
+          # Создаём install.sh в архиве
+          cat > MedicalApp-linux/install.sh << 'EOF'
+          #!/bin/bash
+          echo "Установка зависимостей Python..."
+          pip3 install --user -r requirements.txt
+          echo "Готово. Запустите ./run.sh"
+          EOF
+          chmod +x MedicalApp-linux/install.sh
+          chmod +x MedicalApp-linux/run.sh
+          # Упаковываем
+          tar -czf MedicalApp-linux.tar.gz MedicalApp-linux/
+      - name: Загрузка артефакта (Linux)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MedicalApp-linux
+          path: MedicalApp-linux.tar.gz
+
+  # Создание релиза на GitHub
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Создание релиза
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/MedicalApp-windows/MedicalApp.exe
+            artifacts/MedicalApp-linux/MedicalApp-linux.tar.gz
+          prerelease: ${{ contains(github.ref, '-pre') || contains(github.event.inputs.version, '-pre') }}
+          generate_release_notes: true

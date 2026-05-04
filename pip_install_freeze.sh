@@ -1,1 +1,1 @@
-pip install -r ./requirements2.txt
+pip install -r ./requirements.txt

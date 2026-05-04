@@ -1,9 +1,20 @@
 # app/dto/dto_all.py
-
 """
 DTO (Data Transfer Objects) на базе Pydantic.
-Обеспечивают автоматическую валидацию и сериализацию.
+
+Обеспечивают автоматическую валидацию, сериализацию и десериализацию данных
+при передаче между слоями приложения (сервисы, GUI, CLI).
+
+Содержатся DTO для:
+    - PatientDTO       – пациент
+    - AppointmentNoteDTO – заметка к приёму
+    - PhotoDTO         – фотография
+    - AppointmentDTO   – приём (включая виртуальные поля)
+
+Для каждого DTO установлена конфигурация `from_attributes = True`, что позволяет
+создавать DTO из ORM-объектов SQLAlchemy через `model_validate(obj)`.
 """
+
 import datetime
 
 from typing import (
@@ -18,10 +29,33 @@ from pydantic import ( # pip install pydantic>=2.0
     ConfigDict, 
     Field
 ) 
-
+# from app.dto import PhotoDTO  # для аннотации в AppointmentDTO
 
 class PatientDTO(BaseModel):
-    """DTO для пациента"""
+    """
+    DTO для пациента. Используется для передачи данных между слоями.
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор (None для новой записи).
+        first_name (str): Имя пациента (обязательное).
+        last_name (str): Фамилия пациента (обязательное).
+        birth_date (Optional[datetime.date]): Дата рождения.
+        phone (Optional[str]): Номер телефона.
+        email (Optional[str]): Адрес электронной почты.
+
+    Конфигурация:
+        from_attributes = True – позволяет создавать DTO из ORM-объектов SQLAlchemy.
+
+    Пример:
+        >>> dto = PatientDTO(
+        ...     first_name="Иван",
+        ...     last_name="Петров",
+        ...     birth_date=datetime.date(1990, 5, 12)
+        ... )
+        >>> print(dto.model_dump())
+        {'first_name': 'Иван', 'last_name': 'Петров', 'birth_date': datetime.date(1990, 5, 12)}
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = Field(
@@ -77,7 +111,25 @@ class PatientDTO(BaseModel):
 
 
 class AppointmentNoteDTO(BaseModel):
-    """DTO для заметки к приёму"""
+    """
+    DTO для заметки приёма.
+
+    Используется для передачи текста заметки, которая может быть привязана
+    к одному или нескольким приёмам.
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор заметки (None – для новой).
+        text (str): Содержимое заметки (обязательное).
+
+    Конфигурация:
+        model_config = ConfigDict(from_attributes=True).
+
+    Пример:
+        >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
+        >>> print(note_dto.text)
+        'Первичный осмотр. Жалобы на головную боль.'
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = Field(
@@ -100,8 +152,33 @@ class AppointmentNoteDTO(BaseModel):
 
 class PhotoDTO(BaseModel):
     """
-    DTO для фотографии.
+    DTO для фотографии, прикреплённой к приёму.
+
+    Содержит информацию о файле и его описании. Путь к файлу хранится
+    относительно папки `PHOTOS_STORAGE_PATH` (настраивается в конфигурации).
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор фотографии.
+        appointment_id (int): ID приёма, к которому относится фото.
+        file_path (str): Относительный путь к файлу.
+        description (Optional[str]): Описание фотографии.
+
+    Конфигурация:
+        model_config = ConfigDict(from_attributes=True).
+
+    Примечание:
+        В формах и таблицах это поле используется только для чтения;
+        для загрузки новых фото используется отдельный механизм.
+
+    Пример:
+        >>> photo = PhotoDTO(
+        ...     id=5,
+        ...     appointment_id=10,
+        ...     file_path="app_10/5_face.jpg",
+        ...     description="Лицо"
+        ... )
     """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: Optional[int] = Field(
@@ -142,9 +219,41 @@ class PhotoDTO(BaseModel):
 
 class AppointmentDTO(BaseModel):
     """
-    DTO для приёма.
-    Содержит как поля из модели Appointment, так и дополнительные
-    для отображения (patient_name, note_text).
+    DTO для приёма (визита) пациента.
+
+    Содержит как основные поля модели Appointment, так и дополнительные
+    виртуальные поля (`patient_name`, `note_text`, `has_photos`), которые
+    вычисляются на основе связанных объектов (пациент, заметка, фото).
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор приёма (None – для нового).
+        patient_id (int): ID пациента (обязательный).
+        patient_name (Optional[str]): Виртуальное поле – ФИО пациента.
+        date (datetime.date): Дата приёма.
+        time (Optional[datetime.time]): Время приёма.
+        note_id (Optional[int]): ID заметки (если есть).
+        note_text (Optional[str]): Виртуальное поле – текст заметки.
+        photos (Optional[List[PhotoDTO]]): Список фотографий, привязанных к приёму.
+        has_photos (Optional[str]): Виртуальное поле – индикатор наличия фото
+            (например, "3 фото" или "❌").
+
+    Конфигурация:
+        model_config = ConfigDict(from_attributes=True).
+
+    Примечания:
+        - Поля `patient_name`, `note_text`, `has_photos` не сохраняются в БД,
+          они заполняются при формировании DTO из ORM-объекта.
+        - При создании/обновлении через `AppointmentService` поле `note_text`
+          может использоваться для автоматического поиска/создания заметки.
+
+    Пример:
+        >>> app_dto = AppointmentDTO(
+        ...     patient_id=1,
+        ...     date=datetime.date(2025, 3, 10),
+        ...     time=datetime.time(10, 30),
+        ...     note_text="Первичный осмотр"
+        ... )
+        >>> # при сохранении заметка будет найдена или создана автоматически
     """
     
     model_config = ConfigDict(from_attributes=True)

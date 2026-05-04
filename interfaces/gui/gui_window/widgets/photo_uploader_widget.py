@@ -393,6 +393,19 @@ class PhotoUploaderWidget(QWidget):
 
     Сигналы:
         photosChanged: испускается при любом изменении состава фото или описаний.
+
+    Атрибуты:
+        MAX_PHOTOS (int): Максимальное количество фото (0 – без ограничений).
+        VALID_EXTENSIONS (Set[str]): Допустимые расширения файлов.
+
+    Пример использования:
+        >>> widget = PhotoUploaderWidget()
+        >>> widget.set_storage_path("./photos")
+        >>> widget.set_existing_photos([PhotoDTO(id=1, file_path="app_1/1_face.jpg")])
+        >>> widget.photosChanged.connect(on_photos_changed)
+        >>> # в режиме редактирования
+        >>> widget.set_readonly(False)
+        >>> widget.add_photo()
     """
 
     MAX_PHOTOS = 0  # ограничить максимальное количество загружаемых фото в приём. 0 - без ограницений
@@ -617,9 +630,24 @@ class PhotoUploaderWidget(QWidget):
     )
     def dump_state(self) -> dict:
         """
-        Возвращает сериализуемое состояние виджета: существующие фото, pending, удалённые, изменённые.
+        Возвращает сериализуемое состояние виджета: список существующих фото,
+        ожидающие (не сохранённые) фото, удалённые ID, изменённые ID и оригинальные описания.
+
         Используется для сохранения черновиков при переключении между приёмами.
+
+        Возвращает:
+            dict: Словарь с ключами:
+                - 'existing_photos' (list[dict]): список PhotoDTO в виде словарей.
+                - 'original_descriptions' (dict[int, str]): исходные описания.
+                - 'pending_photos' (list[tuple[str, str]]): новые фото (путь, описание).
+                - 'deleted_photo_ids' (list[int]): ID удалённых фото.
+                - 'modified_photo_ids' (list[int]): ID изменённых фото.
+
+        Пример:
+            >>> state = widget.dump_state()
+            >>> # сохранить state в черновик
         """
+
         return {
             'existing_photos': [p.model_dump() for p in self.existing_photos],
             'original_descriptions': self.original_descriptions.copy(),
@@ -649,6 +677,8 @@ class PhotoUploaderWidget(QWidget):
                 - 'pending_photos': список кортежей (file_path, description)
                 - 'deleted_photo_ids': список int
                 - 'modified_photo_ids': список int
+        Примечание:
+            При загрузке полностью заменяется текущее состояние (все изменения сбрасываются).
         """
 
         self.logger.debug(f"load_state: pending={state.get('pending_photos')}, existing={state.get('existing_photos')}")
@@ -1096,9 +1126,18 @@ class PhotoUploaderWidget(QWidget):
     )
     def set_unique_values_func(self, func):
         """
-        Устанавливает функцию, возвращающую список уникальных строк для автодополнения.
-        :param func: вызываемый объект без аргументов, возвращающий List[str]
+        Устанавливает функцию, возвращающую список уникальных строк для автодополнения описаний.
+
+        Параметры:
+            func (callable): Вызываемый объект без аргументов, возвращающий List[str].
+
+        Пример:
+            >>> photo_service = get_photo_service()
+            >>> widget.set_unique_values_func(
+            ...     lambda: [str(v) for v in photo_service.get_unique_values('description')]
+            ... )
         """
+        
         self._unique_values_func = func
         # Обновим делегат, если он уже создан
         if hasattr(self, 'description_delegate'):
@@ -2129,11 +2168,11 @@ class PhotoUploaderWidget(QWidget):
             - отключаются кнопки добавления/удаления
             - запрещается редактирование описаний (ячеек)
             - запрещается drag-and-drop файлов
-            - таблица переводится в режим NoEditTriggers
 
         Параметры:
             readonly (bool): True – режим просмотра, False – режим редактирования.
         """
+
         self._readonly = readonly
         self.setAcceptDrops(not readonly)  # запрещаем перетаскивание в режиме просмотра
 
@@ -2153,6 +2192,7 @@ class PhotoUploaderWidget(QWidget):
         # обновить состояние пунктов (они станут неактивными,
         # если комбобокс выключен, но это не нужно, т.к. комбобокс отключён целиком)
         self._update_undo_actions_state()
+
     # ----------------------------------------------------------------------
     # Вспомогательные методы для цвета строк
     # ----------------------------------------------------------------------

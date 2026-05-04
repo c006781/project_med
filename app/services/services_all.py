@@ -781,6 +781,12 @@ class PatientService(
 ):
     """
     Сервис для управления пациентами.
+
+    Добавляет специфические методы:
+        - create_patient(patient_dto) – создание с валидацией.
+        - update_patient(patient_dto) – обновление.
+        - delete_patient(patient_id) – удаление с каскадной очисткой заметок.
+        - get_patients_filtered() – фильтрация.
     """
 
     @AppLogger.get_instance(
@@ -836,15 +842,24 @@ class PatientService(
         session: Optional[Session] = None
     ) -> PatientDTO:
         """
-        Создаёт нового пациента. Выполняет валидацию.
+        Создаёт нового пациента (обёртка над `create` с дополнительной валидацией).
 
-        :param patient_dto: DTO для создания пациента
-        :type patient_dto: PatientDTO
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :return: созданный пациент с id
-        :rtype: PatientDTO
+        Параметры:
+            patient_dto (PatientDTO): DTO с данными пациента (без id).
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            PatientDTO: Созданный пациент с заполненным id.
+
+        Исключения:
+            PatientValidationError: Если отсутствуют обязательные поля (first_name, last_name).
+
+        Пример:
+            >>> new_patient = PatientDTO(first_name="Анна", last_name="Смирнова")
+            >>> created = service.create_patient(new_patient)
+            >>> print(created.id)
         """
+
         self.logger.debug(f"patient_dto {patient_dto} session {session} result {session}")
 
         if not patient_dto.first_name or not patient_dto.last_name:
@@ -894,8 +909,8 @@ class PatientService(
         Обновляет существующего пациента.
 
         Args:
-            patient_dto: PatientDTO - данные для обновления пациента.
-            session: Optional[Session] - сессия БД, которая будет использоваться для работы с репозиторием.
+            patient_dto (PatientDTO): DTO с заполненным id и изменяемыми полями.
+            session (Optional[Session]): сессия БД, которая будет использоваться для работы с репозиторием.
 
         Returns:
             PatientDTO: обновленный объект PatientDTO.
@@ -1027,15 +1042,18 @@ class PatientService(
     )  
     def delete_patient(self, patient_id: int, session: Optional[Session] = None) -> None:
         """
-        Удаляет пациента. Приёмы удаляются каскадно благодаря настройкам модели.
-        После удаления проверяет, остались ли заметки, и удаляет неиспользуемые.
-        :param patient_id: ID пациента, которого нужно удалить
-        :type patient_id: int
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :raises PatientNotFoundError: если пациент с указанным идентификатором не найден
+        Удаляет пациента и все связанные приёмы (каскадно). Удаляет неиспользуемые заметки.
+
+        Параметры:
+            patient_id (int): ID пациента.
+            session (Optional[Session]): Внешняя сессия.
+
+        Исключения:
+            PatientNotFoundError: Если пациент не найден.
         """
+
         self.logger.debug(f"Удаление пациента id={patient_id}")
+        
         with self._session_scope(session) as sess:
             # Получаем пациента со связанными приёмами (чтобы собрать ID заметок)
             # patient = session.get(Patient, patient_id)

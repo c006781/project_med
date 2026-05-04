@@ -23,7 +23,43 @@ from app.utils.logger.logger import AppLogger
 
 class DynamicTableModel(QAbstractTableModel):
     """
-    Модель для отображения любых DTO-объектов в таблице.
+    Модель таблицы, работающая со списком DTO-объектов.
+
+    Поддерживает:
+        - Отображение полей, заданных в `columns`.
+        - Редактирование (если ячейка отмечена как editable).
+        - Чекбоксы в отдельном столбце (опционально).
+        - Установку цвета фона для строк.
+        - Сортировку.
+        - Получение уникальных значений для автодополнения.
+
+    Атрибуты:
+        _data (List[Any]): Список DTO (исходные данные).
+        _columns (List[Dict]): Описание колонок.
+        _checkbox_column_enabled (bool): Включён ли столбец чекбоксов.
+        _checkbox_states (Dict[int, bool]): Состояния чекбоксов для строк.
+        _row_colors (Dict[int, QColor]): Цвета строк.
+        _field_by_column (Dict[int, str]): Маппинг индекса колонки → имя поля.
+        row_modified (Signal): Сигнал, испускаемый при изменении данных в строке.
+
+    Параметры инициализации:
+        data (List[Any]): Список DTO.
+        columns (List[Dict]): Список словарей с ключами:
+            - 'name' (str): имя поля в DTO
+            - 'title' (str): заголовок для отображения
+            - 'type' (type): тип данных (для корректной сортировки и редактирования)
+            - 'editable' (bool): можно ли редактировать
+        parent (QObject, optional): Родительский объект.
+        get_unique_values_func (callable, optional): Функция для получения уникальных
+            значений столбца (используется в делегатах с автодополнением).
+
+    Пример:
+        >>> columns = [
+        ...     {'name': 'id', 'title': 'ID', 'type': int, 'editable': False},
+        ...     {'name': 'last_name', 'title': 'Фамилия', 'type': str, 'editable': True}
+        ... ]
+        >>> model = DynamicTableModel(patients, columns)
+        >>> tableView.setModel(model)
     """
 
     # Сигнал, испускаемый при изменении данных в строке (передаётся индекс строки)
@@ -161,7 +197,13 @@ class DynamicTableModel(QAbstractTableModel):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def set_checkbox_column_visible(self, visible: bool):
-        """Включает/выключает столбец чекбоксов."""
+        """
+        Включает или отключает столбец чекбоксов (первый столбец).
+
+        Параметры:
+            visible (bool): True – показать столбец, False – скрыть.
+        """
+
         if self._checkbox_column_enabled == visible:
             return
         
@@ -184,20 +226,37 @@ class DynamicTableModel(QAbstractTableModel):
         level = AppLogger._parse_log_level('DEBUG')
     )
     def set_checkbox_state(self, row: int, checked: bool):
-        """Устанавливает состояние чекбокса для строки (source row)."""
+        """
+        Устанавливает состояние чекбокса для строки (source row).
+
+        Параметры:
+            row (int): Индекс строки в исходной модели.
+            checked (bool): Состояние чекбокса.
+        """
+
         if not self._checkbox_column_enabled:
             return
         
         self._checkbox_states[row] = checked
+
         # Уведомляем об изменении только столбца 0
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
     def get_unique_values_for_column(self, col: int) -> List[str]:
         """
-        Возвращает список уникальных строк для указанного столбца.
-        Если функция не задана или возникает ошибка, возвращает пустой список.
+        Возвращает список уникальных строк для указанного столбца (использует `_get_unique_values_func`).
+
+        Параметры:
+            col (int): Индекс колонки в модели (с учётом чекбокс-столбца).
+
+        Возвращает:
+            List[str]: Уникальные значения.
+
+        Примечание:
+            Если функция `_get_unique_values_func` не задана, возвращает пустой список.
         """
+
         if not self._get_unique_values_func:
             return []
         
@@ -490,7 +549,14 @@ class DynamicTableModel(QAbstractTableModel):
         return True
 
     def set_row_color(self, row: int, color: QColor):
-        """Устанавливает цвет фона для строки."""
+        """
+        Устанавливает цвет фона для строки.
+
+        Параметры:
+            row (int): Индекс строки в исходной модели.
+            color (QColor): Цвет фона.
+        """
+
         if 0 <= row < len(self._data):
             self._row_colors[row] = color
             top_left = self.index(row, 0)
@@ -499,7 +565,9 @@ class DynamicTableModel(QAbstractTableModel):
 
     def clear_row_colors(self):
         """Очищает все установленные цвета строк."""
+
         self._row_colors.clear()
+
         if self.rowCount() > 0:
             top_left = self.index(0, 0)
             bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
@@ -667,16 +735,23 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def update_data(self, new_data: List[Any]):
-        """
-        Полностью обновляет данные модели.
-        
-        :param new_data: новый список данных
-        :type new_data: List[Any]
+        """"
+        Полностью заменяет данные модели.
+
+        Параметры:
+            new_data (List[Any]): Новый список DTO.
+
+        Примечание:
+            Вызывает `beginResetModel()`/`endResetModel()`, поэтому все текущие выделения
+            и состояния чекбоксов сбрасываются.
         """
 
         self.beginResetModel()
+
         self._data = new_data
+
         self.clear_row_colors()
+
         self.endResetModel()
 
     # @AppLogger.get_instance(
@@ -688,12 +763,13 @@ class DynamicTableModel(QAbstractTableModel):
     # )
     def get_item_at_row(self, row: int) -> Optional[Any]:
         """
-        Возвращает DTO, соответствующий указанной строке модели. (по индексу строки)
-        
-        :param row: номер строки
-        :type row: int
-        :return: DTO, если строка существует, None иначе
-        :rtype: Optional[Any]
+        Возвращает DTO для указанной строки.
+
+        Параметры:
+            row (int): Индекс строки в исходной модели.
+
+        Возвращает:
+            Optional[Any]: DTO или None, если строка не существует.
         """
 
         if 0 <= row < len(self._data):
@@ -704,21 +780,35 @@ class DynamicTableModel(QAbstractTableModel):
     def add_row(self, dto: Any) -> int:
         """
         Добавляет новую строку в конец модели.
-        Возвращает индекс добавленной строки.
+
+        Параметры:
+            dto (Any): DTO новой записи.
+
+        Возвращает:
+            int: Индекс добавленной строки.
         """
 
         row = len(self._data)
+
         self.beginInsertRows(QModelIndex(), row, row)
         self._data.append(dto)
         self.endInsertRows()
+
         # Новая строка считается изменённой (для подсветки)
         self.row_modified.emit(row)
+        
         return row
 
     def remove_row(self, row: int) -> Optional[Any]:
-        """
-        Удаляет строку из модели и возвращает удалённый DTO.
+        """ 
+        Удаляет строку из модели.
         Используется для временного удаления (без вызова сервиса).
+
+        Параметры:
+            row (int): Индекс строки в исходной модели.
+
+        Возвращает:
+            Optional[Any]: Удалённый DTO или None, если строка не существовала.
         """
 
         if row < 0 or row >= len(self._data):
@@ -727,12 +817,16 @@ class DynamicTableModel(QAbstractTableModel):
         self.beginRemoveRows(QModelIndex(), row, row)
         removed = self._data.pop(row)
         self.endRemoveRows()
+        
         return removed
 
     def update_row(self, row: int, new_dto: Any):
-        """
+        """ 
         Заменяет DTO в указанной строке на новый.
         Используется после сохранения изменений.
+        Параметры:
+            row (int): Индекс строки.
+            new_dto (Any): Новый DTO.
         """
 
         if row < 0 or row >= len(self._data):
@@ -742,4 +836,11 @@ class DynamicTableModel(QAbstractTableModel):
         # Уведомляем об изменении всей строки
         top_left = self.index(row, 0)
         bottom_right = self.index(row, self.columnCount() - 1)
-        self.dataChanged.emit(top_left, bottom_right, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole])
+        self.dataChanged.emit(
+            top_left, 
+            bottom_right, 
+            [
+                Qt.ItemDataRole.DisplayRole, 
+                Qt.ItemDataRole.EditRole
+            ]
+        )

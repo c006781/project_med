@@ -204,7 +204,18 @@ class AppLogger(BaseAppLogger):
     
     @classmethod
     def reload_all_from_app_config(cls):
-        """Загружает текущую конфигурацию приложения и применяет ко всем логгерам."""
+        """
+        Загружает текущую конфигурацию приложения и применяет её ко всем существующим логгерам.
+
+        Вызывается автоматически при изменении настроек через SettingsPage.
+        Использует `get_config_env()` для получения словаря настроек и передаёт его в
+        `cls.reload_all_from_config(full_config)`.
+
+        Пример:
+            >>> AppLogger.reload_all_from_app_config()
+            # После этого все логгеры перечитают настройки (уровни, директории и т.д.)
+        """
+            
         # from app.config.config_manager.manager import get_config_env
         full_config = get_config_env()
         cls.reload_all_from_config(full_config)

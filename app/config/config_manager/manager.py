@@ -195,8 +195,24 @@ class AppConfigManager(BaseConfigManager):
     Менеджер конфигурации для конкретного приложения.
     Определяет набор настроек по умолчанию, которые берутся из текущей
     конфигурации .env (старый способ), но могут быть переопределены в файле.
+
+    Атрибуты класса:
+        _config_path (str): Путь к файлу конфигурации (по умолчанию 'config.msgpack').
+        _defaults (dict): Словарь со значениями по умолчанию (логирование, пути, токен и т.д.).
+        _instances (dict): Хранилище экземпляров для паттерна Multiton.
+
+    Методы:
+        get_instance(force_new=False, config_path=None, create_if_missing=False) -> AppConfigManager
+        get(key, default=None) -> Any
+        set(key, value) -> None
+        save() -> None
+        load() -> Dict[str, Any]
+        reset_to_defaults() -> None
+        add_change_listener(callback) -> None
     """
+
     _config_path = 'config.msgpack'
+
     # _defaults = {}
     # Значения по умолчанию (копия того, что сейчас возвращает get_config_env)
     # _defaults = {
@@ -299,11 +315,21 @@ class AppConfigManager(BaseConfigManager):
         """
         Возвращает экземпляр менеджера конфигурации (паттерн Multiton).
 
-        :param force_new: если True, создаёт новый экземпляр даже если уже есть.
-        :param config_path: путь к файлу конфигурации. Если не указан,
-                            берётся из старой функции get_config_env() по ключу 'APP_CONFIG_PATH'.
-        :return: экземпляр AppConfigManager.
+        Параметры:
+            force_new (bool): Если True, создаёт новый экземпляр даже если уже есть.
+            config_path (Optional[str]): Путь к файлу конфигурации. Если не указан,
+                берётся из старой функции get_config_env() по ключу 'APP_CONFIG_PATH'.
+            create_if_missing (bool): Если True и файл конфигурации не существует,
+                создаёт его со значениями по умолчанию.
+
+        Возвращает:
+            AppConfigManager: Экземпляр менеджера.
+
+        Пример:
+            >>> manager = AppConfigManager.get_instance()
+            >>> token = manager.get('YANDEX_TOKEN')
         """
+
         if config_path is None:
             # Получаем путь из старой конфигурации (там он уже должен быть)
             config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
@@ -321,10 +347,10 @@ class AppConfigManager(BaseConfigManager):
 
         return instance
 
-
 # ----------------------------------------------------------------------
 # Функция для обратной совместимости со старым кодом
 # ----------------------------------------------------------------------
+
 def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Возвращает словарь с текущей конфигурацией, используя новый менеджер.

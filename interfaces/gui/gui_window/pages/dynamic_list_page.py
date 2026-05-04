@@ -88,30 +88,74 @@ from PySide6.QtGui import QColor
 
 
 class _PreserveSelectionStorage:
-    """Хранилище сохранённых строк для декоратора preserve_selection."""
+    """
+    Хранилище сохранённых строк для декоратора `preserve_selection`.
+
+    Использует слабосвязанный словарь: ключ – строка, значение – индекс строки.
+    Позволяет сохранять выделение до и после выполнения методов, которые могут перестроить модель.
+
+    Атрибуты класса:
+        _data (dict): Словарь {key: row}.
+    """
+
     _data = {}
 
     @classmethod
-    def make_key(cls, obj, func_name: str, label: Optional[str] = None) -> str:
+    def make_key(
+        cls, 
+        obj, 
+        func_name: str, 
+        label: Optional[str] = None
+    ) -> str:
+        """
+        Формирует ключ для хранения.
+
+        Параметры:
+            obj (object): Экземпляр, для которого сохраняется строка.
+            func_name (str): Имя метода, обёрнутого декоратором.
+            label (Optional[str]): Произвольная метка, используемая как ключ (приоритет).
+
+        Возвращает:
+            str: Ключ для словаря.
+        """
+
         if label:
             return label
+        
         class_name = obj.__class__.__name__
+        
         return f"{class_name}.{func_name}"
     
     @classmethod
     def save(cls, key: str, row: int) -> bool:
-        """Сохраняет строку только если для данного ключа ещё нет значения."""
+        """
+        Сохраняет строку, если для данного ключа ещё нет значения.
+
+        Параметры:
+            key (str): Ключ.
+            row (int): Индекс строки.
+
+        Возвращает:
+            bool: True, если сохранение выполнено (значения не было), иначе False.
+        """
+        
         if key not in cls._data:
             cls._data[key] = row
+
             return True
+        
         return False
 
     @classmethod
     def get(cls, key: str) -> int:
+        """Возвращает сохранённый индекс строки или -1."""
+
         return cls._data.get(key, -1)
 
     @classmethod
     def clear(cls, key: str):
+        """Удаляет ключ из хранилища."""
+
         cls._data.pop(key, None)
 
     # @classmethod
@@ -131,17 +175,32 @@ class _PreserveSelectionStorage:
 
 
 def preserve_selection(
-        store_method_name='_store_current_row', 
-        restore_method_name='_restore_current_row',
-        label: Optional[str] = None
-    ):
+    store_method_name='_store_current_row', 
+    restore_method_name='_restore_current_row',
+    label: Optional[str] = None
+):
     """
     Декоратор для сохранения и восстановления текущей строки в таблице.
-    
-    :param store_method_name: имя метода, возвращающего индекс строки (по умолчанию '_store_current_row')
-    :param restore_method_name: имя метода, принимающего индекс строки и восстанавливающего выделение
-    :param label: произвольная строка – если указана, используется как ключ в хранилище вместо автоматического "ClassName.method_name"
+
+    Используется для методов, которые могут перестроить модель (например, `_load_data`, `_on_edit_mode_toggled`).
+    Декоратор сохраняет текущую строку (`store_method_name`), выполняет декорируемый метод,
+    затем восстанавливает строку (`restore_method_name`). Если методы не найдены, декоратор не влияет на работу.
+
+    Параметры:
+        store_method_name (str): Имя метода, возвращающего индекс текущей строки в прокси-модели.
+        restore_method_name (str): Имя метода, принимающего индекс строки (в прокси-модели) и восстанавливающего выделение.
+        label (Optional[str]): Произвольная строка – если указана, используется как ключ в хранилище
+            (вместо автоматического "ClassName.method_name").
+
+    Возвращает:
+        Callable: Декоратор функции.
+
+    Пример:
+        >>> @preserve_selection()
+        ... def _load_data(self):
+        ...     # перестраивает модель
     """
+
     def decorator(func):
         """
         Декоратор для сохранения и восстановления текущей строки в таблице.
@@ -202,11 +261,14 @@ def preserve_selection(
 
 class AdvancedFilterMixin:
     """
-    Миксин для добавления строки активных фильтров и связи с прокси-моделью.
-    Должен использоваться в классах, имеющих:
+    Миксин для добавления строки активных фильтров (чипов) и связи с прокси-моделью.
+
+    Требует наличия в классе-наследнике:
         - self.proxy_model (AdvancedFilterProxyModel)
         - self.main_layout (QVBoxLayout)
         - self.table_view (QTableView)
+
+    Предоставляет методы для обновления полосы фильтров и обработки сигналов от фильтров.
     """
 
     @AppLogger.get_instance(
@@ -218,7 +280,14 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_filter_condition_removed(self, column: int, condition_index: int):
-        """Обработчик удаления конкретного условия через чип."""
+        """
+        Обработчик удаления конкретного условия из составного фильтра.
+
+        Параметры:
+            column (int): Номер столбца.
+            condition_index (int): Индекс условия в списке условий.
+        """
+        
         self.proxy_model.remove_condition(column, condition_index)
 
     @AppLogger.get_instance(
@@ -230,7 +299,13 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_filter_bar(self):
-        """Создаёт и размещает FilterBar между топ-панелью и таблицей."""
+        """
+        Создаёт и размещает FilterBar между топ-панелью и таблицей.
+
+        Подключает сигналы прокси-модели (filtersChanged) и сигналы самой панели
+        (filter_removed, all_filters_cleared, filter_edit_requested, filter_condition_removed).
+        """
+
         if not hasattr(self, 'filter_bar'):
             self.filter_bar = FilterBar(self)
             # Вставляем после топ-панели, но перед таблицей
@@ -243,10 +318,12 @@ class AdvancedFilterMixin:
 
             # Подключаем сигналы прокси-модели
             self.proxy_model.filtersChanged.connect(self._refresh_filter_bar)
+
             # Сигналы от строки фильтров
             self.filter_bar.filter_removed.connect(self._on_filter_removed)
             self.filter_bar.all_filters_cleared.connect(self._on_all_filters_cleared)
             self.filter_bar.filter_edit_requested.connect(self._on_filter_edit_requested)
+
             # Для множественных условий (если реализовано)
             if hasattr(self.filter_bar, 'filter_condition_removed'):
                 self.filter_bar.filter_condition_removed.connect(self._on_filter_condition_removed)
@@ -261,14 +338,18 @@ class AdvancedFilterMixin:
     )
     def _refresh_filter_bar(self):
         """Обновляет строку фильтров на основе текущих фильтров в прокси-модели."""
+        
         if not hasattr(self, 'filter_bar'):
             return
+        
         filters = self.proxy_model.get_active_filters()
+        
         # Получаем заголовки столбцов
         column_titles = {}
         for col in filters.keys():
             title = self.proxy_model.headerData(col, Qt.Horizontal, Qt.DisplayRole)
             column_titles[col] = title
+        
         self.filter_bar.update_filters(filters, column_titles)
 
     @AppLogger.get_instance(
@@ -280,7 +361,8 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_filter_removed(self, column: int):
-        """Обработчик удаления фильтра через чип."""
+        """Обработчик удаления фильтра через чип – очищает фильтр для столбца."""
+
         self.proxy_model.clear_column_filter(column)
 
     @AppLogger.get_instance(
@@ -292,6 +374,8 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_all_filters_cleared(self):
+        """Обработчик кнопки «Очистить все» – сбрасывает все фильтры в прокси-модели."""
+
         self.proxy_model.clear_all_filters()
 
     @AppLogger.get_instance(
@@ -303,7 +387,12 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _on_filter_edit_requested(self, column: int):
-        """Открывает диалог редактирования фильтра для столбца."""
+        """
+        Обработчик двойного клика по чипу – открывает диалог редактирования фильтра для столбца.
+
+        Эмулирует клик по заголовку таблицы, вызывая `_request_advanced_filter` у заголовка.
+        """
+        
         # Эмулируем клик по заголовку для вызова диалога
         header = self.table_view.horizontalHeader()
         if hasattr(header, '_request_advanced_filter'):
@@ -319,20 +408,33 @@ class AdvancedFilterMixin:
     )
     # Переопределяем on_filter_requested (из ListFilterMixin) для поддержки новых операторов
     def on_filter_requested(self, column, logic, conditions):
+        """
+        Применяет сложный фильтр к прокси-модели.
+
+        Параметры:
+            column (int): Номер столбца.
+            logic (str): 'AND' или 'OR' – логика объединения условий.
+            conditions (list): Список словарей с условиями (operator, value, value2).
+        """
+
         self.proxy_model.set_column_filter(column, logic, conditions)
 
 class SelectionDialogMixin:
     """
     Миксин для отображения диалога выбора области действия над строками таблицы.
+
     Поддерживает:
         - только текущую строку
         - только строки, отмеченные чекбоксами
-        - текущую + отмеченные чекбоксами
-        - все строки (видимые после фильтрации)
-    Возвращает структуру с типом действия и списком ID (для точечных действий) или флаг all_visible.
+        - текущую + отмеченные
+        - все видимые строки
+
+    Возвращает структуру `SelectionChoice` с типом действия и списком ID.
     """
 
     class SelectionChoice:
+        """Объект, возвращаемый диалогом выбора."""
+
         __slots__ = ('action_type', 'ids', 'all_visible')
         @AppLogger.get_instance(
             name = 'SelectionChoice',
@@ -342,7 +444,12 @@ class SelectionDialogMixin:
         ).log_execution_time(
             level = AppLogger._parse_log_level('DEBUG')
         )
-        def __init__(self, action_type: str, ids: set = None, all_visible: bool = False):
+        def __init__(
+            self, 
+            action_type: str, 
+            ids: set = None, 
+            all_visible: bool = False
+        ):
             self.action_type = action_type   # 'none', 'current', 'checkbox', 'both', 'all'
             self.ids = ids or set()
             self.all_visible = all_visible
@@ -358,13 +465,18 @@ class SelectionDialogMixin:
     def _show_selection_dialog(self, action_name: str = "удаление") -> 'SelectionChoice':
         """
         Показывает диалог выбора области для действия action_name.
-        Возвращает объект SelectionChoice.
+
+        Параметры:
+            action_name (str): Название действия (отображается в диалоге).
+
+        Возвращает:
+            SelectionChoice: Объект с выбранной областью.
         """
 
-        current_dto = self._get_current_selected_dto() # 
-        checkbox_ids = self._get_selected_checkbox_ids()  # ID сущностей, выбранных через чекбоксы
-        has_checkbox = bool(checkbox_ids) # Есть ли выбранные чекбоксы
-        has_current = current_dto is not None # Есть ли текущая строка
+        current_dto = self._get_current_selected_dto()      # DTO текущей выделенной строки
+        checkbox_ids = self._get_selected_checkbox_ids()    # ID сущностей, выбранных через чекбоксы
+        has_checkbox = bool(checkbox_ids)       # Есть ли выбранные чекбоксы
+        has_current = current_dto is not None   # Есть ли текущая строка
 
         total_visible = self.proxy_model.rowCount() if self.proxy_model else 0 # Всего видимых строк
 
@@ -386,10 +498,6 @@ class SelectionDialogMixin:
             # self._perform_deletion({current_dto.id}, current_dto)
             return self.SelectionChoice('current', ids={current_dto.id})
 
-
-
-
-
         # Если нет текущей строки, но есть чекбоксы – предлагаем только чекбоксы
         if not has_current and has_checkbox:
             reply = QMessageBox.question(
@@ -397,6 +505,7 @@ class SelectionDialogMixin:
                 f"Выполнить {action_name} для {len(checkbox_ids)} отмеченных записей?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
+
             if reply == QMessageBox.StandardButton.Yes:
                 return self.SelectionChoice('checkbox', ids=checkbox_ids)
             
@@ -460,7 +569,12 @@ class SelectionDialogMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _get_all_visible_ids(self) -> set:
-        """Возвращает множество ID всех видимых строк (после фильтрации)."""
+        """
+        Возвращает множество ID всех видимых строк (после фильтрации).
+
+        Возвращает:
+            set[int]: Идентификаторы сущностей.
+        """
 
         ids = set()
 
@@ -482,7 +596,9 @@ class SelectionDialogMixin:
 class CheckboxSelectionMixin:
     """
     Миксин для добавления столбца с чекбоксами в таблицу.
-    Предоставляет методы для управления выбором строк через чекбоксы.
+
+    Предоставляет методы для управления выбором строк через чекбоксы,
+    получения выбранных ID, очистки чекбоксов.
     """
 
     @AppLogger.get_instance(
@@ -494,7 +610,12 @@ class CheckboxSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _ensure_checkbox_header_menu(self):
-        """Переустанавливает callback для заголовка чекбокс-столбца при каждом показе страницы."""
+        """
+        Переустанавливает callback для заголовка чекбокс-столбца при каждом показе страницы.
+
+        Обеспечивает появление пунктов «Выбрать все» / «Снять все» в контекстном меню заголовка.
+        """
+
         if not self.edit_mode:
             return
         
@@ -502,8 +623,7 @@ class CheckboxSelectionMixin:
             header = self.table_view.horizontalHeader()  # заголовок таблицы
             if hasattr(header, 'set_checkbox_header_menu'):
                 header.set_checkbox_header_menu(self._toggle_all_checkboxes) # устанавливаем callback
-                
-                
+                 
     @AppLogger.get_instance(
         name = 'CheckboxSelectionMixin',
         # share_file_with = 'system',
@@ -513,7 +633,12 @@ class CheckboxSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _setup_checkbox_column(self) -> None:
-        """Включает столбец чекбоксов в модели и настраивает заголовок."""
+        """
+        Включает столбец чекбоксов в модели и настраивает заголовок.
+
+        Вызывается при переключении режима редактирования.
+        """
+
         if not hasattr(self, 'source_model'):
             return
         
@@ -530,7 +655,13 @@ class CheckboxSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _toggle_all_checkboxes(self, checked: bool) -> None:
-        """Устанавливает или снимает все чекбоксы."""
+        """
+        Устанавливает или снимает все чекбоксы.
+
+        Параметры:
+            checked (bool): True – выбрать все, False – снять все.
+        """
+
         if not self.edit_mode:
             return
         
@@ -550,8 +681,10 @@ class CheckboxSelectionMixin:
     )
     def _get_selected_checkbox_ids(self) -> Set[int]:
         """
-        Возвращает множество ID сущностей, у которых в текущей модели
-        установлен чекбокс (CheckStateRole == Checked).
+        Возвращает множество ID сущностей, у которых установлен чекбокс.
+
+        Возвращает:
+            set[int]: ID отмеченных строк.
         """
 
         ids = set()
@@ -574,6 +707,7 @@ class CheckboxSelectionMixin:
     )
     def _clear_checkboxes(self) -> None:
         """Снимает все чекбоксы (без изменения deleted_ids)."""
+
         for row in range(self.source_model.rowCount()):
             self.source_model.set_checkbox_state(row, False)
 
@@ -587,8 +721,12 @@ class CheckboxSelectionMixin:
     )
     def _get_current_selected_dto(self):
         """
-        Возвращает DTO текущей выделенной строки или None, если выделения нет.
+        Возвращает DTO текущей выделенной строки (обычное выделение, не чекбокс).
+
+        Возвращает:
+            Optional[Any]: DTO или None, если выделения нет.
         """
+
         selection_model = self.table_view.selectionModel()
         if not selection_model or not selection_model.hasSelection():
             return None
@@ -615,7 +753,8 @@ class CheckboxSelectionMixin:
     def _delete_with_selection_prompt(self) -> None:
         """
         Вызывает диалог выбора области удаления и выполняет удаление.
-        Используется вместо прямого _mark_selected_for_deletion.
+
+        Используется вместо прямого `_mark_selected_for_deletion`.
         """
 
         if not self.edit_mode:
@@ -652,6 +791,9 @@ class CheckboxSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _cancel_with_selection_prompt(self) -> None:
+        """
+        Вызывает диалог выбора области отмены изменений и отменяет изменения для выбранных записей.
+        """
         
         if not self.edit_mode:
             return
@@ -675,6 +817,7 @@ class CheckboxSelectionMixin:
                 f"Отменить изменения для {len(ids_to_cancel)} записей?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
+
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
@@ -690,11 +833,11 @@ class CheckboxSelectionMixin:
             try:
                 fresh_dto = self.service.get_by_id(self.selected_dto.id)
                 self.update_details(fresh_dto)
+
             except Exception as e:
                 self.logger.exception(f"Ошибка обновления правой панели после отмены: {e}")
 
         self.logger.debug(f"Изменения для строки id={ids_to_cancel} отменены, данные восстановлены из БД")
-
 
     @AppLogger.get_instance(
         name = 'CheckboxSelectionMixin',
@@ -710,9 +853,14 @@ class CheckboxSelectionMixin:
         current_dto_to_clear: Optional[Any]= None
     ) -> None:
         """
-        Помечает записи на удаление, удаляет из модели новые строки,
-        сбрасывает чекбоксы для удалённых.
+        Помечает записи на удаление, удаляет из модели новые строки, сбрасывает чекбоксы.
+
+        Параметры:
+            ids_to_delete (set): Множество ID для удаления.
+            current_dto_to_clear (Optional[Any]): Если передан и его ID входит в `ids_to_delete`,
+                правая панель очищается.
         """
+
         if not ids_to_delete:
             return
 
@@ -762,13 +910,18 @@ class CheckboxSelectionMixin:
     )
     def _get_entity_id(self, dto) -> int:
         """Возвращает ID сущности из DTO (учитывая временные отрицательные ID)."""
+        
         if dto is None:
             return None
+        
         return dto.id
 
 class ListSelectionMixin:
     """
     Миксин для управления выделением строк в таблице.
+
+    Предоставляет методы сохранения, восстановления и получения текущей строки,
+    а также поиск строки по ID сущности.
     """
 
     @AppLogger.get_instance(
@@ -780,10 +933,11 @@ class ListSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _clear_selection(self):
+        """
+        Сбрасывает все отслеживаемые изменения (modified_ids, deleted_ids, new_rows).
+        """
+
         # Сбрасываем все отслеживаемые изменения
-        """
-        Очищает все отслеживаемые изменения (modified_rows, deleted_rows, new_rows).
-        """
         # self.modified_rows.clear()
         # self.deleted_rows.clear()
         # self.new_rows.clear()
@@ -804,11 +958,21 @@ class ListSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _select_by_id(self, entity_id: int) -> bool:
-        """Выделяет строку по ID сущности. Возвращает True, если строка найдена."""
+        """
+        Выделяет строку по ID сущности.
+
+        Параметры:
+            entity_id (int): ID записи.
+
+        Возвращает:
+            bool: True, если строка найдена и выделена, иначе False.
+        """
+        
         row = self._find_row_by_dto_id(entity_id)
         if row >= 0:
             self._set_current_row(row)
             return True
+        
         return False
 
     @AppLogger.get_instance(
@@ -821,11 +985,14 @@ class ListSelectionMixin:
     )
     def _get_current_row(self) -> int:
         """
-        Возвращает индекс текущей строки в таблице или -1, если строка не selected.
-        :return: индекс строки или -1
-        :rtype: int
+        Возвращает индекс текущей строки в прокси-модели.
+
+        Возвращает:
+            int: Индекс строки или -1.
         """
+
         current = self.table_view.currentIndex()
+
         return current.row() if current.isValid() else -1
 
     @AppLogger.get_instance(
@@ -840,11 +1007,11 @@ class ListSelectionMixin:
         """
         Выделяет строку с указанным индексом (в прокси-модели).
         Если строка не существует, ничего не делает.
-        :param row: индекс строки
-        :type row: int
-        :return: None
-        :rtype: None
+
+        Параметры:
+            row (int): Индекс строки.
         """
+
         if row < 0 or row >= self.proxy_model.rowCount():
             return
         
@@ -862,13 +1029,12 @@ class ListSelectionMixin:
     )
     def _store_current_row(self) -> None:
         """
-        Запоминает текущую строку в прокси-модели.
-
-        :return: None
-        :rtype: None
+        Запоминает текущую строку в прокси-модели (возвращает её индекс). Используется декоратором `preserve_selection`.
         """
+
         row = self._get_current_row()
         self._saved_row = row
+        
         return row
 
     @AppLogger.get_instance(
@@ -881,10 +1047,10 @@ class ListSelectionMixin:
     )
     def _restore_current_row(self, row: int = None ) -> None:
         """
-        Восстанавливает ранее сохранённую строку.
-        Если сохранённой строки не существует, выбирает первую строку.
-        :return: None
-        :rtype: None
+        Восстанавливает сохранённую строку. Если сохранённой нет, выбирает первую строку.
+
+        Параметры:
+            row (int, optional): Индекс строки для восстановления (если не указан, берётся из self._saved_row).
         """
 
         # if hasattr(self, '_saved_row') and self._saved_row != -1:
@@ -908,7 +1074,6 @@ class ListSelectionMixin:
         # Обновляем состояние кнопок на основе текущего выделения
         self._update_selection_state()
         
-
     @AppLogger.get_instance(
         name = 'ListSelectionMixin',
         # share_file_with = 'system',
@@ -921,8 +1086,6 @@ class ListSelectionMixin:
         """
         Выбирает первую строку в таблице.
         Если таблица не содержит строк, ничего не делает.
-        :return: None
-        :rtype: None
         """
         
         if self.proxy_model.rowCount() > 0:
@@ -937,7 +1100,16 @@ class ListSelectionMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _find_row_by_dto_id(self, dto_id: int) -> int:
-        """Возвращает индекс строки в прокси-модели для DTO с указанным ID, или -1."""
+        """
+        Возвращает индекс строки в прокси-модели для DTO с указанным ID.
+
+        Параметры:
+            dto_id (int): ID записи.
+
+        Возвращает:
+            int: Индекс в прокси-модели или -1.
+        """
+
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
             if dto and getattr(dto, 'id', None) == dto_id:
@@ -945,6 +1117,7 @@ class ListSelectionMixin:
                 proxy_index = self.proxy_model.mapFromSource(source_index)
                 if proxy_index.isValid():
                     return proxy_index.row()
+                
         return -1
     
     @AppLogger.get_instance(
@@ -957,12 +1130,20 @@ class ListSelectionMixin:
     )
     def _find_source_row_by_id(self, entity_id: int) -> int:
         """
-        Возвращает индекс строки в source_model (исходной модели) по ID сущности, или -1.
+        Возвращает индекс строки в исходной модели (source_model) по ID сущности.
+
+        Параметры:
+            entity_id (int): ID записи.
+
+        Возвращает:
+            int: Индекс строки или -1.
         """
+
         for row in range(self.source_model.rowCount()):
             dto = self.source_model.get_item_at_row(row)
             if dto and getattr(dto, 'id', None) == entity_id:
                 return row
+        
         return -1
 
     @AppLogger.get_instance(
@@ -979,7 +1160,11 @@ class ListSelectionMixin:
         Учитывает:
             - обычное выделение (клик + Shift/Ctrl)
             - чекбоксы, если они активны в режиме редактирования
+        
+        Возвращает:
+            set[int]: ID выбранных записей.
         """
+
         entity_ids = set()
 
         # 1. Выделение через selectionModel (Shift/Ctrl)
@@ -994,8 +1179,8 @@ class ListSelectionMixin:
 
         # 2. Чекбоксы (только в режиме редактирования, если включены)
         if self.edit_mode and hasattr(
-                self.source_model,
-                '_checkbox_column_enabled'
+            self.source_model,
+            '_checkbox_column_enabled'
         ) and self.source_model._checkbox_column_enabled:
             for row in range(self.source_model.rowCount()):
                 index = self.source_model.index(row, 0)
@@ -1008,7 +1193,13 @@ class ListSelectionMixin:
 
 class ListDataMixin:
     """
-    Миксин для работы с данными в таблице.
+    Миксин для загрузки данных в таблицу.
+
+    Требует наличия атрибутов:
+        - self.loader_func (callable) – функция, возвращающая список DTO.
+        - self.current_extra (Any) – дополнительные параметры для загрузчика.
+        - self.source_model (DynamicTableModel)
+        - self.original_data (dict) – копия исходных данных для отслеживания изменений.
     """
 
     @AppLogger.get_instance(
@@ -1021,9 +1212,11 @@ class ListDataMixin:
     )
     def _load_data(self):
         """
-        Загружает данные из лоадера и обновляет модель и таблицу.
+        Загружает данные из лоадера, обновляет модель и сбрасывает цвета строк.
 
-        :raises Exception: если не удалось загрузить данные
+        Сохраняет копию исходных данных в `self.original_data`.
+        Устанавливает флаг `self._data_loaded = True`.
+        Вызывает `_clear_selection()` и `_update_save_button_state()`.
         """
 
         # Сохраняем ID выбранного DTO (если есть)
@@ -1093,13 +1286,12 @@ class ListDataMixin:
     )
     def set_needs_refresh(self, value=True):
         """
-        Устанавливает флаг, указывающий на необходимость перезагрузки данных.
-        Если флаг установлен в True, то при следующем вызове on_enter данные будут перезагружены.
-        :param value: флаг, указывающий на необходимость перезагрузки
-        :type value: bool
-        :return: None
-        :rtype: None
+        Устанавливает флаг необходимости перезагрузки данных при следующем входе на страницу.
+
+        Параметры:
+            value (bool): True – данные будут перезагружены, False – нет.
         """
+
         self._needs_refresh = value
 
     @AppLogger.get_instance(
@@ -1112,13 +1304,19 @@ class ListDataMixin:
     )
     def on_enter(self, extra_data=None):
         """
-        Вызывается при переходе на страницу.
-        extra_data может содержать новый параметр, отличающийся от self.current_extra.
-        Если extra_data не None и отличается от self.current_extra, то self.current_extra обновляется.
-        Если self._needs_refresh установлен в True, то данные перезагружаются.
-        :param extra_data: словарь с дополнительными данными
-        :type extra_data: dict
+        Вызывается при переходе на страницу. Если `extra_data` отличается от текущего,
+        перезагружает данные. Поддерживает выделение строки по `select_id`.
+
+        Параметры:
+            extra_data (Any, optional): Дополнительные данные, например `{'patient_id': 123}`
+                для фильтрации списка. Если `extra_data` отличается от сохранённого,
+                данные перезагружаются.
+
+        Примечание:
+            Если в `extra_data` передан ключ `select_id`, то после загрузки данных
+            строка с соответствующим ID будет выделена.
         """
+
         reload_needed = self._needs_refresh
         select_id = None
 
@@ -1140,6 +1338,7 @@ class ListDataMixin:
             # После загрузки выделяем строку, если указан select_id
             if select_id is not None:
                 self._select_by_id(select_id)
+
         elif select_id is not None:
             # Если перезагрузка не требуется, но нужно выделить строку (например, при возврате без обновления)
             self._select_by_id(select_id)
@@ -1150,14 +1349,25 @@ class ListDataMixin:
         #     reload_needed = True
         # if reload_needed:
         #     self._load_data()
-        #     self._needs_refresh = False         
+        #     self._needs_refresh = False 
+    
+    @AppLogger.get_instance(
+        name = 'ListDataMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )       
     def _apply_draft_to_new_dto(self, dto):
         """Переопределяется в наследниках для применения черновиков к новому DTO перед созданием."""
+
         pass
 
 class ListChangesMixin:
     """
-    Миксин для обработки изменений в таблице.
+    Миксин для обработки изменений в таблице: отслеживание modified/delete/new строк,
+    обновление цветов, управление кнопкой сохранения.
     """
     
     # @AppLogger.get_instance(
@@ -1193,14 +1403,14 @@ class ListChangesMixin:
     #     self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
     #     self.source_model.set_row_color(source_row, color)
 
-    @AppLogger.get_instance(
-        name = 'ListChangesMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'ListChangesMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     # def _set_row_color_by_source_row(self, source_row: int):
     #     """Устанавливает цвет строки в исходной модели по её индексу."""
 
@@ -1232,16 +1442,27 @@ class ListChangesMixin:
     #     self.table_view.viewport().update()   # перерисовка видимой области
     #     # self.table_view.update()              # перерисовка всей таблицы
 
+    @AppLogger.get_instance(
+        name = 'ListChangesMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _set_row_color_by_source_row(self, source_row: int):
+
         dto = self.source_model.get_item_at_row(source_row)
         if dto is None:
             return
+        
         if dto.id is None or dto.id < 0:
             # Новая строка
             if source_row in self.new_rows:
                 color = QColor(200, 255, 200)   # зелёный
             else:
                 color = QColor(255, 255, 255)   # белый
+        
         else:
             if dto.id in self.deleted_ids:
                 color = QColor(255, 200, 200)   # красный
@@ -1249,9 +1470,9 @@ class ListChangesMixin:
                 color = QColor(255, 255, 180)   # жёлтый
             else:
                 color = QColor(255, 255, 255)   # белый
+        
         self.source_model.set_row_color(source_row, color)
         self.table_view.viewport().update() # перерисовка видимой области
-
 
     @AppLogger.get_instance(
         name = 'ListChangesMixin',
@@ -1266,14 +1487,13 @@ class ListChangesMixin:
         Обновляет состояние кнопки сохранения изменений.
         Кнопка будет активна, если есть какие-либо изменения (новые, измененные, удаленные строки).
         """
+
         # has_changes = bool(self.modified_rows or self.deleted_rows or self.new_rows)
         has_changes = self._has_unsaved_changes() # возвращает True, если есть какие-либо изменения
 
         self.save_changes_btn.setEnabled(has_changes) # сохранять можно, если есть изменения
         # self.cancel_all_btn.setEnabled(has_changes) # отменять можно, если есть изменения
         # self.cancel_current_btn.setEnabled(has_changes) # отменять можно, если есть изменения
-
-
 
     @AppLogger.get_instance(
         name='ListChangesMixin',
@@ -1297,19 +1517,24 @@ class ListChangesMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _modified_ids_control(self, appointment_id, if_add :bool):
+    def _modified_ids_control(self, entity_id, if_add :bool):
 
         """
-        Метод для управления измененных строк в таблице.
+        Добавляет или удаляет ID из множества изменённых, обновляет цвет строки и кнопку сохранения.\
+        
         Если if_add=True, то добавляет source_row в множество измененных строк.
         Если if_add=False, то удаляет source_row из множества измененных строк.
         Затем вызывает _set_row_color_by_source_row для обновления цвета строки source_row,
         а также _update_save_button_state для обновления состояния кнопки сохранения изменений.
+
+        Параметры:
+            entity_id (int): ID записи.
+            if_add (bool): True – добавить в modified_ids, False – удалить.
         """
         
-        source_row = self._find_source_row_by_id(appointment_id)
+        source_row = self._find_source_row_by_id(entity_id)
 
-        self._modified_ids(appointment_id, if_add) 
+        self._modified_ids(entity_id, if_add) 
 
         if source_row != -1: # Если строка была найдена
             self._set_row_color_by_source_row(source_row) # обновляем цвет строки
@@ -1327,16 +1552,18 @@ class ListChangesMixin:
     @Slot(int)
     def _on_row_modified(self, row: int):
         """
-        Обработчик события изменения строки в таблице.
+        Обработчик сигнала `row_modified` от модели. Помечает строку как изменённую,
+        если данные отличаются от оригинала.
         
         Если строка была удалена, то ничего не делает.
         Иначе, добавляет строку в список измененных строк и обновляет цвет строки в таблице, а также состояние кнопки сохранения изменений.
-        :param row: индекс строки в таблице
-        :type row: int
+        
+        Параметры:
+            row (int): Индекс строки в source_model.
         """
+
         self.logger.debug(
             f"_on_row_modified вызван для row={row}, "
-            # f"modified_rows={self.modified_rows}"
         )
         # self.logger.debug(f"Строка {row} изменена")
 
@@ -1355,7 +1582,9 @@ class ListChangesMixin:
 
         # Если это новая строка (временный id), не добавляем в modified_ids
         if dto.id is None or dto.id < 0:
-            self.logger.debug(f"Строка {row} — новая, пропускаем добавление в modified_ids")
+            self.logger.debug(
+                f"Строка {row} — новая, пропускаем добавление в modified_ids"
+            )
             return 
          
             
@@ -1389,16 +1618,21 @@ class ListChangesMixin:
                 return
 
 
-        self.logger.debug(f"if dto.id not in self.modified_ids : {dto.id not in self.modified_ids}")
+        self.logger.debug(
+            f"if dto.id not in self.modified_ids : {dto.id not in self.modified_ids}"
+        )
         
         if dto.id not in self.modified_ids:
             self._modified_ids_control(dto.id, True) 
             self._update_selection_state()
 
 class ListEditModeMixin:
-    '''
-    Миксин для работы с режимом редактирования.
-    '''
+    """
+    Миксин для включения/выключения режима редактирования.
+
+    Управляет видимостью элементов интерфейса (кнопка сохранения, inline‑комбобокс),
+    переключением сигналов двойного клика и режима редактирования таблицы.
+    """
 
     @AppLogger.get_instance(
         name = 'ListEditModeMixin',
@@ -1410,11 +1644,12 @@ class ListEditModeMixin:
     )
     def _set_visible_edit_mode_elements(self, edit_mode):
         """
-        Устанавливает видимость элементов интерфейса в зависимости от режима редактирования.
-        :param edit_mode: Флаг режима редактирования
+        Показывает/скрывает элементы, относящиеся к режиму редактирования.
+
+        Параметры:
+            edit_mode (bool): True – режим редактирования включён.
         """
-        
-        
+                
         self.action_combo.setVisible(not edit_mode)
         self.inline_action_combo.setVisible(edit_mode)
         self.save_changes_btn.setVisible(edit_mode)
@@ -1435,9 +1670,6 @@ class ListEditModeMixin:
         else:
             self.table_view.doubleClicked.connect(self._on_row_double_clicked )
         
-        
-
-
     @AppLogger.get_instance(
         name = 'ListEditModeMixin',
         # share_file_with = 'system',
@@ -1453,11 +1685,13 @@ class ListEditModeMixin:
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """
-        Вызывается при переключении режима редактирования.
-        Если режим редактирования отключен и есть несохраненные изменения, то выводит предупреждение о необходимости подтверждения.
-        Если пользователь подтвердил удаление, то извлекается соответствующий сигнал.
+        Вызывается при переключении кнопки «Режим редактирования».
 
-        Если включён и таблица пуста, автоматически добавляет новую строку
+        Если выключение и есть несохранённые изменения, предлагает сохранить или отменить.
+        При включении и пустой таблице автоматически добавляет новую строку.
+
+        Параметры:
+            checked (bool): Новое состояние кнопки (включён ли режим).
         """
 
         has_changes = self._has_unsaved_changes() # возвращает True, если есть какие-либо изменения
@@ -1485,6 +1719,7 @@ class ListEditModeMixin:
 
             else:
                 return
+            
         else:
             # При включении режима редактирования, если таблица пуста, создаём новую строку
             if checked and self.source_model.rowCount() == 0:
@@ -1503,11 +1738,13 @@ class ListEditModeMixin:
 
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
-class ListSaveMixin:
+class ListSaveMixin: 
+    """
+    Миксин для сохранения изменений в базу данных.
 
-    '''
-    Миксин для сохранения изменений в таблице
-    '''
+    Реализует сохранение новых строк, обновление изменённых и удаление помеченных записей.
+    """
+
     @AppLogger.get_instance(
         name = 'ListSaveMixin',
         # share_file_with = 'system',
@@ -1517,12 +1754,19 @@ class ListSaveMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _save_deleted(self):
+        """
+        Обновляет изменённые записи (ID из `self.modified_ids`) через сервис.
+        После обновления обновляет DTO в модели и сбрасывает пометку modified.
+        """
+        
         for entity_id in list(self.deleted_ids):
             try:
                 self.service.delete(entity_id)
                 self.logger.info(f"Удалена запись ID={entity_id}")
+
             except Exception as e:
                 self.logger.exception(f"Ошибка удаления ID={entity_id}: {e}")
+        
         self.deleted_ids.clear()
 
     @AppLogger.get_instance(
@@ -1578,6 +1822,11 @@ class ListSaveMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _save_new(self):
+        """
+        Создаёт новые записи (строки из `self.new_rows`) через сервис.
+        Перед созданием применяет черновики через `_apply_draft_to_new_dto`.
+        """
+        
         for row in list(self.new_rows):
             dto = self.source_model.get_item_at_row(row)
             if dto:
@@ -1600,20 +1849,22 @@ class ListSaveMixin:
     @Slot()
     def _save_changes(self , if_question:bool = True):
         """
-        Сохраняет все изменения в БД.
+        Главный метод сохранения: последовательно вызывает `_save_new`, `_save_modified`, `_save_deleted`, 
+        затем перезагружает данные (`_load_data`) и выходит из режима редактирования.
 
         1. Удаление удаленных строк
         2. Обновление измененных строк
         3. Создание новых строк
 
-        После сохранения изменений, обновляет данные на странице и восстанавливает кнопку сохранения.
+        Параметры:
+            if_question (bool): Показывать ли диалог подтверждения перед сохранением.
+        
         """
         self.logger.info("=== _save_changes ВЫЗВАН ИЗ ListSaveMixin ===")
 
         has_changes = self._has_unsaved_changes()
         if not has_changes:
             return
-
 
         if if_question:
             reply = QMessageBox.question(
@@ -1649,6 +1900,7 @@ class ListSaveMixin:
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранении изменений: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+        
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
@@ -1662,12 +1914,22 @@ class ListSaveMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     def _exit_edit_mode(self):
-        """Выходит из режима редактирования, если он активен."""
+        """
+        Выходит из режима редактирования, если он активен.
+        Снимает флаг режима редактирования с кнопки `edit_mode_btn`.
+        """
+        
         if self.edit_mode:
             self.edit_mode_btn.setChecked(False) # снимаем флаг режима редактирования
 
 class ListUIMixin:
+    """
+    Миксин для построения пользовательского интерфейса страницы списка.
 
+    Создаёт верхнюю панель (кнопки, комбобоксы, поиск), таблицу, подключает модель,
+    прокси-модель, настраивает заголовки и делегаты.
+    """
+    
     @AppLogger.get_instance(
         name = 'ListUIMixin',
         # share_file_with = 'system',
@@ -1699,13 +1961,14 @@ class ListUIMixin:
     )
     def _setup_ui(self):
         """
-        Установка UI для страницы со списком записей.
+        Главный метод построения UI – вызывает `_setup_top_panel`, `_setup_table`, `_setup_delegates`.
 
         1. Установка верхней панели
         2. Установка таблицы
         3. Добавление таблицы в основной верстке
         4. Установка делегатов
         """
+
         # Основной макет
         self._setup_top_panel() # Верхняя панель
         self._setup_table() # Добавляем основной макет
@@ -1724,18 +1987,8 @@ class ListUIMixin:
     )
     def _setup_top_panel(self):
         """
-        Установка верхней панели для страницы со списком записей.
-
-        Создает горизонтальный layout и добавляет в него:
-        - кнопку "Режим редактирования"
-        - комбо-бокс действия
-        - кнопку "Сохранить изменения"
-        - комбо-бокс inline-действ
-        - кнопку "Действие"
-        - поле поиска
-
-        :return: None
-        :rtype: None
+        Создаёт верхнюю панель с кнопкой «Режим редактирования», комбобоксами действий,
+        кнопкой сохранения, полем поиска.
         """
         # Верхняя панель
         top_layout = QHBoxLayout()
@@ -1951,7 +2204,10 @@ class ListUIMixin:
     )
     def _setup_header_visible_table(self, header):
         """
-        Устанавливает настройки визуализации заголовка таблици
+        Принудительно показывает заголовок и устанавливает минимальную высоту.
+
+        Параметры:
+            header (QHeaderView): Заголовок таблицы.
         """
         
         # Сохраняем нормальную высоту заголовка (если она не 0)
@@ -1977,9 +2233,11 @@ class ListUIMixin:
     )
     def _setup_header_settings_table(self, header):
         """
-        Устанавливает настройки для заголовка таблицы.
+        Настраивает поведение заголовка: разрешает изменение размера столбцов,
+        делает последний столбец растягивающимся.
 
-        Устанавливает растяжение последнего столбца и размеры столбцов под контент.
+        Параметры:
+            header (QHeaderView): Заголовок таблицы.
         """
         
         # header.setStretchLastSection(True) # Растянуть последний столбец
@@ -2003,8 +2261,6 @@ class ListUIMixin:
 
         # self.table_view.horizontalHeader().setVisible(True) # показываем заголовок
 
-
-
     @AppLogger.get_instance(
         name = 'ListUIMixin',
         # share_file_with = 'system',
@@ -2016,7 +2272,7 @@ class ListUIMixin:
     def _setup_delegates(self):
         """
         Устанавливает делегаты для колонок на основе типов полей и field_configs.
-        Приоритет: choices > widget_type > тип поля.
+        Приоритет: choices > widget_type (autocomplete, textarea, date, time) > тип поля
         """
 
         # Словарь: тип -> класс делегата (и, возможно, дополнительные параметры)
@@ -2087,15 +2343,21 @@ class ListUIMixin:
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
 
 class ListFilterMixin:
+    """
+    Миксин для фильтрации данных через прокси-модель.
 
-    @AppLogger.get_instance(
-        name = 'ListFilterMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    Предоставляет методы для получения уникальных значений столбца
+    и обработки текстового поиска.
+    """
+
+    # @AppLogger.get_instance(
+    #     name = 'ListFilterMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     # def on_filter_requested(self, column: int, operator: str, value, value2=None):
     #     """
     #     Обработка сигнала фильтрации от заголовка.
@@ -2124,8 +2386,10 @@ class ListFilterMixin:
         """
         Очищает фильтр для столбца.
 
-        :param column: номер столбца, для которого нужно очистить фильтр
+        Параметры:
+            column (int): Номер столбца.
         """
+
         self.proxy_model.clear_column_filter(column)
 
     @AppLogger.get_instance(
@@ -2138,12 +2402,15 @@ class ListFilterMixin:
     )
     def get_unique_values_for_column(self, column: int) -> List[str]:
         """
-        Возвращает список уникальных значений для указанного столбца.
-        
-        :param column: номер столбца
-        :return: список уникальных значений для указанного столбца
-        :rtype: List[str]
+        Возвращает список уникальных значений для указанного столбца (через сервис).
+
+        Параметры:
+            column (int): Номер столбца в модели (с учётом чекбокс-столбца).
+
+        Возвращает:
+            list[str]: Уникальные значения в виде строк.
         """
+
         if self.service is None:
             return []
         
@@ -2163,13 +2430,20 @@ class ListFilterMixin:
     )
     def _on_search_text_changed(self, text):
         """
-        Обработка сигнала о изменении текста общего текстового фильтра.
-        
-        :param text: текст для поиска (необязательно)
+        Обработчик изменения текста в поле поиска – устанавливает глобальный текстовый фильтр в прокси-модели.
+
+        Параметры:
+            text (str): Текст для поиска.
         """
+
         self.proxy_model.set_global_text_filter(text)
     
 class ListInlineOpsMixin:
+    """
+    Миксин для inline-операций: добавление строки, пометка на удаление.
+
+    Используется в режиме редактирования.
+    """
     
     @AppLogger.get_instance(
         name = 'ListFilterMixin',
@@ -2181,6 +2455,13 @@ class ListInlineOpsMixin:
     )
     @Slot()
     def _add_inline_row(self):
+        """
+        Добавляет новую пустую строку в таблицу.
+
+        Создаёт DTO со значениями по умолчанию (пустые строки, сегодняшняя дата и т.п.),
+        присваивает временный отрицательный ID, добавляет в модель и помечает как новую.
+        """
+
         defaults = {}
         for col_info in self.columns:
             field_name = col_info['name']
@@ -2201,16 +2482,22 @@ class ListInlineOpsMixin:
 
             if field_type is None:
                 defaults[field_name] = None
+
             elif field_type == str:
                 defaults[field_name] = ""
+
             elif field_type == int:
                 defaults[field_name] = 0
+
             elif field_type == datetime.date:
                 defaults[field_name] = datetime.date.today()
+
             elif field_type == datetime.time:
                 defaults[field_name] = datetime.time(0, 0)
+
             elif field_type == bool:
                 defaults[field_name] = False
+
             else:
                 defaults[field_name] = None
 
@@ -2254,7 +2541,13 @@ class ListInlineOpsMixin:
     )
     @Slot()
     def _mark_selected_for_deletion(self):
-        
+        """
+        Помечает выбранную строку на удаление.
+
+        Для новых строк (временный ID) – удаляет из модели сразу.
+        Для существующих – добавляет ID в `self.deleted_ids` и убирает из modified_ids.
+        """
+
         if not self.selected_dto:
             return
         
@@ -2302,17 +2595,52 @@ class DynamicListPage(
     AdvancedFilterMixin,
     ListInlineOpsMixin,
     BasePage,
-):
+): 
     """
-    Универсальная страница списка с поддержкой inline-редактирования.
+    Универсальная страница списка с поддержкой inline-редактирования, фильтрации,
+    сортировки и массовых операций.
     Добавлена возможность отложенного сохранения изменений через кнопку «Сохранить изменения».
-    Поддерживает два режима:
-        - обычный режим: двойной клик по строке вызывает action_requested (переход на другой фрейм),
-          редактирование выполняется через формы.
-        - режим редактирования: включается кнопкой-переключателем, появляются inline-кнопки
-          «Добавить строку», «Удалить строку», «Сохранить изменения», двойной клик начинает редактирование ячейки.
-    """
 
+    Страница имеет два режима:
+        - Обычный режим: строки нельзя редактировать прямо в таблице. Двойной клик по строке
+          испускает сигнал `action_requested` (обычно для перехода к детальной странице).
+          Добавление/редактирование/удаление выполняется через отдельные формы (сигналы
+          `add_requested`, `edit_requested`, `delete_requested`).
+        - Режим редактирования: включается кнопкой «Режим редактирования». В этом режиме
+          появляется столбец чекбоксов, строки можно редактировать прямо в таблице,
+          добавлять/удалять строки и сохранять изменения через кнопку «Сохранить изменения».
+
+    Сигналы:
+        add_requested (Signal): Вызывается при нажатии «Добавить» в обычном режиме.
+        edit_requested (Signal(object)): Вызывается при выборе «Редактировать» (передаётся DTO).
+        delete_requested (Signal(object)): Вызывается при удалении (передаётся DTO).
+        action_requested (Signal(object)): Вызывается при двойном клике в обычном режиме.
+
+    Параметры инициализации:
+        service: Сервис для работы с сущностью (должен реализовывать методы `get_all`,
+                 `create`, `update`, `delete`, `get_unique_values` и пр.).
+        loader_func (callable): Функция, возвращающая список DTO для отображения.
+        dto_class (Type[BaseModel]): Класс DTO.
+        field_configs (Dict[str, Dict]): Конфигурация полей.
+        page_title (str): Заголовок страницы (отображается в breadcrumbs).
+        add_action_text (str): Текст кнопки «Добавить» в обычном режиме.
+        action_button_text (Optional[str]): Текст дополнительной кнопки (например, «Приёмы»).
+        parent (Optional[QWidget]): Родительский виджет.
+        exclude_columns (Optional[List[str]]): Список имён полей, которые не должны отображаться.
+
+    Пример создания страницы списка пациентов:
+        >>> page = DynamicListPage(
+        ...     service=get_patient_service(),
+        ...     loader_func=lambda extra: get_patient_service().get_all_patients(),
+        ...     dto_class=PatientDTO,
+        ...     field_configs=PATIENT_CONFIG,
+        ...     page_title="Пациенты",
+        ...     add_action_text="Добавить пациента",
+        ...     action_button_text="Приёмы",
+        ... )
+        >>> page.add_requested.connect(lambda: self.page_manager.switch_to('patient_edit'))
+        >>> page.edit_requested.connect(lambda dto: self.page_manager.switch_to('patient_edit', extra_data={'id': dto.id}))
+    """
  
     add_requested = Signal() # сигнал для добавления (можно не использовать, если добавляем строку напрямую)
     edit_requested = Signal(object) # сигнал для открытия формы редактирования
@@ -2342,23 +2670,21 @@ class DynamicListPage(
         parent=None,  # родительский виджет
         exclude_columns=None,
     ):
-        # """
-        # Инициализирует страницу списка.
-        # """
-
         """
         Инициализирует страницу списка.
 
-        :param service: сервис, используемый для редактирования записи
-        :param loader_func: функция, которая возвращает список данных
-        :param dto_class: класс DTO, используемый для создания записи
-        :param field_configs: внешняя конфигурация
-        :param page_title: заголовок страницы
-        :param add_action_text: текст кнопки добавления
-        :param action_button_text: текст дополнительной кнопки (если задана)
-        :param edit_on_double_click: True, если редактирование должно быть доступно при двойном нажатии на строке
-        :param parent: родительский виджет
+        Параметры:
+            service: Сервис с методами get_all, create, update, delete, get_unique_values.
+            loader_func (callable): Функция, возвращающая список DTO.
+            dto_class (Type[BaseModel]): Класс DTO.
+            field_configs (Dict[str, Dict]): Конфигурация полей.
+            page_title (str): Заголовок страницы.
+            add_action_text (str): Текст кнопки «Добавить».
+            action_button_text (Optional[str]): Текст дополнительной кнопки (если None – не создаётся).
+            parent (Optional[QWidget]): Родительский виджет.
+            exclude_columns (Optional[List[str]]): Имена полей, которые не отображать.
         """
+
         super().__init__(parent)
 
         self.logger = AppLogger.get_instance(
@@ -2420,8 +2746,6 @@ class DynamicListPage(
         self._setup_ui()
         
         # self._load_data() # загрузка данных на страницу
-     
-
 
     @AppLogger.get_instance(
         name='DynamicListPage',

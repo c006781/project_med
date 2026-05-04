@@ -40,8 +40,43 @@ from PySide6.QtCore import (
 
 class DynamicEditPage(BasePage):
     """
-    Универсальная страница редактирования.
-    Поддерживает автоматическую подстановку patient_id при создании приёма.
+    Универсальная страница редактирования записи.
+
+    Автоматически создаёт форму на основе DTO и `field_configs`, поддерживает:
+        - Загрузку существующей записи по ID.
+        - Создание новой записи.
+        - Обработку виртуальных полей (вычисляемых функций).
+        - Автодополнение для строковых полей (CompleterEdit).
+        - Работу с фотографиями (через PhotoUploaderWidget).
+
+    Сигналы:
+        data_saved (Signal(object)): Испускается при сохранении, если `save_directly=False`
+            (возвращает DTO без сохранения в БД).
+
+    Параметры инициализации:
+        service: Сервис для работы с сущностью (должен реализовывать `create`, `update`, `delete`,
+            `get_by_id`, `_session_scope` и т.д.).
+        dto_class (Type[BaseModel]): Класс DTO.
+        page_title (str): Заголовок страницы.
+        exclude_fields (Optional[List[str]]): Список полей, которые не должны отображаться в форме.
+        field_configs (Optional[Dict[str, Dict]]): Конфигурация полей.
+        related_services (Optional[Dict[str, Any]]): Словарь сервисов для загрузки связанных объектов
+            (например, {'patient': patient_service}).
+        save_directly (bool): Если True, данные сохраняются в БД сразу; если False – возвращается
+            DTO через сигнал `data_saved` (используется для вложенных окон).
+        parent (Optional[QWidget]): Родительский виджет.
+
+    Пример страницы редактирования пациента:
+        >>> edit_page = DynamicEditPage(
+        ...     service=get_patient_service(),
+        ...     dto_class=PatientDTO,
+        ...     page_title="Редактирование пациента",
+        ...     exclude_fields=['id'],
+        ...     field_configs=PATIENT_CONFIG,
+        ...     save_directly=True,
+        ... )
+        >>> edit_page.list_page_id = 'patient_list'  # для возврата после сохранения
+        >>> # При переходе передаём extra_data={'id': patient_id}
     """
 
     data_saved = Signal(object)   # испускается при сохранении, если save_directly=False
@@ -738,13 +773,16 @@ class DynamicEditPage(BasePage):
     def on_enter(self, extra_data=None):
         """
         Вызывается при переходе на страницу.
-        extra_data может содержать 'id' и 'patient_id'.
-        Если передан 'id' – загружаем существующую запись.
-        Если передан 'patient_id' и нет 'id' – создаём новый приём для этого пациента.
 
-        :param extra_data: словарь с дополнительными данными
-        :type extra_data: dict
+        Параметры:
+            extra_data (dict, optional): Может содержать:
+                - 'id': ID редактируемой записи (для загрузки).
+                - Любые другие ключи, указанные в `field_configs` как `init_from_extra`.
+                - 'return_to_page' и 'return_field' для возврата значения после сохранения.
+
+        Если `id` не передан, форма очищается для создания новой записи.
         """
+        
         # загружаем id, если он передан
         self.current_id = extra_data.get('id') if extra_data else None
 
@@ -1046,13 +1084,13 @@ class DynamicEditPage(BasePage):
     )
     def set_field_value(self, field_name: str, value):
         """
-        Устанавливает значение в указанное поле формы.
+        Устанавливает значение в указанное поле формы (используется при возврате из дочерних окон).
 
-        :param field_name: имя поля формы, в которое нужно установить значение
-        :type field_name: str
-        :param value: значение, которое нужно установить в поле формы
-        :type value: Any
+        Параметры:
+            field_name (str): Имя поля.
+            value (Any): Новое значение.
         """
+        
         if field_name in self.form.widgets:
             self.form._set_widget_value(self.form.widgets[field_name], value)
 

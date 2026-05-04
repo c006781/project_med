@@ -436,6 +436,7 @@ class SelectionDialogMixin:
         """Объект, возвращаемый диалогом выбора."""
 
         __slots__ = ('action_type', 'ids', 'all_visible')
+
         @AppLogger.get_instance(
             name = 'SelectionChoice',
             # share_file_with = 'system',
@@ -450,9 +451,116 @@ class SelectionDialogMixin:
             ids: set = None, 
             all_visible: bool = False
         ):
-            self.action_type = action_type   # 'none', 'current', 'checkbox', 'both', 'all'
+            self.action_type = action_type   # 'none', 'selected', 'current', 'checkbox', 'both', 'all'
             self.ids = ids or set()
             self.all_visible = all_visible
+
+    # @AppLogger.get_instance(
+    #     name = 'SelectionDialogMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _show_selection_dialog(self, action_name: str = "удаление") -> 'SelectionChoice':
+    #     """
+    #     Показывает диалог выбора области для действия action_name.
+
+    #     Параметры:
+    #         action_name (str): Название действия (отображается в диалоге).
+
+    #     Возвращает:
+    #         SelectionChoice: Объект с выбранной областью.
+    #     """
+
+    #     current_dto = self._get_current_selected_dto()      # DTO текущей выделенной строки
+    #     checkbox_ids = self._get_selected_checkbox_ids()    # ID сущностей, выбранных через чекбоксы
+        
+    #     has_checkbox = bool(checkbox_ids)       # Есть ли выбранные чекбоксы
+    #     has_current = current_dto is not None   # Есть ли текущая строка
+
+    #     total_visible = self.proxy_model.rowCount() if self.proxy_model else 0 # Всего видимых строк
+
+    #     if not has_checkbox and not has_current:
+    #         QMessageBox.warning(self, "Нет выбора", "Нет строк для выполнения действия.")
+    #         return self.SelectionChoice('none')
+
+    #     # # Если нет чекбоксов – сразу возвращаем текущую строку
+    #     # if not has_checkbox and has_current:
+    #     #     return self.SelectionChoice('current', ids={current_dto.id})
+
+
+    #     # Если нет выбранных чекбоксов – удаляем только текущую строку без вопросов
+    #     if (
+    #         has_current and not has_checkbox # Есть текущая строка, но нет выбранных чекбоксов
+    #     ) or (
+    #         has_current and (current_dto.id in checkbox_ids) and len(checkbox_ids) == 1 # Есть текущая строка и только она выбрана через чекбокс
+    #     ):
+    #         # self._perform_deletion({current_dto.id}, current_dto)
+    #         return self.SelectionChoice('current', ids={current_dto.id})
+
+    #     # Если нет текущей строки, но есть чекбоксы – предлагаем только чекбоксы
+    #     if not has_current and has_checkbox:
+    #         reply = QMessageBox.question(
+    #             self, f"Подтверждение {action_name}",
+    #             f"Выполнить {action_name} для {len(checkbox_ids)} отмеченных записей?",
+    #             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    #         )
+
+    #         if reply == QMessageBox.StandardButton.Yes:
+    #             return self.SelectionChoice('checkbox', ids=checkbox_ids)
+            
+    #         return self.SelectionChoice('none')
+
+    #     # Есть и текущая строка, и чекбоксы – показываем расширенный диалог
+    #     msg = QMessageBox(self)
+    #     msg.setWindowTitle(f"Выбор области {action_name}")
+    #     msg.setText("Выберите, к каким записям применить действие:")
+
+    #     btn_current = msg.addButton("Только текущую", QMessageBox.ActionRole)
+    #     btn_checkbox = msg.addButton("Только выбранные (чекбоксы)", QMessageBox.ActionRole)
+    #     btn_both = msg.addButton("Текущую + выбранные", QMessageBox.ActionRole)
+    #     btn_all = msg.addButton("Все строки", QMessageBox.ActionRole)
+    #     btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
+
+    #     # Устанавливаем доступность кнопок 
+    #     btn_current.setEnabled(has_current) # Только текущая
+    #     btn_checkbox.setEnabled(has_checkbox) # Только чекбоксы
+    #     btn_both.setEnabled(has_current and has_checkbox) # Текущая + чекбоксы
+    #     btn_all.setEnabled(total_visible > 0) # Все
+
+    #     msg.setDefaultButton(btn_cancel)
+
+    #     msg.exec()
+    #     clicked = msg.clickedButton()
+
+    #     if clicked == btn_current: # Только текущая
+    #         return self.SelectionChoice('current', ids={current_dto.id})
+        
+    #     elif clicked == btn_checkbox: # Только чекбоксы
+    #         return self.SelectionChoice('checkbox', ids=checkbox_ids)
+        
+    #     elif clicked == btn_both: # Текущая + чекбоксы
+    #         ids = set(checkbox_ids)
+    #         ids.add(current_dto.id)
+    #         return self.SelectionChoice('both', ids=ids)
+        
+    #     elif clicked == btn_all: # Все
+    #         # Дополнительное подтверждение для массовой операции
+    #         reply = QMessageBox.question(
+    #             self, "Подтверждение массового действия",
+    #             f"Вы действительно хотите применить действие ко всем {total_visible} отображаемым записям?",
+    #             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    #         )
+    #         if reply == QMessageBox.StandardButton.Yes: # 
+    #             return self.SelectionChoice('all', all_visible=True)
+            
+    #         else:
+    #             return self.SelectionChoice('none')
+            
+    #     else:
+    #         return self.SelectionChoice('none')
 
     @AppLogger.get_instance(
         name = 'SelectionDialogMixin',
@@ -462,103 +570,124 @@ class SelectionDialogMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _show_selection_dialog(self, action_name: str = "удаление") -> 'SelectionChoice':
-        """
-        Показывает диалог выбора области для действия action_name.
-
-        Параметры:
-            action_name (str): Название действия (отображается в диалоге).
-
-        Возвращает:
-            SelectionChoice: Объект с выбранной областью.
-        """
-
-        current_dto = self._get_current_selected_dto()      # DTO текущей выделенной строки
-        checkbox_ids = self._get_selected_checkbox_ids()    # ID сущностей, выбранных через чекбоксы
-        has_checkbox = bool(checkbox_ids)       # Есть ли выбранные чекбоксы
-        has_current = current_dto is not None   # Есть ли текущая строка
-
-        total_visible = self.proxy_model.rowCount() if self.proxy_model else 0 # Всего видимых строк
-
-        if not has_checkbox and not has_current:
-            QMessageBox.warning(self, "Нет выбора", "Нет строк для выполнения действия.")
+    def _show_selection_dialog_no(self, selected_ids: set, checkbox_ids: set, action_name: str = "удаление"):
+        # Если нет ни выделенных, ни чекбоксов – сообщаем
+        if not selected_ids and not checkbox_ids:
+            QMessageBox.warning(self, "Нет выбора", "Нет строк для выполнения действия {action_name}.")
             return self.SelectionChoice('none')
 
-        # # Если нет чекбоксов – сразу возвращаем текущую строку
-        # if not has_checkbox and has_current:
-        #     return self.SelectionChoice('current', ids={current_dto.id})
+        return None    
+    
+    @AppLogger.get_instance(
+        name = 'SelectionDialogMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _show_selection_dialog_one(self, selected_ids: set, checkbox_ids: set, action_name: str = "удаление"):
 
+        if_selected = selected_ids and not checkbox_ids     # Простой случай: только выделенные (нет чекбоксов)
+        if_checkbox = checkbox_ids and not selected_ids     # Простой случай: только чекбоксы (нет выделенных)
 
-        # Если нет выбранных чекбоксов – удаляем только текущую строку без вопросов
-        if (
-            has_current and not has_checkbox # Есть текущая строка, но нет выбранных чекбоксов
-        ) or (
-            has_current and (current_dto.id in checkbox_ids) and len(checkbox_ids) == 1 # Есть текущая строка и только она выбрана через чекбокс
-        ):
-            # self._perform_deletion({current_dto.id}, current_dto)
-            return self.SelectionChoice('current', ids={current_dto.id})
-
-        # Если нет текущей строки, но есть чекбоксы – предлагаем только чекбоксы
-        if not has_current and has_checkbox:
+        if if_selected or if_checkbox:
             reply = QMessageBox.question(
                 self, f"Подтверждение {action_name}",
-                f"Выполнить {action_name} для {len(checkbox_ids)} отмеченных записей?",
+                f"Выполнить {action_name} для {len(selected_ids if if_selected else checkbox_ids)} выделенных записей?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-
             if reply == QMessageBox.StandardButton.Yes:
-                return self.SelectionChoice('checkbox', ids=checkbox_ids)
+                return self.SelectionChoice(
+                    action_type=    'selected' if if_selected else 'checkbox', 
+                    ids=            selected_ids if if_selected else checkbox_ids 
+                )
             
-            return self.SelectionChoice('none')
+            else:
+                return self.SelectionChoice('none')
 
-        # Есть и текущая строка, и чекбоксы – показываем расширенный диалог
+        return None  
+
+    @AppLogger.get_instance(
+        name = 'SelectionDialogMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _show_selection_dialog_multi(self, selected_ids: set, checkbox_ids: set, action_name: str = "удаление"):
+
+        total_visible = self.proxy_model.rowCount() if self.proxy_model else 0
+        
+        # Сложный случай: есть и выделенные, и чекбоксы (возможно пересечение)
+        # Показываем расширенный диалог
         msg = QMessageBox(self)
         msg.setWindowTitle(f"Выбор области {action_name}")
         msg.setText("Выберите, к каким записям применить действие:")
 
-        btn_current = msg.addButton("Только текущую", QMessageBox.ActionRole)
-        btn_checkbox = msg.addButton("Только выбранные (чекбоксы)", QMessageBox.ActionRole)
-        btn_both = msg.addButton("Текущую + выбранные", QMessageBox.ActionRole)
-        btn_all = msg.addButton("Все строки", QMessageBox.ActionRole)
+        btn_selected = msg.addButton("Только выделенные (обычное выделение)", QMessageBox.ActionRole)
+        btn_checkbox = msg.addButton("Только отмеченные (чекбоксы)", QMessageBox.ActionRole)
+        btn_both = msg.addButton("Выделенные + отмеченные", QMessageBox.ActionRole)
+        btn_all = msg.addButton("Все видимые строки", QMessageBox.ActionRole)
         btn_cancel = msg.addButton("Отмена", QMessageBox.RejectRole)
 
-        # Устанавливаем доступность кнопок 
-        btn_current.setEnabled(has_current) # Только текущая
-        btn_checkbox.setEnabled(has_checkbox) # Только чекбоксы
-        btn_both.setEnabled(has_current and has_checkbox) # Текущая + чекбоксы
-        btn_all.setEnabled(total_visible > 0) # Все
-
         msg.setDefaultButton(btn_cancel)
-
         msg.exec()
         clicked = msg.clickedButton()
 
-        if clicked == btn_current: # Только текущая
-            return self.SelectionChoice('current', ids={current_dto.id})
+        if clicked == btn_selected:
+            return self.SelectionChoice('selected', ids=selected_ids)
         
-        elif clicked == btn_checkbox: # Только чекбоксы
+        elif clicked == btn_checkbox:
             return self.SelectionChoice('checkbox', ids=checkbox_ids)
         
-        elif clicked == btn_both: # Текущая + чекбоксы
-            ids = set(checkbox_ids)
-            ids.add(current_dto.id)
-            return self.SelectionChoice('both', ids=ids)
+        elif clicked == btn_both:
+            # Объединение множеств (удаляем возможные дубликаты)
+            both_ids = selected_ids.union(checkbox_ids)
+            return self.SelectionChoice('both', ids=both_ids)
         
-        elif clicked == btn_all: # Все
+        elif clicked == btn_all:
             # Дополнительное подтверждение для массовой операции
             reply = QMessageBox.question(
                 self, "Подтверждение массового действия",
                 f"Вы действительно хотите применить действие ко всем {total_visible} отображаемым записям?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.StandardButton.Yes: # 
+
+            if reply == QMessageBox.StandardButton.Yes:
                 return self.SelectionChoice('all', all_visible=True)
-            
             else:
                 return self.SelectionChoice('none')
             
         else:
             return self.SelectionChoice('none')
+
+    @AppLogger.get_instance(
+        name = 'SelectionDialogMixin',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _show_selection_dialog(self, action_name: str = "удаление") -> 'SelectionChoice':
+        """
+        Показывает диалог выбора области для массового действия.
+
+        Возвращает SelectionChoice с выбранным типом и множеством ID.
+        """
+        selected_ids = self._get_selected_ids_from_view()          # обычное выделение
+        checkbox_ids = self._get_selected_checkbox_ids()           # чекбоксы
+
+        for i in [
+            self._show_selection_dialog_no,     # Если нет ни выделенных, ни чекбоксов – сообщаем
+            self._show_selection_dialog_one,    # Простой случай: только выделенные (нет чекбоксов)
+            self._show_selection_dialog_multi,  # Сложный случай: есть и выделенные, и чекбоксы (возможно пересечение)
+        ]:
+            choice = i(selected_ids, checkbox_ids, action_name)
+
+            if choice:
+                return choice
 
     @AppLogger.get_instance(
         name = 'SelectionDialogMixin',
@@ -1166,28 +1295,23 @@ class ListSelectionMixin:
         """
 
         entity_ids = set()
-
-        # 1. Выделение через selectionModel (Shift/Ctrl)
         selection_model = self.table_view.selectionModel()
         if selection_model:
-            for proxy_index in selection_model.selectedRows():
-                source_index = self.proxy_model.mapToSource(proxy_index)
-                if source_index.isValid():
-                    dto = self.source_model.get_item_at_row(source_index.row())
-                    if dto and dto.id is not None:
-                        entity_ids.add(dto.id)
+            # Явно берём первую колонку (0), так как `selectedRows()` без аргумента может вернуть все колонки.
+            for proxy_index in selection_model.selectedRows(0):
+                if not proxy_index.isValid():
+                    continue
 
-        # 2. Чекбоксы (только в режиме редактирования, если включены)
-        if self.edit_mode and hasattr(
-            self.source_model,
-            '_checkbox_column_enabled'
-        ) and self.source_model._checkbox_column_enabled:
-            for row in range(self.source_model.rowCount()):
-                index = self.source_model.index(row, 0)
-                if self.source_model.data(index, Qt.CheckStateRole) == Qt.Checked:
-                    dto = self.source_model.get_item_at_row(row)
-                    if dto and dto.id is not None:
-                        entity_ids.add(dto.id)
+                source_index = self.proxy_model.mapToSource(proxy_index)
+                if not source_index.isValid():
+                    continue
+
+                if source_index.row() < 0 or source_index.row() >= self.source_model.rowCount():
+                    continue
+
+                dto = self.source_model.get_item_at_row(source_index.row())
+                if dto and dto.id is not None:
+                    entity_ids.add(dto.id)
 
         return entity_ids
 
@@ -2154,8 +2278,8 @@ class ListUIMixin:
         self.table_view = FilterTableView()
         self.table_view.setSortingEnabled(True)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
         add_copy_paste_to_table(self.table_view) # Добавляем возможность копирования и вставки
 

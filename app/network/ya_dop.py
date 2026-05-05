@@ -1,4 +1,3 @@
-
 # app/network/ya_dop.py
 
 # Стандартные библиотеки Python
@@ -99,11 +98,11 @@ import yadisk # pip install yadisk requests
 
 
 def yadisk_download_file(
-        ya_token: str,
-        ya_file_path: str,
-        local_file_path: str,
-        if_err: bool = False,
-        progress_callback=None,
+    ya_token: str,
+    ya_file_path: str,
+    local_file_path: str,
+    if_err: bool = False,
+    progress_callback=None,
 ):
     """
     Скачивание файла с yandex.disk с поддержкой прогресса.
@@ -139,12 +138,12 @@ def yadisk_download_file(
 
 
 def yadisk_upload_file(
-        ya_token: str,
-        local_file_path: str,
-        ya_file_path: str,
-        if_err: bool = False,
-        progress_callback=None,
-        overwrite = False,
+    ya_token: str,
+    local_file_path: str,
+    ya_file_path: str,
+    if_err: bool = False,
+    progress_callback=None,
+    overwrite = False,
 ):
     """
     Загрузка файла на yandex.disk с поддержкой прогресса.
@@ -201,7 +200,11 @@ def check_token(ya_token: str) -> bool:
     return y.check_token()
 
 
-def check_and_create_path(ya_token: str, ya_path: str, create_if_missing: bool = True) -> Tuple[bool, str]:
+def check_and_create_path(
+    ya_token: str, 
+    ya_path: str, 
+    create_if_missing: bool = True
+) -> Tuple[bool, str]:
     """
     Проверяет существование пути на Яндекс.Диске.
     Если create_if_missing=True и путь не существует, создаёт его (включая все родительские папки).

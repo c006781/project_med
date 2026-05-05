@@ -27,9 +27,14 @@
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import List, Optional, Any, Dict, TypeVar, Generic
+from typing import (
+    List, Optional, Any, 
+    Dict, TypeVar, Generic
+)
+
 from abc import ABC, abstractmethod
 
+from app.utils.logger.logger import AppLogger
 
 # Импорты модулей
 # def _add_package_name(
@@ -99,7 +104,7 @@ from app.database.database_shema.clinic import AppointmentNote, Appointment, Pat
 #         pass #  raise # e # pass
 
 # try:
-from app.utils.logger.logger import AppLogger
+# from app.utils.logger.logger import AppLogger
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -407,6 +412,7 @@ class BaseRepository(Generic[ModelType], ABC):
 
 
 class AppointmentNoteRepository(BaseRepository):
+
     model_class =  AppointmentNote
     
     @AppLogger.get_instance(
@@ -430,11 +436,9 @@ class AppointmentNoteRepository(BaseRepository):
         self.logger.debug(f"get_by_text_exact: text = {text}")
         return self._session.query(AppointmentNote).filter(AppointmentNote.text == text).first()
 
-
-
 class AppointmentRepository(BaseRepository):
+
     model_class =  Appointment
-    
 
     @AppLogger.get_instance(
         name = 'AppointmentRepository',

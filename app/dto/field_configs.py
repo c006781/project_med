@@ -157,7 +157,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'widget_type': 'date',       # Виджет выбора даты.
     },
     # Виртуальное поле "reason" – причина обращения.
-    'reason': {
+    'reason_text': {
         'title': 'Причина обращения',
         'editable': True,
         'virtual': True,
@@ -169,7 +169,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         },
     },
     # Виртуальное поле "procedure" – выполненная процедура.
-    'procedure': {
+    'procedure_text': {
         'title': 'Выполненная процедура',
         'editable': True,
         'virtual': True,
@@ -181,7 +181,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         },
     },
     # Виртуальное поле "recommendations" – рекомендации.
-    'recommendations': {
+    'recommendations_text': {
         'title': 'Рекомендации',
         'editable': True,
         'virtual': True,
@@ -199,7 +199,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'widget_type': 'date',       # Виджет даты.
     },
     # Виртуальное поле "note" – примечание (основная заметка).
-    'note': {
+    'note_text': {
         'title': 'Примечание',
         'editable': True,
         'virtual': True,
@@ -210,20 +210,20 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
             'args': ['note'],
         },
     },
-    # Синоним `note_text` для совместимости со старым кодом (например, в CLI или старых формах).
-    'note_text': {
-        'title': 'Примечание',
-        'editable': True,
-        'virtual': True,
-        'widget_type': 'textarea',
-        'source_attr': 'note',
-        'compute': {
-            'func': lambda note: note.text if note else None,
-            'args': ['note'],
-        },
-    },
+    # # Синоним `note_text` для совместимости со старым кодом (например, в CLI или старых формах).
+    # 'note_text': {
+    #     'title': 'Примечание',
+    #     'editable': True,
+    #     'virtual': True,
+    #     'widget_type': 'textarea',
+    #     'source_attr': 'note',
+    #     'compute': {
+    #         'func': lambda note: note.text if note else None,
+    #         'args': ['note'],
+    #     },
+    # },
     # Виртуальное поле "cost_procedure" – стоимость процедуры.
-    'cost_procedure': {
+    'cost_procedure_text': {
         'title': 'Стоимость процедуры',
         'editable': True,
         'virtual': True,

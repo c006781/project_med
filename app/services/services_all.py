@@ -2432,35 +2432,35 @@ class AppointmentService(
                 sess, 
                 note_repo, 
                 None, 
-                dto.reason,                  
+                dto.reason_text,                  
                 create_if_missing=False
             )
             procedure_id, _ = self._update_note_field(         
                 sess, 
                 note_repo, 
                 None, 
-                dto.procedure,               
+                dto.procedure_text,               
                 create_if_missing=False
             )
             recommendations_id , _= self._update_note_field(   
                 sess, 
                 note_repo, 
                 None, 
-                dto.recommendations,         
+                dto.recommendations_text,         
                 create_if_missing=False
             )
             note_id, _ = self._update_note_field(              
                 sess, 
                 note_repo, 
                 None, 
-                dto.note or dto.note_text,   
+                dto.note_text,   
                 create_if_missing=False
             )
             cost_procedure_id, _ = self._update_note_field(    
                 sess, 
                 note_repo, 
                 None, 
-                dto.cost_procedure,          
+                dto.cost_procedure_text,          
                 create_if_missing=False
             )
 
@@ -2555,19 +2555,39 @@ class AppointmentService(
 
             # Обновляем каждую заметку, получаем (новый ID, старый ID)
             new_reason_id, old_reason = self._update_note_field(
-                sess, note_repo, old_reason_id, dto.reason, create_if_missing=False
+                sess, 
+                note_repo, 
+                old_reason_id, 
+                dto.reason_text, 
+                create_if_missing=False
             )
             new_procedure_id, old_procedure = self._update_note_field(
-                sess, note_repo, old_procedure_id, dto.procedure, create_if_missing=False
+                sess, 
+                note_repo, 
+                old_procedure_id, 
+                dto.procedure_text, 
+                create_if_missing=False
             )
             new_recommendations_id, old_recommendations = self._update_note_field(
-                sess, note_repo, old_recommendations_id, dto.recommendations, create_if_missing=False
+                sess, 
+                note_repo, 
+                old_recommendations_id, 
+                dto.recommendations_text, 
+                create_if_missing=False
             )
             new_note_id, old_note = self._update_note_field(
-                sess, note_repo, old_note_id, dto.note or dto.note_text, create_if_missing=False
+                sess, 
+                note_repo, 
+                old_note_id, 
+                dto.note_text, 
+                create_if_missing=False
             )
             new_cost_id, old_cost = self._update_note_field(
-                sess, note_repo, old_cost_procedure_id, dto.cost_procedure, create_if_missing=False
+                sess, 
+                note_repo, 
+                old_cost_procedure_id, 
+                dto.cost_procedure_text, 
+                create_if_missing=False
             )
 
             # Присваиваем новые ID

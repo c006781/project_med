@@ -185,32 +185,32 @@ class AppointmentDTO(BaseModel):
     # )
 
     # Виртуальные поля для текстов (берутся из связанных заметок)
-    reason: Optional[str] = Field(
+    reason_text: Optional[str] = Field(
         None, 
         description='Причина обращения'
     )
-    procedure: Optional[str] = Field(
+    procedure_text: Optional[str] = Field(
         None, 
         description='Выполненная процедура'
     )
-    recommendations: Optional[str] = Field(
+    recommendations_text: Optional[str] = Field(
         None, 
         description='Рекомендации'
     )
-    note: Optional[str] = Field(
+    note_text: Optional[str] = Field(
         None, 
         description='Примечание'
     )
-    cost_procedure: Optional[str] = Field(
+    cost_procedure_text: Optional[str] = Field(
         None, 
         description='Стоимость процедуры'
     )
 
-    # Также можно добавить виртуальное поле для заметки (оставляем совместимость)
-    note_text: Optional[str] = Field(
-        None, 
-        description='Примечание (синоним note)'
-    )
+    # # Также можно добавить виртуальное поле для заметки (оставляем совместимость)
+    # note_text: Optional[str] = Field(
+    #     None, 
+    #     description='Примечание (синоним note)'
+    # )
 
     # Скрытые ID заметок (для внутреннего использования)
     reason_id: Optional[int] = Field(

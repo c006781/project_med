@@ -1,10 +1,16 @@
 # interfaces/gui/gui_window/pages/settings_page.py
 
-from app.config.config_applier import ConfigApplier
-from app.network.ya_dop import check_and_create_path
+import os
+
+from app.dependencies import create_database
 from app.utils.logger.logger import AppLogger
-from interfaces.gui.gui_window.pages.base_page import BasePage
+
+from app.network.ya_dop import check_and_create_path
+
+from app.config.config_applier import ConfigApplier
 from app.config.config_manager.manager import AppConfigManager
+
+from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from PySide6.QtWidgets import (
     # QWidget, 
@@ -97,11 +103,21 @@ class SettingsPage(BasePage):
         self.db_path_edit = QLineEdit()
         self.db_path_btn = QPushButton("Обзор...")
         self.db_path_btn.setMaximumWidth(80)
+        self.create_db_btn = QPushButton("Создать тестовую БД")
+        self.create_db_btn.setMaximumWidth(150)
+        self.create_db_btn.setVisible(False)
 
         db_path_layout = QHBoxLayout()
         db_path_layout.addWidget(self.db_path_edit)
         db_path_layout.addWidget(self.db_path_btn)
+        db_path_layout.addWidget(self.create_db_btn)
         form_layout.addRow("Путь к БД:", db_path_layout)
+
+
+        # db_path_layout = QHBoxLayout()
+        # db_path_layout.addWidget(self.db_path_edit)
+        # db_path_layout.addWidget(self.db_path_btn)
+        # form_layout.addRow("Путь к БД:", db_path_layout)
 
         # Папка для хранения фото
         self.photos_path_edit = QLineEdit()
@@ -238,6 +254,70 @@ class SettingsPage(BasePage):
         self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
         self.log_dir_btn.clicked.connect(lambda: self._browse_dir(self.log_dir_edit, "Выберите папку для логов"))
         self.save_btn.clicked.connect(self._save_settings)
+
+        # Подключаем сигнал изменения текста для обновления видимости кнопки
+        self.db_path_edit.textChanged.connect(self._update_create_db_button_visibility)
+        self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def can_leave(self) -> bool:
+        """Проверяет, можно ли покинуть страницу (существует ли БД)."""
+        db_path = self.db_path_edit.text().strip()
+        if not db_path or not os.path.isfile(db_path):
+            QMessageBox.warning(self, "Ошибка", "Сначала укажите существующий файл БД или создайте его.")
+            return False
+        
+        return True
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_create_db_button_visibility(self, text: str = None):
+        """Показывает кнопку 'Создать тестовую БД', если путь пуст или указывает на несуществующий файл."""
+        path = self.db_path_edit.text().strip()
+        if not path:
+            self.create_db_btn.setVisible(True)
+            return
+        
+        exists = os.path.exists(path)
+        self.create_db_btn.setVisible(not exists)
+        self.adjustSize()  # или self.updateGeometry()
+
+    # Обработчик кнопки создания БД
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_create_test_db_clicked(self):
+        """Обработчик кнопки 'Создать тестовую БД'."""
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            default_path = os.path.join('.', 'clinic.db')
+            db_path = default_path
+            self.db_path_edit.setText(default_path)
+        
+        reply = QMessageBox.question(
+            self,
+            "Создание базы данных",
+            "Заполнить тестовыми данными?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        fill_test = (reply == QMessageBox.StandardButton.Yes)
+        try:
+            create_database(db_path, fill_test_data=fill_test)
+            QMessageBox.information(self, "Успех", f"База данных создана: {db_path}")
+            self._update_create_db_button_visibility()
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка создания БД: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать БД: {e}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы для выбора путей
@@ -494,6 +574,31 @@ class SettingsPage(BasePage):
             None
         """
 
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            QMessageBox.warning(self, "Ошибка", "Путь к БД не может быть пустым.")
+            return
+        if not os.path.isfile(db_path):
+            reply = QMessageBox.question(
+                self, "База данных не найдена",
+                f"Файл БД '{db_path}' не существует.\nСоздать новую БД?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                fill = QMessageBox.question(
+                    self, "Тестовые данные",
+                    "Заполнить тестовыми данными?"
+                ) == QMessageBox.StandardButton.Yes
+                try:
+                    create_database(db_path, fill_test_data=fill)
+                    QMessageBox.information(self, "Успех", "БД создана.")
+                    # Путь уже установлен, продолжаем сохранение
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось создать БД: {e}")
+                    return
+            else:
+                return  # не сохранять
+
         # Сохраняем старую конфигурацию для сравнения
         old_config = self.config_manager.get_all().copy()
 
@@ -540,6 +645,8 @@ class SettingsPage(BasePage):
 
             QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены, логгеры перезагружены")
+
+            self._update_create_db_button_visibility()
 
             # Если это был первый запуск (настройки открыты при старте) – переходим на список пациентов
             if self.first_start:

@@ -581,6 +581,11 @@ class NavigationMixin:
         self.logger.debug(
             f"if isinstance(current_page, DynamicListPage) and current_page.edit_mode: {isinstance(current_page, DynamicListPage) and current_page.edit_mode}"
         )
+        # Если это страница настроек и она не разрешает выход
+        if current_page is self.settings_page:
+            if hasattr(current_page, 'can_leave') and not current_page.can_leave():
+                return
+            
         # T1 = isinstance(current_page, DynamicListPage)
         # T2 = current_page.edit_mode
         # 0==0

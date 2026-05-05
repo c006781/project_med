@@ -561,6 +561,7 @@ class AppointmentNote(Base):
     # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
     appointments = relationship(
         "Appointment", 
+        foreign_keys='[Appointment.note_id]', 
         back_populates="note"
     )
     

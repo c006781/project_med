@@ -542,3 +542,24 @@ def get_appointment_service() -> AppointmentService:
         photo_service=photo_service,
         field_configs=APPOINTMENT_CONFIG
     )
+
+AppLogger.get_instance(
+    name='dependencies.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def create_database(db_path: str, fill_test_data: bool = False) -> None:
+    """
+    Создаёт базу данных по указанному пути (если её нет) и опционально заполняет тестовыми данными.
+    
+    :param db_path: путь к файлу БД.
+    :param fill_test_data: если True, заполняет тестовыми данными после создания таблиц.
+    """
+    # from app.database import Database
+    db = Database(f"sqlite:///{db_path}")
+    if fill_test_data:
+        db.fill_test_data()
+        
+    db.close()

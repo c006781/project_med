@@ -254,7 +254,7 @@ class Patient(Base):
                 self.last_name,
                 self.first_name,
                 self.middle_name   
-            ])
+            ]).strip()
             return f"<Patient(id={self.id}, name={temp})>"
         
         except Exception as e:

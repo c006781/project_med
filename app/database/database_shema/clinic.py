@@ -168,6 +168,11 @@ class Patient(Base):
         nullable=False,
         comment='Имя пациента',
     )
+    middle_name = Column(
+        String(50), 
+        nullable=True, 
+        comment='Отчество пациента'
+    )
     last_name = Column(
         String(50), 
         nullable=False,
@@ -183,19 +188,43 @@ class Patient(Base):
         nullable=True,
         comment='Номер телефона',
     )
-    email = Column(
-        String(100), 
-        nullable=True,
-        comment='Электронная почта',
+    # email = Column(
+    #     String(100), 
+    #     nullable=True,
+    #     comment='Электронная почта',
+    # )
+    description_id = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с описанием пациента'
+    )
+    comment_id = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с комментарием к пациенту'
     )
     # address = Column(String(200), nullable=True)
     created_at = Column(
         DateTime, 
         default=datetime.now,
-        comment='Электронная почта',
+        comment='Дата создания',
     )
 
-    # Отношение к приёмам (каскадное удаление)
+    # Отношения к заметкам
+    description_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[description_id],
+        # back_populates="appointments"
+    )
+    comment_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[comment_id],
+        # back_populates="appointments"
+    )
+
+    # Отношение к приёмам
     appointments = relationship(
         "Appointment", 
         back_populates="patient", 
@@ -221,73 +250,23 @@ class Patient(Base):
         """
 
         try:
-            return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
+            temp = ' '.join([
+                self.last_name,
+                self.first_name,
+                self.middle_name   
+            ])
+            return f"<Patient(id={self.id}, name={temp})>"
+        
         except Exception as e:
             # tt = str(e)
             AppLogger.get_instance(
-                name='system',
+                name='Patient',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
             ).exception(f'Err: {str(e)}')
             raise e
 
         # return result
-
-class AppointmentNote(Base):
-    """
-    Таблица заметок к приёмам.
-
-    Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
-    через поле `note_id` в Appointment).
-
-    Атрибуты:
-        id (int): Первичный ключ.
-        text (str): Содержимое заметки (обязательное).
-        created_at (datetime): Дата создания.
-        appointments (list[Appointment]): Список приёмов, использующих эту заметку.
-
-    Пример:
-        >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
-        >>> session.add(note)
-    """
-
-    __tablename__ = 'appointments_notes'
-
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True,
-        comment='Уникальный идентификатор заметки',
-    )
-    
-    text = Column( # содержимое заметки (рекомендации, описание)
-        Text, 
-        nullable=False,
-        comment='Текст заметки',
-    )   
-
-    created_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата и время создания заметки',
-    )
-
-    # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
-    appointments = relationship(
-        "Appointment", 
-        back_populates="note"
-    )
-    
-    __table_args__ = (
-        {
-            'comment': 'Таблица заметок приёмов', 
-            'sqlite_autoincrement': True,
-        }
-    )
-
-    def __repr__(self):
-        """
-        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
-        """
-        return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
     
 class Appointment(Base):
     """
@@ -339,21 +318,57 @@ class Appointment(Base):
 
     # time = Column(Time, nullable=True, default=time.now)  
     # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
-    time = Column(
-        Time, 
-        nullable=True, 
-        default=func.current_time(),
-        comment='Время приёма',
-    )
+    # time = Column(
+    #     Time, 
+    #     nullable=True, 
+    #     default=func.current_time(),
+    #     comment='Время приёма',
+    # )
     # time = Column(Time, nullable=True, server_default=func.current_time())
 
     # notes = Column(Text, nullable=True)      # заметки / рекомендации
-    note_id = Column(
+    # note_id = Column(
+    #     Integer, 
+    #     ForeignKey('appointments_notes.id'), 
+    #     nullable=True,
+    #     comment='ID заметки (внешний ключ)',
+    # )   # внешний ключ на заметку
+
+    reason_id           = Column(
         Integer, 
         ForeignKey('appointments_notes.id'), 
-        nullable=True,
-        comment='ID заметки (внешний ключ)',
-    )   # внешний ключ на заметку
+        nullable=True, 
+        comment='ID заметки с причиной обращения'
+    )
+    procedure_id        = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с выполненной процедурой'
+    )
+    recommendations_id  = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с рекомендациями'
+    )
+    date_next           = Column(
+        Date, 
+        nullable=True, 
+        comment='Дата следующего приёма'
+    )
+    note_id             = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с примечанием'
+    )
+    cost_procedure_id   = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки со стоимостью процедуры'
+    )
 
     created_at = Column(
         DateTime, 
@@ -366,12 +381,28 @@ class Appointment(Base):
     patient = relationship(
         "Patient", 
         back_populates="appointments",
-        )
+    )
 
-    # доступ к заметке
+    # Отношения к заметкам
+    reason_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[reason_id]
+    )
+    procedure_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[procedure_id]
+    )
+    recommendations_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[recommendations_id]
+    )
     note = relationship(
         "AppointmentNote", 
-        back_populates="appointments",
+        foreign_keys=[note_id]
+    )
+    cost_procedure_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[cost_procedure_id]
     )
    
     # Отношение к фотографиям
@@ -383,6 +414,7 @@ class Appointment(Base):
 
     __table_args__ = (
         Index('ix_appointment_date', 'date'),
+        Index('ix_patient_id', 'patient_id'),   # уже есть
         {
             'comment': 'Таблица приёмов', 
             'sqlite_autoincrement': True,
@@ -393,7 +425,21 @@ class Appointment(Base):
         """
         Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
         """
-        return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+        # return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+    
+        try:
+            return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+        
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='Appointment',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
+            ).exception(f'Err: {str(e)}')
+            raise e
+
+
 
 class Photo(Base):
     """
@@ -472,6 +518,75 @@ class Photo(Base):
         """
         return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
 
+
+class AppointmentNote(Base):
+    """
+    Таблица заметок к приёмам.
+
+    Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
+    через поле `note_id` в Appointment).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        text (str): Содержимое заметки (обязательное).
+        created_at (datetime): Дата создания.
+        appointments (list[Appointment]): Список приёмов, использующих эту заметку.
+
+    Пример:
+        >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
+        >>> session.add(note)
+    """
+
+    __tablename__ = 'appointments_notes'
+
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True,
+        comment='Уникальный идентификатор заметки',
+    )
+    
+    text = Column( # содержимое заметки (рекомендации, описание)
+        Text, 
+        nullable=False,
+        comment='Текст заметки',
+    )   
+
+    created_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Дата и время создания заметки',
+    )
+
+    # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
+    appointments = relationship(
+        "Appointment", 
+        back_populates="note"
+    )
+    
+    __table_args__ = (
+        {
+            'comment': 'Таблица заметок приёмов', 
+            'sqlite_autoincrement': True,
+        }
+    )
+
+    def __repr__(self):
+        """
+        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
+        """
+
+        try:
+            return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
+    
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='AppointmentNote',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
+            ).exception(f'Err: {str(e)}')
+            raise e
 
 # Функция для инициализации БД и создания тестовых данных
 @AppLogger.get_instance(

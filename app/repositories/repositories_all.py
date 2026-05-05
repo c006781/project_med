@@ -178,7 +178,12 @@ class BaseRepository(Generic[ModelType], ABC):
         """
         query = self._session.query(self.model_class)
 
-        self.logger.debug(f"get_with_relations: entity_id {entity_id} query {query} self.model_class {self.model_class}")
+        self.logger.debug(
+            f"get_with_relations: "
+            f"entity_id {entity_id} "
+            f"query {query} "
+            f"self.model_class {self.model_class}"
+        )
 
         for rel in relations:
             self.logger.debug(f"get_with_relations: rel {rel}")
@@ -190,9 +195,16 @@ class BaseRepository(Generic[ModelType], ABC):
                     )
                 )   
                 
-                self.logger.debug(f"get_with_relations: rel {rel} query {query}")
+                self.logger.debug(
+                    f"get_with_relations: "
+                    f"rel {rel} "
+                    f"query {query}"
+                )
         
-        self.logger.debug(f'self.model_class.id {self.model_class.id} entity_id {entity_id}')
+        self.logger.debug(
+            f"self.model_class.id {self.model_class.id} "
+            f"entity_id {entity_id}"
+        )
 
         return query.filter(self.model_class.id == entity_id).first()
 
@@ -450,6 +462,25 @@ class AppointmentRepository(BaseRepository):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _get_joinedload_Appointment(self):
+        return [
+            joinedload(Appointment.patient),
+            joinedload(Appointment.reason_note),
+            joinedload(Appointment.procedure_note),
+            joinedload(Appointment.recommendations_note),
+            joinedload(Appointment.note),
+            joinedload(Appointment.cost_procedure_note),
+            # joinedload(Appointment.photos)   # если нужно, можно оставить
+        ]
+
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all_with_relations(self) -> List[Appointment]:
         """
         Возвращает все приёмы с подгруженными пациентом и заметкой.
@@ -460,8 +491,9 @@ class AppointmentRepository(BaseRepository):
         self.logger.debug("get_all_with_relations")
 
         return self._session.query(Appointment).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note)
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note)
+            *self._get_joinedload_Appointment()
         ).all()
     
     @AppLogger.get_instance(
@@ -487,9 +519,10 @@ class AppointmentRepository(BaseRepository):
         )
 
         return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note),
-            # joinedload(Appointment.photos),
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note),
+            # # joinedload(Appointment.photos),
+            *self._get_joinedload_Appointment()
         ).all()
 
     @AppLogger.get_instance(
@@ -529,8 +562,7 @@ class AppointmentRepository(BaseRepository):
         
         # Получаем приём с подгруженными связями
         return self._session.query(Appointment).options(# Получаем приём с подгруженными связями
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note),
+            *self._get_joinedload_Appointment(),
 
             joinedload(Appointment.photos) 
         ).filter( # Фильтруем результаты по ID приёма
@@ -567,15 +599,18 @@ class AppointmentRepository(BaseRepository):
         :rtype: List[Appointment]
         """
         query = self._session.query(Appointment).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note)
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note)
+            *self._get_joinedload_Appointment()
         )
         if filters:
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
             if sql_filters:
                 query, _ = apply_filters(query, Appointment, sql_filters)
+
         if order_by:
             query = query.order_by(*order_by)
+            
         return query.offset(offset).limit(limit).all()
 
     @AppLogger.get_instance(

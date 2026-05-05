@@ -146,7 +146,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'virtual': True,             # Виртуальное.
         'source_attr': 'patient',    # Атрибут ORM, содержащий объект пациента.
         'compute': {                 # Вычисление: формирует строку "Фамилия Имя".
-            'func': lambda patient: f"{patient.last_name} {patient.first_name}" if patient else "",
+            'func': lambda patient: " ".join([patient.last_name, patient.first_name, patient.middle_name]).strip(),
             'args': ['patient'],
         },
     },

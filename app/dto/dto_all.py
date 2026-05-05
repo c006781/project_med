@@ -23,16 +23,16 @@ DTO (Data Transfer Objects) на базе Pydantic.
 import datetime
 
 from typing import (
-    Dict, 
+    # Dict, 
     Optional, 
     List, 
-    Tuple
+    # Tuple
 )
 
 from pydantic import ( # pip install pydantic>=2.0
     BaseModel, 
     ConfigDict, 
-    Field
+    Field,
 ) 
 # from app.dto import PhotoDTO  # для аннотации в AppointmentDTO
 
@@ -65,162 +65,50 @@ class PatientDTO(BaseModel):
 
     id: Optional[int] = Field(
         None,
-        # metadata={
-        #     'title': 'ID',
-        #     'editable': False,
-        #     'hide_in_form': True,
-        # },
         description='ID пациента (None для нового)',
     )
     first_name: str = Field(
         ...,
-        # metadata={
-        #     'title': 'Имя',
-        #     'editable': True,
-        # },
-        description='Имя пациента',
+        description='Имя',
+    )
+    middle_name: Optional[str] = Field(
+        None, 
+        description='Отчество'
     )
     last_name: str = Field(
         ...,
-        # metadata={
-        #     'title': 'Фамилия',
-        #     'editable': True,
-        # },
-        description='Фамилия пациента',
+        description='Фамилия',
     )
     birth_date: Optional[datetime.date] = Field(
         None,
-        # metadata={
-        #     'title': 'Дата рождения',
-        #     'editable': True,
-        # },
         description='Дата рождения (ГГГГ-ММ-ДД)',
-
     )
     phone: Optional[str] = Field(
         None,
-        # metadata={
-        #     'title': 'Телефон',
-        #     'editable': True,
-        # },
         description='Номер телефона',
     )
-    email: Optional[str] = Field(
-        None,
-        # metadata={
-        #     'title': 'Email',
-        #     'editable': True,
-        # },
-        description='Электронная почта',
-    )
-
-
-class AppointmentNoteDTO(BaseModel):
-    """
-    DTO для заметки приёма.
-
-    Используется для передачи текста заметки, которая может быть привязана
-    к одному или нескольким приёмам.
-
-    Атрибуты:
-        id (Optional[int]): Уникальный идентификатор заметки (None – для новой).
-        text (str): Содержимое заметки (обязательное).
-
-    Конфигурация:
-        model_config = ConfigDict(from_attributes=True).
-
-    Пример:
-        >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
-        >>> print(note_dto.text)
-        'Первичный осмотр. Жалобы на головную боль.'
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: Optional[int] = Field(
-        None,
-        # metadata={
-        #     'title': 'ID',
-        #     'editable': False,
-        #     'hide_in_form': True,
-        # },
-        description='ID заметки (None для новой)'
-    )
-    text: str = Field(
-        ...,
-        # metadata={
-        #     'title': 'Текст заметки',
-        #     'editable': True,
-        # },
-        description='Содержимое заметки'
-    )
-
-class PhotoDTO(BaseModel):
-    """
-    DTO для фотографии, прикреплённой к приёму.
-
-    Содержит информацию о файле и его описании. Путь к файлу хранится
-    относительно папки `PHOTOS_STORAGE_PATH` (настраивается в конфигурации).
-
-    Атрибуты:
-        id (Optional[int]): Уникальный идентификатор фотографии.
-        appointment_id (int): ID приёма, к которому относится фото.
-        file_path (str): Относительный путь к файлу.
-        description (Optional[str]): Описание фотографии.
-
-    Конфигурация:
-        model_config = ConfigDict(from_attributes=True).
-
-    Примечание:
-        В формах и таблицах это поле используется только для чтения;
-        для загрузки новых фото используется отдельный механизм.
-
-    Пример:
-        >>> photo = PhotoDTO(
-        ...     id=5,
-        ...     appointment_id=10,
-        ...     file_path="app_10/5_face.jpg",
-        ...     description="Лицо"
-        ... )
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: Optional[int] = Field(
-        None,
-        # metadata={
-        #     'title': 'ID',
-        #     'editable': False,
-        #     'hide_in_form': True,  # в форме не показываем
-        # },
-        description='ID фотографии',
-    )
-    appointment_id: int = Field(
-        ...,
-        # metadata={
-        #     'title': 'ID приёма',
-        #     'editable': False,
-        #     'hide_in_form': True,  # или можно оставить только для чтения, но лучше скрыть
-        # },
-        description='ID приёма, к которому относится фото',
-    )
-    file_path: str = Field(
-        ...,
-        # metadata={
-        #     'title': 'Путь к файлу',
-        #     'editable': False,
-        #     'hide_in_form': True,  # путь генерируется автоматически
-        # },
-        description='Относительный путь к файлу',
-    )
+    # email: Optional[str] = Field(
+    #     None,
+    #     description='Электронная почта',
+    # )
     description: Optional[str] = Field(
-        None,
-        # metadata={
-        #     'title': 'Описание',
-        #     'editable': True,
-        # },
-        description='Описание фотографии',
+        None, 
+        description='Описание пациента (виртуальное)'
     )
+    comment: Optional[str] = Field(
+        None, 
+        description='Комментарий к пациенту (виртуальное)'
+    )
+    # для внутреннего использования (ID заметок) – скрыты
+    description_id: Optional[int] = Field(
+        None, 
+        exclude=True
+    )
+    comment_id: Optional[int] = Field(
+        None, 
+        exclude=True
+    )
+
 
 class AppointmentDTO(BaseModel):
     """
@@ -265,71 +153,87 @@ class AppointmentDTO(BaseModel):
 
     id: Optional[int] = Field(
         None,
-        # metadata={
-        #     'title': 'ID',
-        #     'editable': False,
-        #     'hide_in_form': True,
-        # },
         description='ID приёма (None для нового)',
     )
     patient_id: int = Field(
         ...,
-        # metadata={
-        #     'title': 'Пациент',
-        #     'editable': False,
-        #     'hide_in_form': True,
-        # },
         description='ID пациента',
     )
-
     patient_name: Optional[str] = Field(
         None,
-        # metadata={
-        #     'title': 'Пациент',
-        #     'editable': False,
-        #     'virtual': True,
-        # },
         description='Имя пациента',
     )
-
     date: datetime.date = Field(
         ...,
-        # metadata={
-        #     'title': 'Дата',
-        #     'editable': True,
-        # },
         description='Дата приёма'
     )
-    time: Optional[datetime.time] = Field(
-        None,
-        # metadata={
-        #     'title': 'Время',
-        #     'editable': True,
-        # },
-        description='Время приёма',
+    date_next: Optional[datetime.date] = Field(
+        None, 
+        description='Дата следующего приёма'
+    )
+    # time: Optional[datetime.time] = Field(
+    #     None,
+    #     description='Время приёма',
+    # )
+    # note_id: Optional[int] = Field(
+    #     None,
+    #     description='ID заметки',
+    # )
+    # note_text: Optional[str] = Field(
+    #     None,
+    #     description='Текст заметки',
+    # )
+
+    # Виртуальные поля для текстов (берутся из связанных заметок)
+    reason: Optional[str] = Field(
+        None, 
+        description='Причина обращения'
+    )
+    procedure: Optional[str] = Field(
+        None, 
+        description='Выполненная процедура'
+    )
+    recommendations: Optional[str] = Field(
+        None, 
+        description='Рекомендации'
+    )
+    note: Optional[str] = Field(
+        None, 
+        description='Примечание'
+    )
+    cost_procedure: Optional[str] = Field(
+        None, 
+        description='Стоимость процедуры'
+    )
+
+    # Также можно добавить виртуальное поле для заметки (оставляем совместимость)
+    note_text: Optional[str] = Field(
+        None, 
+        description='Примечание (синоним note)'
+    )
+
+    # Скрытые ID заметок (для внутреннего использования)
+    reason_id: Optional[int] = Field(
+        None, 
+        exclude=True
+    )
+    procedure_id: Optional[int] = Field(
+        None, 
+        exclude=True
+    )
+    recommendations_id: Optional[int] = Field(
+        None, 
+        exclude=True
     )
     note_id: Optional[int] = Field(
-        None,
-        # metadata={
-        #     'hide_in_form': True,
-        # },
-        description='ID заметки',
+        None, 
+        exclude=True
     )
-    note_text: Optional[str] = Field(
-        None,
-        # metadata={
-        #     # 'title': 'Заметка',
-        #     # 'editable': True,
-        #     # 'virtual': True,
-        #     'title': 'Заметка',
-        #     'editable': True,
-        #     'virtual': True,
-        #     'widget_type': 'completer_with_edit',  # или completer_with_create
-        #     'choices_provider': 'note_service.get_choices',
-        #     'edit_window': 'note_edit'
-        # },
-        description='Текст заметки',
+    cost_procedure_id: Optional[int] = Field(
+        None, 
+        exclude=True
     )
+
     photos: Optional[List['PhotoDTO']] = Field(
         None, 
         description='Фотографии приёма'
@@ -338,4 +242,84 @@ class AppointmentDTO(BaseModel):
         None, 
         description='Наличие фото'
     )
-    # photos: List[PhotoDTO]
+
+
+class PhotoDTO(BaseModel):
+    """
+    DTO для фотографии, прикреплённой к приёму.
+
+    Содержит информацию о файле и его описании. Путь к файлу хранится
+    относительно папки `PHOTOS_STORAGE_PATH` (настраивается в конфигурации).
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор фотографии.
+        appointment_id (int): ID приёма, к которому относится фото.
+        file_path (str): Относительный путь к файлу.
+        description (Optional[str]): Описание фотографии.
+
+    Конфигурация:
+        model_config = ConfigDict(from_attributes=True).
+
+    Примечание:
+        В формах и таблицах это поле используется только для чтения;
+        для загрузки новых фото используется отдельный механизм.
+
+    Пример:
+        >>> photo = PhotoDTO(
+        ...     id=5,
+        ...     appointment_id=10,
+        ...     file_path="app_10/5_face.jpg",
+        ...     description="Лицо"
+        ... )
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[int] = Field(
+        None,
+        description='ID фотографии',
+    )
+    appointment_id: int = Field(
+        ...,
+        description='ID приёма, к которому относится фото',
+    )
+    file_path: str = Field(
+        ...,
+        description='Относительный путь к файлу',
+    )
+    description: Optional[str] = Field(
+        None,
+        description='Описание фотографии',
+    )
+
+
+class AppointmentNoteDTO(BaseModel):
+    """
+    DTO для заметки приёма.
+
+    Используется для передачи текста заметки, которая может быть привязана
+    к одному или нескольким приёмам.
+
+    Атрибуты:
+        id (Optional[int]): Уникальный идентификатор заметки (None – для новой).
+        text (str): Содержимое заметки (обязательное).
+
+    Конфигурация:
+        model_config = ConfigDict(from_attributes=True).
+
+    Пример:
+        >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
+        >>> print(note_dto.text)
+        'Первичный осмотр. Жалобы на головную боль.'
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[int] = Field(
+        None,
+        description='ID заметки (None для новой)'
+    )
+    text: str = Field(
+        ...,
+        description='Содержимое заметки'
+    )

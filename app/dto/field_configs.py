@@ -101,6 +101,15 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable': True,            # Редактируемое.
         'order': 5,                  # Порядковый номер колонки.
     },
+    'description_id': {
+    'title': 'ID описания',
+    'hidden': True,
+    },
+    'comment_id': {
+        'title': 'ID комментария',
+        'hidden': True,
+    },
+
     # Виртуальное поле "description" – описание пациента.
     # Не хранится в БД как отдельный столбец; значение берётся из связанной заметки.
     'description': {
@@ -139,6 +148,28 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable': False,           # Не редактируется.
         'hidden': True,              # Скрыто в формах.
     },
+
+    'reason_id': {
+        'title': 'ID причины',
+        'hidden': True,
+    },
+    'procedure_id': {
+        'title': 'ID процедуры',
+        'hidden': True,
+    },
+    'recommendations_id': {
+        'title': 'ID рекомендаций',
+        'hidden': True,
+    },
+    'note_id': {
+        'title': 'ID примечания',
+        'hidden': True,
+    },
+    'cost_procedure_id': {
+        'title': 'ID стоимости процедуры',
+        'hidden': True,
+    },
+
     # Виртуальное поле "patient_name" – ФИО пациента (вычисляется).
     'patient_name': {
         'title': 'Пациент',          # Заголовок.

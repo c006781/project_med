@@ -210,18 +210,6 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
             'args': ['note'],
         },
     },
-    # # Синоним `note_text` для совместимости со старым кодом (например, в CLI или старых формах).
-    # 'note_text': {
-    #     'title': 'Примечание',
-    #     'editable': True,
-    #     'virtual': True,
-    #     'widget_type': 'textarea',
-    #     'source_attr': 'note',
-    #     'compute': {
-    #         'func': lambda note: note.text if note else None,
-    #         'args': ['note'],
-    #     },
-    # },
     # Виртуальное поле "cost_procedure" – стоимость процедуры.
     'cost_procedure_text': {
         'title': 'Стоимость процедуры',

@@ -809,7 +809,7 @@ class PatientService(
     """
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -848,7 +848,7 @@ class PatientService(
 
     # Переопределяем create, так как логика создания специфична
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -939,7 +939,7 @@ class PatientService(
             return dto_out
            
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1059,7 +1059,7 @@ class PatientService(
             return updated_dto  
         
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1081,7 +1081,7 @@ class PatientService(
         return PatientNotFoundError(entity_id) # Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1106,7 +1106,7 @@ class PatientService(
         )
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1133,7 +1133,7 @@ class PatientService(
         return self.get_by_id(patient_id, session=session)
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1192,7 +1192,7 @@ class PatientService(
             self.logger.info(f"Удалён пациент id={patient_id}")
    
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1234,7 +1234,7 @@ class PatientService(
    
    # Для совместимости с DynamicEditPage
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -1253,7 +1253,7 @@ class PatientService(
         return self.create_patient(dto)
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',

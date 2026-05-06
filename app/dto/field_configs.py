@@ -148,7 +148,11 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable': False,           # Не редактируется.
         'hidden': True,              # Скрыто в формах.
     },
-
+    'patient_id': {
+        'title': 'ID пациента',
+        'editable': False,      # запрещаем редактирование
+        # 'hidden': True,       # можно также скрыть поле, если не нужно показывать ID
+    },
     'reason_id': {
         'title': 'ID причины',
         'hidden': True,

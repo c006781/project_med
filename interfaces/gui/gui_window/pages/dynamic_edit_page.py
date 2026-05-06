@@ -169,6 +169,7 @@ class DynamicEditPage(BasePage):
 
         if self.readonly:
             self._set_readonly_mode(True)
+            
         if self.hide_action_buttons:
             self._set_action_buttons_visible(False)    
 

@@ -101,6 +101,8 @@ class DynamicEditPage(BasePage):
         field_configs=None,  # внешняя конфигурация
         related_services=None,
         save_directly: bool = True,   # если True, сохраняет в БД; если False, возвращает DTO через сигнал
+        readonly: bool = False,  # режим "только просмотр"
+        hide_action_buttons: bool = False, # скрывать кнопки действий
     ):
         """
         Инициализирует страницу редактирования.
@@ -134,6 +136,8 @@ class DynamicEditPage(BasePage):
         self.field_configs = field_configs or {}
         self.related_services = related_services or {}
         self.save_directly = save_directly
+        self.readonly = readonly 
+        self.hide_action_buttons = hide_action_buttons
 
         self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
 
@@ -163,16 +167,42 @@ class DynamicEditPage(BasePage):
         # # настройка интерфейса страницы
         self._setup_ui()
 
-    # @AppLogger.get_instance(
-    #     name='DynamicEditPage',
-    #     enable_file_logging='system',
-    #     use_name_in_filename=False,
-    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    # def reload_config(self):
-    #     """Перезагружает конфигурацию страницы: обновляет photo_service."""
-    #     # from app.dependencies import get_photo_service
-    #     self.photo_service = get_photo_service()
-    #     self.logger.info("DynamicEditPage: photo_service обновлён")
+        if self.readonly:
+            self._set_readonly_mode(True)
+        if self.hide_action_buttons:
+            self._set_action_buttons_visible(False)    
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_action_buttons_visible(self, visible: bool):
+        """Показывает или скрывает кнопки сохранения, отмены и удаления."""
+        self.save_btn.setVisible(visible)
+        self.cancel_btn.setVisible(visible)
+        self.delete_btn.setVisible(visible)
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_readonly_mode(self, readonly: bool):
+        """Устанавливает режим только для чтения для всех виджетов формы."""
+        for widget in self.form.widgets.values():
+
+            if hasattr(widget, 'setReadOnly'):
+                widget.setReadOnly(readonly)
+
+            elif hasattr(widget, 'setEnabled'):
+                widget.setEnabled(not readonly)
+
+        # Дополнительно отключаем кнопки сохранения/удаления
+        self.save_btn.setEnabled(not readonly)
+        self.delete_btn.setEnabled(not readonly)
+
+        # Кнопка отмены может остаться активной
 
     @AppLogger.get_instance(
         name='DynamicEditPage',
@@ -799,13 +829,20 @@ class DynamicEditPage(BasePage):
             self.logger.exception(f"Ошибка в методе on_enter: {e}")
             raise e
 
-        self.logger.debug(f"self.current_id is not None: {self.current_id is not None}")
+        self.logger.debug(
+            f"self.current_id is not None: {self.current_id is not None}"
+        )
+
         if self.current_id is not None:
             self._load_existing_entity(self.current_id)
         else:
             self._prepare_new_entity()
 
         self._after_load_or_clear(extra_data)  
+
+        # После загрузки данных применяем readonly
+        if self.readonly:
+            self._set_readonly_mode(True)
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',

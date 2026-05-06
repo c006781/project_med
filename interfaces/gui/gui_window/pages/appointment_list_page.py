@@ -33,9 +33,10 @@ from app.dependencies import (
     get_photo_service
 )
 
+from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage, preserve_selection
 # from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
-from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm
+# from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
@@ -743,29 +744,30 @@ class AppointmentListPage(
             QMessageBox.information(self, "Информация о пациенте", "Пациент не выбран.")
             return
         try:
-            patient_dto = self.patient_service.get_patient_by_id(self.selected_dto.patient_id)
-            dialog = QDialog(self)
-            dialog.setWindowTitle(f"Пациент: {patient_dto.last_name} {patient_dto.first_name}")
-            layout = QVBoxLayout(dialog)
-
-            # Создаём форму просмотра
-            form = DynamicEditForm(
+            edit_page = DynamicEditPage(
+                service=get_patient_service(),
                 dto_class=PatientDTO,
+                page_title="Просмотр пациента",
+                exclude_fields=['id'],
                 field_configs=PATIENT_CONFIG,
-                exclude_fields=['id']
+                save_directly=False,   # не сохраняем
+                readonly=True ,         # режим только для чтения
+                hide_action_buttons=True , # скрываем кнопки
             )
-            form.load_data(patient_dto)
-            # Делаем все виджеты неактивными (режим только для чтения)
-            for widget in form.widgets.values():
-                if hasattr(widget, 'setEnabled'):
-                    widget.setEnabled(False)
-                elif hasattr(widget, 'setReadOnly'):
-                    widget.setReadOnly(True)
-            layout.addWidget(form)
-
+            # Передаём ID пациента через extra_data
+            edit_page.on_enter(extra_data={'id': self.selected_dto.patient_id})
+            # Отображаем как диалог (можно встроить в QDialog, но проще создать отдельное окно)
+            # from PySide6.QtWidgets import QDialog, QVBoxLayout
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Информация о пациенте")
+            layout = QVBoxLayout(dialog)
+            layout.addWidget(edit_page)
+            # Кнопка закрытия (так как сохранение отключено)
+            # from PySide6.QtWidgets import QDialogButtonBox
             btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
             btn_box.accepted.connect(dialog.accept)
             layout.addWidget(btn_box)
+            dialog.resize(600, 500)
             dialog.exec()
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки пациента: {e}")

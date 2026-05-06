@@ -19,6 +19,7 @@ import datetime
 from functools import wraps
 
 from app.utils.logger.logger import AppLogger
+from app.dto.dto_all import PatientDTO
 
 from app.config.config_manager.manager import (
     # AppConfigManager, 
@@ -33,17 +34,19 @@ from app.dependencies import (
 )
 
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage, preserve_selection
-from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+# from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+from interfaces.gui.gui_window.widgets.dynamic_edit_form import DynamicEditForm
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
     # QTableView, QPushButton, QHeaderView, 
     # QLineEdit, 
     # QAbstractItemView, 
-    QFrame, QGridLayout, 
+    QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, 
     # QHBoxLayout,
-    QLabel, QMessageBox, QScrollArea, QSizePolicy, 
-    QSplitter, QTextEdit, 
+    QLabel, QMessageBox, QPushButton, QScrollArea, QSizePolicy, 
+    QSplitter, 
+    # QTextEdit, 
     # QListWidget, QListWidgetItem, 
     QVBoxLayout, QWidget
 )
@@ -56,7 +59,7 @@ from PySide6.QtCore import (
     # Slot, 
     # QSortFilterProxyModel, 
     # QSize,
-    Signal
+    # Signal
 )
 
 # from PySide6.QtGui import QPixmap, QIcon
@@ -620,7 +623,7 @@ class AppointmentListPage(
     # DraftMixin,               # черновики заметок и фото
     DynamicListPage,
     # DynamicDetailListPage,    # страница списка с правой панелью деталей
-    PatientInfoMixin,         # панель информации о пациенте (сверху)
+    # PatientInfoMixin,         # панель информации о пациенте (сверху)
     # RightPanelMixin,          # правая панель (заметка + фото)
 
 
@@ -630,7 +633,7 @@ class AppointmentListPage(
     """
 
     # Сигнал, испускаемый при изменении текущей строки (для обновления панели информации)
-    current_patient_changed = Signal(object)
+    # current_patient_changed = Signal(object)
 
     _patient_info_frame_setMinimumHeight = 70 # высота верхней панели с информацией о пациенте
 
@@ -666,7 +669,7 @@ class AppointmentListPage(
             use_name_in_filename = False, # 'user',
         )
 
-        self._current_patient_dto = None
+        # self._current_patient_dto = None
 
         # Словари для хранения черновиков приёмов
         self._draft_photos = {}         # appointment_id -> состояние от photo_widget.dump_state()
@@ -680,8 +683,8 @@ class AppointmentListPage(
         self._loading_right_panel = 0
         
         # Сервисы
-        self.photo_service = get_photo_service()
-        self.patient_service = get_patient_service()
+        self.photo_service = get_photo_service() # для работы с фото
+        self.patient_service = get_patient_service() # для работы с пациентами
 
         # self._suppress_draft_save = False
 
@@ -724,6 +727,49 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+    def _setup_top_panel(self):
+        super()._setup_top_panel()
+        # Ищем горизонтальный layout верхней панели (первый QHBoxLayout в main_layout)
+        for i in range(self.main_layout.count()):
+            item = self.main_layout.itemAt(i)
+            if item and isinstance(item.layout(), QHBoxLayout):
+                self.patient_info_btn = QPushButton("Пациент")
+                self.patient_info_btn.clicked.connect(self._show_patient_info)
+                item.layout().addWidget(self.patient_info_btn)
+                break
+    
+    def _show_patient_info(self):
+        if not self.selected_dto or self.selected_dto.patient_id is None:
+            QMessageBox.information(self, "Информация о пациенте", "Пациент не выбран.")
+            return
+        try:
+            patient_dto = self.patient_service.get_patient_by_id(self.selected_dto.patient_id)
+            dialog = QDialog(self)
+            dialog.setWindowTitle(f"Пациент: {patient_dto.last_name} {patient_dto.first_name}")
+            layout = QVBoxLayout(dialog)
+
+            # Создаём форму просмотра
+            form = DynamicEditForm(
+                dto_class=PatientDTO,
+                field_configs=PATIENT_CONFIG,
+                exclude_fields=['id']
+            )
+            form.load_data(patient_dto)
+            # Делаем все виджеты неактивными (режим только для чтения)
+            for widget in form.widgets.values():
+                if hasattr(widget, 'setEnabled'):
+                    widget.setEnabled(False)
+                elif hasattr(widget, 'setReadOnly'):
+                    widget.setReadOnly(True)
+            layout.addWidget(form)
+
+            btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
+            btn_box.accepted.connect(dialog.accept)
+            layout.addWidget(btn_box)
+            dialog.exec()
+        except Exception as e:
+            self.logger.exception(f"Ошибка загрузки пациента: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить данные пациента: {e}")
 
     # @AppLogger.get_instance(
     #     name = 'ListSelectionMixin',
@@ -1425,13 +1471,13 @@ class AppointmentListPage(
         # - горизонтальный сплиттер self.splitter (таблица + правая панель)
 
         super()._setup_ui()
-        # Создаём панель информации о пациенте и вставляем её перед таблицей
-        self._setup_patient_info_panel()
-        idx = self.main_layout.indexOf(self.table_view)
-        if idx >= 0:
-            self.main_layout.insertWidget(idx, self.patient_info_frame)
-        else:
-            self.main_layout.addWidget(self.patient_info_frame)
+        # # Создаём панель информации о пациенте и вставляем её перед таблицей
+        # self._setup_patient_info_panel()
+        # idx = self.main_layout.indexOf(self.table_view)
+        # if idx >= 0:
+        #     self.main_layout.insertWidget(idx, self.patient_info_frame)
+        # else:
+        #     self.main_layout.addWidget(self.patient_info_frame)
 
         # Создаём виджет фото
         config = get_config_env()
@@ -2031,13 +2077,13 @@ class AppointmentListPage(
             # Обновляем правую панель свежими данными
             self._update_right_panel_with_fresh_data(fresh_dto, fresh_photos) 
 
-            # Обновляем панель информации о пациенте
-            try:
-                patient_dto = self.patient_service.get_patient_by_id(fresh_dto.patient_id)
-                self.current_patient_changed.emit(patient_dto)
-            except Exception as e:
-                self.logger.exception(f"Ошибка загрузки пациента после сохранения: {e}")
-                self.current_patient_changed.emit(None)
+            # # Обновляем панель информации о пациенте
+            # try:
+            #     patient_dto = self.patient_service.get_patient_by_id(fresh_dto.patient_id)
+            #     self.current_patient_changed.emit(patient_dto)
+            # except Exception as e:
+            #     self.logger.exception(f"Ошибка загрузки пациента после сохранения: {e}")
+            #     self.current_patient_changed.emit(None)
 
     # --- Основной метод сохранения ---
 
@@ -2175,16 +2221,16 @@ class AppointmentListPage(
         self.selected_dto = dto
         # self.current_appointment_id = dto.id
 
-        # Обновляем панель пациента
-        if dto.patient_id:
-            try:
-                patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
-                self.current_patient_changed.emit(patient_dto)
-            except Exception as e:
-                self.logger.exception(f"Ошибка загрузки пациента: {e}")
-                self.current_patient_changed.emit(None)
-        else:
-            self.current_patient_changed.emit(None)
+        # # Обновляем панель пациента
+        # if dto.patient_id:
+        #     try:
+        #         patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
+        #         self.current_patient_changed.emit(patient_dto)
+        #     except Exception as e:
+        #         self.logger.exception(f"Ошибка загрузки пациента: {e}")
+        #         self.current_patient_changed.emit(None)
+        # else:
+        #     self.current_patient_changed.emit(None)
 
         self.logger.debug("Вызываем _load_draft_for_appointment")
         self._load_draft_for_appointment(dto.id, dto) # Загружаем черновик или свежие фото
@@ -2236,18 +2282,18 @@ class AppointmentListPage(
             self._clear_selection() # сбрасываем выделение в таблице (если оно есть)
             # self._clear_drafts() # Очистка черновиков (если они есть)
 
-        # Запоминаем patient_id для отображения информации
-        patient_id = extra_data.get('patient_id') if extra_data else None
-        if patient_id:
-            try:
-                patient_dto = self.patient_service.get_patient_by_id(patient_id)
-                self._current_patient_dto = patient_dto   # сохраняем
-                self.current_patient_changed.emit(patient_dto)
-            except Exception as e:
-                self.logger.exception(f"Ошибка загрузки пациента при входе: {e}")
-                self.current_patient_changed.emit(None)
-        else:
-            self.current_patient_changed.emit(None)
+        # # Запоминаем patient_id для отображения информации
+        # patient_id = extra_data.get('patient_id') if extra_data else None
+        # if patient_id:
+        #     try:
+        #         patient_dto = self.patient_service.get_patient_by_id(patient_id)
+        #         self._current_patient_dto = patient_dto   # сохраняем
+        #         self.current_patient_changed.emit(patient_dto)
+        #     except Exception as e:
+        #         self.logger.exception(f"Ошибка загрузки пациента при входе: {e}")
+        #         self.current_patient_changed.emit(None)
+        # else:
+        #     self.current_patient_changed.emit(None)
 
         # Вызываем родительский метод для загрузки данных
         super().on_enter(extra_data)           

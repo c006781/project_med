@@ -71,7 +71,7 @@ def preserve_right_panel_state(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         self._loading_right_panel += 1
-        self.note_text_edit.blockSignals(True)
+        # self.note_text_edit.blockSignals(True)
         self.photo_widget.blockSignals(True)
         try:
             result = func(self, *args, **kwargs)
@@ -81,7 +81,7 @@ def preserve_right_panel_state(func):
         finally:
             self._loading_right_panel -= 1
             if self._loading_right_panel == 0:
-                self.note_text_edit.blockSignals(False)
+                # self.note_text_edit.blockSignals(False)
                 self.photo_widget.blockSignals(False)
 
         return result
@@ -207,6 +207,8 @@ class DynamicDetailListPage(DynamicListPage):
         
         Если строка выбрана, то обновляет правую панель с деталями выбранной строки.
         """
+        if self.selected_dto and self.selected_dto.id is not None:
+            self._save_current_draft()
         super()._on_selection_changed(selected, deselected)
         if self.selected_dto:
             self.update_details(self.selected_dto)
@@ -243,23 +245,23 @@ class DraftMixin:
        
         # Для существующих
 
-        # Заметка
-        current_text = self.note_text_edit.toPlainText()
+        # # Заметка
+        # current_text = self.note_text_edit.toPlainText()
 
-        # Если черновика для этого приёма ещё нет – создаём с оригиналом из БД
-        if aid not in self._draft_note_original:
-            # Оригинал берём из selected_dto (он загружен из БД или из черновика)
-            original = self.selected_dto.note_text or ""
-            self._draft_note_original[aid] = original
-            self._draft_note_current[aid] = original
+        # # Если черновика для этого приёма ещё нет – создаём с оригиналом из БД
+        # if aid not in self._draft_note_original:
+        #     # Оригинал берём из selected_dto (он загружен из БД или из черновика)
+        #     original = self.selected_dto.note_text or ""
+        #     self._draft_note_original[aid] = original
+        #     self._draft_note_current[aid] = original
 
-        # Если текущий текст отличается от оригинального – обновляем current
-        if current_text != self._draft_note_original[aid]:
-            self._draft_note_current[aid] = current_text
-        else:
-            # Если вернулось к оригиналу – удаляем запись current (чтобы не хранить лишнее)
-            if aid in self._draft_note_current:
-                del self._draft_note_current[aid]
+        # # Если текущий текст отличается от оригинального – обновляем current
+        # if current_text != self._draft_note_original[aid]:
+        #     self._draft_note_current[aid] = current_text
+        # else:
+        #     # Если вернулось к оригиналу – удаляем запись current (чтобы не хранить лишнее)
+        #     if aid in self._draft_note_current:
+        #         del self._draft_note_current[aid]
 
         # Фото
         self._draft_photos[aid] = self.photo_widget.dump_state()
@@ -287,20 +289,20 @@ class DraftMixin:
             f"Есть черновик: {appointment_id in self._draft_photos}"
         )
 
-        # Заметка
-        if appointment_id in self._draft_note_current:
-            # Есть изменённый текст – показываем его
-            self.note_text_edit.setText(self._draft_note_current[appointment_id])
-            self.logger.debug("Загружена заметка из черновика (изменённая)")
-        elif appointment_id in self._draft_note_original:
-            # Есть оригинал, но нет current – значит без изменений
-            self.note_text_edit.setText(self._draft_note_original[appointment_id])
-            self.logger.debug("Загружена заметка из черновика (оригинал)")
-        else:
-            # Нет черновика – берём из БД
-            self.note_text_edit.setText(dto.note_text or "")
-            # Сохраняем оригинал для будущих сравнений (без пометки modified)
-            self._draft_note_original[appointment_id] = dto.note_text or ""
+        # # Заметка
+        # if appointment_id in self._draft_note_current:
+        #     # Есть изменённый текст – показываем его
+        #     self.note_text_edit.setText(self._draft_note_current[appointment_id])
+        #     self.logger.debug("Загружена заметка из черновика (изменённая)")
+        # elif appointment_id in self._draft_note_original:
+        #     # Есть оригинал, но нет current – значит без изменений
+        #     self.note_text_edit.setText(self._draft_note_original[appointment_id])
+        #     self.logger.debug("Загружена заметка из черновика (оригинал)")
+        # else:
+        #     # Нет черновика – берём из БД
+        #     self.note_text_edit.setText(dto.note_text or "")
+        #     # Сохраняем оригинал для будущих сравнений (без пометки modified)
+        #     self._draft_note_original[appointment_id] = dto.note_text or ""
 
         # фото
         if appointment_id in self._draft_photos:
@@ -403,14 +405,16 @@ class DraftMixin:
         """
         if appointment_id is None:
             self._draft_photos.clear()
-            self._draft_note_original.clear()
-            self._draft_note_current.clear()
+            # self._draft_note_original.clear()
+            # self._draft_note_current.clear()
             self.logger.debug("Все черновики очищены")
         else:
             # Удаляем черновики для приёма appointment_id
+            # self._draft_photos.pop(appointment_id, None)
+            # self._clear_drafts(appointment_id)
             self._draft_photos.pop(appointment_id, None)
-            self._draft_note_original.pop(appointment_id, None)
-            self._draft_note_current.pop(appointment_id, None)
+            # self._draft_note_original.pop(appointment_id, None)
+            # self._draft_note_current.pop(appointment_id, None)
             self.logger.debug(f"Черновики очищены для приёма {appointment_id}")
 
 
@@ -538,65 +542,65 @@ class RightPanelMixin:
         logger: AppLogger
     """
 
-    @AppLogger.get_instance(
-        name='RightPanelMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _setup_detail_panel(self):
-        """Создаёт виджеты правой панели и подключает сигналы."""
-        # Заметка
-        self.note_text_edit = QTextEdit()
-        install_standard_context_menu(self.note_text_edit)  
-        self.note_text_edit.setReadOnly(True)  # изначально только просмотр
-        self.note_text_edit.textChanged.connect(self._on_draft_changed)
+    # @AppLogger.get_instance(
+    #     name='RightPanelMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _setup_detail_panel(self):
+    #     """Создаёт виджеты правой панели и подключает сигналы."""
+    #     # Заметка
+    #     self.note_text_edit = QTextEdit()
+    #     install_standard_context_menu(self.note_text_edit)  
+    #     self.note_text_edit.setReadOnly(True)  # изначально только просмотр
+    #     self.note_text_edit.textChanged.connect(self._on_draft_changed)
 
-        self.detail_layout.addWidget(QLabel("Заметка:"))
-        self.detail_layout.addWidget(self.note_text_edit)
+    #     self.detail_layout.addWidget(QLabel("Заметка:"))
+    #     self.detail_layout.addWidget(self.note_text_edit)
 
-        # Фотографии
-        self.photo_widget = PhotoUploaderWidget()
-        config = get_config_env()
-        storage_path = config.get(
-            'PHOTOS_STORAGE_PATH',
-            os.path.join('.', 'photos')
-        )
-        self.logger.debug(f'storage_path: {storage_path}')
-        self.photo_widget.set_storage_path(storage_path)
-        self.photo_widget.set_readonly(True)
-        self.photo_widget.photosChanged.connect(self._on_draft_changed)
+    #     # Фотографии
+    #     self.photo_widget = PhotoUploaderWidget()
+    #     config = get_config_env()
+    #     storage_path = config.get(
+    #         'PHOTOS_STORAGE_PATH',
+    #         os.path.join('.', 'photos')
+    #     )
+    #     self.logger.debug(f'storage_path: {storage_path}')
+    #     self.photo_widget.set_storage_path(storage_path)
+    #     self.photo_widget.set_readonly(True)
+    #     self.photo_widget.photosChanged.connect(self._on_draft_changed)
 
-        # Устанавливаем функцию получения уникальных описаний для автодополнения
-        photo_service = get_photo_service()
-        self.photo_widget.set_unique_values_func(
-            lambda: [str(v) for v in photo_service.get_unique_values('description')]
-        )
+    #     # Устанавливаем функцию получения уникальных описаний для автодополнения
+    #     photo_service = get_photo_service()
+    #     self.photo_widget.set_unique_values_func(
+    #         lambda: [str(v) for v in photo_service.get_unique_values('description')]
+    #     )
 
-        self.detail_layout.addWidget(QLabel("Фотографии:"))
-        self.detail_layout.addWidget(self.photo_widget)
+    #     self.detail_layout.addWidget(QLabel("Фотографии:"))
+    #     self.detail_layout.addWidget(self.photo_widget)
 
         
 
-        self._loading_right_panel = 0
+    #     self._loading_right_panel = 0
 
-    @AppLogger.get_instance(
-        name='RightPanelMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _on_note_text_changed(self):
-        """
-        Обработчик изменения текста заметки (может быть вызван напрямую,
-        но мы уже используем _on_draft_changed, поэтому этот метод можно
-        оставить как заглушку или вообще убрать.
-        """
-        pass
+    # @AppLogger.get_instance(
+    #     name='RightPanelMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _on_note_text_changed(self):
+    #     """
+    #     Обработчик изменения текста заметки (может быть вызван напрямую,
+    #     но мы уже используем _on_draft_changed, поэтому этот метод можно
+    #     оставить как заглушку или вообще убрать.
+    #     """
+    #     pass
 
     @AppLogger.get_instance(
         name='RightPanelMixin',
@@ -613,10 +617,11 @@ class RightPanelMixin:
         pass
 
 class AppointmentListPage(
-    DraftMixin,               # черновики заметок и фото
-    DynamicDetailListPage,    # страница списка с правой панелью деталей
+    # DraftMixin,               # черновики заметок и фото
+    DynamicListPage,
+    # DynamicDetailListPage,    # страница списка с правой панелью деталей
     PatientInfoMixin,         # панель информации о пациенте (сверху)
-    RightPanelMixin,          # правая панель (заметка + фото)
+    # RightPanelMixin,          # правая панель (заметка + фото)
 
 
 ):
@@ -665,12 +670,12 @@ class AppointmentListPage(
 
         # Словари для хранения черновиков приёмов
         self._draft_photos = {}         # appointment_id -> состояние от photo_widget.dump_state()
-        self._draft_note_original = {}   # appointment_id -> оригинальный текст
-        self._draft_note_current = {}    # appointment_id -> текущий текст (если изменён)
+        # self._draft_note_original = {}   # appointment_id -> оригинальный текст
+        # self._draft_note_current = {}    # appointment_id -> текущий текст (если изменён)
 
 
-        # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
-        self._right_panel_modified = False
+        # # Флаг, указывающий, что в правой панели есть несохранённые изменения (фото/заметка)
+        # self._right_panel_modified = False
         # Блокируем сигналы при загрузке данных в правую панель
         self._loading_right_panel = 0
         
@@ -678,11 +683,11 @@ class AppointmentListPage(
         self.photo_service = get_photo_service()
         self.patient_service = get_patient_service()
 
-        self._suppress_draft_save = False
+        # self._suppress_draft_save = False
 
-        # Создаём правую панель
-        # Создаём виджеты правой панели (после того как detail_layout создан в родительском _setup_ui)
-        self._setup_detail_panel()
+        # # Создаём правую панель
+        # # Создаём виджеты правой панели (после того как detail_layout создан в родительском _setup_ui)
+        # self._setup_detail_panel()
 
         # # Подключаем сигналы черновиков
         # self.note_text_edit.textChanged.connect(self._on_draft_changed)
@@ -708,6 +713,10 @@ class AppointmentListPage(
             self.save_changes_btn.clicked.connect(self._save_changes)
             self.logger.debug("Кнопка save_changes_btn подключена к _save_changes в AppointmentListPage")
             self.logger.info("Кнопка 'Сохранить изменения' ПРИНУДИТЕЛЬНО подключена к _save_changes в AppointmentListPage")
+
+        # Принудительно подключаем сигнал выбора строки
+        if hasattr(self, 'table_view') and self.table_view.selectionModel():
+            self.table_view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
         # # Создаём виджеты правой панели (будет вызвано в _setup_detail_panel)
         # self.note_text_edit = None
@@ -764,10 +773,10 @@ class AppointmentListPage(
         Проверяет наличие черновиков (заметка или фото) для указанного приёма.
         Используется методом _has_current_row_changes из DynamicListPage.
         """
-        # Заметка
-        if appointment_id in self._draft_note_current:
-            if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
-                return True
+        # # Заметка
+        # if appointment_id in self._draft_note_current:
+        #     if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
+        #         return True
             
         # Фото
         if appointment_id in self._draft_photos:
@@ -907,24 +916,30 @@ class AppointmentListPage(
         source_row = self._find_source_row_by_id(appointment_id)
         if source_row != -1:
             dto = self.source_model.get_item_at_row(source_row)
+
         if dto is None:
             return True
+        
         original = self.original_data.get(source_row)
         if original is None:
             return True
+        
         # Сравнение основных полей (исключая виртуальные)
         exclude = ['patient_name', 'has_photos']
         if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
             return True
-        # Проверка черновиков заметки
-        if appointment_id in self._draft_note_current:
-            if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
-                return True
+        
+        # # Проверка черновиков заметки
+        # if appointment_id in self._draft_note_current:
+        #     if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
+        #         return True
+
         # Проверка черновиков фото
         if appointment_id in self._draft_photos:
             draft = self._draft_photos[appointment_id]
             if draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'):
                 return True
+            
         return False
 
 
@@ -944,7 +959,23 @@ class AppointmentListPage(
     #             return row
     #     return -1
 
-
+    @AppLogger.get_instance(
+        name='AppointmentListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_drafts(self, appointment_id=None):
+        """
+        Заглушка для страниц без черновиков.
+        Переопределяется в AppointmentListPage.
+        """
+        if appointment_id is None: 
+            self._draft_photos.clear()
+        else:
+            self._draft_photos.pop(appointment_id, None)
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -1088,17 +1119,17 @@ class AppointmentListPage(
         if source_row == -1 or source_row is None:
             return
        
-        # Заметка
-        if aid in self._draft_note_current:
-            new_text = self._draft_note_current[aid]
-            if self.selected_dto.note_text != new_text:
-                self.selected_dto.note_text = new_text
+        # # Заметка
+        # if aid in self._draft_note_current:
+        #     new_text = self._draft_note_current[aid]
+        #     if self.selected_dto.note_text != new_text:
+        #         self.selected_dto.note_text = new_text
 
-                # Обновить в модели — используем метод, учитывающий чекбокс-столбец
-                real_col = self.source_model.get_model_column_index('note_text')
-                if real_col >= 0:
-                    index = self.source_model.index(source_row, real_col)
-                    self.source_model.setData(index, new_text, Qt.EditRole)
+        #         # Обновить в модели — используем метод, учитывающий чекбокс-столбец
+        #         real_col = self.source_model.get_model_column_index('note_text')
+        #         if real_col >= 0:
+        #             index = self.source_model.index(source_row, real_col)
+        #             self.source_model.setData(index, new_text, Qt.EditRole)
 
         # Фото уже синхронизировано через _sync_draft_to_selected_dto
         self._sync_draft_to_selected_dto()
@@ -1202,7 +1233,7 @@ class AppointmentListPage(
     )
     def _clear_right_panel(self):
         """Очищает правую панель (заметку и фото) и сбрасывает выбранный DTO."""
-        self.note_text_edit.clear()
+        # self.note_text_edit.clear()
         self.photo_widget.clear()
         self.selected_dto = None
         # self.current_patient_changed.emit(None)
@@ -1230,29 +1261,54 @@ class AppointmentListPage(
                 self.modified_ids.discard(aid)
                 continue
 
-            self.logger.warning(f"_save_modified_appointments: if not self._has_row_changes(aid):  {not self._has_row_changes(aid)}")
+            # Проверяем, есть ли реальные изменения (основные поля + фото)
             if not self._has_row_changes(aid):
+                # Если изменений нет – снимаем пометку и переходим к следующему
                 self.modified_ids.discard(aid)
                 continue
 
-            self._save_single_appointment(dto, source_row)
+            # Сохраняем основные поля приёма
+            self.service.update(dto)
 
-        self.modified_ids.clear()   
+            # Сохраняем фото, если есть черновик
+            if aid in self._draft_photos:
+                draft = self._draft_photos[aid]
+                pending = draft.get('pending_photos', [])
+                deleted = draft.get('deleted_photo_ids', [])
+                self.photo_service.update_photos_for_appointment(aid, pending, deleted)
+                # Обновляем описания изменённых фото
+                for photo_dto in draft.get('existing_photos', []):
+                    if isinstance(photo_dto, dict) and photo_dto.get('id') in draft.get('modified_photo_ids', []):
+                        self.photo_service.update_photo_description(photo_dto['id'], photo_dto.get('description', ''))
+                # Очищаем черновик
+                # self._draft_photos.pop(aid, None)
+                self._clear_drafts(aid)
+            self.logger.info(f"Обновлён приём ID={aid}")
+        self.modified_ids.clear()
+        
+        #     self.logger.warning(f"_save_modified_appointments: if not self._has_row_changes(aid):  {not self._has_row_changes(aid)}")
+        #     if not self._has_row_changes(aid):
+        #         self.modified_ids.discard(aid)
+        #         continue
 
-    @AppLogger.get_instance(
-        name = 'AppointmentListPage',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
-    def _apply_draft_to_new_dto(self, dto):
-        if dto.id is not None and dto.id < 0:
-            if dto.id in self._draft_note_current:
-                note_text = self._draft_note_current.get(dto.id)
-                if note_text is not None:
-                    dto.note_text = note_text
+        #     self._save_single_appointment(dto, source_row)
+
+        # self.modified_ids.clear()   
+
+    # @AppLogger.get_instance(
+    #     name = 'AppointmentListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _apply_draft_to_new_dto(self, dto):
+    #     if dto.id is not None and dto.id < 0:
+    #         if dto.id in self._draft_note_current:
+    #             note_text = self._draft_note_current.get(dto.id)
+    #             if note_text is not None:
+    #                 dto.note_text = note_text
 
     @AppLogger.get_instance(
         name = 'AppointmentListPage',
@@ -1269,10 +1325,10 @@ class AppointmentListPage(
             dto = self.source_model.get_item_at_row(row)
             if dto and (dto.id is not None) and (dto.id < 0):
                 temp_id = dto.id
-                # Заметка из черновика
-                note_text = self._draft_note_current.get(temp_id)
-                if note_text is not None:
-                    dto.note_text = note_text
+                # # Заметка из черновика
+                # note_text = self._draft_note_current.get(temp_id)
+                # if note_text is not None:
+                #     dto.note_text = note_text
 
                 # Создаём запись в БД
                 created = self.service.create(dto)
@@ -1280,7 +1336,7 @@ class AppointmentListPage(
                 self.logger.info(f"Создан новый приём ID={created.id}")
                 newly_created_id = created.id
 
-                # Обрабатываем фото для новой строки
+                # Обрабатываем фото для новой строки , если есть черновик
                 draft = self._draft_photos.get(temp_id)
                 if draft and created.id is not None:
                     pending = draft.get('pending_photos', [])
@@ -1302,9 +1358,14 @@ class AppointmentListPage(
                 elif draft:
                     self.logger.warning(f"Не удалось сохранить фото для нового приёма: created.id = {created.id}")
 
-                # Очищаем черновики для этого временного ID
-                self._clear_drafts(temp_id) # Удаляем черновики для этого приёма
+                # Очищаем черновики для этого временного ID 
+                self._clear_drafts(temp_id) # Удаляем черновики для этого приёма 
                 # DraftMixin._clear_drafts(self, temp_id) # Удаляем черновики для этого приёма
+
+                # # Очищаем черновик для временного ID
+                # self._draft_photos.pop(temp_id, None)
+
+        self.new_rows.clear()
 
         return newly_created_id
 
@@ -1364,63 +1425,115 @@ class AppointmentListPage(
         # - горизонтальный сплиттер self.splitter (таблица + правая панель)
 
         super()._setup_ui()
-
-        # Сохраняем ссылку на горизонтальный сплиттер (он уже добавлен в main_layout)
-        horizontal_splitter = self.splitter
-
-        # Удаляем горизонтальный сплиттер из main_layout (чтобы потом вставить его в вертикальный)
-        index = self.main_layout.indexOf(horizontal_splitter)
-        self.logger.debug(f"if index != -1 : {index != -1}")
-        if index != -1: # если горизонтальный сплиттер есть в main_layout
-            self.main_layout.takeAt(index)
-
-        # Создаём вертикальный сплиттер
-        self.vertical_splitter = QSplitter(Qt.Vertical)
-
-        # Создаём панель информации о пациенте (миксин)
+        # Создаём панель информации о пациенте и вставляем её перед таблицей
         self._setup_patient_info_panel()
+        idx = self.main_layout.indexOf(self.table_view)
+        if idx >= 0:
+            self.main_layout.insertWidget(idx, self.patient_info_frame)
+        else:
+            self.main_layout.addWidget(self.patient_info_frame)
 
-        # Добавляем панель информации в вертикальный сплиттер -
-        self.vertical_splitter.addWidget(self.patient_info_frame) 
+        # Создаём виджет фото
+        config = get_config_env()
+        storage_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+        self.photo_widget = PhotoUploaderWidget()
+        self.photo_widget.set_storage_path(storage_path)
+        self.photo_widget.set_readonly(not self.edit_mode)
+        self.photo_widget.photosChanged.connect(self._on_photos_changed)
 
-        # Добавляем горизонтальный сплиттер
-        self.vertical_splitter.addWidget(horizontal_splitter)
+        # Настраиваем уникальные значения для автодополнения описаний
+        self.photo_widget.set_unique_values_func(
+            lambda: [str(v) for v in self.photo_service.get_unique_values('description')]
+        )
 
-        # Настраиваем пропорции: панель информации не растягивается, горизонтальный сплиттер растягивается
-        self.vertical_splitter.setStretchFactor(0, 0) # панель не растягивается
-        self.vertical_splitter.setStretchFactor(1, 1) # таблица растягивается
+        # Добавляем фото-виджет в конец layout (под таблицей)
+        self.main_layout.addWidget(self.photo_widget)
 
-        # Добавляем вертикальный сплиттер в main_layout
-        self.main_layout.addWidget(self.vertical_splitter)
+        # # Сохраняем ссылку на горизонтальный сплиттер (он уже добавлен в main_layout)
+        # horizontal_splitter = self.splitter
 
-        # Устанавливаем стили для обоих сплиттеров
-        self._apply_splitter_style(self.vertical_splitter)
-        self._apply_splitter_style(horizontal_splitter)
+        # # Удаляем горизонтальный сплиттер из main_layout (чтобы потом вставить его в вертикальный)
+        # index = self.main_layout.indexOf(horizontal_splitter)
+        # self.logger.debug(f"if index != -1 : {index != -1}")
+        # if index != -1: # если горизонтальный сплиттер есть в main_layout
+        #     self.main_layout.takeAt(index)
 
-        # Устанавливаем начальные размеры (панель информации – 100px, остальное – остаток)
-        # Точное значение будет установлено в showEvent, когда окно станет видимым
-        self.logger.debug(f"self.height() : {self.height()}")
-        self.vertical_splitter.setSizes([100, self.height() - 100])
-        self.logger.debug(f"self.height() : {self.height()}")
+        # # Создаём вертикальный сплиттер
+        # self.vertical_splitter = QSplitter(Qt.Vertical)
 
-        # # Если self.height() ещё 0, установим фиксированные размеры
-        # if self.height() == 0:
-        #     self.vertical_splitter.setSizes([200, 600])
+        # # Создаём панель информации о пациенте (миксин)
+        # self._setup_patient_info_panel()
 
-        # # Принудительно показываем и обновляем правую панель
-        # if hasattr(self, 'detail_widget'):
-        #     self.detail_widget.setVisible(True)
-        #     self.detail_widget.updateGeometry()
-        #     # Если layout был пересоздан в _setup_detail_panel, убедимся, что он активен
-        #     if self.detail_layout:
-        #         self.detail_layout.activate()
-        # # Обновляем весь вертикальный сплиттер
-        # if hasattr(self, 'vertical_splitter'):
-        #     self.vertical_splitter.updateGeometry()
+        # # Добавляем панель информации в вертикальный сплиттер -
+        # self.vertical_splitter.addWidget(self.patient_info_frame) 
+
+        # # Добавляем горизонтальный сплиттер
+        # self.vertical_splitter.addWidget(horizontal_splitter)
+
+        # # Настраиваем пропорции: панель информации не растягивается, горизонтальный сплиттер растягивается
+        # self.vertical_splitter.setStretchFactor(0, 0) # панель не растягивается
+        # self.vertical_splitter.setStretchFactor(1, 1) # таблица растягивается
+
+        # # Добавляем вертикальный сплиттер в main_layout
+        # self.main_layout.addWidget(self.vertical_splitter)
+
+        # # Устанавливаем стили для обоих сплиттеров
+        # self._apply_splitter_style(self.vertical_splitter)
+        # self._apply_splitter_style(horizontal_splitter)
+
+        # # Устанавливаем начальные размеры (панель информации – 100px, остальное – остаток)
+        # # Точное значение будет установлено в showEvent, когда окно станет видимым
+        # self.logger.debug(f"self.height() : {self.height()}")
+        # self.vertical_splitter.setSizes([100, self.height() - 100])
+        # self.logger.debug(f"self.height() : {self.height()}")
+
+        # # # Если self.height() ещё 0, установим фиксированные размеры
+        # # if self.height() == 0:
+        # #     self.vertical_splitter.setSizes([200, 600])
+
+        # # # Принудительно показываем и обновляем правую панель
+        # # if hasattr(self, 'detail_widget'):
+        # #     self.detail_widget.setVisible(True)
+        # #     self.detail_widget.updateGeometry()
+        # #     # Если layout был пересоздан в _setup_detail_panel, убедимся, что он активен
+        # #     if self.detail_layout:
+        # #         self.detail_layout.activate()
+        # # # Обновляем весь вертикальный сплиттер
+        # # if hasattr(self, 'vertical_splitter'):
+        # #     self.vertical_splitter.updateGeometry()
 
 
-        self.logger.debug(f"Vertical splitter sizes after setup: {self.vertical_splitter.sizes()}")
+        # self.logger.debug(f"Vertical splitter sizes after setup: {self.vertical_splitter.sizes()}")
+        
+    def _save_current_draft(self):
+        """Сохраняет черновик фото для текущего приёма."""
+        if not self.selected_dto or self.selected_dto.id is None:
+            return
+        self._draft_photos[self.selected_dto.id] = self.photo_widget.dump_state()
 
+    def _load_draft_for_appointment(self, appointment_id, dto):
+        """Загружает черновик или свежие фото для указанного приёма."""
+        self.photo_widget.clear() # Принудительно очищаем виджет, чтобы сбросить старые фото
+
+        if appointment_id in self._draft_photos:
+            self.photo_widget.load_state(self._draft_photos[appointment_id])
+        else:
+            self.photo_widget.set_existing_photos(dto.photos or [])
+
+    def _has_draft_changes_for_appointment(self, appointment_id):
+        """Проверяет наличие несохранённых изменений в фото."""
+        if appointment_id not in self._draft_photos:
+            return False
+        draft = self._draft_photos[appointment_id]
+        return bool(draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'))
+
+    def _on_photos_changed(self):
+        """Обработчик изменения фото – помечает строку как изменённую."""
+        if not self.selected_dto or self.selected_dto.id is None or self.selected_dto.id < 0:
+            return
+        self._save_current_draft()
+        self._modified_ids_control(self.selected_dto.id, True)
+        self._update_save_button_state()
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы для сплиттеров
@@ -1540,10 +1653,17 @@ class AppointmentListPage(
         Сохраняет черновик текущего выбранного приёма (если есть)
         и вызывает родительский метод, который обновит self.selected_dto и вызовет update_details
         """
-        if not getattr(self, '_suppress_draft_save', False) and self.selected_dto:
+        # Сохраняем черновик предыдущего приёма
+        # if not getattr(self, '_suppress_draft_save', False) and self.selected_dto:
+        if  self.selected_dto:
             self._save_current_draft()
-            
+
+        # Вызываем родительский метод (он обновит self.selected_dto)    
         super()._on_selection_changed(selected, deselected)
+        
+        # Обновляем фото-виджет и панель пациента для новой выбранной строки
+        if self.selected_dto:
+            self.update_details(self.selected_dto)
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -1640,37 +1760,53 @@ class AppointmentListPage(
         :return: True, если есть несохранённые изменения, False - иначе
         :rtype: bool
         """
-        
-        # Определяем, есть ли изменения
-        # if self.modified_rows or self.deleted_rows or self.new_rows:
-        self.logger.debug(f"if self.modified_ids or self.deleted_ids or self.new_rows: {self.modified_ids or self.deleted_ids or self.new_rows}")
+        # Проверяем изменения в таблице (новые, изменённые, удалённые строки)
         if self.modified_ids or self.deleted_ids or self.new_rows:
-            
             return True
         
-        # Добавляем проверку черновиков для текущего выбранного приёма
-        if self.selected_dto:
-            appointment_id = self.selected_dto.id
-
-            # Заметка изменена?
-            self.logger.debug(f"if appointment_id in self._draft_note_current: {appointment_id in self._draft_note_current}")
-            if appointment_id in self._draft_note_current:
-                if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
-                    return True
-
-            # Или фото изменены?
-            if appointment_id in self._draft_photos:
-                for i in [
-                    'pending_photos', # ожидающие фото
-                    'deleted_photo_ids', # удалённые фото
-                    'modified_photo_ids', # изменённые фото
-                ]:
-                    
-                    self.logger.debug(f"if len(self._draft_photos[{appointment_id}].get({i}, []))>0: {len(self._draft_photos[appointment_id].get(i, []))>0}")
-                    if len(self._draft_photos[appointment_id].get(i, []))>0: # Если есть
-                        return True # то изменение есть
-                
+        # Проверяем черновики фото для текущего выбранного приёма
+        if self.selected_dto and self.selected_dto.id is not None:
+            return self._has_draft_changes_for_appointment(self.selected_dto.id)
+        
         return False
+
+
+        # if super()._has_unsaved_changes():
+        #     return True
+        # if self.selected_dto and self.selected_dto.id is not None:
+        #     return self._has_draft_changes_for_appointment(self.selected_dto.id)
+        # return False
+        
+        # # Определяем, есть ли изменения
+        # # if self.modified_rows or self.deleted_rows or self.new_rows:
+        # self.logger.debug(f"if self.modified_ids or self.deleted_ids or self.new_rows: {self.modified_ids or self.deleted_ids or self.new_rows}")
+        # if self.modified_ids or self.deleted_ids or self.new_rows:
+            
+        #     return True
+        
+        # # Добавляем проверку черновиков для текущего выбранного приёма
+        # if self.selected_dto:
+        #     appointment_id = self.selected_dto.id
+
+        #     # # Заметка изменена?
+        #     # self.logger.debug(f"if appointment_id in self._draft_note_current: {appointment_id in self._draft_note_current}")
+        #     # if appointment_id in self._draft_note_current:
+        #     #     if self._draft_note_current[appointment_id] != self._draft_note_original[appointment_id]:
+        #     #         return True
+
+        #     # Или фото изменены?
+        #     if appointment_id in self._draft_photos:
+        #         for i in [
+        #             'pending_photos', # ожидающие фото
+        #             'deleted_photo_ids', # удалённые фото
+        #             'modified_photo_ids', # изменённые фото
+        #         ]:
+                    
+        #             self.logger.debug(f"if len(self._draft_photos[{appointment_id}].get({i}, []))>0: {len(self._draft_photos[appointment_id].get(i, []))>0}")
+        #             if len(self._draft_photos[appointment_id].get(i, []))>0: # Если есть
+        #                 return True # то изменение есть
+                
+        # return False
 
 
     @AppLogger.get_instance(
@@ -1691,7 +1827,7 @@ class AppointmentListPage(
         - для фото (photo_widget)
         :param edit_mode: True - включить режим редактирования, False - выключить
         """
-        self.note_text_edit.setReadOnly(edit_mode)
+        # self.note_text_edit.setReadOnly(edit_mode)
         self.photo_widget.set_readonly(edit_mode)
 
     @AppLogger.get_instance(
@@ -1718,9 +1854,11 @@ class AppointmentListPage(
                 return
             
         super()._on_edit_mode_toggled(checked)
-
-        # Настройка правых виджетов в зависимости от режима
-        self._edit_mode_note_text_photo_edit(not self.edit_mode)
+        # Обновляем режим только для чтения фото-виджета
+        if hasattr(self, 'photo_widget'):
+            self.photo_widget.set_readonly(not self.edit_mode)
+        # # Настройка правых виджетов в зависимости от режима
+        # self._edit_mode_note_text_photo_edit(not self.edit_mode)
 
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
@@ -1730,19 +1868,19 @@ class AppointmentListPage(
     # ----------------------------------------------------------------------
 
     # --- Вспомогательные методы для сохранения одного приёма ---
-    @AppLogger.get_instance(
-        name='AppointmentListPage',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _update_appointment_note(self, dto, appointment_id):
-        """Обновляет заметку приёма из черновика."""
-        if appointment_id in self._draft_note_current:
-            dto.note_text = self._draft_note_current[appointment_id]
-            self.logger.debug(f"  → Заметка обновлена из черновика для {appointment_id}")
+    # @AppLogger.get_instance(
+    #     name='AppointmentListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _update_appointment_note(self, dto, appointment_id):
+    #     """Обновляет заметку приёма из черновика."""
+    #     if appointment_id in self._draft_note_current:
+    #         dto.note_text = self._draft_note_current[appointment_id]
+    #         self.logger.debug(f"  → Заметка обновлена из черновика для {appointment_id}")
 
     @AppLogger.get_instance(
         name='AppointmentListPage',
@@ -1796,8 +1934,8 @@ class AppointmentListPage(
         appointment_id = dto.id
         self.logger.info(f"Сохраняем приём ID={appointment_id} (строка {source_row})")
 
-        # Заметка
-        self._update_appointment_note(dto, appointment_id)
+        # # Заметка
+        # self._update_appointment_note(dto, appointment_id)
         
         # Фото
         draft = self._draft_photos.get(appointment_id)
@@ -1846,7 +1984,7 @@ class AppointmentListPage(
         Временно обновляет правую панель (заметка и фото) свежими данными.
         Не изменяет выделение строки.
         """
-        self.note_text_edit.setText(fresh_dto.note_text or "")
+        # self.note_text_edit.setText(fresh_dto.note_text or "")
         self.photo_widget.clear()
         self.photo_widget.set_existing_photos(fresh_photos)
 
@@ -2029,16 +2167,38 @@ class AppointmentListPage(
 
         self.logger.info(f"update_details вызван для приёма ID={dto.id}")
 
-        if self.selected_dto and self.selected_dto.id != dto.id:
+        # Сохраняем черновик предыдущего приёма
+        # if self.selected_dto and self.selected_dto.id != dto.id:
+        if self.selected_dto and (self.selected_dto.id is not None) and (self.selected_dto.id != dto.id):
             self._save_current_draft()
 
         self.selected_dto = dto
-        self.current_appointment_id = dto.id
+        # self.current_appointment_id = dto.id
+
+        # Обновляем панель пациента
+        if dto.patient_id:
+            try:
+                patient_dto = self.patient_service.get_patient_by_id(dto.patient_id)
+                self.current_patient_changed.emit(patient_dto)
+            except Exception as e:
+                self.logger.exception(f"Ошибка загрузки пациента: {e}")
+                self.current_patient_changed.emit(None)
+        else:
+            self.current_patient_changed.emit(None)
 
         self.logger.debug("Вызываем _load_draft_for_appointment")
-        self._load_draft_for_appointment(dto.id, dto)
-        if self.edit_mode:
-            self._sync_draft_to_model()
+        self._load_draft_for_appointment(dto.id, dto) # Загружаем черновик или свежие фото
+
+        # ПРИНУДИТЕЛЬНОЕ ОБНОВЛЕНИЕ ВИДЖЕТА ФОТО
+        self.photo_widget.update()
+        self.photo_widget.repaint()
+
+        # Синхронизируем с моделью (обновляем selected_dto.photos)
+        self._sync_draft_to_selected_dto()
+        self._check_and_clear_modified_if_unchanged()
+        
+        # if self.edit_mode:
+        #     self._sync_draft_to_model()
             
         # self._sync_draft_to_model()
 

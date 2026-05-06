@@ -3860,6 +3860,7 @@ class BaseAppLogger:
                         except Exception as e:
                             err = e
                             raise err
+                            # 0==0
                         
                             # func_qualname
                         return result
@@ -3913,6 +3914,7 @@ class BaseAppLogger:
                         except Exception as e:
                             err = e
                             raise err
+                            # 0==0
                             # func_qualname
                         return result
 

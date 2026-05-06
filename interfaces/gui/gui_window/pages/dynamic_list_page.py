@@ -32,6 +32,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     DateStringDelegate,
     StringDelegate,
     DateDelegate,
+    TextPopupDelegate,
     TimeDelegate,
     BoolDelegate,
     ComboBoxDelegate,
@@ -46,22 +47,15 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 
 from PySide6.QtWidgets import (
     # QWidget, 
-    QComboBox,
-    QVBoxLayout, 
-    QHBoxLayout, 
-    QPushButton, 
-    QLineEdit,
-    QHeaderView, 
-    QMessageBox, 
+    QComboBox, QVBoxLayout, 
+    QHBoxLayout,  QPushButton, 
+    QLineEdit, QHeaderView, 
+    QMessageBox, QAbstractItemView,
     # QTableView, 
-    QAbstractItemView,
 )
 from PySide6.QtCore import (
-    Qt, 
-    Signal, 
-    Slot, 
-    QModelIndex,
-    QTimer
+    Qt, Signal, Slot, 
+    # QModelIndex, QTimer
 )
 from PySide6.QtGui import QColor
 
@@ -2280,6 +2274,9 @@ class ListUIMixin:
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        
+        self.table_view.setMouseTracking(True)
+        
         self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers) # Изначально двойной клик не редактирует ячейки (режим не редактирования)
         add_copy_paste_to_table(self.table_view) # Добавляем возможность копирования и вставки
 
@@ -2435,8 +2432,17 @@ class ListUIMixin:
 
             # Определяем тип поля и его реальный тип (для делегата) автоматически по параметрам
             widget_type = config.get('widget_type') # Специальные типы виджетов из field_configs
+
+            if (widget_type is not None) and (widget_type  == 'textarea'):
+                # field_type = invert_tip.get(widget_type) # определяем по типу поля  
+                # Определяем режим только для чтения (если таблица не в режиме редактирования)
+                # readonly = not self.edit_mode
+                delegate = TextPopupDelegate(self.table_view, readonly=not self.edit_mode)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)   
+                continue
+            
             if widget_type:
-                field_type = invert_tip.get(widget_type) # определяем по типу поля     
+                field_type = invert_tip.get(widget_type)            
             else:
                 field_type = col_info.get('type')   # Определяем по реальному типу поля
 
@@ -2465,6 +2471,24 @@ class ListUIMixin:
                 continue
                 # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
+
+    @AppLogger.get_instance(
+        name = 'ListUIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_text_popup_delegates_readonly(self):
+        """Обновляет состояние readonly для всех TextPopupDelegate при смене режима редактирования."""
+        if not hasattr(self, 'table_view'):
+            return
+        
+        for col in range(self.table_view.model().columnCount()):
+            delegate = self.table_view.itemDelegateForColumn(col)
+            if delegate and isinstance(delegate, TextPopupDelegate):
+                delegate.set_readonly(not self.edit_mode)
 
 class ListFilterMixin:
     """
@@ -2936,6 +2960,8 @@ class DynamicListPage(
         self._ensure_checkbox_header_menu() # добавляем пункты в контекстное меню
 
         self._reapply_delegates() # переустанавливаем делегаты
+        
+        # self._update_text_popup_delegates_readonly() # Обновляем readonly у всех TextPopupDelegate
 
         if not self.edit_mode:
             self._clear_checkboxes() # снимаем все чекбоксы

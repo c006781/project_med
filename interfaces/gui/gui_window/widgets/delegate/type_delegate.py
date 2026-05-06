@@ -11,35 +11,191 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 
 from PySide6.QtWidgets import (
-    QCompleter,
-    QStyle,
-    QStyledItemDelegate, 
-    QLineEdit, QCheckBox, 
-    QDateEdit, QTimeEdit, 
-    QComboBox, 
-    QPushButton, 
-    QStyleOptionButton, 
-    QApplication
+    QCompleter, QDialog, QDialogButtonBox,
+    QStyle, QStyledItemDelegate,  QLineEdit, 
+    QCheckBox, QDateEdit, QTextEdit, 
+    QTimeEdit, QComboBox, 
+    # QPushButton, 
+    QStyleOptionButton, QApplication,
+    QVBoxLayout,
 )
 
 from PySide6.QtCore import (
-    Qt, 
-    QPoint, 
-    QDate, 
-    QTime, 
-    QModelIndex, 
-    QAbstractItemModel, 
-    QEvent, 
-    QSize, 
-    Signal
+    QRect, Qt, 
+    # QPoint, 
+    QDate, QTime,  QModelIndex, 
+    QAbstractItemModel,  QEvent, 
+    QSize,  Signal,
 )
 
 from PySide6.QtGui import (
     QPainter, 
-    QMouseEvent
+    # QMouseEvent
 )
 
+class TextPopupDelegate(QStyledItemDelegate):
+    """
+    Делегат для ячеек с многострочным текстом.
+    При наведении мыши показывает маленькую кнопку,
+    по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
+    В режиме только для чтения диалог открывается без возможности редактирования.
+    """
+    # sawe_paint : dict = {}
 
+    def __init__(self, parent=None, readonly=False):
+        super().__init__(parent)
+        self._readonly = readonly
+        self._hovered_row = -1
+        self._hovered_col = -1
+        # # для отслеживания изменения hover
+        # self._prev_hovered_row = -1      
+        # self._prev_hovered_col = -1
+
+        self._button_rect = None
+
+         # Устанавливаем фильтр событий на таблицу, чтобы ловить Leave
+        if parent:
+            parent.installEventFilter(self)
+
+    def paint(self, painter, option, index):
+        # Стандартная отрисовка содержимого ячейки
+        super().paint(painter, option, index)
+
+        # Если мышь над этой ячейкой – рисуем кнопку
+        if self._hovered_row == index.row() and self._hovered_col == index.column():
+            btn_rect = self._get_button_rect(option.rect)
+            btn_opt = QStyleOptionButton()
+            btn_opt.rect = btn_rect
+            btn_opt.text = "..."
+            btn_opt.state = QStyle.State_Enabled
+            self._button_rect = btn_rect
+            QApplication.style().drawControl(QStyle.CE_PushButton, btn_opt, painter)
+
+    def _get_button_rect(self, cell_rect):
+        """Возвращает прямоугольник кнопки в правой части ячейки."""
+        btn_w = 20
+        btn_h = 20
+        x = cell_rect.right() - btn_w - 2
+        y = cell_rect.top() + (cell_rect.height() - btn_h) // 2
+        # temp = QRect(x, y, btn_w, btn_h)
+
+        # k_now = (self._hovered_row, self._hovered_col)
+        # for k, v in TextPopupDelegate.sawe_paint.items():
+        #     if k != k_now:
+        #         print(k, k_now)
+        #         idx = self.parent().model().index(*k)
+        #         if idx.isValid():
+        #             self.parent().update(idx)
+        #         # old_idx = model.index(*k)
+        #         # if old_idx.isValid():
+
+        #         #     # TextPopupDelegate.sawe_paint[(self._hovered_row, self._hovered_col)] = 
+        #         #     self.parent().update(old_idx)
+
+
+
+        # temp = None      
+        # if k_now in TextPopupDelegate.sawe_paint.keys():
+        #     temp = TextPopupDelegate.sawe_paint[k_now]
+        
+        # TextPopupDelegate.sawe_paint.clear()
+            
+        #     # return temp
+        # if temp is None:
+        #     temp = QRect(x, y, btn_w, btn_h)
+        #     TextPopupDelegate.sawe_paint[k_now] = temp
+        
+        temp = QRect(x, y, btn_w, btn_h)
+        return temp
+
+    def eventFilter(self, obj, event):
+        """Перехватываем событие Leave на таблице, чтобы сбросить hover."""
+        if obj == self.parent() and event.type() == QEvent.Leave:
+            if self._hovered_row != -1:
+                # Запоминаем координаты, чтобы перерисовать
+                old_row, old_col = self._hovered_row, self._hovered_col
+                self._hovered_row = -1
+                self._hovered_col = -1
+                # Перерисовываем ячейку, где был hover
+                idx = self.parent().model().index(old_row, old_col)
+                if idx.isValid():
+                    self.parent().update(idx)
+            return False  # не блокируем дальнейшую обработку события
+        return super().eventFilter(obj, event)
+
+    def editorEvent(self, event, model, option, index):
+        # if event.type() == QEvent.MouseButtonPress:
+        #     if self._hovered_row != -1:
+        #         old_idx = model.index(self._hovered_row, self._hovered_col)
+        #         self._hovered_row = -1
+        #         self._hovered_col = -1
+        #         if old_idx.isValid():
+        #             self.parent().update(old_idx)
+        # Обработка движения мыши – обновляем hover и перерисовываем старую/новую ячейки
+        if event.type() == QEvent.MouseMove:
+            
+            new_row, new_col = index.row(), index.column()
+            if (new_row, new_col) != (self._hovered_row, self._hovered_col):
+                old_row, old_col = self._hovered_row, self._hovered_col
+                self._hovered_row, self._hovered_col = new_row, new_col
+
+                # Перерисовываем старую ячейку
+                if old_row != -1:
+                    old_idx = model.index(old_row, old_col)
+                    if old_idx.isValid():
+
+                        # TextPopupDelegate.sawe_paint[(self._hovered_row, self._hovered_col)] = 
+                        self.parent().update(old_idx)
+                # Перерисовываем новую ячейку
+                self.parent().update(index)
+            return False
+
+        # Обработка двойного клика – только в режиме редактирования
+        if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+            if not self._readonly:
+                self._open_popup(model, index)
+                return True
+            return False
+
+        # Клик по кнопке (левой кнопкой)
+        if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if self._button_rect and self._button_rect.contains(event.pos()):
+                self._open_popup(model, index)
+                return True
+
+        return super().editorEvent(event, model, option, index)
+
+    def _open_popup(self, model, index):
+        """Открывает диалог просмотра/редактирования текста."""
+        value = model.data(index, Qt.EditRole)
+        text = str(value) if value is not None else ""
+
+        dialog = QDialog(self.parent())
+        dialog.setWindowTitle("Просмотр текста" if self._readonly else "Редактирование текста")
+
+        layout = QVBoxLayout(dialog)
+        text_edit = QTextEdit()
+        text_edit.setPlainText(text)
+        if self._readonly:
+            text_edit.setReadOnly(True)
+        layout.addWidget(text_edit)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+
+        if dialog.exec() == QDialog.Accepted:
+            new_text = text_edit.toPlainText()
+            if new_text != text:
+                model.setData(index, new_text, Qt.EditRole)
+
+    def set_readonly(self, readonly):
+        self._readonly = readonly
+
+    def createEditor(self, parent, option, index):
+        # Не создаём редактор, вместо этого открываем попап (при двойном клике)
+        return None
 
 class StringDelegate(QStyledItemDelegate):
     """Делегат для редактирования строковых ячеек с русским контекстным меню."""

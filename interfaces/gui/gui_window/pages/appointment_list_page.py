@@ -13,8 +13,6 @@
 - её высоту можно изменять с помощью разделителя (QSplitter)
 """
 
-
-
 import os
 import datetime
 
@@ -57,7 +55,7 @@ from PySide6.QtCore import (
     # QModelIndex, 
     # Slot, 
     # QSortFilterProxyModel, 
-    QSize,
+    # QSize,
     Signal
 )
 
@@ -615,10 +613,11 @@ class RightPanelMixin:
         pass
 
 class AppointmentListPage(
-    DraftMixin,
-    DynamicDetailListPage,
-    PatientInfoMixin,
-    RightPanelMixin
+    DraftMixin,               # черновики заметок и фото
+    DynamicDetailListPage,    # страница списка с правой панелью деталей
+    PatientInfoMixin,         # панель информации о пациенте (сверху)
+    RightPanelMixin,          # правая панель (заметка + фото)
+
 
 ):
     """

@@ -2959,9 +2959,9 @@ class DynamicListPage(
 
         self._ensure_checkbox_header_menu() # добавляем пункты в контекстное меню
 
-        self._reapply_delegates() # переустанавливаем делегаты
+        self._reapply_delegates() # переустанавливаем делегаты (Автоопределение типа столбца при появлении доп столбцов)
         
-        # self._update_text_popup_delegates_readonly() # Обновляем readonly у всех TextPopupDelegate
+        self._update_text_popup_delegates_readonly() # Обновляем readonly у всех TextPopupDelegate
 
         if not self.edit_mode:
             self._clear_checkboxes() # снимаем все чекбоксы

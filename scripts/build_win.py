@@ -10,14 +10,25 @@ import shutil
 from pathlib import Path
 
 def main():
+    # Корень проекта (на два уровня выше этого скрипта)
     root_dir = Path(__file__).parent.parent.resolve()
     os.chdir(root_dir)
     print(f"Working directory: {os.getcwd()}")
 
+    # 1. Проверяем наличие PyInstaller
     if not shutil.which('pyinstaller'):
         print("Error: PyInstaller not installed. Run: pip install pyinstaller")
         sys.exit(1)
 
+    # 2. Проверяем, что входной скрипт существует
+    entry_point = root_dir / "main_gui_window.py"
+    if not entry_point.exists():
+        print(f"Error: Entry script not found at {entry_point}")
+        sys.exit(1)
+    print(f"Entry script: {entry_point}")
+
+    # 3. Формируем команду PyInstaller
+    #    Важно: все опции должны идти ДО указания scriptname
     separator = ';' if sys.platform == 'win32' else ':'
 
     cmd = [
@@ -31,50 +42,22 @@ def main():
 
     # --- Полный список скрытых импортов ---
     hidden = [
-        # logging handlers
         'logging', 'logging.handlers', 'logging.config',
-        # sqlalchemy
-        'sqlalchemy.sql.default',
-        'sqlalchemy.dialects.sqlite',
-        'sqlalchemy.dialects.postgresql',
-        'sqlalchemy.dialects.mysql',
-        'sqlalchemy.dialects.oracle',
-        'sqlalchemy.dialects.mssql',
-        # cryptography
-        'cryptography',
-        'cryptography.hazmat.backends.openssl',
-        'cryptography.hazmat.primitives',
-        # pydantic
-        'pydantic',
-        'pydantic_core',
-        'pydantic.networks',
-        'pydantic.types',
-        # yadisk
+        'sqlalchemy.sql.default', 'sqlalchemy.dialects.sqlite',
+        'cryptography', 'cryptography.hazmat.backends.openssl',
+        'pydantic', 'pydantic_core',
         'yadisk',
-        # dotenv
-        'dotenv',
-        # requests
-        'requests',
-        'requests.packages',
-        # msgpack
+        'dotenv', 'requests',
         'msgpack',
-        # click
         'click',
-        # alembic (если используется)
-        'alembic',
-        'alembic.operations',
-        # Наши внутренние модули (на всякий случай)
-        'app.utils.logger.base_logger',
+        # Ваши внутренние модули (на всякий случай)
         'app.utils.logger.logger',
         'app.config.config_manager.manager',
         'app.database.database',
-        'app.services.services_all',
-        'app.services.sync_service',
-        'interfaces.cli.cli',
         'interfaces.gui.gui_window.main',
     ]
-    for h in hidden:
-        cmd.extend(['--hidden-import', h])
+    for module in hidden:
+        cmd.extend(['--hidden-import', module])
 
     # Собираем все компоненты PySide6
     cmd.extend(['--collect-all', 'PySide6'])
@@ -84,28 +67,36 @@ def main():
     if version_file.exists():
         cmd.extend(['--add-data', f'VERSION{separator}.'])
 
-    print("Starting PyInstaller...")
+    # Добавляем опцию --debug для получения подробного лога
+    # cmd.append('--debug')  # Раскомментируйте для детальной отладки
+
+    # 4. В самом конце КОМАНДЫ указываем входной скрипт
+    cmd.append(str(entry_point))
+
+    print("Starting PyInstaller with command:")
+    print(' '.join(cmd))
+    print("-" * 50)
+
+    # 5. Запускаем процесс с выводом в реальном времени
     result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
+
+    # 6. Выводим stdout и stderr
+    if result.stdout:
+        print(result.stdout)
     if result.stderr:
         print("STDERR:", result.stderr)
+
+    # 7. Проверяем успешность
     if result.returncode != 0:
         print(f"PyInstaller failed with code {result.returncode}")
         sys.exit(result.returncode)
 
+    # 8. Проверяем результат
     exe_path = root_dir / 'dist' / 'MedicalApp.exe'
     if exe_path.exists():
         print(f"Done! Executable file: {exe_path}")
     else:
         print(f"ERROR: Executable file not found at {exe_path}")
-        # Выведем содержимое dist для отладки
-        dist_dir = root_dir / 'dist'
-        if dist_dir.exists():
-            print(f"Contents of {dist_dir}:")
-            for f in dist_dir.iterdir():
-                print(f"  {f.name}")
-        else:
-            print("dist directory does not exist")
         sys.exit(1)
 
 if __name__ == '__main__':

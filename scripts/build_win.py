@@ -10,12 +10,10 @@ import shutil
 from pathlib import Path
 
 def main():
-    # Корень проекта (на два уровня выше этого скрипта)
     root_dir = Path(__file__).parent.parent.resolve()
     os.chdir(root_dir)
     print(f"Working directory: {os.getcwd()}")
 
-    # Проверяем наличие PyInstaller
     if not shutil.which('pyinstaller'):
         print("Error: PyInstaller not installed. Run: pip install pyinstaller")
         sys.exit(1)
@@ -29,42 +27,78 @@ def main():
         '--name', 'MedicalApp',
         '--add-data', f'app{separator}app',
         '--add-data', f'interfaces{separator}interfaces',
-        '--hidden-import', 'sqlalchemy.sql.default',
-        '--hidden-import', 'sqlalchemy.dialects.sqlite',
-        '--hidden-import', 'yadisk',
-        '--hidden-import', 'cryptography',
-        '--hidden-import', 'pydantic',
-        '--hidden-import', 'msgpack',
-        '--hidden-import', 'dotenv',
-        '--collect-all', 'PySide6',
-        'main_gui_window.py'
     ]
 
+    # --- Полный список скрытых импортов ---
+    hidden = [
+        # logging handlers
+        'logging', 'logging.handlers', 'logging.config',
+        # sqlalchemy
+        'sqlalchemy.sql.default',
+        'sqlalchemy.dialects.sqlite',
+        'sqlalchemy.dialects.postgresql',
+        'sqlalchemy.dialects.mysql',
+        'sqlalchemy.dialects.oracle',
+        'sqlalchemy.dialects.mssql',
+        # cryptography
+        'cryptography',
+        'cryptography.hazmat.backends.openssl',
+        'cryptography.hazmat.primitives',
+        # pydantic
+        'pydantic',
+        'pydantic_core',
+        'pydantic.networks',
+        'pydantic.types',
+        # yadisk
+        'yadisk',
+        # dotenv
+        'dotenv',
+        # requests
+        'requests',
+        'requests.packages',
+        # msgpack
+        'msgpack',
+        # click
+        'click',
+        # alembic (если используется)
+        'alembic',
+        'alembic.operations',
+        # Наши внутренние модули (на всякий случай)
+        'app.utils.logger.base_logger',
+        'app.utils.logger.logger',
+        'app.config.config_manager.manager',
+        'app.database.database',
+        'app.services.services_all',
+        'app.services.sync_service',
+        'interfaces.cli.cli',
+        'interfaces.gui.gui_window.main',
+    ]
+    for h in hidden:
+        cmd.extend(['--hidden-import', h])
+
+    # Собираем все компоненты PySide6
+    cmd.extend(['--collect-all', 'PySide6'])
+
+    # Добавляем файл VERSION, если существует
     version_file = root_dir / 'VERSION'
     if version_file.exists():
         cmd.extend(['--add-data', f'VERSION{separator}.'])
 
     print("Starting PyInstaller...")
-    print(f"Command: {' '.join(cmd)}")
-
-    # Запускаем PyInstaller с захватом вывода
     result = subprocess.run(cmd, capture_output=True, text=True)
-    print("STDOUT:")
     print(result.stdout)
-    print("STDERR:")
-    print(result.stderr)
-
+    if result.stderr:
+        print("STDERR:", result.stderr)
     if result.returncode != 0:
         print(f"PyInstaller failed with code {result.returncode}")
         sys.exit(result.returncode)
 
-    # Проверяем, создался ли файл
     exe_path = root_dir / 'dist' / 'MedicalApp.exe'
     if exe_path.exists():
         print(f"Done! Executable file: {exe_path}")
     else:
         print(f"ERROR: Executable file not found at {exe_path}")
-        # Выводим содержимое папки dist, если она существует
+        # Выведем содержимое dist для отладки
         dist_dir = root_dir / 'dist'
         if dist_dir.exists():
             print(f"Contents of {dist_dir}:")

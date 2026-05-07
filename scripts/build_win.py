@@ -16,7 +16,7 @@ def main():
 
     # Проверяем наличие PyInstaller
     if not shutil.which('pyinstaller'):
-        print("Ошибка: PyInstaller не установлен. Выполните: pip install pyinstaller")
+        print("Error: PyInstaller not installed. Run: pip install pyinstaller")
         sys.exit(1)
 
     separator = ';' if sys.platform == 'win32' else ':'
@@ -44,9 +44,8 @@ def main():
     if version_file.exists():
         cmd.extend(['--add-data', f'VERSION{separator}.'])
 
-    print("Запуск PyInstaller...")
-    subprocess.run(cmd, check=True)
-    print(f"Готово! Исполняемый файл: {root_dir / 'dist' / 'MedicalApp.exe'}")
+    print("Starting PyInstaller...")
+    print(f"Done! Executable file: {root_dir / 'dist' / 'MedicalApp.exe'}")
 
 if __name__ == '__main__':
     main()

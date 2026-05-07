@@ -1,1 +1,0 @@
-pip freeze | grep -v "project_med" | grep -v "pytest" | grep -v "coverage" | grep -v "pluggy" | grep -v "iniconfig" | grep -v "packaging" | grep -v "Pygments" > requirements.txt

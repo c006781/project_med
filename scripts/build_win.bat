@@ -1,5 +1,5 @@
 @echo off
+cd /d %~dp0\..
 call venv_project_med\Scripts\activate.bat
-pip install pyinstaller
-python build_exe.py
+python scripts\build_win.py
 pause

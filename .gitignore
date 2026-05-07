@@ -26,5 +26,20 @@ __pycache__/*
 *.db
 
 *.log
+*.log.*
 
 *.msgpack
+
+photos/
+photos*/
+
+ййй.txt
+
+
+dist/
+build/
+*.spec
+MedicalApp-linux/
+MedicalApp-linux.tar.gz
+MedicalApp-windows/
+venv_project_med/

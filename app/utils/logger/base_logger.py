@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+# app/utils/logger/base_logger.py
 
 """
 Базовый модуль логирования.
@@ -271,6 +270,7 @@ class BaseAppLogger:
         with cls._watchdog_started_lock:
             if cls._watchdog_started:
                 return
+            
             cls._watchdog_started = True
 
         def watch():
@@ -704,8 +704,10 @@ class BaseAppLogger:
             else:
                 return getattr(self._depth_local, 'depth', 0)
         
-        except (RuntimeError, LookupError):
+        except (RuntimeError, LookupError) as e:
+            err = e
             # Если не задан, используем threading.local (синхронный поток)
+            # Нет запущенного event loop – синхронный контекст
             return getattr(self._depth_local, 'depth', 0)
 
     def _set_current_depth(self, depth: int) -> None:
@@ -1087,8 +1089,8 @@ class BaseAppLogger:
             fun: Callable=None
         )-> Any:
 
-        if key == 'LEVEL':
-            0==0
+        # if key == 'LEVEL':
+        #     0==0
 
         temp = self._get_config(
             config= config, 
@@ -1118,11 +1120,12 @@ class BaseAppLogger:
         effective_file = self.effective_enable_file_logging(_visited=None)
         effective_name = self.effective_use_name_in_filename(_visited=None)
 
-        if self.name in (
-            'Database',
-            'DynamicTableModel',
-        ):
-            0==0
+        # if self.name in (
+        #     'Database',
+        #     'DynamicTableModel',
+        # ):
+        #     0==0
+
         # Общие флаги (если есть специфичные для имени)
         result = {}
         
@@ -1150,9 +1153,10 @@ class BaseAppLogger:
             ['MAX_BYTES', 10*1024*1024, int],
             ['BACKUP_COUNT', 5, int],
             ['show_call_depth', False, self._to_bool],
-        ]:  
-            if key == 'LEVEL':
-                0==0
+            # ['show_call_depth', True, self._to_bool],
+        ]:
+            # if key == 'LEVEL':
+            #     0==0
             
             # result[key] = self._get_config_param(
             #     config= config, 
@@ -1737,6 +1741,7 @@ class BaseAppLogger:
         if log_dir and not os.path.exists(log_dir): # Если директория не существует
             try:
                 os.makedirs(log_dir, exist_ok=True)
+
             except OSError as e:
                 raise RuntimeError(f"Не удалось создать директорию для логов {log_dir}: {e}") from e
 
@@ -2523,8 +2528,8 @@ class BaseAppLogger:
         Возвращает значение параметра из конфига с учётом префиксов.
         Приоритет: {self.name}_{key} -> LOG_{key} -> key -> default
         """
-        if key == 'LEVEL':
-            0==0
+        # if key == 'LEVEL':
+        #     0==0
 
         if if_lower:
             list_key = list(config.keys())
@@ -3043,7 +3048,7 @@ class BaseAppLogger:
         cls, 
         name, 
         share_file_with,
-        sync_full_state:bool=False, 
+        sync_full_state: bool = False,
     ):
         with cls._instances_lock:
             # экземпляр с таким именем уже существует - возвращается существующий
@@ -3069,7 +3074,7 @@ class BaseAppLogger:
         enable_file_logging: Union[str,bool] = False,
         use_name_in_filename: Union[str,bool] = False,
         share_file_with: Optional[str] = None,
-        show_call_depth: bool = False,
+        show_call_depth: bool = False, # показывать уровень вложенности
         sync_full_state: bool = False,
         auto_share: bool = False, # Пока не используется
     ) -> 'BaseAppLogger':
@@ -3140,25 +3145,53 @@ class BaseAppLogger:
             )
 
             # После создания – если нужен шаринг, применяем
+            # if share_file_with:
+            #     other = cls._instances.get(share_file_with)
+            #     # if other and other.file_handler:
+            #     if other and other._file_enabled and other.file_handler:
+            #         instance.share_file_handler_with(
+            #             other,
+            #             sync_full_state=sync_full_state,
+            #         )
+            #         # # Немедленно перезагружаем настройки с учётом нового мастера
+            #         # instance.reload_from_config(
+            #         #     instance.get_default_config()
+            #         # )
+            #     else:
+            #         # Логгируем предупреждение, но продолжаем
+            #         print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}' для логгера '{name}'.", file=sys.stderr)
+            #         # if instance.logger:
+            #         #     instance.logger.info(
+            #         #         f"Файловый обработчик не общий с '{share_file_with}': у мастера он отключён. Будет использоваться собственный."
+            #         #     )
+
             if share_file_with:
                 other = cls._instances.get(share_file_with)
-                # if other and other.file_handler:
-                if other and other._file_enabled and other.file_handler:
-                    instance.share_file_handler_with(
-                        other,
-                        sync_full_state=sync_full_state,
-                    )
-                    # # Немедленно перезагружаем настройки с учётом нового мастера
-                    # instance.reload_from_config(
-                    #     instance.get_default_config()
-                    # )
+                if other:
+                    # Проверяем, должен ли у other быть файловый обработчик
+                    # (учитываем эффективное состояние файлового логирования)
+                    if other.effective_enable_file_logging(_visited=None):
+                        # Файловое логирование включено, но обработчик отсутствует – это ошибка
+                        if other.file_handler is None:
+                            print(f"WARNING: У логгера '{share_file_with}' включено файловое логирование, "
+                                  f"но обработчик отсутствует. Расшаривание для '{name}' невозможно.",
+                                  file=sys.stderr)
+                        else:
+                            instance.share_file_handler_with(
+                                other,
+                                sync_full_state=sync_full_state,
+                            )
+                    else:
+                        # У other файловое логирование отключено – ничего не делаем, предупреждение не нужно
+                        pass
                 else:
-                    # Логгируем предупреждение, но продолжаем
-                    print(f"WARNING: Не удалось расшарить файловый обработчик с '{share_file_with}' для логгера '{name}'.", file=sys.stderr)
-                    # if instance.logger:
-                    #     instance.logger.info(
-                    #         f"Файловый обработчик не общий с '{share_file_with}': у мастера он отключён. Будет использоваться собственный."
-                    #     )
+                    # Логгер с именем share_file_with не существует
+                    print(
+                        f"WARNING: Логгер '{share_file_with}', с которым требуется расшарить обработчик, не найден.",
+                        file=sys.stderr
+                    )
+
+
             return instance
 
     @staticmethod
@@ -3808,6 +3841,10 @@ class BaseAppLogger:
 
                     logger_instance.logger.log(level, formatted)
 
+                    # if 'PhotoUploaderWidget.set_existing_photos' in formatted:
+                    #     0==0
+                    # 0==0
+
                 # Создаём синхронную обёртку
                 @wraps(func)
                 def sync_wrapper(*args, **kwargs):
@@ -3822,7 +3859,9 @@ class BaseAppLogger:
                             result = func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise e
+                            raise err
+                            # 0==0
+                        
                             # func_qualname
                         return result
 
@@ -3843,11 +3882,17 @@ class BaseAppLogger:
                             # raise
                         finally:
                             execution_time = time.time() - start_time
+
                             log_end(execution_time, error, result)
 
                         if error:
                             raise error
-                            
+
+                        # if execution_time > 17:
+                        # if execution_time > 17.2:
+                        # if execution_time > 15.2:
+                        #     0 == 0
+
                         return result
                     
                     finally:
@@ -3868,7 +3913,8 @@ class BaseAppLogger:
                             result = await func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise e
+                            raise err
+                            # 0==0
                             # func_qualname
                         return result
 
@@ -3891,12 +3937,14 @@ class BaseAppLogger:
                             # raise
                         finally:
                             execution_time = time.time() - start_time
+
                             log_end(execution_time, error, result)
 
                         if error:
                             raise error
                         
                         return result
+                    
                     finally:
                         if _show_depth:
                             logger_instance._decrease_depth()

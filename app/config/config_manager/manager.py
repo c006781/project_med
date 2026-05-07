@@ -1,4 +1,5 @@
 # app/controllers/config_manager/manager.py
+
 """
 Модуль управления конфигурацией приложения с использованием MessagePack.
 
@@ -31,6 +32,8 @@ from app.config.conf.get_config import get_config_env as _old_get_config_env
 
 import msgpack # pip install msgpack
 
+# from cryptography.fernet import Fernet # pip install cryptography
+
 
 
 class BaseConfigManager:
@@ -45,12 +48,38 @@ class BaseConfigManager:
 
     _config_path = 'config.msgpack'
     _defaults = {}
-    
+
+    _listeners = []   # список callable-функций
+
+    @classmethod
+    def add_change_listener(cls, callback):
+        """Добавляет слушатель, вызываемый при сохранении конфигурации."""
+        if callback not in cls._listeners:
+            cls._listeners.append(callback)
+
+    @classmethod
+    def remove_change_listener(cls, callback):
+        """Удаляет слушатель."""
+        if callback in cls._listeners:
+            cls._listeners.remove(callback)
+
+    @classmethod
+    def _notify_change(cls):
+        """Оповещает всех зарегистрированных слушателей об изменении конфига."""
+        for cb in cls._listeners:
+            try:
+                cb()
+            except Exception as e:
+                # Логируем ошибку, но не прерываем цепочку
+                print(f"Ошибка в слушателе конфигурации: {e}")
+
+                
     def __init__(
         self, 
         config_path: str = None, 
         defaults: Dict[str, Any] = None,
         # logger:logging = None,
+        encrypt: bool = True, # по умолчанию включено шифрование
     ):
         """
         Инициализирует менеджер.
@@ -61,19 +90,17 @@ class BaseConfigManager:
         self._config_path = config_path or self._config_path
         self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
         self._config = self._defaults.copy()  # начинаем с умолчаний
+
+        # # Определяем, нужно ли шифрование
+        # self._encrypt_enabled = encrypt
+
+        # # Инициализируем шифратор
+        # self._cipher = None
+        # if self._encrypt_enabled:
+        #     self._setup_cipher()
+
         self._load()  # загружаем из файла, если он существует
-         # Логирование, если доступно
-        
-        # if not logger:
-        #     logger = logging.Logger(f"{self.__class__.__name__}_{self._config_path}")
-        #     if 'app.utils.logger.logger' not in sys.modules:
-        #         from app.utils.logger.logger import AppLogger
-        #     else:
-        #         AppLogger = sys.modules['project_med.app.utils.logger.logger'].AppLogger
-        #     logger = AppLogger.get_instance(name=f"{self.__class__.__name__}_{self._config_path}")
-
-        # self.logger = logger 
-
+    
     def _load(self) -> None:
         """
         Загружает конфигурацию из файла и обновляет кеш (_config).
@@ -111,9 +138,13 @@ class BaseConfigManager:
         dirname = os.path.dirname(self._config_path)
         if dirname:  # только если есть директория
             os.makedirs(dirname, exist_ok=True)
+
         # Сохраняем в бинарном режиме
         with open(self._config_path, 'wb') as f:
             msgpack.pack(self._config, f)
+        
+        # Уведомляем всех подписчиков
+        self.__class__._notify_change()
 
     def load(self) -> Dict[str, Any]:
         """
@@ -164,8 +195,24 @@ class AppConfigManager(BaseConfigManager):
     Менеджер конфигурации для конкретного приложения.
     Определяет набор настроек по умолчанию, которые берутся из текущей
     конфигурации .env (старый способ), но могут быть переопределены в файле.
+
+    Атрибуты класса:
+        _config_path (str): Путь к файлу конфигурации (по умолчанию 'config.msgpack').
+        _defaults (dict): Словарь со значениями по умолчанию (логирование, пути, токен и т.д.).
+        _instances (dict): Хранилище экземпляров для паттерна Multiton.
+
+    Методы:
+        get_instance(force_new=False, config_path=None, create_if_missing=False) -> AppConfigManager
+        get(key, default=None) -> Any
+        set(key, value) -> None
+        save() -> None
+        load() -> Dict[str, Any]
+        reset_to_defaults() -> None
+        add_change_listener(callback) -> None
     """
+
     _config_path = 'config.msgpack'
+
     # _defaults = {}
     # Значения по умолчанию (копия того, что сейчас возвращает get_config_env)
     # _defaults = {
@@ -195,8 +242,6 @@ class AppConfigManager(BaseConfigManager):
     #     # 'APP_CONFIG_PATH': 'config.msgpack',  # путь по умолчанию для файла конфигурации
     #     'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
     # }
-
-    # app/config/config_manager/manager.py
 
     _defaults = {
         'YANDEX_TOKEN': '----',
@@ -245,6 +290,9 @@ class AppConfigManager(BaseConfigManager):
         # Остальные настройки
         'PHOTOS_STORAGE_PATH': os.path.join('.', 'photos'),
         'APP_CONFIG_PATH': 'config.msgpack', # путь по умолчанию для файла конфигурации
+
+        # 'show_call_depth': 'True',  # или False, но с возможностью переключения
+        'show_call_depth': 'False',  # или False, но с возможностью переключения
     }
 
     # Хранилище для экземпляров (Multiton)
@@ -267,11 +315,21 @@ class AppConfigManager(BaseConfigManager):
         """
         Возвращает экземпляр менеджера конфигурации (паттерн Multiton).
 
-        :param force_new: если True, создаёт новый экземпляр даже если уже есть.
-        :param config_path: путь к файлу конфигурации. Если не указан,
-                            берётся из старой функции get_config_env() по ключу 'APP_CONFIG_PATH'.
-        :return: экземпляр AppConfigManager.
+        Параметры:
+            force_new (bool): Если True, создаёт новый экземпляр даже если уже есть.
+            config_path (Optional[str]): Путь к файлу конфигурации. Если не указан,
+                берётся из старой функции get_config_env() по ключу 'APP_CONFIG_PATH'.
+            create_if_missing (bool): Если True и файл конфигурации не существует,
+                создаёт его со значениями по умолчанию.
+
+        Возвращает:
+            AppConfigManager: Экземпляр менеджера.
+
+        Пример:
+            >>> manager = AppConfigManager.get_instance()
+            >>> token = manager.get('YANDEX_TOKEN')
         """
+
         if config_path is None:
             # Получаем путь из старой конфигурации (там он уже должен быть)
             config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
@@ -289,10 +347,10 @@ class AppConfigManager(BaseConfigManager):
 
         return instance
 
-
 # ----------------------------------------------------------------------
 # Функция для обратной совместимости со старым кодом
 # ----------------------------------------------------------------------
+
 def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Возвращает словарь с текущей конфигурацией, используя новый менеджер.
@@ -311,7 +369,9 @@ def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     return manager.get_all()
 
 if __name__ == '__main__':
+
     global env_key
     env_key = get_config_env()
-    0==0
+
+    # 0==0
     pass

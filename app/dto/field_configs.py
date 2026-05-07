@@ -1,13 +1,35 @@
 # app/dto/field_configs.py
+
 """
 Общая конфигурация полей для форм и таблиц.
+
 Содержит словари для каждой сущности, описывающие отображение, редактируемость,
 виджеты, источники данных для выпадающих списков и т.д.
+
+Структура словаря (каждый ключ – имя поля, значение – словарь с параметрами):
+    - title (str): Заголовок поля в форме или таблице.
+    - editable (bool): Можно ли редактировать поле.
+    - hidden (bool): Скрыть поле в форме (но виджет остаётся).
+    - order (int): Порядок колонки в таблице (сортировка).
+    - required (bool): Обязательное поле (пока не используется).
+    - widget_type (str): Тип виджета: 'date', 'time', 'textarea', 'completer', 'photo_uploader'.
+    - virtual (bool): Виртуальное поле, не хранится в БД.
+    - compute (dict): Настройка вычисления виртуального поля (функция, аргументы).
+    - init_from_extra (str/True): Ключ в extra_data, из которого нужно взять значение при переходе.
+    - choices (list): Список строк для выпадающего списка.
+    - choices_provider (str): Имя провайдера для автодополнения (например, 'note_service.get_choices').
+    - autocomplete (bool): Включает автодополнение в таблице и форме (для QLineEdit).
+
+Пример:
+    >>> from app.dto.field_configs import PATIENT_CONFIG
+    >>> PATIENT_CONFIG['first_name']['title']
+    'Имя'
 """
+
 
 from typing import Dict, Any
 
-from app.dto.compute_fields import get_patient_full_name
+# from app.dto.compute_fields import get_patient_full_name
 
 
 
@@ -34,122 +56,225 @@ from app.dto.compute_fields import get_patient_full_name
 
 
 # --- Пациенты ---
+# Словарь, описывающий все поля для сущности "Пациент".
 PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
+    # Поле "id" – первичный ключ.
     'id': {
-        'title'         : 'ID',     # заголовок колонки
-        'editable'      : False,    # не редактируемый
-        'hidden'        : True,     # скрываем ли его объект
-        'order'         : 0,        # сортировка
+        'title': 'ID',               # Заголовок, который будет отображаться в таблице и форме.
+        'editable': False,           # Поле нельзя редактировать (только для чтения).
+        'hidden': True,              # Поле скрыто в формах (но может использоваться внутри).
+        'order': 0,                  # Номер для сортировки колонок в таблице (чем меньше, тем левее).
     },
-    'first_name': {
-        'title'         : 'Имя',    # заголовок колонки
-        'editable'      : True,     # редактируемый ли
-        'autocomplete'  : True,         # включает автодополнение в таблице и форме
-        'order'         : 1,        # сортировка
-        'required'      : True,     # обязательное поле для заполнения ли
-    },
+    # Поле "last_name" – фамилия пациента.
     'last_name': {
-        'title'         : 'Фамилия',    # заголовок колонки
-        'editable'      : True,         # редактируемый ли
-        'autocomplete'  : True,         # включает автодополнение в таблице и форме
-        'order'         : 2,            # сортировка
-        'required'      : True,         # обязательное поле для заполнения ли
+        'title': 'Фамилия',          # Отображаемый заголовок.
+        'editable': True,            # Поле доступно для редактирования пользователем.
+        'order': 1,                  # Сортировка: будет вторым столбцом после ID (если ID видим).
+        'required': True,            # Поле обязательно для заполнения (валидация на стороне сервиса).
+        'autocomplete': True,        # Включает автодополнение в таблице и форме (источник – уникальные значения столбца).
     },
+    # Поле "first_name" – имя пациента.
+    'first_name': {
+        'title': 'Имя',              # Заголовок.
+        'editable': True,            # Редактируемое.
+        'order': 2,                  # Порядковый номер колонки.
+        'required': True,            # Обязательное поле.
+        'autocomplete': True,        # Автодополнение.
+    },
+    # Поле "middle_name" – отчество пациента.
+    'middle_name': {
+        'title': 'Отчество',         # Заголовок.
+        'editable': True,            # Редактируемое.
+        'order': 3,                  # Порядковый номер колонки.
+        'autocomplete': True,        # Автодополнение.
+    },
+    # Поле "birth_date" – дата рождения.
     'birth_date': {
-        'title'         : 'Дата рождения',  # заголовок колонки
-        'editable'      : True,             # редактируемый ли
-        'widget_type'   : 'date',           # виджет (указатель на тип виджета)
-        'order'         : 3,                # сортировка
+        'title': 'Дата рождения',    # Заголовок.
+        'editable': True,            # Редактируемое.
+        'widget_type': 'date',       # Тип виджета – календарь (QDateEdit).
+        'order': 4,                  # Порядковый номер колонки.
     },
+    # Поле "phone" – номер телефона.
     'phone': {
-        'title'         : 'Телефон',    # заголовок колонки
-        'editable'      : True,         # редактируемый ли
-        'order'         : 4,            # сортировка
+        'title': 'Телефон',          # Заголовок.
+        'editable': True,            # Редактируемое.
+        'order': 5,                  # Порядковый номер колонки.
     },
-    'email': {
-        'title'         : 'Email',  # заголовок колонки
-        'editable'      : True,     # редактируемый ли
-        'order'         : 5,        # сортировка
+    'description_id': {
+    'title': 'ID описания',
+    'hidden': True,
+    },
+    'comment_id': {
+        'title': 'ID комментария',
+        'hidden': True,
+    },
+
+    # Виртуальное поле "description" – описание пациента.
+    # Не хранится в БД как отдельный столбец; значение берётся из связанной заметки.
+    'description': {
+        'title': 'Описание',                     # Заголовок.
+        'editable': True,                        # Редактируемое.
+        'virtual': True,                         # Помечаем как виртуальное (не сохраняется напрямую).
+        'widget_type': 'textarea',               # Многострочный текстовый редактор.
+        'order': 6,                              # Порядковый номер колонки.
+        'source_attr': 'description_note',       # Имя атрибута в ORM-объекте, по которому можно получить связанную заметку.
+        'compute': {                             # Настройка вычисления значения виртуального поля.
+            'func': lambda note: note.text if note else None,  # Функция: берёт текст из заметки.
+            'args': ['description_note'],        # Аргументы функции: имя атрибута, который будет передан в функцию.
+        },
+    },
+    # Виртуальное поле "comment" – комментарий к пациенту.
+    'comment': {
+        'title': 'Комментарий',                  # Заголовок.
+        'editable': True,                        # Редактируемое.
+        'virtual': True,                         # Виртуальное.
+        'widget_type': 'textarea',               # Многострочное поле.
+        'order': 7,                              # Порядковый номер.
+        'source_attr': 'comment_note',           # Атрибут ORM, ссылающийся на заметку.
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['comment_note'],
+        },
     },
 }
 
 # --- Приёмы ---
+# Словарь для сущности "Приём".
 APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
+    # Поле "id" – первичный ключ приёма.
     'id': {
-        'title'             : 'ID',     # заголовок колонки
-        'editable'          : False,    # редактируемый ли
-        'hidden'            : True,     # скрываем ли его объект
+        'title': 'ID',               # Заголовок.
+        'editable': False,           # Не редактируется.
+        'hidden': True,              # Скрыто в формах.
     },
     'patient_id': {
-        'title'             : 'ID пациента',    # заголовок колонки
-        'editable'          : False,            # редактируемый ли
-        'hidden'            : True,             # скрываем ли его объект
-        'init_from_extra'   : 'patient_id',     # ключ в extra_data # указывает, что при входе на страницу редактирования (в методе _init_from_extra) значение для этого поля должно быть автоматически взято из словаря extra_data и установлено в соответствующий виджет формы.
+        'title': 'ID пациента',
+        'editable': False,      # запрещаем редактирование
+        # 'hidden': True,       # можно также скрыть поле, если не нужно показывать ID
     },
-    'patient_name': {
-        'title'             : 'Пациент',    # заголовок колонки
-        'editable'          : False,        # редактируемый ли
-        'virtual'           : True,         # виртуальное ли поле
-        'source'            : 'patient.full_name',   # как получить из связанного объекта
-        'source_attr'       : 'patient',    # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
-        'compute'           : {             # как вычислить
-            # оставить так, что бы в редакторе появлялось...
-            # 'func'      : get_patient_full_name, # функция вычисления
-            # 'args'      : ['patient_id',],   # имена аргументов, которые нужно передать в функцию
-            'func'      : lambda patient: f"{patient.last_name} {patient.first_name}" if patient else "", # функция вычисления
-            'args'      : ['patient',],   # имена аргументов, которые нужно передать в функцию
-        }
+    'reason_id': {
+        'title': 'ID причины',
+        'hidden': True,
     },
-    'date': {
-        'title'             : 'Дата',   # заголовок колонки
-        'editable'          : True,     # редактируемый ли
-        'widget_type'       : 'date',   # виджет (указатель на тип виджета)
+    'procedure_id': {
+        'title': 'ID процедуры',
+        'hidden': True,
     },
-    'time': {
-        'title'             : 'Время',  # заголовок колонки
-        'editable'          : True,     # редактируемый ли
-        'widget_type'       : 'time',   # виджет (указатель на тип виджета)
-    },
-    'note_text': {
-        'title'             : 'Заметка',    # заголовок колонки
-        'editable'          : True,         # редактируемый ли
-        'virtual'           : True,         # виртуальное ли поле
-        'source_attr'       : 'note',       # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
-        # 'widget_type'       : 'completer_with_edit', # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
-        'widget_type'       : 'textarea',   # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
-        'choices_provider'  : 'note_service.get_choices', # как получить список строк
-        'compute': {
-            'func'  : lambda note: note.text if note else None,  # функция вычисления
-            'args'  : ['note'],  # имена аргументов, которые нужно передать в функцию
-        },
+    'recommendations_id': {
+        'title': 'ID рекомендаций',
+        'hidden': True,
     },
     'note_id': {
-        'title'         : 'ID заметки', # заголовок колонки
-        'editable'      : False,        # редактируемый ли
-        'hidden'        : True,         # скрываем ли его объект
+        'title': 'ID примечания',
+        'hidden': True,
     },
+    'cost_procedure_id': {
+        'title': 'ID стоимости процедуры',
+        'hidden': True,
+    },
+
+    # Виртуальное поле "patient_name" – ФИО пациента (вычисляется).
+    'patient_name': {
+        'title': 'Пациент',          # Заголовок.
+        'editable': False,           # Нельзя редактировать, только отображение.
+        'virtual': True,             # Виртуальное.
+        'source_attr': 'patient',    # Атрибут ORM, содержащий объект пациента.
+        'compute': {                 # Вычисление: формирует строку "Фамилия Имя".
+            'func': lambda patient: " ".join([patient.last_name, patient.first_name, patient.middle_name]).strip(),
+            'args': ['patient'],
+        },
+    },
+    # Поле "date" – дата приёма.
+    'date': {
+        'title': 'Дата приёма',      # Заголовок.
+        'editable': True,            # Редактируемое.
+        'widget_type': 'date',       # Виджет выбора даты.
+    },
+    # Виртуальное поле "reason" – причина обращения.
+    'reason_text': {
+        'title': 'Причина обращения',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'textarea',
+        'source_attr': 'reason_note',
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['reason_note'],
+        },
+    },
+    # Виртуальное поле "procedure" – выполненная процедура.
+    'procedure_text': {
+        'title': 'Выполненная процедура',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'textarea',
+        'source_attr': 'procedure_note',
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['procedure_note'],
+        },
+    },
+    # Виртуальное поле "recommendations" – рекомендации.
+    'recommendations_text': {
+        'title': 'Рекомендации',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'textarea',
+        'source_attr': 'recommendations_note',
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['recommendations_note'],
+        },
+    },
+    # Поле "date_next" – дата следующего приёма.
+    'date_next': {
+        'title': 'Дата следующего приёма',
+        'editable': True,
+        'widget_type': 'date',       # Виджет даты.
+    },
+    # Виртуальное поле "note" – примечание (основная заметка).
+    'note_text': {
+        'title': 'Примечание',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'textarea',
+        'source_attr': 'note',       # ORM-связь с заметкой (Appointment.note).
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['note'],
+        },
+    },
+    # Виртуальное поле "cost_procedure" – стоимость процедуры.
+    'cost_procedure_text': {
+        'title': 'Стоимость процедуры',
+        'editable': True,
+        'virtual': True,
+        'widget_type': 'textarea',
+        'source_attr': 'cost_procedure_note',
+        'compute': {
+            'func': lambda note: note.text if note else None,
+            'args': ['cost_procedure_note'],
+        },
+    },
+    # Поле "photos" – список фотографий (не хранится в БД, только ссылка на связанные объекты).
     'photos': {
-        'title'         : 'Фотографии',     # заголовок колонки 
-        'editable'      : True,             # редактируемый ли
-        'virtual'       : True,             # виртуальное ли поле
-        'source_attr'   : 'photos',         # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные      
-        'widget_type'   : 'photo_uploader', # кастомный виджет
-        # 'compute': {
-        #     'func': lambda photos: [PhotoDTO.model_validate(p) for p in photos] if photos else [],
-        #     'args': ['photos'],
-        # }
-        # 'hidden': True, # скрываем ли его объект - True нельзя, так как не будет отображаться в Редакторе приёма
+        'title': 'Фотографии',
+        'editable': True,            # Можно редактировать (добавлять/удалять фото).
+        'virtual': True,             # Виртуальное – обрабатывается специальным виджетом PhotoUploaderWidget.
+        'widget_type': 'photo_uploader',  # Кастомный виджет для работы с фото.
     },
+    # Виртуальное поле "has_photos" – индикатор наличия фото (для отображения в таблице).
     'has_photos': {
-        'title'         : 'Фото',       # заголовок колонки
-        'editable'      : False,        # редактируемый ли
-        'virtual'       : True,         # виртуальное ли поле
-        'source_attr'   : 'photos',     # ключ для extra_data (из DTO) - указывает, из какого атрибута ORM-объекта брать данные
-        'order'         : 0,            # порядок в таблице
-        'compute': {  # как вычислить
-            'func'  : lambda photos: f"{len(photos)} фото" if photos else '❌',  # или 'Да'/'Нет'
-            'args'  : ['photos'],
-        }
+        'title': 'Фото',
+        'editable': False,           # Только для чтения.
+        'virtual': True,
+        'order': 0,                  # Делаем эту колонку самой левой (необязательно).
+        'source_attr': 'photos',     # Атрибут ORM, содержащий список фото.
+        'compute': {                 # Вычисляем: возвращает текст "3 фото" или "❌".
+            'func': lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
+            'args': ['photo_count'], # Аргумент – количество фото (подставляется отдельно).
+        },
     },
 }
 

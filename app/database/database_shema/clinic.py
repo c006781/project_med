@@ -1,7 +1,8 @@
 # app/database/database_shema/clinic.py
+
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 # def _add_package_name(
 #     file_module: str = None,
@@ -104,21 +105,54 @@ from app.config.config_manager.manager import get_config_env
 
 
 
-from datetime import date, datetime, time
+from datetime import (
+    datetime,
+    # date, time
+)
 
 # Сторонние библиотеки
-from sqlalchemy import create_engine, Column, Integer, String, Date, DateTime, ForeignKey, Text, Time
+from sqlalchemy import (
+    create_engine, Column,
+    Integer, String, Date,
+    DateTime, ForeignKey,
+    Text, Time
+)
 # from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy import event, Index, func
+from sqlalchemy.orm import (
+    declarative_base, relationship,
+    # sessionmaker
+)
+from sqlalchemy import (
+    # event,
+    Index, func,
+)
 
 Base = declarative_base()
 
 class Patient(Base):
     """
     Таблица пациентов.
-    Хранит персональные данные пациентов.
+
+    Хранит персональные данные пациента: имя, фамилию, дату рождения,
+    контактную информацию. Связана с приёмами (Appointment) отношением one-to-many.
+
+    Атрибуты:
+        id (int): Первичный ключ, автоинкремент.
+        first_name (str): Имя пациента (обязательное).
+        last_name (str): Фамилия пациента (обязательное).
+        birth_date (date, optional): Дата рождения.
+        phone (str, optional): Номер телефона.
+        email (str, optional): Адрес электронной почты.
+        created_at (datetime): Дата и время создания записи (автоматически).
+        appointments (list[Appointment]): Список связанных приёмов (каскадное удаление).
+
+    Индексы:
+        ix_patient_last_name (last_name) – для ускорения поиска по фамилии.
+
+    Пример:
+        >>> patient = Patient(first_name="Иван", last_name="Петров")
+        >>> session.add(patient)
+        >>> session.commit()
     """
 
     __tablename__ = 'patients'
@@ -133,6 +167,11 @@ class Patient(Base):
         String(50), 
         nullable=False,
         comment='Имя пациента',
+    )
+    middle_name = Column(
+        String(50), 
+        nullable=True, 
+        comment='Отчество пациента'
     )
     last_name = Column(
         String(50), 
@@ -149,19 +188,43 @@ class Patient(Base):
         nullable=True,
         comment='Номер телефона',
     )
-    email = Column(
-        String(100), 
-        nullable=True,
-        comment='Электронная почта',
+    # email = Column(
+    #     String(100), 
+    #     nullable=True,
+    #     comment='Электронная почта',
+    # )
+    description_id = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с описанием пациента'
+    )
+    comment_id = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с комментарием к пациенту'
     )
     # address = Column(String(200), nullable=True)
     created_at = Column(
         DateTime, 
         default=datetime.now,
-        comment='Электронная почта',
+        comment='Дата создания',
     )
 
-    # Отношение к приёмам (каскадное удаление)
+    # Отношения к заметкам
+    description_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[description_id],
+        # back_populates="appointments"
+    )
+    comment_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[comment_id],
+        # back_populates="appointments"
+    )
+
+    # Отношение к приёмам
     appointments = relationship(
         "Appointment", 
         back_populates="patient", 
@@ -178,70 +241,57 @@ class Patient(Base):
     
     def __repr__(self):
         """
-        Возвращает строку-representation объекта Patient в виде "<Patient(id=1, name=Ivan Ivanov)>"
+        Возвращает строковое представление объекта Patient.
+
+        Формат: <Patient(id=1, name=Петров Иван)>
+
+        Возвращает:
+            str: Представление пациента.
         """
 
         try:
-            return f"<Patient(id={self.id}, name={self.last_name} {self.first_name})>"
+            temp = ' '.join([
+                self.last_name,
+                self.first_name,
+                self.middle_name   
+            ]).strip()
+            return f"<Patient(id={self.id}, name={temp})>"
+        
         except Exception as e:
             # tt = str(e)
             AppLogger.get_instance(
-                name='system',
+                name='Patient',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
             ).exception(f'Err: {str(e)}')
             raise e
 
         # return result
-
-class AppointmentNote(Base):
-    """
-    Таблица заметок к приёмам.
-    Заметки могут быть общими для нескольких приёмов.
-    """
-
-    __tablename__ = 'appointments_notes'
-
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True,
-        comment='Уникальный идентификатор заметки',
-    )
-    
-    text = Column( # содержимое заметки (рекомендации, описание)
-        Text, 
-        nullable=False,
-        comment='Текст заметки',
-    )   
-
-    created_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата и время создания заметки',
-    )
-
-    # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
-    appointments = relationship(
-        "Appointment", 
-        back_populates="note"
-    )
-    
-    __table_args__ = (
-        {
-            'comment': 'Таблица заметок приёмов', 
-            'sqlite_autoincrement': True,
-        }
-    )
-
-    def __repr__(self):
-        """
-        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
-        """
-        return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
     
 class Appointment(Base):
     """
     Таблица приёмов.
+
     Связывает пациента с датой, временем и опциональной заметкой.
+    Может содержать несколько фотографий (Photo).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        patient_id (int): Внешний ключ на Patient.id.
+        date (date): Дата приёма (обязательное).
+        time (time, optional): Время приёма.
+        note_id (int, optional): Внешний ключ на AppointmentNote.id.
+        created_at (datetime): Дата создания записи.
+        patient (Patient): ORM-связь с пациентом.
+        note (AppointmentNote): ORM-связь с заметкой.
+        photos (list[Photo]): Список фотографий (каскадное удаление).
+
+    Индексы:
+        ix_appointment_date (date) – для ускорения фильтрации по дате.
+
+    Пример:
+        >>> app = Appointment(patient_id=1, date=date(2025,3,10), time=time(10,30))
+        >>> session.add(app)
     """
 
     __tablename__ = 'appointments'
@@ -268,21 +318,57 @@ class Appointment(Base):
 
     # time = Column(Time, nullable=True, default=time.now)  
     # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
-    time = Column(
-        Time, 
-        nullable=True, 
-        default=func.current_time(),
-        comment='Время приёма',
-    )
+    # time = Column(
+    #     Time, 
+    #     nullable=True, 
+    #     default=func.current_time(),
+    #     comment='Время приёма',
+    # )
     # time = Column(Time, nullable=True, server_default=func.current_time())
 
     # notes = Column(Text, nullable=True)      # заметки / рекомендации
-    note_id = Column(
+    # note_id = Column(
+    #     Integer, 
+    #     ForeignKey('appointments_notes.id'), 
+    #     nullable=True,
+    #     comment='ID заметки (внешний ключ)',
+    # )   # внешний ключ на заметку
+
+    reason_id           = Column(
         Integer, 
         ForeignKey('appointments_notes.id'), 
-        nullable=True,
-        comment='ID заметки (внешний ключ)',
-    )   # внешний ключ на заметку
+        nullable=True, 
+        comment='ID заметки с причиной обращения'
+    )
+    procedure_id        = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с выполненной процедурой'
+    )
+    recommendations_id  = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с рекомендациями'
+    )
+    date_next           = Column(
+        Date, 
+        nullable=True, 
+        comment='Дата следующего приёма'
+    )
+    note_id             = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки с примечанием'
+    )
+    cost_procedure_id   = Column(
+        Integer, 
+        ForeignKey('appointments_notes.id'), 
+        nullable=True, 
+        comment='ID заметки со стоимостью процедуры'
+    )
 
     created_at = Column(
         DateTime, 
@@ -295,12 +381,28 @@ class Appointment(Base):
     patient = relationship(
         "Patient", 
         back_populates="appointments",
-        )
+    )
 
-    # доступ к заметке
+    # Отношения к заметкам
+    reason_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[reason_id]
+    )
+    procedure_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[procedure_id]
+    )
+    recommendations_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[recommendations_id]
+    )
     note = relationship(
         "AppointmentNote", 
-        back_populates="appointments",
+        foreign_keys=[note_id]
+    )
+    cost_procedure_note = relationship(
+        "AppointmentNote", 
+        foreign_keys=[cost_procedure_id]
     )
    
     # Отношение к фотографиям
@@ -312,6 +414,7 @@ class Appointment(Base):
 
     __table_args__ = (
         Index('ix_appointment_date', 'date'),
+        Index('ix_patient_id', 'patient_id'),   # уже есть
         {
             'comment': 'Таблица приёмов', 
             'sqlite_autoincrement': True,
@@ -322,12 +425,43 @@ class Appointment(Base):
         """
         Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
         """
-        return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+        # return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+    
+        try:
+            return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+        
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='Appointment',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
+            ).exception(f'Err: {str(e)}')
+            raise e
+
+
 
 class Photo(Base):
     """
     Таблица фотографий, прикреплённых к приёмам.
-    Файлы хранятся в файловой системе, в таблице хранится путь.
+
+    Файлы изображений хранятся в файловой системе, в таблице сохраняется
+    относительный путь (относительно `PHOTOS_STORAGE_PATH`).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        appointment_id (int): Внешний ключ на Appointment.id (обязательное).
+        file_path (str): Относительный путь к файлу.
+        description (str, optional): Описание фотографии.
+        uploaded_at (datetime): Дата и время загрузки.
+        appointment (Appointment): ORM-связь с приёмом.
+
+    Индексы:
+        ix_photo_appointment (appointment_id) – для быстрого получения фото по приёму.
+
+    Пример:
+        >>> photo = Photo(appointment_id=1, file_path="app_1/1_face.jpg", description="Лицо")
+        >>> session.add(photo)
     """
 
     __tablename__ = 'photos'
@@ -385,6 +519,76 @@ class Photo(Base):
         return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
 
 
+class AppointmentNote(Base):
+    """
+    Таблица заметок к приёмам.
+
+    Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
+    через поле `note_id` в Appointment).
+
+    Атрибуты:
+        id (int): Первичный ключ.
+        text (str): Содержимое заметки (обязательное).
+        created_at (datetime): Дата создания.
+        appointments (list[Appointment]): Список приёмов, использующих эту заметку.
+
+    Пример:
+        >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
+        >>> session.add(note)
+    """
+
+    __tablename__ = 'appointments_notes'
+
+    id = Column(
+        Integer, 
+        primary_key=True , 
+        autoincrement=True,
+        comment='Уникальный идентификатор заметки',
+    )
+    
+    text = Column( # содержимое заметки (рекомендации, описание)
+        Text, 
+        nullable=False,
+        comment='Текст заметки',
+    )   
+
+    created_at = Column(
+        DateTime, 
+        default=datetime.now,
+        comment='Дата и время создания заметки',
+    )
+
+    # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
+    appointments = relationship(
+        "Appointment", 
+        foreign_keys='[Appointment.note_id]', 
+        back_populates="note"
+    )
+    
+    __table_args__ = (
+        {
+            'comment': 'Таблица заметок приёмов', 
+            'sqlite_autoincrement': True,
+        }
+    )
+
+    def __repr__(self):
+        """
+        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
+        """
+
+        try:
+            return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
+    
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='AppointmentNote',
+                enable_file_logging = 'system',
+                use_name_in_filename = False, # 'system',
+            ).exception(f'Err: {str(e)}')
+            raise e
+
 # Функция для инициализации БД и создания тестовых данных
 @AppLogger.get_instance(
     name = 'system',
@@ -392,64 +596,55 @@ class Photo(Base):
     level=AppLogger._parse_log_level('DEBUG')
 )
 def create_db(
-        db_path="clinic.db",
-        recreate=False,
-    ):
+    db_path: str = "clinic.db",
+    recreate=False,
+):
     """
-    Создаёт файл БД (если не существует), таблицы и заполняет тестовыми данными.
+    Создаёт файл базы данных и все таблицы.
 
-    :param db_path: путь к файлу БД
-    :param recreate: если True и файл существует, он будет удалён перед созданием таблиц
+    Параметры:
+        db_path (str): Путь к файлу БД. По умолчанию "clinic.db".
+        recreate (bool): Если True и файл существует, он будет удалён перед созданием таблиц.
+                         По умолчанию False.
+
+    Возвращает:
+        Engine: Движок SQLAlchemy, подключённый к созданной БД.
+
+    Примечание:
+        Если БД уже существует и `recreate=False`, таблицы создаются только при их отсутствии.
+        Для SQLite автоматически устанавливается `check_same_thread=False`.
+
+    Пример:
+        >>> engine = create_db("./data/clinic.db", recreate=False)
+        >>> with engine.connect() as conn:
+        ...     result = conn.execute(text("SELECT * FROM patients"))
     """
+
+    logger = AppLogger.get_instance(
+        name = 'db',
+        # share_file_with = 'user',
+        enable_file_logging = 'user',
+        use_name_in_filename = False, # 'user',
+    )
 
     abs_path = os.path.abspath(db_path)
 
     if recreate and os.path.exists(abs_path):
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Удаление существующего файла БД: {abs_path}"
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Удаление существующего файла БД: {abs_path}")
         os.remove(abs_path)
 
 
     if os.path.exists(abs_path):
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Файл БД {abs_path} уже существует. Таблицы будут созданы, если их нет."
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Файл БД {db_path} уже существует. Таблицы будут созданы, если их нет.")
     else:
 
-        AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-        ).debug(
+        logger.debug(
             f"Создание нового файла БД: {abs_path}"
-            # level = AppLogger._parse_log_level(
-            #     # 'INFO'
-            #     'DEBUG'
-            # )
         )
-        # print(f"Создание нового файла БД: {db_path}")
 
     # Создаём движок (будет использовать SQLite)
     # Движок SQLAlchemy: если файл не существует, он будет создан автоматически
@@ -462,24 +657,11 @@ def create_db(
     )
     # engine = create_engine(f"sqlite:///{abs_path}", echo=False)  # echo=True для отладки SQL
 
-    # Создаём таблицы, если их нет
-    
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine)  # Создаём таблицы, если их нет
 
-    AppLogger.get_instance(
-            name = 'db',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
-    ).debug(
+    logger.debug(
         f"Таблицы успешно созданы (или уже существовали): {abs_path}"
-        # level = AppLogger._parse_log_level(
-        #     # 'INFO'
-        #     'DEBUG'
-        # )
     )
-
-    # print("Таблицы успешно созданы (или уже существовали).")
 
     return engine
 
@@ -492,6 +674,20 @@ def create_db(
 def init_db(
     db_path="clinic.db"
 ):
+    """
+    Полностью инициализирует БД: создаёт таблицы и заполняет тестовыми данными.
+
+    Параметры:
+        db_path (str): Путь к файлу БД.
+
+    Примечание:
+        Вызывает `create_db(recreate=True)` (перезаписывает существующую БД),
+        затем `generate_test_data()`.
+
+    Пример:
+        >>> init_db("test.db")
+        # После выполнения в БД будут созданы таблицы и добавлены тестовые пациенты, приёмы и фото.
+    """
 
     create_db(
         db_path = db_path ,  
@@ -500,11 +696,10 @@ def init_db(
     )
     
     from .temp_data_bd import generate_test_data   # локальный импорт
+
     generate_test_data(
         db_path = db_path    
     )
-
-
 
 if __name__ == "__main__":
     # При запуске этого файла напрямую создаём БД с тестовыми данными

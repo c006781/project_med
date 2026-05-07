@@ -1,11 +1,14 @@
 # interfaces/gui/gui_window/controllers/page_manager.py
+
 """
 Менеджер навигации между страницами.
 Хранит историю посещений (с заголовками), управляет переключением в QStackedWidget,
 испускает сигналы при изменении.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import (
+    Dict, List, Optional, Tuple
+)
 
 from app.utils.logger.logger import AppLogger
 
@@ -19,10 +22,33 @@ from PySide6.QtWidgets import QStackedWidget
 
 class PageManager(QObject):
     """
-    Управляет стеком страниц и историей переходов.
+    Управляет стеком страниц и историей переходов в QStackedWidget.
+
+    Позволяет переключаться между страницами, сохранять историю, возвращаться назад.
+    Поддерживает передачу дополнительных данных (`extra_data`) при переходе.
+
     Сигналы:
-        navigation_changed(history, current_page_id) - при изменении навигации.
-        page_entered(page_id, extra_data) - при входе на страницу.
+        navigation_changed (list, str): Испускается при изменении навигации.
+            Передаёт копию истории (список кортежей (page_id, title)) и текущий page_id.
+        page_entered (str, object): Испускается при входе на страницу.
+            Передаёт page_id и extra_data.
+
+    Атрибуты:
+        _stack (QStackedWidget): Стек виджетов, содержащий страницы.
+        _pages (Dict[str, QWidget]): Словарь {id: виджет страницы}.
+        _page_to_index (Dict[str, int]): Отображение page_id → индекс в стеке.
+        _index_to_page (Dict[int, str]): Обратное отображение.
+        _history (List[Tuple[str, str]]): История посещений (id, title).
+        _current_page_id (str): Текущий идентификатор страницы.
+        _extra_data (Any): Дополнительные данные, переданные на текущую страницу.
+
+    Пример:
+        >>> stacked = QStackedWidget()
+        >>> pages = {'main': MainPage(), 'settings': SettingsPage()}
+        >>> for page in pages.values(): stacked.addWidget(page)
+        >>> manager = PageManager(stacked, pages)
+        >>> manager.switch_to('settings', extra_data={'user': 'admin'})
+        >>> manager.navigation_changed.connect(update_breadcrumbs)
     """
 
     navigation_changed = Signal(list, str)  # history: List[Tuple[str,str]], current_page_id: str
@@ -43,12 +69,17 @@ class PageManager(QObject):
     ):
         """
         Инициализирует страницу менеджера.
-
-        :param stacked_widget: QStackedWidget, содержащий страницы.
-        :param pages: словарь {id: виджет страницы}. Все страницы должны быть добавлены в stacked_widget.
-
         Создаёт отображение id -> индекс в стеке и обратное отображение.
         Инициализирует историю посещений (список кортежей (id, title)) и текущую страницу (по умолчанию первая в стеке).
+
+        Параметры:
+            stacked_widget (QStackedWidget): Стек, в который уже добавлены страницы.
+            pages (Dict[str, QWidget]): Словарь {id: виджет}. Все виджеты должны быть
+                добавлены в `stacked_widget` (порядок не важен).
+
+        Примечание:
+            Автоматически определяет текущую страницу по индексу стека и устанавливает
+            её как `_current_page_id`.
         """
 
         # Вызов parent class
@@ -141,9 +172,15 @@ class PageManager(QObject):
     ):
         """
         Переключает на указанную страницу.
-        :param page_id: идентификатор страницы.
-        :param add_to_history: добавлять ли текущую страницу в историю.
-        :param extra_data: дополнительные данные, которые будут переданы в on_enter.
+
+        Параметры:
+            page_id (str): Идентификатор страницы (должен существовать в `_pages`).
+            add_to_history (bool): Добавлять ли текущую страницу в историю (по умолч. True).
+            extra_data (object, optional): Дополнительные данные, которые будут переданы
+                в метод `on_enter` целевой страницы.
+
+        Исключения:
+            ValueError: Если страница с `page_id` не найдена.
         """
 
         self.logger.debug(f'page_id not in self._page_to_index : {page_id not in self._page_to_index}')
@@ -199,7 +236,10 @@ class PageManager(QObject):
         
         Если история не пустая, то извлекаем последний элемент истории,
         переключаем на соответствующую страницу и оповещаем об изменении навигации.
+
+        Вызывает `on_leave` у текущей страницы перед переходом.
         """
+
         if not self._history:
             return
 
@@ -236,6 +276,7 @@ class PageManager(QObject):
         
         Если страница не была установлен, то возвращает None.
         """
+
         return self._current_page_id
 
     # @AppLogger.get_instance(
@@ -256,7 +297,11 @@ class PageManager(QObject):
         
         История хранит список кортежей (id, title), где id - идентификатор страницы,
         а title - заголовок страницы.
+
+        Возвращает:
+            List[Tuple[str, str]]: Список кортежей (page_id, title).
         """
+
         return self._history.copy()
 
     @AppLogger.get_instance(
@@ -268,9 +313,6 @@ class PageManager(QObject):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def clear_history(self):
-        # """
-        # Очистить историю (но не переключать страницу).
-        # """
         """
         Очистить историю (но не переключать страницу).
         История навигации будет очищена, а сигнал navigation_changed будет отправлен с пустым списком истории.
@@ -290,6 +332,9 @@ class PageManager(QObject):
     def get_current_extra_data(self):
         """
         Возвращает дополнительные данные, переданные на текущую страницу.
-        :return: объект с дополнительными данными или None, если не было передано.
+
+        Возвращает:
+            object: Данные, переданные при последнем вызове `switch_to`, или None.
         """
+
         return self._extra_data

@@ -40,8 +40,43 @@ from PySide6.QtCore import (
 
 class DynamicEditPage(BasePage):
     """
-    Универсальная страница редактирования.
-    Поддерживает автоматическую подстановку patient_id при создании приёма.
+    Универсальная страница редактирования записи.
+
+    Автоматически создаёт форму на основе DTO и `field_configs`, поддерживает:
+        - Загрузку существующей записи по ID.
+        - Создание новой записи.
+        - Обработку виртуальных полей (вычисляемых функций).
+        - Автодополнение для строковых полей (CompleterEdit).
+        - Работу с фотографиями (через PhotoUploaderWidget).
+
+    Сигналы:
+        data_saved (Signal(object)): Испускается при сохранении, если `save_directly=False`
+            (возвращает DTO без сохранения в БД).
+
+    Параметры инициализации:
+        service: Сервис для работы с сущностью (должен реализовывать `create`, `update`, `delete`,
+            `get_by_id`, `_session_scope` и т.д.).
+        dto_class (Type[BaseModel]): Класс DTO.
+        page_title (str): Заголовок страницы.
+        exclude_fields (Optional[List[str]]): Список полей, которые не должны отображаться в форме.
+        field_configs (Optional[Dict[str, Dict]]): Конфигурация полей.
+        related_services (Optional[Dict[str, Any]]): Словарь сервисов для загрузки связанных объектов
+            (например, {'patient': patient_service}).
+        save_directly (bool): Если True, данные сохраняются в БД сразу; если False – возвращается
+            DTO через сигнал `data_saved` (используется для вложенных окон).
+        parent (Optional[QWidget]): Родительский виджет.
+
+    Пример страницы редактирования пациента:
+        >>> edit_page = DynamicEditPage(
+        ...     service=get_patient_service(),
+        ...     dto_class=PatientDTO,
+        ...     page_title="Редактирование пациента",
+        ...     exclude_fields=['id'],
+        ...     field_configs=PATIENT_CONFIG,
+        ...     save_directly=True,
+        ... )
+        >>> edit_page.list_page_id = 'patient_list'  # для возврата после сохранения
+        >>> # При переходе передаём extra_data={'id': patient_id}
     """
 
     data_saved = Signal(object)   # испускается при сохранении, если save_directly=False
@@ -66,6 +101,8 @@ class DynamicEditPage(BasePage):
         field_configs=None,  # внешняя конфигурация
         related_services=None,
         save_directly: bool = True,   # если True, сохраняет в БД; если False, возвращает DTO через сигнал
+        readonly: bool = False,  # режим "только просмотр"
+        hide_action_buttons: bool = False, # скрывать кнопки действий
     ):
         """
         Инициализирует страницу редактирования.
@@ -99,6 +136,8 @@ class DynamicEditPage(BasePage):
         self.field_configs = field_configs or {}
         self.related_services = related_services or {}
         self.save_directly = save_directly
+        self.readonly = readonly 
+        self.hide_action_buttons = hide_action_buttons
 
         self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
 
@@ -128,7 +167,43 @@ class DynamicEditPage(BasePage):
         # # настройка интерфейса страницы
         self._setup_ui()
 
+        if self.readonly:
+            self._set_readonly_mode(True)
+            
+        if self.hide_action_buttons:
+            self._set_action_buttons_visible(False)    
 
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_action_buttons_visible(self, visible: bool):
+        """Показывает или скрывает кнопки сохранения, отмены и удаления."""
+        self.save_btn.setVisible(visible)
+        self.cancel_btn.setVisible(visible)
+        self.delete_btn.setVisible(visible)
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_readonly_mode(self, readonly: bool):
+        """Устанавливает режим только для чтения для всех виджетов формы."""
+        for widget in self.form.widgets.values():
+
+            if hasattr(widget, 'setReadOnly'):
+                widget.setReadOnly(readonly)
+
+            elif hasattr(widget, 'setEnabled'):
+                widget.setEnabled(not readonly)
+
+        # Дополнительно отключаем кнопки сохранения/удаления
+        self.save_btn.setEnabled(not readonly)
+        self.delete_btn.setEnabled(not readonly)
+
+        # Кнопка отмены может остаться активной
 
     @AppLogger.get_instance(
         name='DynamicEditPage',
@@ -729,13 +804,16 @@ class DynamicEditPage(BasePage):
     def on_enter(self, extra_data=None):
         """
         Вызывается при переходе на страницу.
-        extra_data может содержать 'id' и 'patient_id'.
-        Если передан 'id' – загружаем существующую запись.
-        Если передан 'patient_id' и нет 'id' – создаём новый приём для этого пациента.
 
-        :param extra_data: словарь с дополнительными данными
-        :type extra_data: dict
+        Параметры:
+            extra_data (dict, optional): Может содержать:
+                - 'id': ID редактируемой записи (для загрузки).
+                - Любые другие ключи, указанные в `field_configs` как `init_from_extra`.
+                - 'return_to_page' и 'return_field' для возврата значения после сохранения.
+
+        Если `id` не передан, форма очищается для создания новой записи.
         """
+        
         # загружаем id, если он передан
         self.current_id = extra_data.get('id') if extra_data else None
 
@@ -752,13 +830,20 @@ class DynamicEditPage(BasePage):
             self.logger.exception(f"Ошибка в методе on_enter: {e}")
             raise e
 
-        self.logger.debug(f"self.current_id is not None: {self.current_id is not None}")
+        self.logger.debug(
+            f"self.current_id is not None: {self.current_id is not None}"
+        )
+
         if self.current_id is not None:
             self._load_existing_entity(self.current_id)
         else:
             self._prepare_new_entity()
 
         self._after_load_or_clear(extra_data)  
+
+        # После загрузки данных применяем readonly
+        if self.readonly:
+            self._set_readonly_mode(True)
 
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
@@ -1037,13 +1122,13 @@ class DynamicEditPage(BasePage):
     )
     def set_field_value(self, field_name: str, value):
         """
-        Устанавливает значение в указанное поле формы.
+        Устанавливает значение в указанное поле формы (используется при возврате из дочерних окон).
 
-        :param field_name: имя поля формы, в которое нужно установить значение
-        :type field_name: str
-        :param value: значение, которое нужно установить в поле формы
-        :type value: Any
+        Параметры:
+            field_name (str): Имя поля.
+            value (Any): Новое значение.
         """
+        
         if field_name in self.form.widgets:
             self.form._set_widget_value(self.form.widgets[field_name], value)
 

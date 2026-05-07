@@ -8,6 +8,7 @@
 а также методы загрузки данных для списков (load_patients, load_appointments и т.д.).
 """
 
+import os
 import sys
 
 from app.utils.logger.logger import AppLogger
@@ -16,7 +17,7 @@ from app.config.config_manager.manager import AppConfigManager
 from app.network.thread_network import DownloadThread, UploadThread
 from app.dependencies import (
     get_patient_service, get_appointment_service,
-    get_note_service, get_photo_service
+    get_note_service, get_photo_service, get_sync_service
 )
 
 from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
@@ -42,6 +43,8 @@ from PySide6.QtWidgets import (
     QStackedWidget, QFrame
 )
 from PySide6.QtCore import Qt, Slot
+
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 
 class PagesCreationMixin:
@@ -275,8 +278,8 @@ class ConnectionsMixin:
         # Кнопка возврата на предыдущую страницу
         self.back_btn.clicked.connect(self._on_back_clicked)
 
-        # Кнопка открытия страницы настроек
-        self.settings_btn.clicked.connect(self._on_settings_clicked)
+        # # Кнопка открытия страницы настроек
+        # self.settings_btn.clicked.connect(self._on_settings_clicked)
 
         # Выбор действия из выпадающего списка (скачать, сохранить, отправить)
         self.action_combo.currentIndexChanged.connect(self._on_action_selected)
@@ -578,6 +581,11 @@ class NavigationMixin:
         self.logger.debug(
             f"if isinstance(current_page, DynamicListPage) and current_page.edit_mode: {isinstance(current_page, DynamicListPage) and current_page.edit_mode}"
         )
+        # Если это страница настроек и она не разрешает выход
+        if current_page is self.settings_page:
+            if hasattr(current_page, 'can_leave') and not current_page.can_leave():
+                return
+            
         # T1 = isinstance(current_page, DynamicListPage)
         # T2 = current_page.edit_mode
         # 0==0
@@ -723,14 +731,18 @@ class SyncMixin:
             index 1 → сохранить изменения (пока заглушка)
             index 2 → отправить БД на сервер
         """
-        if index == 0:
+        if index == 1:          # Настройки
+            self._on_settings_clicked()
+        elif index == 3:        # Скачать БД (если использовался insertSeparator, то индекс 2, иначе 3)
             self._start_download()
-        elif index == 1:
-            self._save_changes()
-        elif index == 2:
+        elif index == 4:        # Загрузить БД (индекс 3 или 4)
             self._start_upload()
+
         # Сбрасываем выбранный индекс, чтобы можно было повторно выбрать то же действие
-        self.action_combo.setCurrentIndex(-1)
+        # self.action_combo.setCurrentIndex(-1)
+        self.action_combo.blockSignals(True)
+        self.action_combo.setCurrentIndex(0)
+        self.action_combo.blockSignals(False)
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -788,7 +800,7 @@ class SyncMixin:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
 
-        self.upload_thread = UploadThread(token, local, remote)
+        self.upload_thread = UploadThread(token, local, remote, overwrite=True)
         self.upload_thread.progress.connect(self._update_progress)
         self.upload_thread.finished.connect(self._on_upload_finished)
         self.upload_thread.error.connect(self._on_upload_error)
@@ -836,9 +848,61 @@ class SyncMixin:
         self.progress_bar.setVisible(False)
         if code == 0:
             QMessageBox.information(self, "Успех", "База данных успешно скачана.")
-            # После скачивания можно обновить текущие страницы, если нужно
+            # # Перезагружаем данные на всех страницах-списках
+            # self._reload_all_list_pages()
+            # Перезагружаем все данные через существующий механизм
+            self.on_settings_changed(changed_blocks={'database'})
         else:
             QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
+
+    # @AppLogger.get_instance(
+    #     name='MainWindow',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def _reload_all_list_pages(self):
+    #     """
+    #     Перезагружает данные на всех страницах-списках (пациенты, приёмы, заметки, фото).
+    #     Также, если текущая страница – это страница редактирования (DynamicEditPage),
+    #     перезагружает её с сохранением ID редактируемой записи.
+    #     """
+    #     self.logger.info("Перезагрузка всех страниц после синхронизации БД")
+
+    #     # Список страниц-списков
+    #     list_pages = [
+    #         self.patient_list_page,
+    #         self.appointment_list_page,
+    #         self.note_list_page,
+    #         self.photo_list_page,
+    #     ]
+
+    #     # Перезагружаем каждую страницу списка, если она существует и имеет метод _load_data
+    #     for page in list_pages:
+    #         if page and hasattr(page, '_load_data'):
+    #             # Временно блокируем сигналы выделения, чтобы не вызывать лишние обновления
+    #             if hasattr(page, 'table_view') and page.table_view.selectionModel():
+    #                 page.table_view.selectionModel().blockSignals(True)
+    #             try:
+    #                 page._load_data()
+    #             finally:
+    #                 if hasattr(page, 'table_view') and page.table_view.selectionModel():
+    #                     page.table_view.selectionModel().blockSignals(False)
+
+    #     # Если текущая страница – редактирование (DynamicEditPage) или другая детальная страница,
+    #     # перезагружаем её, сохраняя контекст (id записи)
+    #     current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+    #     if current_page and current_page not in list_pages:
+    #         if hasattr(current_page, 'on_enter'):
+    #             # Получаем те же extra_data, которые были переданы при входе на страницу
+    #             extra = self.page_manager.get_current_extra_data()
+    #             # Если extra_data не сохранялись, но у страницы есть атрибут current_id – используем его
+    #             if extra is None and hasattr(current_page, 'current_id') and current_page.current_id:
+    #                 extra = {'id': current_page.current_id}
+    #             # Вызываем on_enter для перезагрузки данных
+    #             current_page.on_enter(extra)
+    #             self.logger.info(f"Перезагружена страница {current_page.page_title}")
+
+    #     self.logger.info("Перезагрузка страниц завершена")
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -978,6 +1042,8 @@ class MainWindow(
 
         # Создание страниц и менеджера страниц
         self._init_page_manager()
+
+        self.sync_service = get_sync_service()
 
         # Подключение основных сигналов (кнопки, комбобокс, навигация)
         self._connect_signals()
@@ -1124,17 +1190,26 @@ class MainWindow(
 
         # Выпадающий список действий
         self.action_combo = QComboBox()
-        self.action_combo.addItem("Скачать БД")
-        self.action_combo.addItem("Сохранить изменения")
-        self.action_combo.addItem("Отправить БД на сервер")
+        self.action_combo.addItem("Файл")          # индекс 0 – заглушка
+        self.action_combo.addItem("Настройки")     # индекс 1
+        self.action_combo.insertSeparator(2)       # разделитель 
+        self.action_combo.addItem("Скачать БД с сервера")   # индекс 3
+        self.action_combo.addItem("Загрузить БД на сервер") # индекс 4
         self.action_combo.setEditable(False)
         self.action_combo.setMaximumWidth(200)
+
+        # Делаем пункт "Файл" невыбираемым
+        self.action_combo.model().item(0).setEnabled(False)
+        # Пункт-разделитель (индекс 2) тоже делаем невыбираемым, можно пустую строку
+        # self.action_combo.model().item(2).setEnabled(False)
+        self.action_combo.setCurrentIndex(0)  # по умолчанию выбран заглушечный пункт
+
         self.header_layout.addWidget(self.action_combo)
 
         # Кнопка настроек
-        self.settings_btn = QPushButton("Настройки")
-        self.settings_btn.setMaximumWidth(100)
-        self.header_layout.addWidget(self.settings_btn)
+        # self.settings_btn = QPushButton("Настройки")
+        # self.settings_btn.setMaximumWidth(100)
+        # self.header_layout.addWidget(self.settings_btn)
 
         self.header_layout.addStretch()
 
@@ -1196,3 +1271,92 @@ class MainWindow(
         """
         handler = LogViewerHandler(self.log_viewer)
         AppLogger.add_global_handler(handler)
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def on_settings_changed(
+        self,
+        changed_blocks: set = None,
+    ):
+        """
+        Слот, вызываемый при изменении настроек (после сохранения в SettingsPage).
+        (Перезагружает сервисы, обновляет пути и перезагружает текущую страницу.)
+
+        Применяет изменения в UI в зависимости от того, какие блоки настроек изменились.
+        Это позволяет избежать полной перезагрузки всего интерфейса.
+
+        Параметры:
+            changed_blocks (set, optional): Множество строк – названия блоков,
+                которые изменились (например, {'photos', 'database'}).
+                Если None, считается, что изменилось всё (для обратной совместимости).
+
+        Логика:
+            - Если блок 'photos' изменился (или changed_blocks is None), обновляет
+              путь к хранилищу фото во всех виджетах PhotoUploaderWidget.
+            - Если блок 'database' или 'photos' изменился, перезагружает данные
+              на всех страницах-списках (пациенты, приёмы, заметки, фото).
+            - Если блок 'database' изменился и текущая страница – редактирование,
+              перезагружает её данные через вызов on_enter с сохранёнными extra_data.
+
+        Returns:
+            None
+        """
+
+        self.logger.info("Применение новых настроек...")
+
+        #  Обновляем пути к фото во всех PhotoUploaderWidget
+        config = AppConfigManager.get_instance()
+        storage_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+
+        # # Обновляем путь через PhotoService (классовый атрибут)
+        # photo_service = get_photo_service()
+        #
+        # # Устанавливаем путь через свойство – оно обновит классовый атрибут
+        # photo_service._storage_path = storage_path
+
+
+        # Обновляем путь к фото во всех виджетах PhotoUploaderWidget (только если изменился блок photos)
+        if changed_blocks is None or 'photos' in changed_blocks:
+            for widget in self._find_all_photo_widgets():
+                widget.set_storage_path(storage_path)
+
+        # Перезагружаем данные на страницах-списках (только если изменилась БД или фото)
+        if changed_blocks is None or 'database' in changed_blocks or 'photos' in changed_blocks:
+
+            list_pages = [
+                self.patient_list_page,
+                self.appointment_list_page,
+                self.note_list_page,
+                self.photo_list_page,
+            ]
+            for page in list_pages:
+                if page and hasattr(page, '_load_data'):
+                    page._load_data()
+        
+        # Если изменилась БД и текущая страница – редактирование, перезагружаем её данные
+        #    перезагружаем её данные, если она поддерживает on_enter с extra_data
+        if changed_blocks is None or 'database' in changed_blocks:
+            current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+            if current_page and current_page not in list_pages:
+                # Для страниц редактирования: если открыта какая-то запись, перезагрузим её
+                if hasattr(current_page, 'on_enter'):
+                    # Передаём те же extra_data, что были при входе, чтобы не сбросить id
+                    extra = self.page_manager.get_current_extra_data()
+                    current_page.on_enter(extra)
+        
+        self.logger.info("Применение настроек завершено")
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _find_all_photo_widgets(self):
+        """Рекурсивно собирает все виджеты PhotoUploaderWidget в окне."""
+        result = []
+        for child in self.findChildren(PhotoUploaderWidget):
+            result.append(child)
+        return result

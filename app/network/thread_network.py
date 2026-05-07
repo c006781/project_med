@@ -1,3 +1,5 @@
+# app/network/thread_network.py
+
 # import os
 from PySide6.QtCore import QThread, Signal # pip install PySide6
 
@@ -15,7 +17,13 @@ class DownloadThread(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, token: str, remote_path: str, local_path: str, parent=None):
+    def __init__(
+        self, 
+        token: str, 
+        remote_path: str, 
+        local_path: str, 
+        parent=None
+    ):
         """
         Инициализация потока для скачивания файла с Диска.
 
@@ -24,7 +32,9 @@ class DownloadThread(QThread):
         :param local_path: (str) Локальный путь для сохранения файла.
         :param parent: (QObject/None) Родительский объект (по умолчанию None).
         """
+
         super().__init__(parent)
+
         # сохраняем параметры для использования в run
         self.token = token
         self.remote_path = remote_path
@@ -76,7 +86,14 @@ class UploadThread(QThread):
     finished = Signal(int)
     error = Signal(str)
 
-    def __init__(self, token: str, local_path: str, remote_path: str, parent=None):
+    def __init__(
+        self, 
+        token: str, 
+        local_path: str, 
+        remote_path: str, 
+        parent=None, 
+        overwrite = False,
+    ):
         """
         Инициализация потока для загрузки файла на Диск.
 
@@ -90,6 +107,7 @@ class UploadThread(QThread):
         self.token = token
         self.local_path = local_path
         self.remote_path = remote_path
+        self.overwrite = overwrite
 
     def _progress_callback(self, current: int, total: int):
         """
@@ -118,6 +136,7 @@ class UploadThread(QThread):
                 local_file_path=self.local_path,
                 ya_file_path=self.remote_path,
                 if_err=True,
+                overwrite=self.overwrite,
                 progress_callback=self._progress_callback
             )
             # передача результата в колбэк finished

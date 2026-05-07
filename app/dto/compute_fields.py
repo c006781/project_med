@@ -1,11 +1,12 @@
-
 # app/dto/compute_fields.py
+
 from app.utils.logger.logger import AppLogger 
-
-
+from app.dependencies import get_patient_service
 
 @AppLogger.get_instance(
-    name = 'system',
+    name = 'compute_fields.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, # 'system',
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -18,10 +19,16 @@ def get_patient_full_name(patient_id: int) -> str:
     :return: ФИО пациента
     :rtype: str
     """
+    logger = AppLogger.get_instance(
+        name = 'compute_fields.py',
+        enable_file_logging = 'user',
+        use_name_in_filename = False, 
+    )
+
 
     # Если пациент не указан, то возвращаем пустую строку
     if patient_id is None:
-        AppLogger.get_instance( name = 'user').debug(
+        logger.debug(
                 f"patient_id is None"
                 # f"compute_virtual_fields: вычисление виртуального поля {field_name}: args = {args}, kwargs = {kwargs}, value = {value}"
         )
@@ -29,7 +36,7 @@ def get_patient_full_name(patient_id: int) -> str:
 
     try:
         # Получаем сервис для работы с пациентами
-        from app.dependencies import get_patient_service
+        # from app.dependencies import get_patient_service
         patient_service = get_patient_service()
 
         # Получаем пациента по его ID
@@ -37,16 +44,26 @@ def get_patient_full_name(patient_id: int) -> str:
 
         # Если пациент найден, то возвращаем ФИО
         if patient:
-            return f"{patient.last_name} {patient.first_name}"
+            # return f"{patient.last_name} {patient.first_name}"
+            return " ".join(
+                [
+                    patient.last_name, 
+                    patient.first_name, 
+                    patient.middle_name
+                ]
+            ).strip()
+        
         else:
             # Если пациент не найден, то возвращаем сообщение об ошибке
-            AppLogger.get_instance( name = 'user').debug(
+            logger.debug(
                 f"Если пациент не найден."
                 )
             return "Пациент не найден"
+        
     except Exception as e:
-        AppLogger.get_instance( name = 'user').debug(
+        logger.debug(
                 f"Ошибка загрузки: {e}"
         )
+
         # Если произошла ошибка, то возвращаем сообщение об ошибке
         return "Ошибка загрузки"

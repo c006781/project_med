@@ -1,10 +1,40 @@
+# app/repositories/repositories_all.py
+"""
+Слой доступа к данным (репозитории).
+
+Каждый репозиторий инкапсулирует запросы к конкретной таблице БД.
+Базовый класс :class:`BaseRepository` предоставляет общие методы:
+- get_by_id, get_all, add, delete
+- get_page (пагинация с фильтрацией)
+- get_unique_values (уникальные значения столбца)
+
+Конкретные репозитории:
+- :class:`PatientRepository`
+- :class:`AppointmentRepository`
+- :class:`AppointmentNoteRepository`
+- :class:`PhotoRepository`
+
+Пример использования:
+    >>> from app.database import Database
+    >>> db = Database("sqlite:///clinic.db")
+    >>> with db.session_scope() as session:
+    ...     repo = PatientRepository(session)
+    ...     patient = repo.get_by_id(1)
+    ...     print(patient.first_name)
+"""
+
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import List, Optional, Any, Dict, TypeVar, Generic
+from typing import (
+    List, Optional, Any, 
+    Dict, TypeVar, Generic
+)
+
 from abc import ABC, abstractmethod
 
+from app.utils.logger.logger import AppLogger
 
 # Импорты модулей
 # def _add_package_name(
@@ -74,7 +104,7 @@ from app.database.database_shema.clinic import AppointmentNote, Appointment, Pat
 #         pass #  raise # e # pass
 
 # try:
-from app.utils.logger.logger import AppLogger
+# from app.utils.logger.logger import AppLogger
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -153,7 +183,12 @@ class BaseRepository(Generic[ModelType], ABC):
         """
         query = self._session.query(self.model_class)
 
-        self.logger.debug(f"get_with_relations: entity_id {entity_id} query {query} self.model_class {self.model_class}")
+        self.logger.debug(
+            f"get_with_relations: "
+            f"entity_id {entity_id} "
+            f"query {query} "
+            f"self.model_class {self.model_class}"
+        )
 
         for rel in relations:
             self.logger.debug(f"get_with_relations: rel {rel}")
@@ -165,9 +200,16 @@ class BaseRepository(Generic[ModelType], ABC):
                     )
                 )   
                 
-                self.logger.debug(f"get_with_relations: rel {rel} query {query}")
+                self.logger.debug(
+                    f"get_with_relations: "
+                    f"rel {rel} "
+                    f"query {query}"
+                )
         
-        self.logger.debug(f'self.model_class.id {self.model_class.id} entity_id {entity_id}')
+        self.logger.debug(
+            f"self.model_class.id {self.model_class.id} "
+            f"entity_id {entity_id}"
+        )
 
         return query.filter(self.model_class.id == entity_id).first()
 
@@ -370,6 +412,7 @@ class BaseRepository(Generic[ModelType], ABC):
 
 
 class AppointmentNoteRepository(BaseRepository):
+
     model_class =  AppointmentNote
     
     @AppLogger.get_instance(
@@ -393,11 +436,9 @@ class AppointmentNoteRepository(BaseRepository):
         self.logger.debug(f"get_by_text_exact: text = {text}")
         return self._session.query(AppointmentNote).filter(AppointmentNote.text == text).first()
 
-
-
 class AppointmentRepository(BaseRepository):
+
     model_class =  Appointment
-    
 
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
@@ -425,6 +466,25 @@ class AppointmentRepository(BaseRepository):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _get_joinedload_Appointment(self):
+        return [
+            joinedload(Appointment.patient),
+            joinedload(Appointment.reason_note),
+            joinedload(Appointment.procedure_note),
+            joinedload(Appointment.recommendations_note),
+            joinedload(Appointment.note),
+            joinedload(Appointment.cost_procedure_note),
+            # joinedload(Appointment.photos)   # если нужно, можно оставить
+        ]
+
+    @AppLogger.get_instance(
+        name = 'AppointmentRepository',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all_with_relations(self) -> List[Appointment]:
         """
         Возвращает все приёмы с подгруженными пациентом и заметкой.
@@ -433,11 +493,13 @@ class AppointmentRepository(BaseRepository):
         :rtype: List[Appointment]
         """
         self.logger.debug("get_all_with_relations")
-        return self._session.query(Appointment).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note)
-        ).all()
 
+        return self._session.query(Appointment).options(
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note)
+            *self._get_joinedload_Appointment()
+        ).all()
+    
     @AppLogger.get_instance(
         name = 'AppointmentRepository',
         # share_file_with = 'system',
@@ -455,11 +517,16 @@ class AppointmentRepository(BaseRepository):
         :return: список приёмов
         :rtype: List[Appointment]
         """
-        self.logger.debug(f"get_by_patient_with_relations: patient_id={patient_id}")
+        self.logger.debug(
+            f"get_by_patient_with_relations: "
+            f"patient_id={patient_id}"
+        )
+
         return self._session.query(Appointment).filter_by(patient_id=patient_id).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note),
-            joinedload(Appointment.photos),
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note),
+            # # joinedload(Appointment.photos),
+            *self._get_joinedload_Appointment()
         ).all()
 
     @AppLogger.get_instance(
@@ -499,8 +566,7 @@ class AppointmentRepository(BaseRepository):
         
         # Получаем приём с подгруженными связями
         return self._session.query(Appointment).options(# Получаем приём с подгруженными связями
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note),
+            *self._get_joinedload_Appointment(),
 
             joinedload(Appointment.photos) 
         ).filter( # Фильтруем результаты по ID приёма
@@ -537,15 +603,18 @@ class AppointmentRepository(BaseRepository):
         :rtype: List[Appointment]
         """
         query = self._session.query(Appointment).options(
-            joinedload(Appointment.patient),
-            joinedload(Appointment.note)
+            # joinedload(Appointment.patient),
+            # joinedload(Appointment.note)
+            *self._get_joinedload_Appointment()
         )
         if filters:
             sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
             if sql_filters:
                 query, _ = apply_filters(query, Appointment, sql_filters)
+
         if order_by:
             query = query.order_by(*order_by)
+            
         return query.offset(offset).limit(limit).all()
 
     @AppLogger.get_instance(

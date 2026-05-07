@@ -1,1 +1,0 @@
-python interfaces/gui_window/main.py

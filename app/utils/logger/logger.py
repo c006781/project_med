@@ -204,7 +204,18 @@ class AppLogger(BaseAppLogger):
     
     @classmethod
     def reload_all_from_app_config(cls):
-        """Загружает текущую конфигурацию приложения и применяет ко всем логгерам."""
+        """
+        Загружает текущую конфигурацию приложения и применяет её ко всем существующим логгерам.
+
+        Вызывается автоматически при изменении настроек через SettingsPage.
+        Использует `get_config_env()` для получения словаря настроек и передаёт его в
+        `cls.reload_all_from_config(full_config)`.
+
+        Пример:
+            >>> AppLogger.reload_all_from_app_config()
+            # После этого все логгеры перечитают настройки (уровни, директории и т.д.)
+        """
+            
         # from app.config.config_manager.manager import get_config_env
         full_config = get_config_env()
         cls.reload_all_from_config(full_config)
@@ -218,7 +229,7 @@ if not AppLogger.thec_create('system'):
         use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
         # share_file_with='system',
     )
-    0==0
+    # 0==0
 
 if not AppLogger.thec_create('user'):
     AppLogger.get_instance(
@@ -229,7 +240,7 @@ if not AppLogger.thec_create('user'):
         use_name_in_filename = False, # True, # False, # используем общий файл из конфига
         # share_file_with='system',
     )
-    0==0
+    # 0==0
     
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
@@ -319,7 +330,7 @@ if __name__ == '__main__':
         use_name_in_filename = False, # 'default1',
     ).info("test4")
 
-    0==0
+    # 0==0
 
     pass
 # ------------------------------------------------------------------------------

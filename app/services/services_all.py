@@ -1,3 +1,23 @@
+# app/services/services_all.py
+"""
+Бизнес-логика приложения (сервисный слой).
+
+Содержит абстрактный базовый класс :class:`BaseService` и конкретные сервисы:
+- :class:`PatientService` – управление пациентами.
+- :class:`AppointmentService` – управление приёмами (с заметками и фото).
+- :class:`NoteService` – управление заметками.
+- :class:`PhotoService` – управление фотографиями (хранение файлов, копирование).
+
+Все сервисы используют репозитории для доступа к БД, автоматически управляют сессиями,
+поддерживают фильтрацию, пагинацию и вычисление виртуальных полей.
+
+Пример использования:
+    >>> from app.dependencies import get_patient_service
+    >>> service = get_patient_service()
+    >>> patients = service.get_all_patients()
+    >>> for p in patients:
+    ...     print(p.last_name, p.first_name)
+"""
 
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -7,13 +27,22 @@ import os  # Импорт модуля os для работы с путями ф
 import shutil
 import uuid
 
-from typing import Type, TypeVar, Generic, List, Optional, Dict, Any, Tuple, Union
+from typing import (
+    Type, TypeVar, Generic, 
+    List, Optional, Dict, 
+    Any, Tuple, Union
+)
 
 import time as time_module
 # from datetime import time
 # import datetime
 
 from contextlib import contextmanager
+
+from sqlalchemy import func
+
+
+from app.utils.logger import AppLogger
 
 # Импорты модулей
 # def _add_package_name(
@@ -73,7 +102,9 @@ from contextlib import contextmanager
 #         __package__ = None
 
 # try:
-from app.utils.logger import AppLogger
+from app.config.config_manager.manager import AppConfigManager
+# from app.dependencies import get_db
+# from app.dependencies import get_note_service, get_photo_service
 # except ImportError as e:
 #     # try:
 #     # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -94,7 +125,10 @@ from app.database.database import Database
 #         # pass #  raise # e # pass
 
 # try:
-from app.database.database_shema.clinic import Patient, Appointment, AppointmentNote, Photo
+from app.database.database_shema.clinic import (
+    Patient, Appointment, AppointmentNote, 
+    Photo
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -105,7 +139,10 @@ from app.database.database_shema.clinic import Patient, Appointment, Appointment
 #         pass #  raise # e # pass
 
 # try:
-from app.repositories.repositories_all import BaseRepository, PatientRepository, AppointmentRepository, PatientRepository, AppointmentNoteRepository, PhotoRepository
+from app.repositories.repositories_all import (
+    BaseRepository, PatientRepository, AppointmentRepository, 
+    PatientRepository, AppointmentNoteRepository, PhotoRepository
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -116,7 +153,9 @@ from app.repositories.repositories_all import BaseRepository, PatientRepository,
 #         pass #  raise # e # pass
 
 # try:
-from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
+from app.dto import (
+    PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -127,7 +166,12 @@ from app.dto import PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
 #         pass #  raise # e # pass
 
 # try:
-from app.exceptions import PatientNotFoundError, PatientValidationError, AppointmentNotFoundError, AppointmentNoteNotFoundError, PhotoNotFoundError, PhotoFileError, AppException
+from app.exceptions import (
+    PatientNotFoundError, PatientValidationError, 
+    AppointmentNotFoundError, AppointmentNoteNotFoundError, 
+    PhotoNotFoundError, PhotoFileError, 
+    #   AppException
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -164,19 +208,40 @@ ModelType = TypeVar('ModelType')
 DTOType = TypeVar('DTOType')
 RepoType = TypeVar('RepoType', bound=BaseRepository)
 
-class BaseService(Generic[ModelType, DTOType, RepoType]):
+class BaseService(
+    Generic[
+        ModelType,
+        DTOType,
+        RepoType
+    ]
+):
     """
-    Абстрактный базовый сервис, предоставляющий стандартные методы работы с сущностями.
+    Абстрактный базовый сервис, предоставляющий стандартные методы CRUD,
+    фильтрацию, пагинацию и управление сессиями.
 
-    Параметры:
-        db (Database): экземпляр Database для получения сессий.
-        repo_class (Type[RepoType]): класс репозитория, с которым работает сервис.
-        model_class (Type[ModelType]): класс ORM-модели (нужен для создания экземпляров).
-        dto_class (Type[DTOType]): класс DTO (нужен для преобразования).
-        logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+    Параметры типа:
+        ModelType: Класс ORM-модели SQLAlchemy (например, Patient).
+        DTOType: Класс Pydantic DTO (например, PatientDTO).
+        RepoType: Класс репозитория, унаследованный от BaseRepository.
 
     Атрибуты:
-        logger (AppLogger): логгер для записи событий.
+        _db (Database): Экземпляр Database для получения сессий.
+        _repo_class (Type[RepoType]): Класс репозитория.
+        _model_class (Type[ModelType]): Класс ORM-модели.
+        _dto_class (Type[DTOType]): Класс DTO.
+        _field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей (для виртуальных полей).
+        logger (AppLogger): Логгер для записи событий.
+
+    Примечания:
+        - Подписывается на изменения конфигурации через AppConfigManager.add_change_listener.
+        - При изменении настроек (например, пути к БД) вызывается `reload_config()`.
+        - Все методы, работающие с БД, используют контекстный менеджер `_session_scope`.
+
+    Пример:
+        >>> class PatientService(BaseService[Patient, PatientDTO, PatientRepository]):
+        ...     pass
+        >>> service = PatientService(db, PatientRepository, Patient, PatientDTO)
+        >>> patients = service.get_all()
     """
 
     @AppLogger.get_instance(
@@ -199,22 +264,26 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         """
         Инициализирует экземпляр сервиса.
 
-        Parameters:
-            db (Database): экземпляр Database для получения сессий.
-            repo_class (Type[RepoType]): класс репозитория, с которым работает сервис.
-            model_class (Type[ModelType]): класс ORM-модели (нужен для создания экземпляров).
-            dto_class (Type[DTOType]): класс DTO (нужен для преобразования).
-            logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
+        Параметры:
+            db (Database): Экземпляр Database для получения сессий.
+            repo_class (Type[RepoType]): Класс репозитория, с которым работает сервис.
+            model_class (Type[ModelType]): Класс ORM-модели (нужен для создания экземпляров).
+            dto_class (Type[DTOType]): Класс DTO (нужен для преобразования).
+            field_configs (Optional[Dict[str, Dict[str, Any]]]): Конфигурация полей (используется для виртуальных полей).
 
-        Attributes:
-            logger (AppLogger): логгер для записи событий.
+            logger_name (Optional[str]): Имя логгера. По умолчанию – имя класса сервиса.
+
+        Особенности:
+            - Подписывается на изменения конфигурации через
+              `AppConfigManager.add_change_listener(self._on_config_changed)`.
+              При изменении настроек автоматически вызывается `self.reload_config()`.
         """
 
         self._db            = db 
-        self._repo_class    = repo_class # репозиторий с которым работает сервис 
-        self._model_class   = model_class # ORM-модель для создания экземпляров 
-        self._dto_class     = dto_class # DTO класс для преобразования 
-        self._field_configs = field_configs or {} # конфигурация полей для сервиса (по умолчанию пустой словарь)
+        self._repo_class    = repo_class    # репозиторий с которым работает сервис
+        self._model_class   = model_class   # ORM-модель для создания экземпляров
+        self._dto_class     = dto_class     # DTO класс для преобразования
+        self._field_configs = field_configs or {}  # конфигурация полей для сервиса (по умолчанию пустой словарь)
 
         # Настройка логгера: если имя не передано, используем имя класса сервиса
         if logger_name is None:
@@ -224,14 +293,39 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             name = logger_name,
             # share_file_with = 'user',
             enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
+            use_name_in_filename = False,  # 'user',
         )
+
+        # Подписываемся на изменения конфигурации
+        AppConfigManager.add_change_listener(self._on_config_changed)
 
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_config_changed(self):
+        """
+        Вызывается при изменении конфигурации приложения  – перезагружает сервис.
+
+        Просто перенаправляет вызов на `self.reload_config()`, который должен быть
+        переопределён в наследниках или реализован в базовом классе.
+        Этот метод автоматически вызывается `AppConfigManager` при сохранении новых настроек.
+
+        Returns:
+            None
+        """
+
+        self.reload_config()
+
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -245,6 +339,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         Returns:
             RepoType: репозиторий с переданной сессией.
         """
+
         return self._repo_class(session)
 
     @AppLogger.get_instance(
@@ -258,26 +353,35 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     def get_all(self, session: Optional[Session] = None) -> List[DTOType]:
         """
         Возвращает список всех записей в виде DTO.
-        Логирует начало и конец операции.
-        :param session: сессия для работы с БД
-        :type session: Optional[Session]
-        :return: список записей в виде DTO
-        :rtype: List[DTOType]
+
+        Параметры:
+            session (Optional[Session]): Внешняя сессия. Если не указана, создаётся новая.
+
+        Возвращает:
+            List[DTOType]: Список DTO.
+
+        Пример:
+            >>> patients = patient_service.get_all()
+            >>> for p in patients:
+            ...     print(p.last_name, p.first_name)
         """
+
         self.logger.debug(f"Запрос всех записей {self._model_class.__name__}")
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_all() # Предполагаем, что в репозитории есть метод get_all()
+            items = repo.get_all()  # Предполагаем, что в репозитории есть метод get_all()
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
             # self.logger.debug(f"Получено {len(dtos)} записей")
+
             return dtos
 
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -321,7 +425,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -334,6 +438,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         :return: созданная запись в виде DTO
         :raises: NotImplementedError, если метод не переопределён в наследнике
         """
+
         raise NotImplementedError("Метод create должен быть переопределён в наследнике")
 
     @AppLogger.get_instance(
@@ -353,13 +458,14 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         :return: обновленная запись в виде DTO
         :raises: NotImplementedError, если метод не переопределён в наследнике
         """
+
         raise NotImplementedError("Метод update должен быть переопределён в наследнике")
 
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
+        use_name_in_filename = False,  # 'system',
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -435,6 +541,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
             self.logger.debug(f"Получено {len(dtos)} записей")  # логгируем количество полученных DTO
 
             return dtos
+        
         else:
             # данные из ТБ
             try:
@@ -485,11 +592,11 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def get_filtered(
-            self, 
-            filters: List[Dict[str, Any]], 
-            fuzzy_threshold: int = 60,
-            session: Optional[Session] = None
-        ) -> List[DTOType]:
+        self, 
+        filters: List[Dict[str, Any]], 
+        fuzzy_threshold: int = 60,
+        session: Optional[Session] = None
+    ) -> List[DTOType]:
         """
         Возвращает записи, отфильтрованные по заданным условиям.
 
@@ -498,16 +605,15 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
                 - column (str): имя столбца модели.
                 - operator (str): оператор из FilterOperator (например, 'eq', 'like', 'fuzzy').
                 - value (any): значение для сравнения (зависит от оператора).
-            fuzzy_threshold: порог схожести для нечёткого поиска (0-100). Используется только
-                            для оператора 'fuzzy'.
-            session: опциональная сессия SQLAlchemy для выполнения запроса.
+            fuzzy_threshold (int): порог схожести для нечёткого поиска (0-100). Используется только для оператора 'fuzzy'. По умолчанию 60
+            session (Optional[Session]): опциональная сессия SQLAlchemy для выполнения запроса.
 
         Возвращает:
-            Список DTO, удовлетворяющих условиям фильтрации.
+            List[DTOType]: Отфильтрованный список DTO, удовлетворяющих условиям фильтрации.
 
         Примечание:
             - Для SQL-операторов фильтрация происходит на уровне БД.
-            - Для 'fuzzy' фильтрация выполняется в памяти после получения всех записей,
+            - Для 'fuzzy' фильтрация выполняется в памяти после получения всех записей (выполнения SQL-запроса),
             поэтому может быть медленной на больших объёмах данных.
         """
 
@@ -517,17 +623,33 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         # filters: список словарей с ключами column, operator, value.
         # fuzzy_threshold: порог схожести для нечеткого поиска.
         # """
-        self.logger.debug(f"Запрос отфильтрованных записей {self._model_class.__name__} с фильтрами {filters}")
+        self.logger.debug(
+            f"Запрос отфильтрованных записей {self._model_class.__name__} "
+            f"с фильтрами {filters}"
+        )
+
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class)
             # apply_filters теперь возвращает кортеж
-            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+            query, post_filters = apply_filters(
+                query, 
+                self._model_class, 
+                filters, 
+                fuzzy_threshold
+            )
+            
             items = query.all()
             if post_filters:
-                items = apply_post_filters(items, post_filters, self._model_class)
+                items = apply_post_filters(
+                    items, 
+                    post_filters, 
+                    self._model_class
+                )
+
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
             # self.logger.debug(f"Получено {len(dtos)} записей после фильтрации")
+
             return dtos
 
 
@@ -548,6 +670,7 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         """
         if session is not None:
             yield session
+
         else:
             with self._db.session_scope() as new_session:
                 yield new_session
@@ -569,29 +692,48 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
         session: Optional[Session] = None
     ) -> Tuple[List[DTOType], int]:
         """
-        Возвращает страницу DTO и общее количество записей.
+        Возвращает страницу записей и общее количество (с учётом фильтров).
 
-        :param offset: смещение страницы (начиная с 0)
-        :type offset: int
-        :param limit: количество записей на странице
-        :type limit: int
-        :param filters: список словарей с фильтрами для записей
-        :type filters: Optional[List[dict[str, Any]]]
-        :param order_by: список полей для сортировки записей
-        :type order_by: Optional[List]
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :return: список записей на странице и общее количество записей
-        :rtype: Tuple[List[DTOType], int]
+        Параметры:
+            offset (int): Количество пропускаемых записей (смещение).
+            limit (int): Размер страницы (максимум записей).
+            filters (Optional[List[Dict[str, Any]]]): Фильтры (аналогично `get_filtered`).
+            order_by (Optional[List]): Список полей для сортировки, например, ['date', '-time'].
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            Tuple[List[DTOType], int]:
+                - Список DTO на текущей странице.
+                - Общее количество записей, удовлетворяющих фильтрам.
+
+        Пример:
+            >>> page, total = service.get_page(offset=10, limit=25, order_by=['-date'])
+            >>> print(f"Показаны записи 11-35 из {total}")
         """
         
-        self.logger.debug(f"Запрос страницы {self._model_class.__name__}: offset={offset}, limit={limit}, filters={filters}")
+        self.logger.debug(
+            f"Запрос страницы {self._model_class.__name__}: "
+            f"offset={offset}, "
+            f"limit={limit}, "
+            f"filters={filters}"
+        )
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_page(offset, limit, filters=filters, order_by=order_by)
-            total = repo.count(filters=filters)
+
+            items = repo.get_page(
+                offset, 
+                limit, 
+                filters=filters,
+                order_by=order_by
+            )
+            total = repo.count(
+                filters=filters
+            )
+
             # dtos = [self._dto_class.from_orm(item) for item in items]
             dtos = self.get_dtos(items)
+
             return dtos, total
         
     @AppLogger.get_instance(
@@ -602,17 +744,51 @@ class BaseService(Generic[ModelType, DTOType, RepoType]):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def get_unique_values(self, column_name: str, session: Optional[Session] = None) -> List[Any]:
+    def get_unique_values(
+        self,
+        column_name: str,
+        session: Optional[Session] = None
+    ) -> List[Any]:
         """
         Возвращает список уникальных значений для указанного столбца.
-        
-        :param column_name: имя столбца модели (атрибут ORM)
-        :param session: опциональная сессия
+
+        Параметры:
+            column_name (str): Имя столбца модели (атрибут ORM) (например, 'last_name').
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            List[Any]: Список уникальных значений (тип зависит от столбца).
+
+        Пример:
+            >>> unique_last_names = service.get_unique_values('last_name')
+            >>> # ['Петров', 'Иванов', ...]
         """
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
+
             return repo.get_unique_values(column_name)
         
+    # в конце класса BaseService, после метода get_unique_values (или перед _session_scope)
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_config(self) -> None:
+        """
+        Перезагружает конфигурацию сервиса: закрывает старый Database и создаёт новый.
+
+        Вызывается автоматически при изменении настроек (через AppConfigManager.add_change_listener).
+        Также может вызываться вручную после ручного обновления конфигурации.
+        """
+        from app.dependencies import get_db # оставить тут, так как цикл
+
+        self._db.close()
+        self._db = get_db()
+
+        self.logger.info("Конфигурация сервиса перезагружена")        
 
 
 class PatientService(
@@ -624,10 +800,16 @@ class PatientService(
 ):
     """
     Сервис для управления пациентами.
+
+    Добавляет специфические методы:
+        - create_patient(patient_dto) – создание с валидацией.
+        - update_patient(patient_dto) – обновление.
+        - delete_patient(patient_id) – удаление с каскадной очисткой заметок.
+        - get_patients_filtered() – фильтрация.
     """
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -635,11 +817,11 @@ class PatientService(
         level = AppLogger._parse_log_level('DEBUG')
     )
     def __init__(
-            self, 
-            db: Database,  
-            field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-            logger_name: Optional[str] = None, 
-        ):
+        self,
+        db: Database,
+        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+        logger_name: Optional[str] = None,
+    ):
         """
         Инициализирует экземпляр сервиса.
 
@@ -666,7 +848,7 @@ class PatientService(
 
     # Переопределяем create, так как логика создания специфична
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -679,44 +861,85 @@ class PatientService(
         session: Optional[Session] = None
     ) -> PatientDTO:
         """
-        Создаёт нового пациента. Выполняет валидацию.
+        Создаёт нового пациента (обёртка над `create` с дополнительной валидацией).
 
-        :param patient_dto: DTO для создания пациента
-        :type patient_dto: PatientDTO
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :return: созданный пациент с id
-        :rtype: PatientDTO
+        Параметры:
+            patient_dto (PatientDTO): DTO с данными пациента (без id).
+            session (Optional[Session]): Внешняя сессия.
+
+        Возвращает:
+            PatientDTO: Созданный пациент с заполненным id.
+
+        Исключения:
+            PatientValidationError: Если отсутствуют обязательные поля (first_name, last_name).
+
+        Пример:
+            >>> new_patient = PatientDTO(first_name="Анна", last_name="Смирнова")
+            >>> created = service.create_patient(new_patient)
+            >>> print(created.id)
         """
-        self.logger.debug(f"patient_dto {patient_dto} session {session} result {session}")
+
+        self.logger.debug(
+            f"patient_dto "
+            f"{patient_dto} "
+            f"session {session} "
+            f"result {session}"
+        )
 
         if not patient_dto.first_name or not patient_dto.last_name:
             self.logger.warning("Попытка создания пациента без имени/фамилии")
             raise PatientValidationError("first_name/last_name", "Имя и фамилия обязательны")
 
-        self.logger.debug(f"Создание пациента: {patient_dto}")
+        self.logger.debug(
+            f"Создание пациента: {patient_dto}"
+        )
+
         with self._session_scope(session) as sess:
+            # Репозиторий для заметок
+            note_repo = AppointmentNoteRepository(sess)   # создаём репозиторий
+
+            # Создаём заметки для description и comment, если они не пустые
+            description_note = None
+            if patient_dto.description:
+                description_note = AppointmentNote(text=patient_dto.description)
+                note_repo.add(description_note) 
+
+            comment_note = None
+            if patient_dto.comment:
+                comment_note = AppointmentNote(text=patient_dto.comment)
+                note_repo.add(comment_note) 
+
+            sess.flush()  # чтобы получить id заметок   
+
+
+
             # Создаём ORM-объект
             patient = self._model_class(
                 first_name=patient_dto.first_name,
+                middle_name=patient_dto.middle_name,
                 last_name=patient_dto.last_name,
                 birth_date=patient_dto.birth_date,
                 phone=patient_dto.phone,
-                email=patient_dto.email,
+                description_id=description_note.id if description_note else None,
+                comment_id=comment_note.id if comment_note else None,
             )
+
+            # Используем репозиторий для добавления пациента
             repo = self._get_repo(sess)
             repo.add(patient)
-            # Чтобы получить id, делаем flush (коммит будет в session_scope)
-            sess.flush()
+            sess.flush() # Чтобы получить id, делаем flush (коммит будет в session_scope)
+
             # dto_out = self._dto_class.from_orm(patient)
             # dto_out = self._dto_class.model_validate(patient)
             dto_out = self.get_dto_out(patient)
+
             self.logger.info(f"Создан пациент с id={dto_out.id}")
             self.logger.debug(f"dto_out {dto_out}")
+
             return dto_out
            
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -729,11 +952,12 @@ class PatientService(
         session: Optional[Session] = None
     ) -> PatientDTO:
         """
-        Обновляет существующего пациента.
+        Обновляет существующего пациента, а также связанные заметки description/comment.
+        Использует get_with_relations для подгрузки связей перед обновлением.
 
         Args:
-            patient_dto: PatientDTO - данные для обновления пациента.
-            session: Optional[Session] - сессия БД, которая будет использоваться для работы с репозиторием.
+            patient_dto (PatientDTO): DTO с заполненным id и изменяемыми полями.
+            session (Optional[Session]): сессия БД, которая будет использоваться для работы с репозиторием.
 
         Returns:
             PatientDTO: обновленный объект PatientDTO.
@@ -742,36 +966,100 @@ class PatientService(
             PatientValidationError: если id не указан.
             PatientNotFoundError: если пациент с указанным id не найден.
         """
-        self.logger.debug(f"patient_dto {patient_dto} session {session} result {session}")
+
+        self.logger.debug(
+            f"patient_dto {patient_dto} "
+            f"session {session} "
+            f"result {session}"
+        )
 
         if patient_dto.id is None:
             self.logger.warning("Попытка обновления пациента без id")
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
 
-        self.logger.debug(f"Обновление пациента id={patient_dto.id}")
+        self.logger.debug(
+            f"Обновление пациента id={patient_dto.id}"
+        )
+
         with self._session_scope(session) as sess:
+            # ВАЖНО: используем get_with_relations, чтобы подгрузить description_note и comment_note
+            # У PatientRepository уже есть метод get_with_relations, унаследованный от BaseRepository
+
             repo = self._get_repo(sess)
-            patient = repo.get_by_id(patient_dto.id)
+            # patient = repo.get_by_id(patient_dto.id)
+            patient = repo.get_with_relations(
+                patient_dto.id, 
+                ['description_note', 'comment_note']
+            )
+
             if patient is None:
                 raise PatientNotFoundError(patient_dto.id)
 
+            # Сохраняем старые ID заметок до изменения
+            old_description_id = patient.description_id
+            old_comment_id = patient.comment_id
+
             # Обновляем поля
             patient.first_name = patient_dto.first_name
+            patient.middle_name = patient_dto.middle_name
             patient.last_name = patient_dto.last_name
             patient.birth_date = patient_dto.birth_date
             patient.phone = patient_dto.phone
-            patient.email = patient_dto.email
+            
+            note_repo = AppointmentNoteRepository(sess)
+            note_service = NoteService(
+                self._db, 
+                logger_name=self.logger.name + ".NoteService"
+            )
+
+            # Обработка заметки description
+            if patient_dto.description is not None:
+                if patient.description_id:
+                    note = note_repo.get_by_id(patient.description_id)  
+                    if note:
+                        note.text = patient_dto.description
+                        # ID не меняется
+                else:
+                    new_note = AppointmentNote(text=patient_dto.description)
+                    note_repo.add(new_note)
+                    sess.flush()
+                    patient.description_id = new_note.id
+                    # Старая заметка (old_description_id) будет удалена позже, если она не используется
+
+            # Аналогично для comment
+            if patient_dto.comment is not None:
+                if patient.comment_id:
+                    note = note_repo.get_by_id(patient.comment_id)
+                    if note:
+                        note.text = patient_dto.comment
+                        # ID не меняется
+                else:
+                    new_note = AppointmentNote(text=patient_dto.comment)
+                    note_repo.add(new_note)
+                    sess.flush()
+                    patient.comment_id = new_note.id
+                    # Старая заметка (old_comment_id) будет удалена позже, если она не используется
+
+            # === Очистка старых заметок, которые больше не используются ===
+            # Если description_id изменился (был и стал другим) – удаляем старую заметку
+            if old_description_id is not None and old_description_id != patient.description_id:
+                note_service.cleanup_unused_note(old_description_id, sess)
+
+            if old_comment_id is not None and old_comment_id != patient.comment_id:
+                note_service.cleanup_unused_note(old_comment_id, sess)
 
             # commit произойдёт автоматически при выходе из session_scope
             # updated_dto = self._dto_class.from_orm(patient)
             # sess.commit()  # Явный коммит
             updated_dto = self.get_dto_out(patient)
+
             self.logger.info(f"Обновлён пациент id={updated_dto.id}")
             self.logger.debug(f"updated_dto {updated_dto}") 
+
             return updated_dto  
         
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -789,10 +1077,11 @@ class PatientService(
         :rtype: PatientNotFoundError
         """
         self.logger.error(f"Пациент с идентификатором {entity_id} не найден.'")
+
         return PatientNotFoundError(entity_id) # Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -811,10 +1100,13 @@ class PatientService(
         :rtype: List[PatientDTO]
         """
         self.logger.debug("Запрос всех пациентов")
-        return self.get_all(session=session)
+
+        return self.get_all(
+            session=session
+        )
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -835,11 +1127,13 @@ class PatientService(
         Raises:
             PatientNotFoundError: Если пациент с указанным идентификатором не найден в базе данных.
         """
+
         self.logger.debug(f"Запрос пациента по id={patient_id}")
+
         return self.get_by_id(patient_id, session=session)
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -848,38 +1142,57 @@ class PatientService(
     )  
     def delete_patient(self, patient_id: int, session: Optional[Session] = None) -> None:
         """
-        Удаляет пациента. Приёмы удаляются каскадно благодаря настройкам модели.
-        После удаления проверяет, остались ли заметки, и удаляет неиспользуемые.
-        :param patient_id: ID пациента, которого нужно удалить
-        :type patient_id: int
-        :param session: сессия для работы в одной транзакции
-        :type session: Optional[Session]
-        :raises PatientNotFoundError: если пациент с указанным идентификатором не найден
+        Удаляет пациента и все связанные приёмы (каскадно). Удаляет неиспользуемые заметки.
+
+        Параметры:
+            patient_id (int): ID пациента.
+            session (Optional[Session]): Внешняя сессия.
+
+        Исключения:
+            PatientNotFoundError: Если пациент не найден.
         """
+
         self.logger.debug(f"Удаление пациента id={patient_id}")
+        
         with self._session_scope(session) as sess:
             # Получаем пациента со связанными приёмами (чтобы собрать ID заметок)
             # patient = session.get(Patient, patient_id)
-            patient = sess.query(Patient).options(selectinload(Patient.appointments)).filter(Patient.id == patient_id).first()
+            patient = sess.query(
+                Patient
+            ).options(
+                selectinload(Patient.appointments)
+            ).filter(
+                Patient.id == patient_id
+            ).first()
+
             if patient is None:
                 raise PatientNotFoundError(patient_id)
 
             # Собираем ID заметок, привязанных к приёмам этого пациента
             note_ids = [app.note_id for app in patient.appointments if app.note_id]
 
+            if patient.description_id:
+                note_ids.append(patient.description_id)
+
+            if patient.comment_id:
+                note_ids.append(patient.comment_id)
+
             # Удаляем пациента — каскадно удалятся все его приёмы и фото
             sess.delete(patient)
             sess.flush() # принудительно выполняем удаление, чтобы обновить состояние БД
 
             # Проверяем каждую заметку: остались ли ещё приёмы, ссылающиеся на неё           
-            note_service = NoteService(self._db, logger_name=self.logger.name + ".NoteService")
+            note_service = NoteService(
+                self._db, 
+                logger_name=self.logger.name + ".NoteService"
+            )
             for note_id in note_ids:
                 note_service.cleanup_unused_note(note_id, sess)
 
             self.logger.info(f"Удалён пациент id={patient_id}")
    
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -910,11 +1223,18 @@ class PatientService(
         3. Вызываем метод get_patients_filtered у PatientService, передавая туда полученный список фильтров и порог схожести
         4. Выводим список пациентов, если он не пустой
         """
-        self.logger.debug(f"Запрос пациентов с фильтрацией: filters={filters}, fuzzy_threshold={fuzzy_threshold}")
+
+        self.logger.debug(
+            f"Запрос пациентов с фильтрацией: "
+            f"filters={filters}, "
+            f"fuzzy_threshold={fuzzy_threshold}"
+        )
+
         return self.get_filtered(filters, fuzzy_threshold, session=session)
    
+   # Для совместимости с DynamicEditPage
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -933,7 +1253,7 @@ class PatientService(
         return self.create_patient(dto)
 
     @AppLogger.get_instance(
-        name = 'BaseService',
+        name = 'PatientService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -945,6 +1265,7 @@ class PatientService(
         Универсальный метод обновления, вызывающий update_patient.
         Возвращает обновленный объект PatientDTO.
         """
+
         return self.update_patient(dto)
 
 
@@ -984,6 +1305,7 @@ class NoteService(
         """
         if logger_name is None:
             logger_name = self.__class__.__name__
+
         super().__init__(
             db=db,
             repo_class=AppointmentNoteRepository,
@@ -1033,6 +1355,7 @@ class NoteService(
         :rtype: List[AppointmentNoteDTO]
         """
         self.logger.debug("Запрос всех заметок")
+
         return super().get_all(session=session)
 
     @AppLogger.get_instance(
@@ -1055,6 +1378,7 @@ class NoteService(
         :rtype: AppointmentNoteDTO
         """
         self.logger.debug(f"Запрос заметки id={note_id}")
+
         return super().get_by_id(note_id, session=session)
 
     @AppLogger.get_instance(
@@ -1075,6 +1399,7 @@ class NoteService(
         :type session: Optional[Session]
         """
         self.logger.debug(f"Удаление заметки id={note_id}")
+
         super().delete(note_id, session=session)
 
     @AppLogger.get_instance(
@@ -1161,13 +1486,18 @@ class NoteService(
         :rtype: AppointmentNoteDTO
         """
         self.logger.debug("Создание заметки")
+
         with self._session_scope(session) as sess:
             note = self._model_class(text=text)
+
             sess.add(note)
             sess.flush()
+
             # dto_out = self._dto_class.from_orm(note)
             dto_out = self.get_dto_out(note)
+
             self.logger.info(f"Создана заметка id={dto_out.id}")
+
             return dto_out
 
 
@@ -1177,10 +1507,7 @@ class NoteService(
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
     ).log_execution_time(
-        level = AppLogger._parse_log_level(
-            # 'INFO'
-            'DEBUG'
-        )
+        level = AppLogger._parse_log_level('DEBUG')
     )  
     def update_note(
         self, 
@@ -1253,6 +1580,7 @@ class NoteService(
         """
         
         self.logger.debug(f"Удаляет запись по ID ({note_id})")
+
         self.delete(note_id, session=session)
 
 
@@ -1291,9 +1619,12 @@ class NoteService(
 
             # Создаём новую заметку
             note = self._model_class(text=text)
+
             sess.add(note)
             sess.flush()
+
             self.logger.info(f"Создана новая заметка id={note.id}")
+
             # return self._dto_class.from_orm(note)
             return self.get_dto_out(note)
 
@@ -1319,12 +1650,15 @@ class NoteService(
         :rtype: AppointmentNoteDTO
         """
         self.logger.debug(f"Создание заметки из файла: {file_path}")
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 text = f.read()
+
         except Exception as e:
             self.logger.exception(f"Ошибка чтения файла {file_path}: {e}")
             raise  # пробрасываем дальше
+
         return self.create_note(text, session=session)      
       
 
@@ -1336,10 +1670,11 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def cleanup_unused_note(self, note_id: int, session: Session) -> None:
+    def cleanup_unused_note(self, note_id: int, session: Optional[Session] = None) -> None:
         """
-        Удаляет заметку, если на неё больше не ссылаются никакие приёмы.
+        Удаляет заметку, если на неё больше нет ссылок ни из patients, ни из appointments.
         Если заметка используется, ничего не делает.
+        
         :param note_id: ID заметки, которую нужно проверить на использование
         :type note_id: int
         :param session: сессия для работы в одной транзакции
@@ -1348,16 +1683,38 @@ class NoteService(
         
         if note_id is None:
             return
+        
+        with self._session_scope(session) as sess:
 
-        # Проверяем, остались ли приёмы с этой заметкой
-        remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
-        if remaining == 0:
-            note_repo = AppointmentNoteRepository(session)
-            note = note_repo.get_by_id(note_id)
-            if note:
-                note_repo.delete(note)
-                self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")   
+            # Проверяем patients
+            patient_usage = sess.query(Patient).filter(
+                (Patient.description_id == note_id) | (Patient.comment_id == note_id)
+            ).count()
 
+            # Проверяем appointments
+            appointment_usage = sess.query(Appointment).filter(
+                (Appointment.reason_id == note_id) |
+                (Appointment.procedure_id == note_id) |
+                (Appointment.recommendations_id == note_id) |
+                (Appointment.note_id == note_id) |
+                (Appointment.cost_procedure_id == note_id)
+            ).count()
+
+            if patient_usage == 0 and appointment_usage == 0:
+                note_repo = AppointmentNoteRepository(sess)
+                note = note_repo.get_by_id(note_id)
+                if note:
+                    sess.delete(note)
+                    self.logger.info(f"Заметка {note_id} удалена как неиспользуемая")
+
+        # # Проверяем, остались ли приёмы с этой заметкой
+        # remaining = session.query(Appointment).filter(Appointment.note_id == note_id).count()
+        # if remaining == 0:
+        #     note_repo = AppointmentNoteRepository(session)
+        #     note = note_repo.get_by_id(note_id)
+        #     if note:
+        #         note_repo.delete(note)
+        #         self.logger.info(f"Заметка id={note_id} удалена как неиспользуемая")   
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -1376,6 +1733,7 @@ class NoteService(
         :rtype: List[str]
         """
         notes = self.get_all(session=session)
+
         return [note.text for note in notes]
 
 
@@ -1442,7 +1800,104 @@ class AppointmentService(
 
         # Если не передан, создадим по умолчанию (для совместимости)
         if self._note_service is None:
-            self._note_service = NoteService(db, logger_name=logger_name + ".NoteService")
+            self._note_service = NoteService(
+                db, 
+                logger_name=logger_name + ".NoteService"
+            )
+
+    # ------------------------------------------------------------
+    # Вспомогательный метод для работы с заметками через репозиторий
+    # ------------------------------------------------------------
+
+    # @AppLogger.get_instance(
+    #     name = 'AppointmentService',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )  
+    @staticmethod
+    def _update_note_field(
+        sess: Session,
+        note_repo: AppointmentNoteRepository,
+        old_note_id: Optional[int],
+        new_text: Optional[str],
+        create_if_missing: bool = True
+    ) -> Optional[int]:
+        """
+        Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
+        old_note_id – переданный старый ID (может быть None).
+        Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
+        """
+        # Если текст не передан и не требуется создавать – ничего не меняем
+        if new_text is None and not create_if_missing:
+            return old_note_id, None
+
+        # Если есть старая заметка и текст передан – обновляем её
+        if old_note_id is not None:
+            note = note_repo.get_by_id(old_note_id)
+            if note:
+                if new_text is not None:
+                    note.text = new_text
+
+                return old_note_id, None   # ID не изменился, старый не нужно удалять
+
+        # Создаём новую заметку
+        new_note = AppointmentNote(text=new_text or "")
+        note_repo.add(new_note)
+        sess.flush()
+        
+        return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_photo_counts(self, appointments: List[Appointment], sess) -> None:
+        """Добавляет каждому приёму временный атрибут _photo_count с количеством фото."""
+
+        if not appointments:
+            return
+        
+        # from sqlalchemy import func
+        # from app.database.database_shema.clinic import Photo
+        app_ids = [app.id for app in appointments]
+
+        # Запрос количества фото по каждому приёму
+        counts = sess.query(
+            Photo.appointment_id,
+            func.count(Photo.id).label('cnt')
+        ).filter(
+            Photo.appointment_id.in_(app_ids)
+        ).group_by(
+            Photo.appointment_id
+        ).all()
+
+        count_map = {c[0]: c[1] for c in counts}
+
+        for app in appointments:
+            setattr(app, '_photo_count', count_map.get(app.id, 0))
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_config(self) -> None:
+        """
+        Перезагружает конфигурацию AppointmentService.
+        Обновляет Database, а также пересоздаёт сервисы заметок и фото.
+        """
+        super().reload_config()
+
+        from app.dependencies import get_note_service, get_photo_service # оставить тут, так как циклы
+
+        self._note_service = get_note_service()
+        self._photo_service = get_photo_service()
+
+        self.logger.info("AppointmentService: note_service и photo_service перезагружены")
 
 
     @AppLogger.get_instance(
@@ -1463,17 +1918,17 @@ class AppointmentService(
         :rtype: Exception
         """
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
+
         return AppointmentNotFoundError(entity_id)
 
-
-    @AppLogger.get_instance(
-        name = 'AppointmentService',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )  
+    # @AppLogger.get_instance(
+    #     name = 'AppointmentService',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     # def get_dtos( # ф-ю требуется переделать в динамику
     #         self, 
     #         item_s:Union[List[AppointmentDTO], AppointmentDTO]  
@@ -1537,15 +1992,80 @@ class AppointmentService(
     #         #     raise e
             
     #         return dto
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_extra_data(self, item_s):
+        extra_data = {}
+        # Определяем количество фото
+        if hasattr(item_s, 'photos') and item_s.photos is not None:
+            extra_data['photo_count'] = len(item_s.photos)
+        elif hasattr(item_s, '_photo_count'):
+            extra_data['photo_count'] = item_s._photo_count
+        else:
+            extra_data['photo_count'] = 0
+
+        return extra_data
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _conwert_photos_in_PhotoDTO(self, photos):
+        # Преобразование photos в PhotoDTO (если есть и это не DTO)
+        if photos:
+            self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
+
+            # from app.dto import PhotoDTO
+            # dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
+            photos = [  # Если элемент уже PhotoDTO, оставляем как есть; иначе преобразуем
+                p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
+                for p in photos
+            ]
+
+            self.logger.debug(
+                f"После преобразования: "
+                f"тип dto.photos = {type(photos)}, "
+                f"первый элемент = {type(photos[0]) if photos else None}"
+            )
+
+        return photos
+
+    @AppLogger.get_instance(
+        name='AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging='system',
+        use_name_in_filename=False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_dtos(
         self, 
-        item_s: Union[List[Appointment], Appointment]
+        item_s: Union[List[Appointment], Appointment],
+        # extra_data_for_photos:bool = False,
     ) -> Union[List[AppointmentDTO], AppointmentDTO]:
+
         if isinstance(item_s, list):
-            return [self.get_dtos(item) for item in item_s]
+            return [ # Для списка вызываем рекурсивно с тем же флагом
+                self.get_dtos(
+                    item,
+                    # extra_data_for_photos=extra_data_for_photos
+                ) for item in item_s
+            ]
+        
         else:
             try:
                 dto = self._dto_class.model_validate(item_s)
+
                 self.logger.debug(
                     f"item_s: "
                     f"type={type(item_s).__name__}, "
@@ -1556,36 +2076,31 @@ class AppointmentService(
                     self.logger.debug(f"  первый элемент: {type(dto.photos[0])}")
 
             except Exception as e:
-                self.logger.error(f"Ошибка валидации для объекта: {item_s}")
+                self.logger.error(f"Ошибка валидации для объекта: {item_s} : {e}")
                 raise e
 
-            # Явное преобразование photos в PhotoDTO
-            if dto.photos:
-                self.logger.debug("Начинаем явное преобразование photos в PhotoDTO")
+            # Преобразование photos в PhotoDTO (если есть и это не DTO)
+            dto.photos = self._conwert_photos_in_PhotoDTO(dto.photos)
 
-                # from app.dto import PhotoDTO
-                # dto.photos = [PhotoDTO.model_validate(p) for p in dto.photos]
-                dto.photos = [ # Если элемент уже PhotoDTO, оставляем как есть; иначе преобразуем
-                    p if isinstance(p, PhotoDTO) else PhotoDTO.model_validate(p)
-                    for p in dto.photos
-                ]
-
-                self.logger.debug(
-                    f"После преобразования: "
-                    f"тип dto.photos = {type(dto.photos)}, "
-                    f"первый элемент = {type(dto.photos[0]) if dto.photos else None}"
-                )
+            # Определяем количество фото
+            extra_data = self._get_extra_data(item_s)
 
             # Обогащаем DTO вычисленными полями
-            enriched_dto = enrich_dto_with_computed_fields(dto, item_s, self._field_configs)
+            enriched_dto = enrich_dto_with_computed_fields(
+                dto, 
+                model_obj = item_s, 
+                field_configs = self._field_configs,
+                extra_data = extra_data,
+            )
 
-            self.logger.debug(f"После enrich: тип enriched_dto.photos = {type(enriched_dto.photos)}")
+            self.logger.debug(
+                f"После enrich: тип enriched_dto.photos = {type(enriched_dto.photos)}"
+            )
 
             if enriched_dto.photos:
                 self.logger.debug(f"  первый элемент: {type(enriched_dto.photos[0])}")
 
             return enriched_dto
-
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1609,10 +2124,17 @@ class AppointmentService(
         :rtype: AppointmentDTO
         """
         # получаем текст заметки из dto
-        note_text = getattr(dto, 'note_text', None)
+        note_text = getattr(
+            dto, 
+            'note_text', 
+            None
+        )
+        
         # вызываем метод create_appointment для создания приёма
-        return self.create_appointment(dto, note_text=note_text)
-
+        return self.create_appointment(
+            dto, 
+            note_text=note_text
+        )
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1641,6 +2163,7 @@ class AppointmentService(
 
         # получаем текст заметки из поля dto, если он указан
         note_text = getattr(dto, 'note_text', None)
+
         # вызываем метод update_appointment для обновления приёма
         # и передаем параметр note_text в него
         return self.update_appointment(dto, note_text=note_text)
@@ -1648,7 +2171,6 @@ class AppointmentService(
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей
     # ----------------------------------------------------------------------
-
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1671,26 +2193,20 @@ class AppointmentService(
         :return: список приёмов с подгруженными данными
         :rtype: List[AppointmentDTO]
         """
-        self.logger.debug("get_all (with relations)")
+        # self.logger.debug("get_all (with relations)")
+
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
-            items = repo.get_all_with_relations()  # метод репозитория с подгрузкой
-            # return [self._dto_class.from_orm(item) for item in items]
-            # dtos = [self._dto_class.from_orm(item) for item in items]
-            # dtos = [self._dto_class.model_validate(item) for item in items]
-            dtos = self.get_dtos(items)
-            # self.logger.debug(f"Получено {len(dtos)} записей")
 
-            # dtos = []
-            # for item in items:
-            #     # dto = self.get_dtos(item)
-            #     dto = self._dto_class.model_validate(item)
-                
-            #     # Заполняем виртуальные поля
-            #     if item.patient:
-            #         dto.patient_name = f"{item.patient.last_name} {item.patient.first_name}"
-            #     if item.note:
-            #         dto.note_text = item.note.text
+            items = repo.get_all_with_relations()  # метод репозитория с подгрузкой
+
+            self._add_photo_counts(items, sess)
+
+            dtos = self.get_dtos(
+                items,
+                # extra_data_for_photos=True,
+            )
+
             return dtos
         
 
@@ -1717,7 +2233,10 @@ class AppointmentService(
         :return: список приёмов пациента с подгруженными связями
         :rtype: List[AppointmentDTO]
         """
-        self.logger.debug(f"get_appointments_by_patient: patient_id={patient_id}")
+        self.logger.debug(
+            f"get_appointments_by_patient: "
+            f"patient_id={patient_id}"
+        )
 
         # 1. Создаем сессию для работы в одной транзакции (если не указана)
         with self._session_scope(session) as sess:
@@ -1728,12 +2247,19 @@ class AppointmentService(
             # 3. Вызываем метод get_by_patient_with_relations у репозитория, передавая ID пациента
             items = repo.get_by_patient_with_relations(patient_id)
 
+            self._add_photo_counts(items, sess)
+
             # 4. Создаем список DTO из полученных записей
             # return [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.from_orm(item) for item in items]
             # dtos = [self._dto_class.model_validate(item) for item in items]
-            dtos = self.get_dtos(items)
+            
+            dtos = self.get_dtos(
+                items,
+                # extra_data_for_photos=True,
+            )
             # self.logger.debug(f"Получено {len(dtos)} записей для пациента {patient_id}")
+            
             return dtos
 
 
@@ -1776,10 +2302,12 @@ class AppointmentService(
             item = repo.get_by_id_with_relations(appointment_id)
             if item is None:
                 raise AppointmentNotFoundError(appointment_id)
+            
             # return self._dto_class.from_orm(item)
+
             # Создаем DTO из полученной записи
             return  self.get_dtos(item)
-
+        
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1810,18 +2338,51 @@ class AppointmentService(
 
         # from ..utils.filtering import apply_filters, apply_post_filters
 
-        self.logger.debug(f"get_filtered (with relations) filters={filters}")
+        self.logger.debug(
+            f"get_filtered (with relations) "
+            f"filters={filters}"
+        )
+
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class).options(
+                # joinedload(Appointment.patient),
+                # joinedload(Appointment.note)
+
                 joinedload(Appointment.patient),
-                joinedload(Appointment.note)
+                joinedload(Appointment.reason_note),
+                joinedload(Appointment.procedure_note),
+                joinedload(Appointment.recommendations_note),
+                joinedload(Appointment.note),
+                joinedload(Appointment.cost_procedure_note),
+                # joinedload(Appointment.photos)
             )
-            query, post_filters = apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+            query, post_filters = apply_filters(
+                query, 
+                self._model_class, 
+                filters, 
+                fuzzy_threshold,
+            )
+
             items = query.all()
+
             if post_filters:
-                items = apply_post_filters(items, post_filters, self._model_class)
+                items = apply_post_filters(
+                    items, 
+                    post_filters, 
+                    self._model_class
+                )
+
             # return [self._dto_class.from_orm(item) for item in items]
-            return self.get_dtos(items)
+        
+            self._add_photo_counts(items, sess)
+
+            dtos = self.get_dtos(
+                items, 
+                # extra_data_for_photos=True, 
+            )
+
+            return dtos
 
     # ----------------------------------------------------------------------
     # Методы создания, обновления и удаления (без изменений)
@@ -1851,39 +2412,90 @@ class AppointmentService(
         :param session: опциональная сессия для работы в одной транзакции.
         :raises PatientNotFoundError: если пациент с указанным ID не найден.
         """
-        self.logger.debug(f"Создание приёма: {dto}, note_text={note_text}")
+
+        self.logger.debug(
+            f"Создание приёма: {dto}, "
+            f"note_text={note_text}"
+        )
 
         with self._session_scope(session) as sess:
             # Проверка существования пациента
             patient_repo = PatientRepository(sess)
-            patient = patient_repo.get_by_id(dto.patient_id)
-            if patient is None:
+
+            if not patient_repo.get_by_id(dto.patient_id):
                 raise PatientNotFoundError(dto.patient_id)
 
-            # Обработка заметки
-            note_id = dto.note_id
-            if note_text:
-                # note_service = NoteService( # создаём экземпляр (можно без логгера)
-                #     self._db,
-                #     logger_name=self.logger.name + ".NoteService" # (можно без логгера)
-                #     )  
-                note_dto = self._note_service.get_or_create_note(note_text, session=sess)
-                note_id = note_dto.id if note_dto else None
+            note_repo = AppointmentNoteRepository(sess)
+
+            # Создаём заметки для каждого текстового поля, старых ID нет
+            reason_id, _ = self._update_note_field(            
+                sess, 
+                note_repo, 
+                None, 
+                dto.reason_text,                  
+                create_if_missing=False
+            )
+            procedure_id, _ = self._update_note_field(         
+                sess, 
+                note_repo, 
+                None, 
+                dto.procedure_text,               
+                create_if_missing=False
+            )
+            recommendations_id , _= self._update_note_field(   
+                sess, 
+                note_repo, 
+                None, 
+                dto.recommendations_text,         
+                create_if_missing=False
+            )
+            note_id, _ = self._update_note_field(              
+                sess, 
+                note_repo, 
+                None, 
+                dto.note_text,   
+                create_if_missing=False
+            )
+            cost_procedure_id, _ = self._update_note_field(    
+                sess, 
+                note_repo, 
+                None, 
+                dto.cost_procedure_text,          
+                create_if_missing=False
+            )
+
+            # # Обработка заметки
+            # note_id = dto.note_id
+            # if note_text:
+            #     # note_service = NoteService( # создаём экземпляр (можно без логгера)
+            #     #     self._db,
+            #     #     logger_name=self.logger.name + ".NoteService" # (можно без логгера)
+            #     #     )  
+            #     note_dto = self._note_service.get_or_create_note(note_text, session=sess)
+            #     note_id = note_dto.id if note_dto else None
 
             # Создаем приём
             appointment = self._model_class(
                 patient_id=dto.patient_id,
                 date=dto.date,
-                time=dto.time,
-                note_id=note_id
+                date_next=dto.date_next,
+                reason_id=reason_id,
+                procedure_id=procedure_id,
+                recommendations_id=recommendations_id,
+                note_id=note_id,
+                cost_procedure_id=cost_procedure_id,
             )
-            sess.add(appointment)
+
+            repo = self._get_repo(sess)
+            repo.add(appointment)
             sess.flush()  # чтобы получить id
+            
             # dto_out = self._dto_class.from_orm(appointment)
             dto_out = self.get_dto_out(appointment)
-            self.logger.info(f"Создан приём id={dto_out.id}")
-            return dto_out
 
+            self.logger.info(f"Создан приём id={dto_out.id}")
+
+            return dto_out
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1913,44 +2525,122 @@ class AppointmentService(
         :raises AppointmentNotFoundError: если приём с указанным ID не найден
         :raises ValueError: если ID приёма не указан
         """
+        
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
             raise ValueError("ID приёма не указан")
 
         self.logger.debug(f"Обновление приёма id={dto.id}")
 
-        with self._session_scope(session) as sess:
+        with self._session_scope(session) as sess:            
+            # ВАЖНО: используем get_by_id_with_relations, чтобы подгрузить все связи
             repo = self._get_repo(sess)
-            app = repo.get_by_id_with_relations(dto.id)  # используем метод с подгрузкой
-            if app is None:
+            appointment = repo.get_by_id_with_relations(dto.id)
+            if appointment is None:
                 raise AppointmentNotFoundError(dto.id)
 
-            old_note_id = app.note_id
 
-            # Обновляем основные поля
-            app.date = dto.date
-            app.time = dto.time
+            # Сохраняем старые ID заметок до изменения
+            old_reason_id = appointment.reason_id
+            old_procedure_id = appointment.procedure_id
+            old_recommendations_id = appointment.recommendations_id
+            old_note_id = appointment.note_id
+            old_cost_procedure_id = appointment.cost_procedure_id
 
-            # Обработка заметки
-            if note_text is not None:
-                # note_service = NoteService(self._db)
-                note_dto = self._note_service.get_or_create_note(note_text, session=sess)
-                app.note_id = note_dto.id if note_dto else None
-            elif dto.note_id is not None:
-                app.note_id = dto.note_id
-            # иначе оставляем текущую заметку
+            # Обновляем простые поля
+            appointment.date = dto.date
+            appointment.date_next = dto.date_next
 
-            # Если заметка изменилась и была старая заметка
-            if old_note_id is not None and old_note_id != app.note_id:
-                # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
-                #  self._cleanup_unused_note(old_note_id, sess)
-                self._note_service.cleanup_unused_note(old_note_id, sess)
+            note_repo = AppointmentNoteRepository(sess)
 
-            # updated_dto = self._dto_class.from_orm(app)
-            updated_dto = self.get_dto_out(app)
+            # Обновляем каждую заметку, получаем (новый ID, старый ID)
+            new_reason_id, old_reason = self._update_note_field(
+                sess, 
+                note_repo, 
+                old_reason_id, 
+                dto.reason_text, 
+                create_if_missing=False
+            )
+            new_procedure_id, old_procedure = self._update_note_field(
+                sess, 
+                note_repo, 
+                old_procedure_id, 
+                dto.procedure_text, 
+                create_if_missing=False
+            )
+            new_recommendations_id, old_recommendations = self._update_note_field(
+                sess, 
+                note_repo, 
+                old_recommendations_id, 
+                dto.recommendations_text, 
+                create_if_missing=False
+            )
+            new_note_id, old_note = self._update_note_field(
+                sess, 
+                note_repo, 
+                old_note_id, 
+                dto.note_text, 
+                create_if_missing=False
+            )
+            new_cost_id, old_cost = self._update_note_field(
+                sess, 
+                note_repo, 
+                old_cost_procedure_id, 
+                dto.cost_procedure_text, 
+                create_if_missing=False
+            )
+
+            # Присваиваем новые ID
+            appointment.reason_id = new_reason_id
+            appointment.procedure_id = new_procedure_id
+            appointment.recommendations_id = new_recommendations_id
+            appointment.note_id = new_note_id
+            appointment.cost_procedure_id = new_cost_id
+
+            # Очистка старых заметок, которые больше не используются
+            # Используем сервис заметок (self._note_service), который уже имеет метод cleanup_unused_note
+            for old_id in (old_reason, old_procedure, old_recommendations, old_note, old_cost):
+                if old_id is not None and old_id not in (
+                    appointment.reason_id, appointment.procedure_id,
+                    appointment.recommendations_id, appointment.note_id,
+                    appointment.cost_procedure_id
+                ):
+                    self._note_service.cleanup_unused_note(old_id, sess)
+
+            updated_dto = self.get_dto_out(appointment)
             self.logger.info(f"Обновлён приём id={updated_dto.id}")
+
             return updated_dto   
 
+
+
+            # old_note_id = app.note_id
+
+            # # Обновляем основные поля
+            # app.date = dto.date
+            # app.time = dto.time
+
+            # # Обработка заметки
+            # if note_text is not None:
+            #     # note_service = NoteService(self._db)
+            #     note_dto = self._note_service.get_or_create_note(note_text, session=sess)
+            #     app.note_id = note_dto.id if note_dto else None
+
+            # elif dto.note_id is not None:
+            #     app.note_id = dto.note_id
+            # # иначе оставляем текущую заметку
+
+            # # Если заметка изменилась и была старая заметка
+            # if old_note_id is not None and old_note_id != app.note_id:
+            #     # Проверяем, остались ли другие приёмы, ссылающиеся на старую заметку
+            #     #  self._cleanup_unused_note(old_note_id, sess)
+            #     self._note_service.cleanup_unused_note(old_note_id, sess)
+
+            # # updated_dto = self._dto_class.from_orm(app)
+            # updated_dto = self.get_dto_out(app)
+            # self.logger.info(f"Обновлён приём id={updated_dto.id}")
+
+            # return updated_dto   
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -1978,6 +2668,7 @@ class AppointmentService(
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             appointment = repo.get_by_id_with_relations(appointment_id)
+
             if appointment is None:
                 raise AppointmentNotFoundError(appointment_id)
 
@@ -1985,18 +2676,32 @@ class AppointmentService(
             if self._photo_service is not None:
                 for photo in appointment.photos:
                     self._photo_service.delete_photo(photo.id, session=sess)
+
             else:
                 self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
             
-            # Если приём имел заметку, и она больше не используется, удаляем ее
-            note_id = appointment.note_id
+            # # Если приём имел заметку, и она больше не используется, удаляем ее
+            # note_id = appointment.note_id
+
+            # Сохраняем все ID заметок до удаления приёма
+            note_ids = []
+            for note_id in (
+                appointment.reason_id, appointment.procedure_id,
+                appointment.recommendations_id, appointment.note_id,
+                appointment.cost_procedure_id
+            ):
+                if note_id is not None:
+                    note_ids.append(note_id)
+
+
             
             # Удаляем приём
             repo.delete(appointment)
             sess.flush()
 
-            if note_id is not None:
-                self._note_service.cleanup_unused_note(note_id, sess)
+            # Теперь чистим заметки
+            for nid in note_ids:
+                self._note_service.cleanup_unused_note(nid, sess)
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -2052,7 +2757,11 @@ class AppointmentService(
         5. Создаем список DTO из полученных записей
         6. Возвращаем список DTO и общее количество приёмов
         """
-        self.logger.debug(f"Запрос страницы приёмов пациента {patient_id}: offset={offset}, limit={limit}")
+        self.logger.debug(
+            f"Запрос страницы приёмов пациента {patient_id}: "
+            f"offset={offset}, "
+            f"limit={limit}"
+        )
 
         # Создаем сессию для работы в одной транзакции (если не указана)
         with self._session_scope(session) as sess:
@@ -2089,6 +2798,27 @@ class PhotoService(
     Сервис для работы с фотографиями приёмов.
     Все методы поддерживают опциональный параметр session для объединения в одну транзакцию.
     """
+
+    # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
+    _class_storage_path: Optional[str] = None
+    @property
+    def _storage_path(self) -> str:
+        """Возвращает общий путь к хранилищу фото."""
+        if self.__class__._class_storage_path is None:
+            # Первое обращение – загружаем из конфига
+            # from app.config.config_manager.manager import AppConfigManager
+            self.__class__._class_storage_path = AppConfigManager.get_instance().get(
+                'PHOTOS_STORAGE_PATH', os.path.join('.', 'photos')
+            )
+
+        return self.__class__._class_storage_path
+
+    @_storage_path.setter
+    def _storage_path(self, value: str) -> None:
+        """Устанавливает общий путь для всех экземпляров."""
+        self.__class__._class_storage_path = value
+        if value:
+            os.makedirs(value, exist_ok=True)
 
     @AppLogger.get_instance(
         name = 'PhotoService',
@@ -2162,9 +2892,11 @@ class PhotoService(
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             photo = repo.get_by_id(photo_id)
+
             if photo is None:
                 err_ = PhotoNotFoundError(photo_id)
                 self.logger.exception(err_.message)
+
                 raise err_
             
             photo.description = description
@@ -2190,6 +2922,7 @@ class PhotoService(
         """
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
+
             return repo.get_unique_values(column_name)
 
     @AppLogger.get_instance(
@@ -2209,7 +2942,9 @@ class PhotoService(
         :rtype: Exception
         """
         err_ = PhotoNotFoundError(entity_id)
+
         self.logger.exception(err_.message)
+
         # raise err_
         return err_
 
@@ -2292,7 +3027,12 @@ class PhotoService(
             PhotoFileError: если исходный файл не найден, не удаётся его скопировать
                             или возникает другая ошибка ввода-вывода.
         """
-        self.logger.debug(f"Добавление фото к приёму id={appointment_id}, файл={source_file_path}, описание='{description}'")
+        self.logger.debug(
+            f"Добавление фото к приёму "
+            f"id={appointment_id}, "
+            f"файл={source_file_path}, "
+            f"описание='{description}'"
+        )
         
         # 1. Проверка существования и типа файла
         if not os.path.isfile(source_file_path):
@@ -2311,6 +3051,7 @@ class PhotoService(
             if app is None:
                 err_ = AppointmentNotFoundError(appointment_id)
                 self.logger.exception(err_.message)
+
                 raise err_
                 # raise AppointmentNotFoundError(appointment_id)
 
@@ -2320,6 +3061,7 @@ class PhotoService(
                 file_path='pending',  # временная метка
                 description=description
             )
+
             sess.add(photo)
             sess.flush()  # получаем ID фото, нужен для имени файла
 
@@ -2330,7 +3072,11 @@ class PhotoService(
                 # Создаём папку назначения, если её нет
                 os.makedirs(os.path.dirname(target_path), exist_ok=True)
                 shutil.copy2(source_file_path, target_path)
-                self.logger.debug(f"Файл скопирован: {source_file_path} -> {target_path}")
+
+                self.logger.debug(
+                    f"Файл скопирован: "
+                    f"{source_file_path} -> {target_path}"
+                )
                 
             except Exception as e:
                 # Если копирование не удалось — удаляем созданную запись
@@ -2346,8 +3092,15 @@ class PhotoService(
 
             # dto_out = self._dto_class.from_orm(photo)
             dto_out = self.get_dto_out(photo)
-            self.logger.info(f"Добавлено фото id={dto_out.id} к приёму {appointment_id}")
+
+            self.logger.info(
+                f"Добавлено фото "
+                f"id={dto_out.id} "
+                f"к приёму {appointment_id}"
+            )
+
             return dto_out
+        
     # def get_photos_for_appointment(self, appointment_id: int, session: Optional[Session] = None) -> List[PhotoDTO]:
     #     """
     #     Возвращает список фотографий для указанного приёма.
@@ -2402,6 +3155,7 @@ class PhotoService(
                 # 5. Если файл фотографии не существует на диске или имеет статус 'pending', то выводим предупреждение
                 if p.file_path == 'pending':
                     self.logger.warning(f"Фото id={p.id} имеет статус 'pending' (файл не загружен)")
+
                 elif not os.path.exists(full_path):
                     self.logger.warning(f"Файл фото id={p.id} отсутствует на диске: {full_path}")
                     
@@ -2410,7 +3164,12 @@ class PhotoService(
                 dtos.append(self.get_dto_out(p))
             
             # 7. Возвращаем список DTO для фотографий
-            self.logger.info(f"Запрос фото для приёма id={appointment_id}. Получено {len(dtos)} записей")
+            self.logger.info(
+                f"Запрос фото для приёма "
+                f"id={appointment_id}. "
+                f"Получено {len(dtos)} записей"
+            )
+
             return dtos
     
     @AppLogger.get_instance(
@@ -2444,6 +3203,7 @@ class PhotoService(
             if photo is None:
                 err_ = PhotoNotFoundError(photo_id)
                 self.logger.exception(err_.message)
+
                 raise err_
 
             # 4. Запоминаем путь к файлу до удаления записи
@@ -2462,6 +3222,7 @@ class PhotoService(
                         try:
                             os.rmdir(parent_dir)
                             self.logger.debug(f"Удалена пустая папка {parent_dir}")
+
                         except OSError as e:
                             self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
                             
@@ -2521,6 +3282,7 @@ class PhotoService(
 
         # 4. Создаем полный путь к файлу
         app_folder = os.path.join(self._storage_path, f"app_{appointment_id}")
+
         return os.path.join(app_folder, filename)
 
     @AppLogger.get_instance(
@@ -2572,4 +3334,24 @@ class PhotoService(
                 self.add_photo_to_appointment(
                     appointment_id, file_path, description, session=sess
                 )
-            
+    
+    # внутри класса PhotoService, после метода __init__ или в любом месте
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_config(self) -> None:
+        """Перезагружает путь к хранилищу фото и пересоздаёт Database."""
+        # from app.config.config_manager.manager import AppConfigManager
+
+        super().reload_config()
+
+        config = AppConfigManager.get_instance()
+
+        new_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+        self._storage_path = new_path  # обновляем путь к хранилищу фото
+
+        self._ensure_storage_exists()  # создаём директорию для хранения,
+
+        self.logger.info(f"Путь к фото обновлён: {self._storage_path}")

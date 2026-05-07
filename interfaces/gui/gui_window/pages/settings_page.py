@@ -1,9 +1,16 @@
 # interfaces/gui/gui_window/pages/settings_page.py
-# -*- coding: utf-8 -*-
 
+import os
+
+from app.dependencies import create_database
 from app.utils.logger.logger import AppLogger
-from interfaces.gui.gui_window.pages.base_page import BasePage
+
+from app.network.ya_dop import check_and_create_path
+
+from app.config.config_applier import ConfigApplier
 from app.config.config_manager.manager import AppConfigManager
+
+from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from PySide6.QtWidgets import (
     # QWidget, 
@@ -11,9 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Slot, Qt
-
-
+from PySide6.QtCore import QThread, Signal, Slot, Qt
 
 class SettingsPage(BasePage):
     """
@@ -98,10 +103,21 @@ class SettingsPage(BasePage):
         self.db_path_edit = QLineEdit()
         self.db_path_btn = QPushButton("Обзор...")
         self.db_path_btn.setMaximumWidth(80)
+        self.create_db_btn = QPushButton("Создать тестовую БД")
+        self.create_db_btn.setMaximumWidth(150)
+        self.create_db_btn.setVisible(False)
+
         db_path_layout = QHBoxLayout()
         db_path_layout.addWidget(self.db_path_edit)
         db_path_layout.addWidget(self.db_path_btn)
+        db_path_layout.addWidget(self.create_db_btn)
         form_layout.addRow("Путь к БД:", db_path_layout)
+
+
+        # db_path_layout = QHBoxLayout()
+        # db_path_layout.addWidget(self.db_path_edit)
+        # db_path_layout.addWidget(self.db_path_btn)
+        # form_layout.addRow("Путь к БД:", db_path_layout)
 
         # Папка для хранения фото
         self.photos_path_edit = QLineEdit()
@@ -113,13 +129,32 @@ class SettingsPage(BasePage):
         form_layout.addRow("Папка для фото:", photos_layout)
 
         # Токен Яндекс.Диска
+        # self.token_edit = QLineEdit()
+        # self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        # Токен с кнопкой проверки
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Токен Яндекс.Диска:", self.token_edit)
+        token_layout = QHBoxLayout()
+        token_layout.addWidget(self.token_edit)
+        self.check_token_btn = QPushButton("Проверить")
+        self.check_token_btn.setMaximumWidth(80)
+        self.check_token_btn.clicked.connect(self._check_token)
+        token_layout.addWidget(self.check_token_btn)                    
+        form_layout.addRow("Токен Яндекс.Диска:", token_layout)
 
-        # Удалённый путь БД на диске
+        # # Удалённый путь БД на диске
+        # self.remote_path_edit = QLineEdit()
+        # form_layout.addRow("Удалённый путь БД:", self.remote_path_edit)
+
+        # Удалённый путь с кнопкой проверки/создания
         self.remote_path_edit = QLineEdit()
-        form_layout.addRow("Удалённый путь БД:", self.remote_path_edit)
+        remote_layout = QHBoxLayout()
+        remote_layout.addWidget(self.remote_path_edit)
+        self.check_path_btn = QPushButton("Проверить/Создать")
+        self.check_path_btn.setMaximumWidth(120)
+        self.check_path_btn.clicked.connect(self._check_remote_path)
+        remote_layout.addWidget(self.check_path_btn)
+        form_layout.addRow("Удалённый путь БД:", remote_layout)
 
         # Папка для бекапов
         self.backup_path_edit = QLineEdit()
@@ -220,6 +255,70 @@ class SettingsPage(BasePage):
         self.log_dir_btn.clicked.connect(lambda: self._browse_dir(self.log_dir_edit, "Выберите папку для логов"))
         self.save_btn.clicked.connect(self._save_settings)
 
+        # Подключаем сигнал изменения текста для обновления видимости кнопки
+        self.db_path_edit.textChanged.connect(self._update_create_db_button_visibility)
+        self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def can_leave(self) -> bool:
+        """Проверяет, можно ли покинуть страницу (существует ли БД)."""
+        db_path = self.db_path_edit.text().strip()
+        if not db_path or not os.path.isfile(db_path):
+            QMessageBox.warning(self, "Ошибка", "Сначала укажите существующий файл БД или создайте его.")
+            return False
+        
+        return True
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_create_db_button_visibility(self, text: str = None):
+        """Показывает кнопку 'Создать тестовую БД', если путь пуст или указывает на несуществующий файл."""
+        path = self.db_path_edit.text().strip()
+        if not path:
+            self.create_db_btn.setVisible(True)
+            return
+        
+        exists = os.path.exists(path)
+        self.create_db_btn.setVisible(not exists)
+        self.adjustSize()  # или self.updateGeometry()
+
+    # Обработчик кнопки создания БД
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_create_test_db_clicked(self):
+        """Обработчик кнопки 'Создать тестовую БД'."""
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            default_path = os.path.join('.', 'clinic.db')
+            db_path = default_path
+            self.db_path_edit.setText(default_path)
+        
+        reply = QMessageBox.question(
+            self,
+            "Создание базы данных",
+            "Заполнить тестовыми данными?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        fill_test = (reply == QMessageBox.StandardButton.Yes)
+        try:
+            create_database(db_path, fill_test_data=fill_test)
+            QMessageBox.information(self, "Успех", f"База данных создана: {db_path}")
+            self._update_create_db_button_visibility()
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка создания БД: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать БД: {e}")
+
     # ----------------------------------------------------------------------
     # Вспомогательные методы для выбора путей
     # ----------------------------------------------------------------------
@@ -309,10 +408,102 @@ class SettingsPage(BasePage):
         self.log_max_bytes_spin.setValue(int(self.config_manager.get('LOG_MAX_BYTES', 10 * 1024 * 1024)))
         self.log_backup_count_spin.setValue(int(self.config_manager.get('LOG_BACKUP_COUNT', 5)))
 
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _check_token(self):
+        """Проверяет токен Яндекс.Диска асинхронно."""
+        token = self.token_edit.text().strip()
+        
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Токен не задан.")
+            return
+
+        class TokenCheckThread(QThread):
+            result = Signal(bool, str)
+            def __init__(self, token):
+                super().__init__()
+                self.token = token
+            def run(self):
+                from app.network.ya_dop import check_token
+                ok = check_token(self.token)
+                msg = "Токен действителен" if ok else "Токен недействителен или нет соединения"
+                self.result.emit(ok, msg)
+
+        self.token_thread = TokenCheckThread(token)
+        self.token_thread.result.connect(self._on_token_checked)
+        self.token_thread.start()
+        self.check_token_btn.setEnabled(False)
+        self.check_token_btn.setText("Проверка...")
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_token_checked(self, ok: bool, message: str):
+        self.check_token_btn.setEnabled(True)
+        self.check_token_btn.setText("Проверить")
+
+        if ok:
+            QMessageBox.information(self, "Результат", message)
+        else:
+            QMessageBox.warning(self, "Результат", message)
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _check_remote_path(self):
+        """Проверяет существование удалённого пути на Яндекс.Диске, предлагает создать."""
+        token = self.token_edit.text().strip()
+        path = self.remote_path_edit.text().strip()
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Токен не задан.")
+            return
+        
+        if not path:
+            QMessageBox.warning(self, "Ошибка", "Удалённый путь не задан.")
+            return
+
+        class PathCheckThread(QThread):
+            result = Signal(bool, str)
+
+            def __init__(self, token, path):
+                super().__init__()
+                self.token = token
+                self.path = path
+
+            def run(self):
+                # from app.network.ya_dop import check_and_create_path
+                ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
+                self.result.emit(ok, msg)
+
+        self.path_thread = PathCheckThread(token, path)
+        self.path_thread.result.connect(self._on_path_checked)
+        self.path_thread.start()
+        self.check_path_btn.setEnabled(False)
+        self.check_path_btn.setText("Проверка...")
+
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_path_checked(self, ok: bool, message: str):
+        self.check_path_btn.setEnabled(True)
+        self.check_path_btn.setText("Проверить/Создать")
+        if ok:
+            QMessageBox.information(self, "Результат", message)
+        else:
+            QMessageBox.warning(self, "Результат", message)
+
     # ----------------------------------------------------------------------
     # Сохранение настроек и перезагрузка логгеров
     # ----------------------------------------------------------------------
-
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -322,8 +513,9 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    @Slot()
-    def _save_settings(self):
+    def _sawe_new_config(
+        self
+    ):
         # Сохраняем основные настройки
         self.config_manager.set('database_local_path', self.db_path_edit.text())
         self.config_manager.set('PHOTOS_STORAGE_PATH', self.photos_path_edit.text())
@@ -349,17 +541,112 @@ class SettingsPage(BasePage):
         self.config_manager.set('LOG_MAX_BYTES', self.log_max_bytes_spin.value())
         self.config_manager.set('LOG_BACKUP_COUNT', self.log_backup_count_spin.value())
 
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _save_settings(self):
+        """
+        Сохраняет настройки из формы в конфигурационный файл и применяет их.
+
+        Последовательность действий:
+            1. Копирует старую конфигурацию (`old_config`).
+            2. Сохраняет все поля формы в `AppConfigManager`.
+            3. Вызывает `self.config_manager.save()`.
+            4. Получает новую конфигурацию и вычисляет список изменившихся блоков
+               с помощью `ConfigApplier.get_changed_blocks()`.
+            5. Для каждого изменённого блока вызывает соответствующий метод `ConfigApplier`.
+            6. Уведомляет главное окно (`main_window.on_settings_changed`) с указанием
+               изменённых блоков.
+            7. Если это первый запуск (`self.first_start`), переключает страницу на
+               список пациентов.
+
+        Исключения:
+            Любое исключение при сохранении перехватывается, выводится сообщение
+            через QMessageBox.critical, и ошибка логируется.
+
+        Returns:
+            None
+        """
+
+        db_path = self.db_path_edit.text().strip()
+        if not db_path:
+            QMessageBox.warning(self, "Ошибка", "Путь к БД не может быть пустым.")
+            return
+        if not os.path.isfile(db_path):
+            reply = QMessageBox.question(
+                self, "База данных не найдена",
+                f"Файл БД '{db_path}' не существует.\nСоздать новую БД?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                fill = QMessageBox.question(
+                    self, "Тестовые данные",
+                    "Заполнить тестовыми данными?"
+                ) == QMessageBox.StandardButton.Yes
+                try:
+                    create_database(db_path, fill_test_data=fill)
+                    QMessageBox.information(self, "Успех", "БД создана.")
+                    # Путь уже установлен, продолжаем сохранение
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось создать БД: {e}")
+                    return
+            else:
+                return  # не сохранять
+
+        # Сохраняем старую конфигурацию для сравнения
+        old_config = self.config_manager.get_all().copy()
+
+        self._sawe_new_config()
+
         try:
             self.config_manager.save()
 
-            # ----------------------------------------------------------
-            # Ключевой момент: перезагружаем все логгеры из нового конфига
-            # ----------------------------------------------------------
-            # from app.utils.logger.logger import AppLogger
-            AppLogger.reload_all_from_app_config()
+            # Получаем новую конфигурацию и определяем изменившиеся блоки
+            new_config = self.config_manager.get_all()
+            # from app.config.config_applier import ConfigApplier
+            changed_blocks = ConfigApplier.get_changed_blocks(old_config, new_config)
+
+            # Применяем только изменённые блоки
+            applier = ConfigApplier()
+            if 'database' in changed_blocks:
+                applier.apply_database(new_config)
+
+            if 'photos' in changed_blocks:
+                applier.apply_photos_storage(new_config)
+
+            if 'sync' in changed_blocks:
+                applier.apply_sync(new_config)
+
+            if any(block.startswith('logging') for block in changed_blocks):
+                applier.apply_logging(new_config)
+
+            if 'backup' in changed_blocks:
+                applier.apply_backup(new_config)
+
+
+            # # ----------------------------------------------------------
+            # # Ключевой момент: перезагружаем все логгеры из нового конфига
+            # # ----------------------------------------------------------
+            # # from app.utils.logger.logger import AppLogger
+            # AppLogger.reload_all_from_app_config()
+
+
+            # Уведомляем главное окно о применённых изменениях (передаём список изменённых блоков)
+            if self.main_window and hasattr(self.main_window, 'on_settings_changed'):
+                self.main_window.on_settings_changed(
+                    changed_blocks
+                )
 
             QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены, логгеры перезагружены")
+
+            self._update_create_db_button_visibility()
 
             # Если это был первый запуск (настройки открыты при старте) – переходим на список пациентов
             if self.first_start:
@@ -367,6 +654,7 @@ class SettingsPage(BasePage):
                     'patient_list',
                     add_to_history=False,
                 )
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
             self.logger.exception(f"Ошибка сохранения настроек: {e}")
@@ -374,7 +662,6 @@ class SettingsPage(BasePage):
     # ----------------------------------------------------------------------
     # Метод, вызываемый при показе страницы
     # ----------------------------------------------------------------------
-
 
     @AppLogger.get_instance(
         name = 'SettingsPage',

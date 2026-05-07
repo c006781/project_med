@@ -5,17 +5,19 @@
 Запускает главное окно, инициализирует необходимые компоненты.
 """
 import sys
-import os
+# import os
 
 # Добавляем корень проекта в sys.path, чтобы импортировать app.*
 # sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from app.utils.logger.logger import AppLogger
 
+# from interfaces.gui.gui_window.main_window import MainWindow
+
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
-from interfaces.gui.gui_window.main_window import MainWindow
+
 
 @AppLogger.get_instance(
     name = 'system'
@@ -25,11 +27,10 @@ from interfaces.gui.gui_window.main_window import MainWindow
 )
 def main():
     """Главная функция запуска GUI."""
-    # Настройка High DPI (для Windows)
+    # Настройка High DPI (должна быть до создания QApplication)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
     app = QApplication(sys.argv)
 
     # Загружаем стили (если есть)
@@ -37,6 +38,8 @@ def main():
     #     app.setStyleSheet(f.read())
 
     # Создаём главное окно
+
+    from interfaces.gui.gui_window.main_window import MainWindow # тут, так как должно быть после создания QApplication
     window = MainWindow()
     window.show()
 

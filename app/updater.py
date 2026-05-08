@@ -13,18 +13,21 @@ import urllib.request
 import platform
 from typing import Optional, Tuple
 
+import certifi
 import requests
 
 
-from app.config.config_manager.manager import AppConfigManager
 from app.utils.logger.logger import AppLogger
+
+from app.config import APP_VERSION, GITHUB_REPO_SLUG
+from app.config.config_manager.manager import AppConfigManager
+
 
 
 from PySide6.QtCore import QThread, Signal, QObject, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication
 
-from app.config import APP_VERSION, GITHUB_REPO_SLUG
 
 class UpdateChecker(QThread):
     """
@@ -299,7 +302,9 @@ class UpdateDownloader(QThread):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def run(self):
-        
+        if_private = self.token is not None and self.token.strip()
+
+
         self.logger.debug(f"Download URL: {self.download_url}")
         try:
             # 1. Подготовка заголовков и временного файла
@@ -307,9 +312,22 @@ class UpdateDownloader(QThread):
             temp_path = self._get_temp_file_path()
             self.logger.debug(f"Temp file path: {temp_path}")
 
+            param = {
+                'url' : self.download_url, 
+                'headers':headers, 
+                'stream':True, 
+                'timeout':30,
+            }
+
+            if if_private:
+                param['verify'] = certifi.where()   # явно указываем путь к сертификатам
+
             # 2. Выполнение запроса
-            response = requests.get(self.download_url, headers=headers, stream=True, timeout=30)
-            self.logger.debug(f"Response status: {response.status_code}")
+            response = requests.get(
+                **param
+            )
+
+            self.logger.debug(f"Response status: {response.status_code}, if_private = {if_private}")
             response.raise_for_status()
 
             total_size = int(response.headers.get('content-length', 0))
@@ -518,16 +536,23 @@ class UpdateApplier(QObject):
         # Получаем токен для авторизации (если репозиторий приватный)
         from app.config.conf.getenv import get_getenv
         token = get_getenv(key='GITHUB_TOKEN', start_value='')
+        
+        # Определяем, есть ли токен (приватный режим)
+        is_private = bool(token and token.strip())
 
         # Определяем URL бинарного файла для текущей ОС
         system = platform.system().lower()
         asset_url = None
 
         def _tt (
-            asset        
+            asset ,
+            is_private = is_private       
         ):            
-            # asset_url = asset['browser_download_url']
-            asset_url = asset['url']
+            if not is_private:
+                asset_url = asset['browser_download_url']
+            else:
+                asset_url = asset['url']
+            
             return asset_url
 
         for asset in self.release_data.get('assets', []):
@@ -537,12 +562,12 @@ class UpdateApplier(QObject):
             logger.debug(f"Checking asset: {name}")
 
             if system == 'windows' and ('windows' in name or name.endswith('.exe')):
-                asset_url = _tt(asset)
+                asset_url = _tt(asset, is_private)
                 logger.debug(f"Windows asset found: {asset_url}")
                 break
 
             elif system == 'linux' and ('linux' in name or name.endswith('.tar.gz')):
-                asset_url = _tt(asset)
+                asset_url = _tt(asset, is_private)
                 logger.debug(f"Linux asset found: {asset_url}")
                 break
         else:
@@ -554,11 +579,11 @@ class UpdateApplier(QObject):
                 logger.debug(f"Checking asset: {name}")
 
                 if system == 'windows' and name.endswith('.exe'):
-                    asset_url = _tt(asset)
+                    asset_url = _tt(asset, is_private)
                     logger.debug(f"Fallback Windows asset: {asset_url}")
                     break
                 elif system == 'linux' and name.endswith('.tar.gz'):
-                    asset_url = _tt(asset)
+                    asset_url = _tt(asset, is_private)
                     logger.debug(f"Fallback Linux asset: {asset_url}")
                     break
 

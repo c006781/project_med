@@ -62,7 +62,7 @@ class UpdateChecker(QThread):
             use_name_in_filename = False, # 'system'
         )
         try:
-            # Получаем токен из глобальной конфигурации
+            # # Получаем токен из глобальной конфигурации
             # # from app.config.config_manager.manager import AppConfigManager
             # config = AppConfigManager.get_instance()
             # token = config.get('GITHUB_TOKEN', '')

@@ -60,7 +60,7 @@ def get_getenv(
     thec = os.getenv(key)
 
     # Если ключа нет в .env, то добавляем его с start_value
-    if (not thec) and (start_value):
+    if (not thec) and (start_value is not None):
         save_env_file(# внесение новых ключей
             env_key = {
                 key : start_value
@@ -77,7 +77,10 @@ def get_getenv(
         
     # Если ключа нет, то выбрасываем ошибку
     if not thec:
-        raise ValueError(f"{key} is required")
+        if start_value is not None:
+            thec = start_value 
+        else:
+            raise ValueError(f"{key} is required")
     
     return thec
 

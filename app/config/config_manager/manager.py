@@ -293,6 +293,9 @@ class AppConfigManager(BaseConfigManager):
 
         # 'show_call_depth': 'True',  # или False, но с возможностью переключения
         'show_call_depth': 'False',  # или False, но с возможностью переключения
+
+        # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
+        # 'GITHUB_TOKEN': '',
     }
 
     # Хранилище для экземпляров (Multiton)

@@ -114,7 +114,7 @@ def get_config_env(path: str = None)-> dict:
             key =   'APP_CONFIG_PATH',
             start_value= path, # путь к файлу лога (например, logs/app.log)
         ),
-        'APP_CONFIG_PATH': get_getenv( 
+        'GITHUB_TOKEN': get_getenv( 
             key =   'GITHUB_TOKEN',
             start_value= '',   # пусто по умолчанию
         ),

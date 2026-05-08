@@ -1075,15 +1075,24 @@ class UpdateMixin:
     )
     @Slot(str, str)
     def _on_update_available(self, new_version: str, release_url: str):
-        """Вызывается, когда найдена новая версия."""
-        reply = QMessageBox.question(
-            self, "Доступно обновление",
-            f"Доступна новая версия {new_version}.\n"
-            f"Ваша версия: {APP_VERSION}\n\n"
-            "Перейти на страницу релиза для скачивания?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Доступно обновление")
+        msg.setText(f"Доступна новая версия {new_version}\nВаша версия: {APP_VERSION}")
+        msg.setInformativeText("Что вы хотите сделать?")
+        download_btn = msg.addButton("Скачать и установить", QMessageBox.ActionRole)
+        open_btn = msg.addButton("Открыть страницу релиза", QMessageBox.ActionRole)
+        cancel_btn = msg.addButton("Отмена", QMessageBox.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == download_btn:
+            # Запускаем скачивание и установку
+            if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
+                self.updater.apply_update_from_release(self.updater._pending_release_data)
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
+        elif clicked == open_btn:
             QDesktopServices.openUrl(QUrl(release_url))
 
     @AppLogger.get_instance(

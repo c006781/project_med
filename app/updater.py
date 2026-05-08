@@ -20,6 +20,7 @@ from app.utils.logger.logger import AppLogger
 
 from PySide6.QtCore import QThread, Signal, QObject, QUrl
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 
@@ -27,7 +28,7 @@ class UpdateChecker(QThread):
     """
     Поток для проверки наличия новой версии на GitHub.
     """
-    finished = Signal(bool, str, str)  # (есть_обновление, версия_на_гитхабе, url_релиза)
+    finished = Signal(bool, dict)  # (есть_обновление, data_релиза)
     error = Signal(str)                # сообщение об ошибке
 
 
@@ -67,20 +68,25 @@ class UpdateChecker(QThread):
             # token = config.get('GITHUB_TOKEN', '')
 
 
+            # Получаем токен из окружения
             from app.config.conf.getenv import get_getenv as get_getenv
             token = get_getenv(
                 key = 'GITHUB_TOKEN',
                 start_value=''
             )
 
-            logger.debug(f"DEBUG: Token length = {len(token)}, first 5 chars = {token[:5] if token else 'EMPTY'}")
+            logger.debug(
+                f"DEBUG: "
+                f"Token length = {len(token)}, "
+                f"first 5 chars = {token[:5] if token else 'EMPTY'}"
+            )
             # Запрашиваем информацию о последнем релизе
             url = f"https://api.github.com/repos/{self.repo_slug}/releases/latest"
             headers = {"Accept": "application/vnd.github.v3+json"}
             if token and token.strip():
                 headers["Authorization"] = f"token {token.strip()}"
                 
-            logger.debug(f"url = {url}, headers = {headers}")
+            logger.debug(f"url = {url}, headers = {headers is not None}")
 
             req = urllib.request.Request(url, headers=headers)
 
@@ -103,16 +109,47 @@ class UpdateChecker(QThread):
 
             # Сравниваем версии (простое строковое сравнение, но лучше использовать packaging.version)
             # Для простоты используем tuple сравнение
-            def parse_version(v):
-                return tuple(map(int, v.split('.')))
+            # def parse_version(v):
+            #     return tuple(map(int, v.split('.')))
+            
+
+            def parse_version(v_now, v_new):
+
+                v_now = v_now.split('.')
+                v_new = v_new.split('.')
+                len_v_now = len(v_now)
+                len_v_new = len(v_new)
+                for i in range(min(len_v_now, len_v_new)):
+                    try:
+                        if int(v_now[i]) < int(v_new[i]):
+                            return True
+                    except Exception as e:
+                        logger.error(
+                            f"v_now = {v_now}, "
+                            f"v_new = {v_new}, "
+                            f"i = {i}"
+                            f"err: {e}"
+                        )
+                        return False
+                    
+                if len_v_now < len_v_new:
+                    return True
+
+                return False
 
             has_update = False
-            if parse_version(latest_version) > parse_version(self.current_version):
+            # if parse_version(latest_version) > parse_version(self.current_version):
+            if parse_version(self.current_version, latest_version) :
                 has_update = True
 
-            logger.debug(f"has_update = {has_update}, latest_version = {latest_version}, release_url = {release_url}")
+            logger.debug(
+                f"has_update = {has_update}, "
+                f"latest_version = {latest_version}, "
+                f"release_url = {release_url}"
+            )            
 
-            self.finished.emit(has_update, latest_version, release_url)
+            # self.finished.emit(has_update, latest_version, release_url)
+            self.finished.emit(has_update, data)
         except urllib.error.HTTPError as e:
             logger.error(f"Ошибка HTTP {e.code}: {e.reason}")
             self.error.emit(f"Ошибка HTTP {e.code}: {e.reason}")
@@ -250,12 +287,34 @@ class AppUpdater(QObject):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_check_finished(self, has_update: bool, latest_version: str, release_url: str):
+    def apply_update_from_release(self, release_data: dict):
+        """Запускает процесс обновления на основе данных релиза."""
+        self._applier = UpdateApplier(release_data, self)
+        self._applier.progress.connect(self.download_progress.emit)
+        self._applier.finished.connect(self.download_finished.emit)  # или свой сигнал
+        self._applier.error.connect(self.download_error.emit)
+        self._applier.start()
+
+    @AppLogger.get_instance(
+        name='AppUpdater',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_check_finished(self, has_update: bool, release_data: dict):
         if has_update:
-            self._pending_release_url = release_url
-            self.update_available.emit(latest_version, release_url)
+            self._pending_release_data = release_data
+            self.update_available.emit(release_data['tag_name'], release_data['html_url'])
         else:
             self.no_update.emit()
+    # def _on_check_finished(self, has_update: bool, latest_version: str, release_url: str):
+    #     if has_update:
+    #         self._pending_release_url = release_url
+    #         self.update_available.emit(latest_version, release_url)
+    #     else:
+    #         self.no_update.emit()
 
     @AppLogger.get_instance(
         name='AppUpdater',
@@ -318,3 +377,124 @@ class AppUpdater(QObject):
             QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.dirname(downloaded_file)))
 
         # Здесь можно было бы запустить вспомогательный скрипт, но для простоты ограничимся этим.
+
+
+class UpdateApplier(QObject):
+    """
+    Класс для применения обновления: скачивание, замена файла, перезапуск.
+    """
+    progress = Signal(int, int)
+    finished = Signal()
+    error = Signal(str)
+
+    @AppLogger.get_instance(
+        name='UpdateApplier',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, release_data: dict, parent=None):
+        super().__init__(parent)
+        self.release_data = release_data
+        self._downloader = None
+        self._downloaded_file = None
+
+    @AppLogger.get_instance(
+        name='UpdateApplier',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def start(self):
+        """Начинает процесс обновления: определяет asset, скачивает, затем заменяет."""
+        # Определяем URL бинарного файла для текущей ОС
+        system = platform.system().lower()
+        asset_url = None
+        for asset in self.release_data.get('assets', []):
+            name = asset['name'].lower()
+            if system == 'windows' and ('windows' in name or name.endswith('.exe')):
+                asset_url = asset['browser_download_url']
+                break
+            elif system == 'linux' and ('linux' in name or name.endswith('.tar.gz')):
+                asset_url = asset['browser_download_url']
+                break
+
+        if not asset_url:
+            self.error.emit("Не найден подходящий файл обновления для вашей ОС")
+            return
+
+        # Скачиваем
+        temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        os.makedirs(temp_dir, exist_ok=True)
+        self._downloader = UpdateDownloader(asset_url, temp_dir)
+        self._downloader.progress.connect(self.progress.emit)
+        self._downloader.finished.connect(self._on_downloaded)
+        self._downloader.error.connect(self.error.emit)
+        self._downloader.start()
+
+    @AppLogger.get_instance(
+        name='UpdateApplier',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_downloaded(self, file_path: str):
+        self._downloaded_file = file_path
+        self._apply_update()
+
+    @AppLogger.get_instance(
+        name='UpdateApplier',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_update(self):
+        """Заменяет текущий исполняемый файл на новый и перезапускает приложение."""
+        if not getattr(sys, 'frozen', False):
+            self.error.emit("Автообновление работает только в собранном приложении")
+            return
+
+        current_exe = sys.executable
+        new_file = self._downloaded_file
+        system = platform.system().lower()
+
+        if system == "windows":
+            # Создаём bat-скрипт
+            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.bat")
+            content = f"""@echo off
+timeout /t 2 /nobreak > nul
+copy /Y "{new_file}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+"""
+            with open(script_path, "w") as f:
+                f.write(content)
+            # Запускаем скрипт и выходим
+            os.startfile(script_path)
+        elif system == "linux":
+            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
+            content = f"""#!/bin/bash
+sleep 2
+cp "{new_file}" "{current_exe}"
+chmod +x "{current_exe}"
+"{current_exe}" &
+rm "$0"
+"""
+            with open(script_path, "w") as f:
+                f.write(content)
+            os.chmod(script_path, 0o755)
+            os.system(f"nohup {script_path} > /dev/null 2>&1 &")
+        else:
+            self.error.emit(f"Автообновление не поддерживается на {system}")
+            return
+
+        # Завершаем текущее приложение
+        QApplication.quit()

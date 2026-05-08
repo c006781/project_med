@@ -324,7 +324,7 @@ class UpdateDownloader(QThread):
                 param['verify'] = False
             else:
                 # Для публичного используем сертификаты certifi
-                param['verify'] = certifi.where())   # явно указываем путь к сертификатам
+                param['verify'] = certifi.where()   # явно указываем путь к сертификатам
 
             # 2. Выполнение запроса
             response = requests.get(

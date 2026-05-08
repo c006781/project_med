@@ -1764,9 +1764,11 @@ class AppointmentListPage(
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            self._save_changes(
+            success = self._save_changes(
                 if_question=False
             )
+            if not success:
+                return False   # не уходим
             return True
         
         elif reply == QMessageBox.StandardButton.No:
@@ -2110,14 +2112,14 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _save_changes(self, if_question:bool = True):
+    def _save_changes(self, if_question:bool = True) -> bool:
         """Сохраняет все изменения (заметки, фото, основные поля) в БД."""
         self.logger.info("=== _save_changes ВЫЗВАН В AppointmentListPage ===")
     
         # if not (self.modified_rows or self.deleted_rows or self.new_rows): 
         if not self._has_unsaved_changes(): # Проверяем, есть ли несохранённые изменения
             self.logger.debug("Нет изменений для сохранения")
-            return
+            return True
 
         current_id = None 
         if self.selected_dto and getattr(self.selected_dto, 'id', None) is not None:
@@ -2133,11 +2135,12 @@ class AppointmentListPage(
 
             if reply != QMessageBox.StandardButton.Yes:
                 self.logger.debug("Сохранение отменено пользователем")
-                return
+                return False
 
         self.table_view.setEnabled(False)
         self.save_changes_btn.setEnabled(False)
 
+        success = True
         try:
             self.logger.info("=== НАЧАЛО СОХРАНЕНИЯ ИЗМЕНЕНИЙ ===")
             self._save_current_draft()   # сохраняем последние правки перед сохранением
@@ -2171,11 +2174,14 @@ class AppointmentListPage(
         except Exception as e:
             self.logger.exception(f"Ошибка сохранения: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения:\n{e}")
-            
+            success = False
+
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
             self.logger.debug("_save_changes завершён (finally)")
+        
+        return success
     
     @AppLogger.get_instance(
         name='AppointmentListPage',

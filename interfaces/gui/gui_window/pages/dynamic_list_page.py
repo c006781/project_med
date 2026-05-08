@@ -1821,9 +1821,19 @@ class ListEditModeMixin:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
             )
             if reply == QMessageBox.StandardButton.Yes:
-                self._save_changes( # сохраняем изменения
+                # Пытаемся сохранить
+                success = self._save_changes( # сохраняем изменения
                     if_question=False
                 )
+                if not success:
+                    # Сохранение не удалось – НЕ выключаем режим
+                    # Возвращаем кнопку в исходное положение (включено)
+                    self.edit_mode_btn.blockSignals(True)
+                    self.edit_mode_btn.setChecked(True)
+                    self.edit_mode_btn.blockSignals(False)
+                    self.edit_mode = True
+                    
+                    return   # остаёмся в режиме редактирования
                 self.edit_mode = False
 
             elif reply == QMessageBox.StandardButton.No:
@@ -1851,8 +1861,27 @@ class ListEditModeMixin:
         self.table_view.clearSelection() # сбрасываем выделение в таблице
         self.selected_dto = None
 
+        # Управление столбцом чекбоксов
+        self.source_model.set_checkbox_column_visible(self.edit_mode)
+        header = self.table_view.horizontalHeader()
+
         if hasattr(self, 'action_btn'): # если есть дополнительная кнопка
             self.action_btn.setEnabled(False) # отключаем ее
+
+        # Переустанавливаем делегаты и обновляем read-only режим для текстовых попапов
+        self._reapply_delegates()
+        self._update_text_popup_delegates_readonly()
+
+        # Дополнительная очистка при выходе из режима
+        if not self.edit_mode:
+            self._clear_checkboxes()
+            self.deleted_ids.clear()
+            self._update_save_button_state()
+
+        # Настройка заголовка таблицы (растяжение последнего столбца, видимость)
+        if header:
+            self._setup_header_settings_table(header=header)
+            self._setup_header_visible_table(header=header)        
 
         self.logger.debug(f"Режим редактирования: {'включён' if self.edit_mode else 'выключен'}")
 
@@ -1862,6 +1891,31 @@ class ListSaveMixin:
 
     Реализует сохранение новых строк, обновление изменённых и удаление помеченных записей.
     """
+
+    @AppLogger.get_instance(
+        name = 'ListSaveMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def _validate_required_fields(self, dto) -> None:
+        """
+        Проверяет, заполнены ли все обязательные поля в DTO.
+        :param dto: DTO для проверки
+        :raises ValueError: если какое-то обязательное поле не заполнено, с сообщением о пропущенных полях
+        """
+        missing_fields = []
+        for field_name, config in self.field_configs.items():
+            if config.get('required', False):
+                value = getattr(dto, field_name, None)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    # Берём человекочитаемый заголовок из конфига, если есть, иначе имя поля
+                    title = config.get('title', field_name.replace('_', ' ').title())
+                    missing_fields.append(title)
+        if missing_fields:
+            raise ValueError(f"Обязательные поля не заполнены: {', '.join(missing_fields)}")
 
     @AppLogger.get_instance(
         name = 'ListSaveMixin',
@@ -1913,6 +1967,14 @@ class ListSaveMixin:
                 self._modified_ids(entity_id, False)
                 continue
 
+            # Проверяем обязательные поля перед обновлением
+            try:
+                self._validate_required_fields(dto)
+            except ValueError as e:
+                self.logger.warning(f"Обновление ID={entity_id} отменено: {e}")
+                # Можно также показать пользователю предупреждение, но исключение прервёт сохранение
+                raise  # Прерываем весь процесс сохранения
+
             original = self.original_data.get(row)
             if original and dto.model_dump() == original.model_dump():
                 # self.modified_ids.discard(entity_id)
@@ -1948,6 +2010,8 @@ class ListSaveMixin:
         for row in list(self.new_rows):
             dto = self.source_model.get_item_at_row(row)
             if dto:
+                self._validate_required_fields(dto)# Проверяем обязательные поля
+
                 self._apply_draft_to_new_dto(dto) # если есть черновики
                 created = self.service.create(dto)
                 self.source_model.update_row(row, created)
@@ -1965,7 +2029,7 @@ class ListSaveMixin:
     )
     @preserve_selection()
     @Slot()
-    def _save_changes(self , if_question:bool = True):
+    def _save_changes(self , if_question:bool = True) -> bool:
         """
         Главный метод сохранения: последовательно вызывает `_save_new`, `_save_modified`, `_save_deleted`, 
         затем перезагружает данные (`_load_data`) и выходит из режима редактирования.
@@ -1982,7 +2046,7 @@ class ListSaveMixin:
 
         has_changes = self._has_unsaved_changes()
         if not has_changes:
-            return
+            return True
 
         if if_question:
             reply = QMessageBox.question(
@@ -1991,11 +2055,12 @@ class ListSaveMixin:
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
-                return
+                return False
 
         self.table_view.setEnabled(False)
         self.save_changes_btn.setEnabled(False)
 
+        success = True
         try:
             # Новые строки
             self._save_new()
@@ -2018,10 +2083,12 @@ class ListSaveMixin:
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранении изменений: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
-        
+            success = False
         finally:
             self.table_view.setEnabled(True)
             self._update_save_button_state()
+
+        return success
 
     @AppLogger.get_instance(
         name = 'ListSaveMixin',

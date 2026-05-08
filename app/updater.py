@@ -323,6 +323,35 @@ class UpdateDownloader(QThread):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _download_file(self, response, target_path, total_size):
+        """
+        Сохраняет содержимое response в файл с прогрессом.
+        Использует буфер записи для повышения скорости.
+        """
+        buffer_size = 262144  # 256 КБ (можно увеличить до 1 МБ)
+        downloaded = 0
+        with open(target_path, 'wb') as f:
+            # Используем raw-поток response для более эффективного чтения
+            from shutil import copyfileobj
+            # Но copyfileobj не даёт прогресса, поэтому делаем ручной цикл с буфером
+            while True:
+                chunk = response.raw.read(buffer_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    self.progress.emit(downloaded, total_size)
+        return True
+
+    @AppLogger.get_instance(
+        name='UpdateDownloader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def run(self):
         if_private = self.token is not None and self.token.strip()
 
@@ -371,14 +400,7 @@ class UpdateDownloader(QThread):
             # self._download_stream(temp_path, total_size, response)
 
             # Пишем сразу в целевой файл (перезаписываем, если существует)
-            with open(self.target_path, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            self.progress.emit(downloaded, total_size)
+            self._download_file(response, self.target_path, total_size)
 
             # 4. Успешное завершение
             self.logger.debug(f"Download finished, saved to {self.target_path}")

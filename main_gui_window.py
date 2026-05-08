@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import traceback
 
 import interfaces.gui.gui_window.main as main_gui_window
 
@@ -28,12 +29,18 @@ def handle_rename_argument():
             os.remove(target_exe)
         # Переименовываем текущий exe
         os.rename(current_exe, target_exe)
+
+        # Удаляем лог обновления, если он есть
+        log_path = os.path.join(os.path.dirname(target_exe), "update.log")
+        if os.path.exists(log_path):
+            os.remove(log_path)
+
         # Запускаем переименованный exe
         subprocess.Popen([target_exe])
         sys.exit(0)
     except Exception as e:
         # Если не удалось переименовать, лучше показать ошибку и продолжить работу со старым именем
-        import traceback
+        # import traceback
         traceback.print_exc()
         # Можно также вывести сообщение через QMessageBox, но QApplication ещё не создан.
         # Поэтому просто напечатаем в консоль.

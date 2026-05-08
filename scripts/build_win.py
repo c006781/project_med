@@ -70,9 +70,6 @@ def main():
     # Добавляем опцию --debug для получения подробного лога
     # cmd.append('--debug')  # Раскомментируйте для детальной отладки
 
-    # Добавляем опцию --additional-hooks-dir
-    cmd.extend(['--additional-hooks-dir', str(root_dir)])
-
     # 4. В самом конце КОМАНДЫ указываем входной скрипт
     cmd.append(str(entry_point))
 

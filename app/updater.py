@@ -218,7 +218,7 @@ class UpdateDownloader(QThread):
     def __init__(
         self, 
         download_url: str, 
-        dest_dir: str,
+        target_path: str,
         token: str = None
 
     ):
@@ -232,7 +232,7 @@ class UpdateDownloader(QThread):
         )
 
         self.download_url = download_url
-        self.dest_dir = dest_dir
+        self.target_path = target_path
         self.token = token
 
 
@@ -257,62 +257,62 @@ class UpdateDownloader(QThread):
 
         return headers
 
-    @AppLogger.get_instance(
-        name='UpdateDownloader',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _get_temp_file_path(self) -> str:
-        """Создаёт временный файл с правильным расширением."""
-        # os.makedirs(self.dest_dir, exist_ok=True)
-        system = platform.system().lower()
-        file_ext = ".exe" if system == "windows" else ".tar.gz"
+    # @AppLogger.get_instance(
+    #     name='UpdateDownloader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _get_temp_file_path(self) -> str:
+    #     """Создаёт временный файл с правильным расширением."""
+    #     # os.makedirs(self.dest_dir, exist_ok=True)
+    #     system = platform.system().lower()
+    #     file_ext = ".exe" if system == "windows" else ".tar.gz"
 
-        self.logger.debug(f"dest_dir = {self.dest_dir} file_ext = {file_ext}")
+    #     self.logger.debug(f"dest_dir = {self.dest_dir} file_ext = {file_ext}")
 
-        fd, temp_path = tempfile.mkstemp(
-            suffix=file_ext,
-            prefix="MedicalApp_update_",
-            dir=self.dest_dir,
-            # dir=tempfile.gettempdir()   # <-- явно указываем системную временную папку,
-            # mode=0o777, 
-            # exist_ok=True
-        )
-        os.close(fd)
-        return temp_path
+    #     fd, temp_path = tempfile.mkstemp(
+    #         suffix=file_ext,
+    #         prefix="MedicalApp_update_",
+    #         dir=self.dest_dir,
+    #         # dir=tempfile.gettempdir()   # <-- явно указываем системную временную папку,
+    #         # mode=0o777, 
+    #         # exist_ok=True
+    #     )
+    #     os.close(fd)
+    #     return temp_path
 
-    @AppLogger.get_instance(
-        name='UpdateDownloader',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _download_stream(self, temp_path: str, total_size: int, response):
-        """Потоково записывает данные в файл и обновляет прогресс."""
-        downloaded = 0
-        self.logger.debug(f"total_size = {total_size}")
+    # @AppLogger.get_instance(
+    #     name='UpdateDownloader',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _download_stream(self, temp_path: str, total_size: int, response):
+    #     """Потоково записывает данные в файл и обновляет прогресс."""
+    #     downloaded = 0
+    #     self.logger.debug(f"total_size = {total_size}")
         
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                # Добавим проверку существования файла перед записью
-                if not os.path.exists(temp_path):
-                    self.logger.warning(f"Файл {temp_path} исчез, пересоздаём")
-                    # Пересоздаём файл (затираем старый)
-                    with open(temp_path, 'wb'):
-                        pass
-                with open(temp_path, 'ab') as out_file:
-                    out_file.write(chunk)
-                    out_file.flush()
-                    os.fsync(out_file.fileno())
+    #     for chunk in response.iter_content(chunk_size=8192):
+    #         if chunk:
+    #             # Добавим проверку существования файла перед записью
+    #             if not os.path.exists(temp_path):
+    #                 self.logger.warning(f"Файл {temp_path} исчез, пересоздаём")
+    #                 # Пересоздаём файл (затираем старый)
+    #                 with open(temp_path, 'wb'):
+    #                     pass
+    #             with open(temp_path, 'ab') as out_file:
+    #                 out_file.write(chunk)
+    #                 out_file.flush()
+    #                 os.fsync(out_file.fileno())
                     
-                downloaded += len(chunk)
-                if total_size > 0:
-                    self.progress.emit(downloaded, total_size)
+    #             downloaded += len(chunk)
+    #             if total_size > 0:
+    #                 self.progress.emit(downloaded, total_size)
 
     @AppLogger.get_instance(
         name='UpdateDownloader',
@@ -328,16 +328,16 @@ class UpdateDownloader(QThread):
 
         self.logger.debug(f"Download URL: {self.download_url}")
         try:
-            # 1. Сначала создаём директорию (если её нет)
-            if not os.path.exists(self.dest_dir):
-                os.makedirs(self.dest_dir, exist_ok=True)
-                self.logger.debug(f"Created dest dir: {self.dest_dir}")
+            # Создаём директорию для target_path, если её нет
+            dest_dir = os.path.dirname(self.target_path)
+            if not os.path.exists(dest_dir):
+                os.makedirs(dest_dir, exist_ok=True)
 
             # 2. Подготовка заголовков и временного файла
             headers = self._get_headers()
-            temp_path = self._get_temp_file_path()
+            # temp_path = self._get_temp_file_path()
 
-            self.logger.debug(f"Temp file path: {temp_path}")
+            # self.logger.debug(f"Temp file path: {temp_path}")
             
 
             param = {
@@ -366,11 +366,22 @@ class UpdateDownloader(QThread):
             total_size = int(response.headers.get('content-length', 0))
             self.logger.debug(f"Total size: {total_size} bytes")
 
-            # 3. Скачивание с прогрессом
-            self._download_stream(temp_path, total_size, response)
+            # # 3. Скачивание с прогрессом
+            # self._download_stream(temp_path, total_size, response)
+
+            # Пишем сразу в целевой файл (перезаписываем, если существует)
+            with open(self.target_path, 'wb') as f:
+                downloaded = 0
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            self.progress.emit(downloaded, total_size)
 
             # 4. Успешное завершение
-            self.finished.emit(temp_path)
+            self.logger.debug(f"Download finished, saved to {self.target_path}")
+            self.finished.emit(self.target_path)
 
         except requests.exceptions.ConnectionError as e:
             self.logger.error(f"Ошибка соединения: {e}")
@@ -632,12 +643,18 @@ class UpdateApplier(QObject):
         logger.debug("start download")
         # Скачиваем
         # temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
-        temp_dir = os.path.join(get_app_dir(), "MedicalAppUpdates")
-        logger.debug(f"temp_dir = {temp_dir}")
+        # temp_dir = os.path.join(get_app_dir(), "MedicalAppUpdates")
+        # logger.debug(f"temp_dir = {temp_dir}")
 
-        os.makedirs(temp_dir, exist_ok=True)
+        # os.makedirs(temp_dir, exist_ok=True)
 
-        self._downloader = UpdateDownloader(asset_url, temp_dir, token)
+        # self._downloader = UpdateDownloader(asset_url, temp_dir, token)
+
+        # Вместо временной папки
+        exe_dir = get_app_dir()
+        new_exe_path = os.path.join(exe_dir, "MedicalApp_new.exe")
+        self._downloader = UpdateDownloader(asset_url, new_exe_path, token)
+
         self._downloader.progress.connect(self.progress.emit)
         self._downloader.finished.connect(self._on_downloaded)
         self._downloader.error.connect(self.error.emit)
@@ -665,105 +682,181 @@ class UpdateApplier(QObject):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _apply_update(self):
-        """Заменяет текущий исполняемый файл на новый и перезапускает приложение."""
         if not getattr(sys, 'frozen', False):
             self.error.emit("Автообновление работает только в собранном приложении")
             return
 
-        current_exe = sys.executable
-        new_file = self._downloaded_file
-        system = platform.system().lower()
+        # Переходим в папку, где находится текущий EXE (чтобы относительные пути работали)
+        app_dir = get_app_dir()
+        os.chdir(app_dir)
 
-        if system == "windows":
-            source_escaped = json.dumps(new_file)
-            dest_escaped = json.dumps(current_exe)
-            log_file = os.path.join(tempfile.gettempdir(), "MedicalApp_update.log")
-            log_escaped = json.dumps(log_file)
+        old_exe = "MedicalApp.exe"
+        new_exe = "MedicalApp_new.exe"
+        ps_script = "update.ps1"
+        log_file = "update.log"
 
-            ps_script = f"""$source = {source_escaped}
-$dest = {dest_escaped}
-$logFile = {log_escaped}
-$processName = "MedicalApp"
+        # Проверяем, что новый файл существует
+        if not os.path.exists(new_exe):
+            self.error.emit("Новый файл не найден")
+            return
 
-Write-Output "$(Get-Date) - Starting update script" | Out-File $logFile
+        # PowerShell скрипт (использует относительные пути)
+        ps_content = f'''$old = "{old_exe}"
+$new = "{new_exe}"
+$log = "{log_file}"
 
-# Ждём 2 секунды, чтобы приложение успело закрыться само
-Start-Sleep -Seconds 2
+function Write-Log {{ param($msg) Add-Content -Path $log -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $msg" }}
 
-# Если процесс ещё висит – убиваем его
-$proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
+Write-Log "Update script started"
+
+# Даём время на закрытие основного приложения
+Start-Sleep -Seconds 3
+
+# Убиваем процесс, если он ещё жив
+$proc = Get-Process -Name "MedicalApp" -ErrorAction SilentlyContinue
 if ($proc) {{
-    Write-Output "$(Get-Date) - Process still running, killing it" | Out-File $logFile -Append
-    Stop-Process -Name $processName -Force
+    Write-Log "Killing old process"
+    Stop-Process -Name "MedicalApp" -Force
+    Start-Sleep -Seconds 2
+}}
+
+# Удаляем старый файл
+if (Test-Path $old) {{
+    Write-Log "Deleting old executable"
+    Remove-Item -Path $old -Force
     Start-Sleep -Seconds 1
+}} else {{
+    Write-Log "Old file not found, skipping delete"
 }}
 
-# Ждём, пока файл назначения разблокируется (максимум 10 секунд)
-$maxAttempts = 10
-$attempt = 0
-while ($attempt -lt $maxAttempts) {{
-    try {{
-        $stream = [System.IO.File]::OpenWrite($dest)
-        $stream.Close()
-        break
-    }} catch {{
-        Write-Output "$(Get-Date) - Destination file still locked, waiting..." | Out-File $logFile -Append
-        Start-Sleep -Seconds 1
-        $attempt++
-    }}
-}}
+# Переименовываем новый файл
+Write-Log "Renaming $new to $old"
+Rename-Item -Path $new -NewName "MedicalApp.exe" -Force
 
-if ($attempt -eq $maxAttempts) {{
-    Write-Output "$(Get-Date) - ERROR: Destination file still locked after waiting" | Out-File $logFile -Append
-    Read-Host "Press Enter to exit"
-    exit 1
-}}
+# Запускаем обновлённую программу
+Write-Log "Starting new version"
+Start-Process -FilePath $old
 
-try {{
-    Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
-    Write-Output "$(Get-Date) - OK: File replaced successfully" | Out-File $logFile -Append
-    Start-Process -FilePath $dest
-    Write-Output "$(Get-Date) - New process started" | Out-File $logFile -Append
-}} catch {{
-    $errorMsg = $_.Exception.Message
-    Write-Output "$(Get-Date) - ERROR: $errorMsg" | Out-File $logFile -Append
-    Read-Host "Press Enter to exit"
-}}
-
+# Удаляем скрипт
+Write-Log "Cleaning up script"
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force
-"""
-            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.ps1")
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write(ps_script)
+'''
+        with open(ps_script, "w", encoding="utf-8") as f:
+            f.write(ps_content)
 
-            # Запуск PowerShell полностью скрыто (без окна)
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
-            startupinfo.wShowWindow = subprocess.SW_HIDE
+        # Запускаем PowerShell полностью скрыто
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
 
-            subprocess.Popen(
-                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
-                startupinfo=startupinfo,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
-            )
-            QApplication.quit()
-            sys.exit(0)
+        subprocess.Popen(
+            ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", ps_script],
+            startupinfo=startupinfo,
+            creationflags=subprocess.CREATE_NO_WINDOW
+        )
+        QApplication.quit()
+        sys.exit(0)
 
-        elif system == "linux":
-            # Linux скрипт оставляем как есть (он работает с путями UTF-8)
-            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
-            content = f"""#!/bin/bash
-    sleep 2
-    cp "{new_file}" "{current_exe}"
-    chmod +x "{current_exe}"
-    "{current_exe}" &
-    rm "$0"
-    """
-            with open(script_path, "w") as f:
-                f.write(content)
-            os.chmod(script_path, 0o755)
-            subprocess.Popen([script_path])
-            QApplication.quit()
-            sys.exit(0)
-        else:
-            self.error.emit(f"Автообновление не поддерживается на {system}")
+#     def _apply_update(self):
+#         """Заменяет текущий исполняемый файл на новый и перезапускает приложение."""
+#         if not getattr(sys, 'frozen', False):
+#             self.error.emit("Автообновление работает только в собранном приложении")
+#             return
+
+#         current_exe = sys.executable
+#         new_file = self._downloaded_file
+#         system = platform.system().lower()
+
+#         if system == "windows":
+#             source_escaped = json.dumps(new_file)
+#             dest_escaped = json.dumps(current_exe)
+#             log_file = os.path.join(tempfile.gettempdir(), "MedicalApp_update.log")
+#             log_escaped = json.dumps(log_file)
+
+#             ps_script = f"""$source = {source_escaped}
+# $dest = {dest_escaped}
+# $logFile = {log_escaped}
+# $processName = "MedicalApp"
+
+# Write-Output "$(Get-Date) - Starting update script" | Out-File $logFile
+
+# # Ждём 2 секунды, чтобы приложение успело закрыться само
+# Start-Sleep -Seconds 2
+
+# # Если процесс ещё висит – убиваем его
+# $proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
+# if ($proc) {{
+#     Write-Output "$(Get-Date) - Process still running, killing it" | Out-File $logFile -Append
+#     Stop-Process -Name $processName -Force
+#     Start-Sleep -Seconds 1
+# }}
+
+# # Ждём, пока файл назначения разблокируется (максимум 10 секунд)
+# $maxAttempts = 10
+# $attempt = 0
+# while ($attempt -lt $maxAttempts) {{
+#     try {{
+#         $stream = [System.IO.File]::OpenWrite($dest)
+#         $stream.Close()
+#         break
+#     }} catch {{
+#         Write-Output "$(Get-Date) - Destination file still locked, waiting..." | Out-File $logFile -Append
+#         Start-Sleep -Seconds 1
+#         $attempt++
+#     }}
+# }}
+
+# if ($attempt -eq $maxAttempts) {{
+#     Write-Output "$(Get-Date) - ERROR: Destination file still locked after waiting" | Out-File $logFile -Append
+#     Read-Host "Press Enter to exit"
+#     exit 1
+# }}
+
+# try {{
+#     Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
+#     Write-Output "$(Get-Date) - OK: File replaced successfully" | Out-File $logFile -Append
+#     Start-Process -FilePath $dest
+#     Write-Output "$(Get-Date) - New process started" | Out-File $logFile -Append
+# }} catch {{
+#     $errorMsg = $_.Exception.Message
+#     Write-Output "$(Get-Date) - ERROR: $errorMsg" | Out-File $logFile -Append
+#     Read-Host "Press Enter to exit"
+# }}
+
+# Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+# """
+#             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.ps1")
+#             with open(script_path, "w", encoding="utf-8") as f:
+#                 f.write(ps_script)
+
+#             # Запуск PowerShell полностью скрыто (без окна)
+#             startupinfo = subprocess.STARTUPINFO()
+#             startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+#             startupinfo.wShowWindow = subprocess.SW_HIDE
+
+#             subprocess.Popen(
+#                 ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
+#                 startupinfo=startupinfo,
+#                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+#             )
+#             QApplication.quit()
+#             sys.exit(0)
+
+#         elif system == "linux":
+#             # Linux скрипт оставляем как есть (он работает с путями UTF-8)
+#             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
+#             content = f"""#!/bin/bash
+#     sleep 2
+#     cp "{new_file}" "{current_exe}"
+#     chmod +x "{current_exe}"
+#     "{current_exe}" &
+#     rm "$0"
+#     """
+#             with open(script_path, "w") as f:
+#                 f.write(content)
+#             os.chmod(script_path, 0o755)
+#             subprocess.Popen([script_path])
+#             QApplication.quit()
+#             sys.exit(0)
+#         else:
+#             self.error.emit(f"Автообновление не поддерживается на {system}")

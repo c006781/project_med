@@ -19,7 +19,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox, QWidget
 )
-from PySide6.QtCore import QThread, Signal, Slot, Qt
+from PySide6.QtCore import QThread, QUrl, Signal, Slot, Qt
+from PySide6.QtGui import QDesktopServices
 
 class SettingsPage(BasePage):
     """
@@ -79,6 +80,7 @@ class SettingsPage(BasePage):
         self.first_start = False          # флаг первого запуска
 
         self._setup_ui()
+        self.setMinimumHeight(400)
         self._load_settings()
 
     # ----------------------------------------------------------------------
@@ -181,10 +183,9 @@ class SettingsPage(BasePage):
         # Создаём виджеты (если ещё не созданы)
         self._create_about_widgets()
 
-        layout.addWidget(self.about_title)
-        layout.addWidget(self.version_label)
-        layout.addWidget(self.check_update_btn)
-        layout.addWidget(self.link_label)
+        # layout.addWidget(self.about_title, alignment=Qt.AlignCenter)
+        layout.addWidget(self.version_update_widget, alignment=Qt.AlignCenter)
+        layout.addWidget(self.link_widget, alignment=Qt.AlignCenter)
         layout.addStretch()
 
         parent_layout = QVBoxLayout(parent_widget)
@@ -339,19 +340,49 @@ class SettingsPage(BasePage):
     )
     def _create_about_widgets(self):
         """Создаёт виджеты для вкладки «О программе»."""
-        self.about_title = QLabel("<h2>Медицинское приложение</h2>")
-        self.about_title.setAlignment(Qt.AlignCenter)
+        # self.about_title = QLabel("<h2>Медицинское приложение</h2>")
+        # self.about_title.setAlignment(Qt.AlignCenter)
+
+       # Горизонтальная панель для версии и кнопки обновления
+        self.version_update_widget = QWidget()
+        version_layout = QHBoxLayout(self.version_update_widget)
+        version_layout.setContentsMargins(0, 0, 0, 0)
+        version_layout.setSpacing(10)
 
         self.version_label = QLabel(f"Версия: <b>{APP_VERSION}</b>")
         self.version_label.setAlignment(Qt.AlignCenter)
+        version_layout.addWidget(self.version_label)
 
         self.check_update_btn = QPushButton("Проверить обновления")
         self.check_update_btn.clicked.connect(self._on_check_updates_clicked)
+        version_layout.addWidget(self.check_update_btn)
+
+        version_layout.addStretch()  # чтобы не растягивалось на всю ширину
+        version_layout.setAlignment(Qt.AlignCenter)
 
         repo_url = f"https://github.com/{GITHUB_REPO_SLUG}"
-        self.link_label = QLabel(f'<a href="{repo_url}">Страница проекта на GitHub</a>')
-        self.link_label.setOpenExternalLinks(True)
-        self.link_label.setAlignment(Qt.AlignCenter)
+        # self.link_label = QLabel(f'<a href="{repo_url}">Страница проекта на GitHub</a>')
+        # self.link_label.setOpenExternalLinks(True)
+        # self.link_label.setAlignment(Qt.AlignCenter)
+
+        # Виджет-контейнер для ссылки (компактный)
+        self.link_widget = QWidget()
+        link_layout = QHBoxLayout(self.link_widget)
+        link_layout.setContentsMargins(0, 0, 0, 0)
+        link_layout.setSpacing(10)
+
+        # QLabel с возможностью выделения и копирования текста (не растягивается)
+        self.link_label = QLabel(repo_url)
+        # self.link_edit.setReadOnly(True)
+        self.link_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.link_label.setAlignment(Qt.AlignLeft)
+        self.link_label.setStyleSheet("border: none; background: transparent;")
+        link_layout.addWidget(self.link_label)
+
+        self.open_link_btn = QPushButton("Открыть")
+        self.open_link_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(repo_url)))
+        link_layout.addWidget(self.open_link_btn)
+
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -398,7 +429,7 @@ class SettingsPage(BasePage):
             self.content_layout.addWidget(self.about_title)
             self.content_layout.addWidget(self.version_label)
             self.content_layout.addWidget(self.check_update_btn)
-            self.content_layout.addWidget(self.link_label)
+            self.content_layout.addWidget(self.link_widget)
             self.content_layout.addStretch()
 
     # @AppLogger.get_instance(

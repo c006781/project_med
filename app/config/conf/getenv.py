@@ -77,7 +77,10 @@ def get_getenv(
         
     # Если ключа нет, то выбрасываем ошибку
     if not thec:
-        raise ValueError(f"{key} is required")
+        if start_value is not None:
+            thec = start_value 
+        else:
+            raise ValueError(f"{key} is required")
     
     return thec
 

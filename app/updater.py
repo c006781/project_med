@@ -705,7 +705,8 @@ class UpdateApplier(QObject):
             self.error.emit("Новый файл не найден")
             return
 
-        ps_content = f'''$old = "{old_exe}"
+        ps_content = f'''
+$old = "{old_exe}"
 $new = "{new_exe}"
 $log = "{log_file}"
 
@@ -735,8 +736,8 @@ if (Test-Path $old) {{
     Write-Log "Old file not found, skipping delete"
 }}
 
-Write-Log "Starting new version (will rename itself on next launch)"
-Start-Process -FilePath $new -WindowStyle Normal
+Write-Log "Starting new version with rename instruction"
+Start-Process -FilePath $new -ArgumentList "--rename-to `"$old`"" -WindowStyle Normal
 
 Write-Log "Cleaning up script"
 Start-Sleep -Seconds 2

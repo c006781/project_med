@@ -6,28 +6,40 @@ import sys
 
 import interfaces.gui.gui_window.main as main_gui_window
 
-def rename_self_if_needed():
-    """Если приложение запущено как MedicalApp_new_*.exe, переименовывает себя и перезапускается."""
+def handle_rename_argument():
+    """Если передан аргумент --rename-to, переименовываем текущий exe и перезапускаем."""
+    # Работает только в собранном exe
     if not getattr(sys, 'frozen', False):
         return
-    exe_path = sys.executable
-    exe_name = os.path.basename(exe_path)
-    if exe_name.startswith("MedicalApp_new_"):
-        dir_name = os.path.dirname(exe_path)
-        normal_exe = os.path.join(dir_name, "MedicalApp.exe")
-        try:
-            # Если старый MedicalApp.exe существует (например, не удалился), удаляем его
-            if os.path.exists(normal_exe):
-                os.remove(normal_exe)
-            # Переименовываем себя
-            os.rename(exe_path, normal_exe)
-            # Запускаем новую версию
-            subprocess.Popen([normal_exe])
-            sys.exit(0)
-        except Exception as e:
-            print(f"Ошибка переименования: {e}")
-            
+    # Ищем аргумент --rename-to
+    rename_to = None
+    for i, arg in enumerate(sys.argv):
+        if arg == '--rename-to' and i + 1 < len(sys.argv):
+            rename_to = sys.argv[i + 1]
+            break
+    if not rename_to:
+        return
+
+    current_exe = sys.executable
+    target_exe = os.path.join(os.path.dirname(current_exe), rename_to)
+    try:
+        # Удаляем старый файл, если он существует (обычно он уже удалён скриптом, но на всякий случай)
+        if os.path.exists(target_exe):
+            os.remove(target_exe)
+        # Переименовываем текущий exe
+        os.rename(current_exe, target_exe)
+        # Запускаем переименованный exe
+        subprocess.Popen([target_exe])
+        sys.exit(0)
+    except Exception as e:
+        # Если не удалось переименовать, лучше показать ошибку и продолжить работу со старым именем
+        import traceback
+        traceback.print_exc()
+        # Можно также вывести сообщение через QMessageBox, но QApplication ещё не создан.
+        # Поэтому просто напечатаем в консоль.
+        print(f"Ошибка переименования: {e}", file=sys.stderr)
+
 if __name__ == '__main__':
-    rename_self_if_needed()
+    handle_rename_argument()
     main_gui_window.main() 
 

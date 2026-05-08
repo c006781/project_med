@@ -735,26 +735,10 @@ if (Test-Path $old) {{
     Write-Log "Old file not found, skipping delete"
 }}
 
-Write-Log "Copying $new to $old"
-Copy-Item -Path $new -Destination $old -Force
+Write-Log "Starting new version (will rename itself on next launch)"
+Start-Process -FilePath $new -WindowStyle Normal
 
-Write-Log "Deleting $new"
-Remove-Item -Path $new -Force
-
-# Очистка временных папок PyInstaller
-$tempDir = [System.IO.Path]::GetTempPath()
-Get-ChildItem -Path $tempDir -Directory -Filter "_MEI*" | ForEach-Object {{
-    try {{
-        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "Cleaned $($_.Name)"
-    }} catch {{
-        Write-Log "Failed to clean $($_.Name): $($_.Exception.Message)"
-    }}
-}}
-
-Write-Log "Starting new version"
-Start-Process -FilePath $old -WindowStyle Normal
-
+Write-Log "Cleaning up script"
 Start-Sleep -Seconds 2
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force
 '''

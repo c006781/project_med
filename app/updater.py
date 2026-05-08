@@ -675,50 +675,66 @@ class UpdateApplier(QObject):
         system = platform.system().lower()
 
         if system == "windows":
-            # Создаём PowerShell скрипт (корректно работает с Unicode)
-            ps_script = f'''$source = "{new_file}"
-        $dest = "{current_exe}"
-        Write-Host "Waiting 2 seconds..."
-        Start-Sleep -Seconds 2
-        try {{
-            Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
-            Write-Host "File replaced."
-            Start-Process -FilePath $dest
-            Write-Host "New version started."
-        }} catch {{
-            Write-Host "Error: $_"
-            Read-Host "Press Enter to exit"
-        }}
-        # Self-delete the script
-        Remove-Item -Path $MyInvocation.MyCommand.Path -Force
-        '''
+            # import json
+            # import subprocess
+            # import tempfile
+            # Формируем пути с правильным экранированием через JSON
+            # (это защитит от пробелов, кавычек и русских символов)
+            source_escaped = json.dumps(new_file)
+            dest_escaped = json.dumps(current_exe)
+            log_path = os.path.join(tempfile.gettempdir(), "MedicalApp_update.log")
+            log_escaped = json.dumps(log_path)
+
+            ps_script = f'''$source = {source_escaped}
+    $dest = {dest_escaped}
+    $logFile = {log_escaped}
+    Write-Output "Starting update..." | Out-File $logFile
+    Start-Sleep -Seconds 3
+    try {{
+        # Принудительно копируем, перезаписывая существующий файл
+        Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
+        Write-Output "OK: File replaced successfully" | Out-File $logFile -Append
+        # Запускаем обновлённое приложение
+        Start-Process -FilePath $dest
+        Write-Output "New process started" | Out-File $logFile -Append
+    }} catch {{
+        $errorMsg = $_.Exception.Message
+        Write-Output "ERROR: $errorMsg" | Out-File $logFile -Append
+        Pause
+    }}
+    # Самоудаление скрипта
+    Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+    '''
             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.ps1")
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(ps_script)
-            # Запускаем PowerShell с политикой Bypass, скрытое окно
+
+            # Запускаем PowerShell скрипт в скрытом окне, с обходом политики выполнения
             subprocess.Popen([
                 "powershell.exe",
                 "-ExecutionPolicy", "Bypass",
                 "-WindowStyle", "Hidden",
                 "-File", script_path
             ])
+            # Принудительно завершаем текущее приложение
             QApplication.quit()
+            sys.exit(0)
+
         elif system == "linux":
+            # Linux скрипт оставляем как есть (он работает с путями UTF-8)
             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
             content = f"""#!/bin/bash
-sleep 2
-cp "{new_file}" "{current_exe}"
-chmod +x "{current_exe}"
-"{current_exe}" &
-rm "$0"
-"""
+    sleep 2
+    cp "{new_file}" "{current_exe}"
+    chmod +x "{current_exe}"
+    "{current_exe}" &
+    rm "$0"
+    """
             with open(script_path, "w") as f:
                 f.write(content)
             os.chmod(script_path, 0o755)
-            os.system(f"nohup {script_path} > /dev/null 2>&1 &")
+            subprocess.Popen([script_path])
+            QApplication.quit()
+            sys.exit(0)
         else:
             self.error.emit(f"Автообновление не поддерживается на {system}")
-            return
-
-        # Завершаем текущее приложение
-        QApplication.quit()

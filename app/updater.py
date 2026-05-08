@@ -29,6 +29,13 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication
 
 
+def get_app_dir() -> str:
+    """Возвращает директорию, где находится исполняемый файл (или скрипт)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.dirname(os.path.abspath(__file__))
+
 class UpdateChecker(QThread):
     """
     Поток для проверки наличия новой версии на GitHub.
@@ -259,12 +266,19 @@ class UpdateDownloader(QThread):
     )
     def _get_temp_file_path(self) -> str:
         """Создаёт временный файл с правильным расширением."""
+        # os.makedirs(self.dest_dir, exist_ok=True)
         system = platform.system().lower()
         file_ext = ".exe" if system == "windows" else ".tar.gz"
+
+        self.logger.debug(f"dest_dir = {self.dest_dir} file_ext = {file_ext}")
+
         fd, temp_path = tempfile.mkstemp(
             suffix=file_ext,
             prefix="MedicalApp_update_",
-            dir=self.dest_dir
+            dir=self.dest_dir,
+            # dir=tempfile.gettempdir()   # <-- явно указываем системную временную папку,
+            # mode=0o777, 
+            # exist_ok=True
         )
         os.close(fd)
         return temp_path
@@ -282,16 +296,22 @@ class UpdateDownloader(QThread):
         downloaded = 0
         self.logger.debug(f"total_size = {total_size}")
         
-        with open(temp_path, 'wb') as out_file:
-
-            for chunk in response.iter_content(chunk_size=8192):
-                # self.logger.debug(f"chunk = {chunk}")
-                if chunk:
+        for chunk in response.iter_content(chunk_size=8192):
+            if chunk:
+                # Добавим проверку существования файла перед записью
+                if not os.path.exists(temp_path):
+                    self.logger.warning(f"Файл {temp_path} исчез, пересоздаём")
+                    # Пересоздаём файл (затираем старый)
+                    with open(temp_path, 'wb'):
+                        pass
+                with open(temp_path, 'ab') as out_file:
                     out_file.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        self.progress.emit(downloaded, total_size)
-
+                    out_file.flush()
+                    os.fsync(out_file.fileno())
+                    
+                downloaded += len(chunk)
+                if total_size > 0:
+                    self.progress.emit(downloaded, total_size)
 
     @AppLogger.get_instance(
         name='UpdateDownloader',
@@ -307,16 +327,24 @@ class UpdateDownloader(QThread):
 
         self.logger.debug(f"Download URL: {self.download_url}")
         try:
-            # 1. Подготовка заголовков и временного файла
+            # 1. Сначала создаём директорию (если её нет)
+            if not os.path.exists(self.dest_dir):
+                os.makedirs(self.dest_dir, exist_ok=True)
+                self.logger.debug(f"Created dest dir: {self.dest_dir}")
+
+            # 2. Подготовка заголовков и временного файла
             headers = self._get_headers()
             temp_path = self._get_temp_file_path()
+
             self.logger.debug(f"Temp file path: {temp_path}")
+            
 
             param = {
                 'url' : self.download_url, 
                 'headers':headers, 
                 'stream':True, 
-                'timeout':30,
+                # 'timeout':30,
+                'timeout': (5, 120),   # (таймаут подключения, таймаут чтения)
             }
 
             if if_private:
@@ -343,13 +371,15 @@ class UpdateDownloader(QThread):
             # 4. Успешное завершение
             self.finished.emit(temp_path)
 
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Ошибка HTTP: {e}")
+        except requests.exceptions.ConnectionError as e:
+            self.logger.error(f"Ошибка соединения: {e}")
+            self.error.emit(str(e))
+        except OSError as e:
+            self.logger.error(f"Ошибка файловой системы: {e}")
             self.error.emit(str(e))
         except Exception as e:
             self.logger.error(f"Произошла ошибка: {e}")
             self.error.emit(str(e))
-
 
 class AppUpdater(QObject):
     """
@@ -450,7 +480,8 @@ class AppUpdater(QObject):
         if self._downloader and self._downloader.isRunning():
             return
         # Временная директория в папке пользователя
-        temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        # temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        temp_dir = os.path.join(get_app_dir(), "MedicalAppUpdates")
         os.makedirs(temp_dir, exist_ok=True)
 
         self._downloader = UpdateDownloader(download_url, temp_dir)
@@ -552,11 +583,12 @@ class UpdateApplier(QObject):
             asset ,
             is_private = is_private       
         ):            
-            if not is_private:
-                asset_url = asset['browser_download_url']
-            else:
-                asset_url = asset['url']
-            
+            # if not is_private:
+            #     asset_url = asset['browser_download_url']
+            # else:
+            #     asset_url = asset['url']
+
+            asset_url = asset['url']
             return asset_url
 
         for asset in self.release_data.get('assets', []):
@@ -598,7 +630,8 @@ class UpdateApplier(QObject):
 
         logger.debug("start download")
         # Скачиваем
-        temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        # temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        temp_dir = os.path.join(get_app_dir(), "MedicalAppUpdates")
         logger.debug(f"temp_dir = {temp_dir}")
 
         os.makedirs(temp_dir, exist_ok=True)

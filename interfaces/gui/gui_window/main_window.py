@@ -1156,13 +1156,13 @@ class UpdateMixin:
     def _on_update_error(self, error_msg: str):
         QMessageBox.warning(self, "Ошибка", f"Не удалось проверить обновления:\n{error_msg}")
 
-    @AppLogger.get_instance(
-        name='UpdateMixin',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='UpdateMixin',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     @Slot(int, int)
     def _on_download_progress(self, current: int, total: int):
         """Обновляет прогресс-бар в главном окне."""

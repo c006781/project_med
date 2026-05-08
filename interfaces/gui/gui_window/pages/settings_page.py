@@ -15,7 +15,7 @@ from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from PySide6.QtWidgets import (
     # QWidget, 
-    QComboBox, QFrame, QLabel, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QComboBox, QFrame, QLabel, QScrollArea, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox, QWidget
 )
@@ -75,6 +75,7 @@ class SettingsPage(BasePage):
         self.page_title = page_title
         
         self.config_manager = AppConfigManager.get_instance()
+
         self.first_start = False          # флаг первого запуска
 
         self._setup_ui()
@@ -93,39 +94,131 @@ class SettingsPage(BasePage):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _setup_ui(self):
-        """Создаёт все виджеты страницы настроек с вкладками."""
+        """Создаёт вкладки и единую область прокрутки."""
         main_layout = QVBoxLayout(self)
 
-        # Создаём вкладки
+        # Создаём виджет вкладок
         self.tab_widget = QTabWidget()
+
+        # Создаём две страницы
         self.settings_tab = QWidget()
         self.about_tab = QWidget()
+
+        # Добавляем вкладки
         self.tab_widget.addTab(self.settings_tab, "Основные")
         self.tab_widget.addTab(self.about_tab, "О программе")
+
         main_layout.addWidget(self.tab_widget)
 
-        # ----- Вкладка "Основные настройки" -----
-        settings_layout = QVBoxLayout(self.settings_tab)
+        # Наполняем вкладку "Основные"
+        self._setup_settings_scroll_area(self.settings_tab)
 
-        # Группа основных настроек (БД, фото, токен)
-        basic_group = QGroupBox("Основные настройки")
-        form_layout = QFormLayout(basic_group)
+        # Наполняем вкладку "О программе"
+        self._setup_about_scroll_area(self.about_tab)
 
-        # Путь к локальной БД
+        # Подключаем сигналы (те, что не зависят от вкладок)
+        self._connect_signals()
+
+        # # ----- Вкладка "О программе" -----
+        # self._setup_about_tab()
+
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_settings_scroll_area(self, parent_widget):
+        """Добавляет QScrollArea с виджетами настроек в parent_widget."""
+        scroll = QScrollArea(parent_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        container = QWidget()
+        scroll.setWidget(container)
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignTop)
+        layout.setSpacing(15)
+
+        # Создаём виджеты (без layout – они будут добавлены сюда)
+        self._create_settings_widgets()  # создаёт basic_group, log_group, save_btn
+
+        # Добавляем в layout
+        layout.addWidget(self.basic_group)
+        layout.addWidget(self.log_group)
+        layout.addWidget(self.save_btn)
+        layout.addStretch()
+
+        # Устанавливаем scroll в parent_widget
+        parent_layout = QVBoxLayout(parent_widget)
+        parent_layout.setContentsMargins(0, 0, 0, 0)
+        parent_layout.addWidget(scroll)
+
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_about_scroll_area(self, parent_widget):
+        """Добавляет QScrollArea с виджетами о программе в parent_widget."""
+        scroll = QScrollArea(parent_widget)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        container = QWidget()
+        scroll.setWidget(container)
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignTop)
+        layout.setSpacing(10)
+
+        # Создаём виджеты (если ещё не созданы)
+        self._create_about_widgets()
+
+        layout.addWidget(self.about_title)
+        layout.addWidget(self.version_label)
+        layout.addWidget(self.check_update_btn)
+        layout.addWidget(self.link_label)
+        layout.addStretch()
+
+        parent_layout = QVBoxLayout(parent_widget)
+        parent_layout.setContentsMargins(0, 0, 0, 0)
+        parent_layout.addWidget(scroll)
+
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_settings_widgets(self):
+        """Создаёт все виджеты для вкладки «Основные настройки» (без layout)."""
+        # ----- Группа основных настроек -----
+        self.basic_group = QGroupBox("Основные настройки")
+        form_layout = QFormLayout(self.basic_group)
+
+        # Путь к БД
         self.db_path_edit = QLineEdit()
         self.db_path_btn = QPushButton("Обзор...")
         self.db_path_btn.setMaximumWidth(80)
         self.create_db_btn = QPushButton("Создать тестовую БД")
         self.create_db_btn.setMaximumWidth(150)
         self.create_db_btn.setVisible(False)
-
         db_path_layout = QHBoxLayout()
         db_path_layout.addWidget(self.db_path_edit)
         db_path_layout.addWidget(self.db_path_btn)
         db_path_layout.addWidget(self.create_db_btn)
         form_layout.addRow("Путь к БД:", db_path_layout)
 
-        # Папка для хранения фото
+        # Папка для фото
         self.photos_path_edit = QLineEdit()
         self.photos_path_btn = QPushButton("Обзор...")
         self.photos_path_btn.setMaximumWidth(80)
@@ -134,24 +227,22 @@ class SettingsPage(BasePage):
         photos_layout.addWidget(self.photos_path_btn)
         form_layout.addRow("Папка для фото:", photos_layout)
 
-        # Токен Яндекс.Диска с кнопкой проверки
+        # Токен Яндекс.Диска
         self.token_edit = QLineEdit()
-        self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.token_edit.setEchoMode(QLineEdit.Password)
         token_layout = QHBoxLayout()
         token_layout.addWidget(self.token_edit)
         self.check_token_btn = QPushButton("Проверить")
         self.check_token_btn.setMaximumWidth(80)
-        self.check_token_btn.clicked.connect(self._check_token)
         token_layout.addWidget(self.check_token_btn)
         form_layout.addRow("Токен Яндекс.Диска:", token_layout)
 
-        # Удалённый путь БД с кнопкой проверки/создания
+        # Удалённый путь БД
         self.remote_path_edit = QLineEdit()
         remote_layout = QHBoxLayout()
         remote_layout.addWidget(self.remote_path_edit)
         self.check_path_btn = QPushButton("Проверить/Создать")
         self.check_path_btn.setMaximumWidth(120)
-        self.check_path_btn.clicked.connect(self._check_remote_path)
         remote_layout.addWidget(self.check_path_btn)
         form_layout.addRow("Удалённый путь БД:", remote_layout)
 
@@ -169,13 +260,11 @@ class SettingsPage(BasePage):
         self.backup_count_spin.setRange(1, 100)
         form_layout.addRow("Количество бекапов:", self.backup_count_spin)
 
-        settings_layout.addWidget(basic_group)
-
         # ----- Группа настроек логирования -----
-        log_group = QGroupBox("Настройки логирования")
-        log_layout = QFormLayout(log_group)
+        self.log_group = QGroupBox("Настройки логирования")
+        log_layout = QFormLayout(self.log_group)
 
-        # Папка для хранения логов
+        # Папка для логов
         self.log_dir_edit = QLineEdit()
         self.log_dir_btn = QPushButton("Обзор...")
         log_dir_layout = QHBoxLayout()
@@ -183,23 +272,21 @@ class SettingsPage(BasePage):
         log_dir_layout.addWidget(self.log_dir_btn)
         log_layout.addRow("Папка для логов:", log_dir_layout)
 
-        # Добавлять временную метку в имя файла
+        # Временная метка
         self.log_timestamp_check = QCheckBox("Добавлять дату/время в имя файла лога")
         log_layout.addRow(self.log_timestamp_check)
 
-        # ----- Системный логгер -----
+        # Системный логгер
         system_frame = QFrame()
-        system_frame.setFrameShape(QFrame.Shape.Box)
+        system_frame.setFrameShape(QFrame.Box)
         system_frame.setMaximumHeight(180)
         system_vbox = QVBoxLayout(system_frame)
         system_vbox.addWidget(QLabel("<b>Системный логгер</b>"))
-
         self.system_enabled_check = QCheckBox("Включить системный логгер")
         self.system_console_check = QCheckBox("Вывод в консоль")
         self.system_file_check = QCheckBox("Запись в файл")
         self.system_level_combo = QComboBox()
         self.system_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-
         system_vbox.addWidget(self.system_enabled_check)
         system_vbox.addWidget(self.system_console_check)
         system_vbox.addWidget(self.system_file_check)
@@ -207,19 +294,17 @@ class SettingsPage(BasePage):
         system_vbox.addWidget(self.system_level_combo)
         log_layout.addRow(system_frame)
 
-        # ----- Пользовательский логгер -----
+        # Пользовательский логгер
         user_frame = QFrame()
-        user_frame.setFrameShape(QFrame.Shape.Box)
+        user_frame.setFrameShape(QFrame.Box)
         user_frame.setMaximumHeight(180)
         user_vbox = QVBoxLayout(user_frame)
         user_vbox.addWidget(QLabel("<b>Пользовательский логгер</b>"))
-
         self.user_enabled_check = QCheckBox("Включить пользовательский логгер")
         self.user_console_check = QCheckBox("Вывод в консоль")
         self.user_file_check = QCheckBox("Запись в файл")
         self.user_level_combo = QComboBox()
         self.user_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
-
         user_vbox.addWidget(self.user_enabled_check)
         user_vbox.addWidget(self.user_console_check)
         user_vbox.addWidget(self.user_file_check)
@@ -227,7 +312,7 @@ class SettingsPage(BasePage):
         user_vbox.addWidget(self.user_level_combo)
         log_layout.addRow(user_frame)
 
-        # Параметры ротации файлов
+        # Ротация
         self.log_max_bytes_spin = QSpinBox()
         self.log_max_bytes_spin.setRange(1024, 100 * 1024 * 1024)
         self.log_max_bytes_spin.setSuffix(" байт")
@@ -240,25 +325,9 @@ class SettingsPage(BasePage):
         log_layout.addRow("Макс. размер файла (байт):", self.log_max_bytes_spin)
         log_layout.addRow("Количество бэкапов:", self.log_backup_count_spin)
 
-        settings_layout.addWidget(log_group)
-
-        # Кнопка сохранения (помещаем под всеми настройками)
+        # Кнопка сохранения
         self.save_btn = QPushButton("Сохранить настройки")
         self.save_btn.setMaximumWidth(200)
-        settings_layout.addWidget(self.save_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        # ----- Сигналы для виджетов основной вкладки -----
-        self.db_path_btn.clicked.connect(lambda: self._browse_file(self.db_path_edit, "Выберите файл БД", "*.db"))
-        self.photos_path_btn.clicked.connect(lambda: self._browse_dir(self.photos_path_edit, "Выберите папку для фото"))
-        self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
-        self.log_dir_btn.clicked.connect(lambda: self._browse_dir(self.log_dir_edit, "Выберите папку для логов"))
-        self.save_btn.clicked.connect(self._save_settings)
-
-        self.db_path_edit.textChanged.connect(self._update_create_db_button_visibility)
-        self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
-
-        # ----- Вкладка "О программе" -----
-        self._setup_about_tab()
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -268,36 +337,108 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_about_tab(self):
-        layout = QVBoxLayout(self.about_tab)
-        
-        # Логотип (опционально)
-        # logo = QLabel()
-        # logo.setPixmap(QPixmap(":/icons/app_icon.png").scaled(64,64))
-        # layout.addWidget(logo, alignment=Qt.AlignCenter)
-        
-        # Название и версия
-        title = QLabel("<h2>Медицинское приложение</h2>")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-        
-        version_label = QLabel(f"Версия: <b>{APP_VERSION}</b>")
-        version_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(version_label)
-        
-        # Кнопка проверки обновлений
+    def _create_about_widgets(self):
+        """Создаёт виджеты для вкладки «О программе»."""
+        self.about_title = QLabel("<h2>Медицинское приложение</h2>")
+        self.about_title.setAlignment(Qt.AlignCenter)
+
+        self.version_label = QLabel(f"Версия: <b>{APP_VERSION}</b>")
+        self.version_label.setAlignment(Qt.AlignCenter)
+
         self.check_update_btn = QPushButton("Проверить обновления")
         self.check_update_btn.clicked.connect(self._on_check_updates_clicked)
-        layout.addWidget(self.check_update_btn, alignment=Qt.AlignCenter)
-        
-        # Ссылка на GitHub
+
         repo_url = f"https://github.com/{GITHUB_REPO_SLUG}"
-        link_label = QLabel(f'<a href="{repo_url}">Страница проекта на GitHub</a>')
-        link_label.setOpenExternalLinks(True)
-        link_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(link_label)
+        self.link_label = QLabel(f'<a href="{repo_url}">Страница проекта на GitHub</a>')
+        self.link_label.setOpenExternalLinks(True)
+        self.link_label.setAlignment(Qt.AlignCenter)
+
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _connect_signals(self):
+        """Подключает сигналы виджетов (общие для всех вкладок)."""
+        self.db_path_btn.clicked.connect(lambda: self._browse_file(self.db_path_edit, "Выберите файл БД", "*.db"))
+        self.photos_path_btn.clicked.connect(lambda: self._browse_dir(self.photos_path_edit, "Выберите папку для фото"))
+        self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
+        self.log_dir_btn.clicked.connect(lambda: self._browse_dir(self.log_dir_edit, "Выберите папку для логов"))
+        self.save_btn.clicked.connect(self._save_settings)
+        self.db_path_edit.textChanged.connect(self._update_create_db_button_visibility)
+        self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
+        self.check_token_btn.clicked.connect(self._check_token)
+        self.check_path_btn.clicked.connect(self._check_remote_path)
+
+    @AppLogger.get_instance(
+        name = 'SettingsPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_tab_changed(self, index):
+        """При переключении вкладки заменяет содержимое scroll_content."""
+        # Очищаем текущий layout
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        if index == 0:  # Основные настройки
+            self.content_layout.addWidget(self.basic_group)
+            self.content_layout.addWidget(self.log_group)
+            self.content_layout.addWidget(self.save_btn)
+            self.content_layout.addStretch()
+        else:           # О программе
+            self.content_layout.addWidget(self.about_title)
+            self.content_layout.addWidget(self.version_label)
+            self.content_layout.addWidget(self.check_update_btn)
+            self.content_layout.addWidget(self.link_label)
+            self.content_layout.addStretch()
+
+    # @AppLogger.get_instance(
+    #     name = 'SettingsPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _setup_about_tab(self):
+    #     layout = QVBoxLayout(self.about_tab)
         
-        layout.addStretch()
+    #     # Логотип (опционально)
+    #     # logo = QLabel()
+    #     # logo.setPixmap(QPixmap(":/icons/app_icon.png").scaled(64,64))
+    #     # layout.addWidget(logo, alignment=Qt.AlignCenter)
+        
+    #     # Название и версия
+    #     title = QLabel("<h2>Медицинское приложение</h2>")
+    #     title.setAlignment(Qt.AlignCenter)
+    #     layout.addWidget(title)
+        
+    #     version_label = QLabel(f"Версия: <b>{APP_VERSION}</b>")
+    #     version_label.setAlignment(Qt.AlignCenter)
+    #     layout.addWidget(version_label)
+        
+    #     # Кнопка проверки обновлений
+    #     self.check_update_btn = QPushButton("Проверить обновления")
+    #     self.check_update_btn.clicked.connect(self._on_check_updates_clicked)
+    #     layout.addWidget(self.check_update_btn, alignment=Qt.AlignCenter)
+        
+    #     # Ссылка на GitHub
+    #     repo_url = f"https://github.com/{GITHUB_REPO_SLUG}"
+    #     link_label = QLabel(f'<a href="{repo_url}">Страница проекта на GitHub</a>')
+    #     link_label.setOpenExternalLinks(True)
+    #     link_label.setAlignment(Qt.AlignCenter)
+    #     layout.addWidget(link_label)
+        
+    #     layout.addStretch()
 
     @AppLogger.get_instance(
         name='SettingsPage',

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import shutil
 import tempfile
+import time
 import urllib.request
 import platform
 from typing import Optional, Tuple
@@ -651,8 +652,14 @@ class UpdateApplier(QObject):
         # self._downloader = UpdateDownloader(asset_url, temp_dir, token)
 
         # Вместо временной папки
+        # Генерируем уникальное имя для нового файла (например, с меткой времени)
         exe_dir = get_app_dir()
-        new_exe_path = os.path.join(exe_dir, "MedicalApp_new.exe")
+        # import time
+        timestamp = int(time.time())
+        new_exe_name = f"MedicalApp_new_{timestamp}.exe"
+        new_exe_path = os.path.join(exe_dir, new_exe_name)
+        
+        self._new_exe_name = new_exe_name   # сохраняем для использования в _apply_update
         self._downloader = UpdateDownloader(asset_url, new_exe_path, token)
 
         self._downloader.progress.connect(self.progress.emit)
@@ -686,21 +693,18 @@ class UpdateApplier(QObject):
             self.error.emit("Автообновление работает только в собранном приложении")
             return
 
-        # Переходим в папку, где находится текущий EXE (чтобы относительные пути работали)
         app_dir = get_app_dir()
         os.chdir(app_dir)
 
-        old_exe = "MedicalApp.exe"
-        new_exe = "MedicalApp_new.exe"
+        old_exe = os.path.basename(sys.executable)           # динамическое имя текущего EXE (например, "MedicalApp.exe")
+        new_exe = os.path.basename(self._downloaded_file)    # имя скачанного файла (например, "MedicalApp_new_12345.exe")
         ps_script = "update.ps1"
         log_file = "update.log"
 
-        # Проверяем, что новый файл существует
-        if not os.path.exists(new_exe):
+        if not os.path.exists(self._downloaded_file):
             self.error.emit("Новый файл не найден")
             return
 
-        # PowerShell скрипт (использует относительные пути)
         ps_content = f'''$old = "{old_exe}"
 $new = "{new_exe}"
 $log = "{log_file}"
@@ -708,43 +712,52 @@ $log = "{log_file}"
 function Write-Log {{ param($msg) Add-Content -Path $log -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $msg" }}
 
 Write-Log "Update script started"
-
-# Даём время на закрытие основного приложения
 Start-Sleep -Seconds 3
 
-# Убиваем процесс, если он ещё жив
-$proc = Get-Process -Name "MedicalApp" -ErrorAction SilentlyContinue
+Write-Log "Terminating old process(es)"
+$proc = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($old)) -ErrorAction SilentlyContinue
 if ($proc) {{
-    Write-Log "Killing old process"
-    Stop-Process -Name "MedicalApp" -Force
-    Start-Sleep -Seconds 2
+    $proc | Stop-Process -Force
+    do {{
+        Start-Sleep -Milliseconds 500
+        $stillRunning = Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($old)) -ErrorAction SilentlyContinue
+        if ($stillRunning) {{ Write-Log "Still waiting..." }}
+    }} while ($stillRunning)
+    Write-Log "All processes terminated"
+}} else {{
+    Write-Log "No running process found"
 }}
 
-# Удаляем старый файл
 if (Test-Path $old) {{
     Write-Log "Deleting old executable"
     Remove-Item -Path $old -Force
-    Start-Sleep -Seconds 1
 }} else {{
     Write-Log "Old file not found, skipping delete"
 }}
 
-# Переименовываем новый файл
 Write-Log "Renaming $new to $old"
-Rename-Item -Path $new -NewName "MedicalApp.exe" -Force
+Rename-Item -Path $new -NewName $old -Force
 
-# Запускаем обновлённую программу
+# Очистка временных папок PyInstaller
+$tempDir = [System.IO.Path]::GetTempPath()
+Get-ChildItem -Path $tempDir -Directory -Filter "_MEI*" | ForEach-Object {{
+    try {{
+        Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Log "Cleaned $($_.Name)"
+    }} catch {{
+        Write-Log "Failed to clean $($_.Name): $($_.Exception.Message)"
+    }}
+}}
+
 Write-Log "Starting new version"
-Start-Process -FilePath $old
+Start-Process -FilePath $old -WindowStyle Normal
 
-# Удаляем скрипт
-Write-Log "Cleaning up script"
+Start-Sleep -Seconds 2
 Remove-Item -Path $MyInvocation.MyCommand.Path -Force
 '''
         with open(ps_script, "w", encoding="utf-8") as f:
             f.write(ps_content)
 
-        # Запускаем PowerShell полностью скрыто
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
         startupinfo.wShowWindow = subprocess.SW_HIDE
@@ -756,6 +769,7 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force
         )
         QApplication.quit()
         sys.exit(0)
+
 
 #     def _apply_update(self):
 #         """Заменяет текущий исполняемый файл на новый и перезапускает приложение."""

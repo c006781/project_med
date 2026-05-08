@@ -62,6 +62,8 @@ def main():
     # Собираем все компоненты PySide6
     cmd.extend(['--collect-all', 'PySide6'])
 
+    cmd.extend(['--collect-data', 'certifi'])
+
     # Добавляем файл VERSION, если существует
     version_file = root_dir / 'VERSION'
     if version_file.exists():

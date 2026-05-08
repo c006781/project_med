@@ -18,8 +18,8 @@ import tempfile
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 
 
-from app.updater import AppUpdater
 from app.utils.logger.logger import AppLogger
+from app.updater import AppUpdater
 
 from app.config.config_manager.manager import AppConfigManager
 
@@ -1130,7 +1130,7 @@ class UpdateMixin:
             else:
                 self.logger.error("No pending release data or updater missing")
                 QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
-                
+
         elif clicked == open_btn:
             QDesktopServices.openUrl(QUrl(release_url))
 

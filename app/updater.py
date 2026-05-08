@@ -6,6 +6,7 @@
 
 import json
 import os
+import subprocess
 import sys
 import shutil
 import tempfile
@@ -674,18 +675,34 @@ class UpdateApplier(QObject):
         system = platform.system().lower()
 
         if system == "windows":
-            # Создаём bat-скрипт
-            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.bat")
-            content = f"""@echo off
-timeout /t 2 /nobreak > nul
-copy /Y "{new_file}" "{current_exe}"
-start "" "{current_exe}"
-del "%~f0"
-"""
-            with open(script_path, "w") as f:
-                f.write(content)
-            # Запускаем скрипт и выходим
-            os.startfile(script_path)
+            # Создаём PowerShell скрипт (корректно работает с Unicode)
+            ps_script = f'''$source = "{new_file}"
+        $dest = "{current_exe}"
+        Write-Host "Waiting 2 seconds..."
+        Start-Sleep -Seconds 2
+        try {{
+            Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
+            Write-Host "File replaced."
+            Start-Process -FilePath $dest
+            Write-Host "New version started."
+        }} catch {{
+            Write-Host "Error: $_"
+            Read-Host "Press Enter to exit"
+        }}
+        # Self-delete the script
+        Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+        '''
+            script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.ps1")
+            with open(script_path, "w", encoding="utf-8") as f:
+                f.write(ps_script)
+            # Запускаем PowerShell с политикой Bypass, скрытое окно
+            subprocess.Popen([
+                "powershell.exe",
+                "-ExecutionPolicy", "Bypass",
+                "-WindowStyle", "Hidden",
+                "-File", script_path
+            ])
+            QApplication.quit()
         elif system == "linux":
             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
             content = f"""#!/bin/bash

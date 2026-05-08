@@ -933,6 +933,7 @@ class SyncMixin:
         """
         Обработчик ошибки в потоке скачивания.
         """
+        self.logger.error(f"Download error: {message}")
         self.progress_bar.setVisible(False)
         QMessageBox.critical(self, "Ошибка", message)
 
@@ -1066,15 +1067,43 @@ class UpdateMixin:
         else:
             QMessageBox.warning(self, "Ошибка", "Система обновлений не инициализирована")
 
+    # @AppLogger.get_instance(
+    #     name='UpdateMixin',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # @Slot(str, str)
+    # def _on_update_available(self, new_version: str, release_url: str):
+    #     msg = QMessageBox(self)
+    #     msg.setWindowTitle("Доступно обновление")
+    #     msg.setText(f"Доступна новая версия {new_version}\nВаша версия: {APP_VERSION}")
+    #     msg.setInformativeText("Что вы хотите сделать?")
+    #     download_btn = msg.addButton("Скачать и установить", QMessageBox.ActionRole)
+    #     open_btn = msg.addButton("Открыть страницу релиза", QMessageBox.ActionRole)
+    #     cancel_btn = msg.addButton("Отмена", QMessageBox.RejectRole)
+    #     msg.setDefaultButton(cancel_btn)
+    #     msg.exec()
+
+    #     clicked = msg.clickedButton()
+    #     if clicked == download_btn:
+    #         # Запускаем скачивание и установку
+    #         if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
+    #             self.updater.apply_update_from_release(self.updater._pending_release_data)
+    #         else:
+    #             QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
+    #     elif clicked == open_btn:
+    #         QDesktopServices.openUrl(QUrl(release_url))
+
     @AppLogger.get_instance(
         name='UpdateMixin',
         enable_file_logging='system',
         use_name_in_filename=False,
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     @Slot(str, str)
     def _on_update_available(self, new_version: str, release_url: str):
+        self.logger.debug(f"_on_update_available called: new_version={new_version}, url={release_url}")
         msg = QMessageBox(self)
         msg.setWindowTitle("Доступно обновление")
         msg.setText(f"Доступна новая версия {new_version}\nВаша версия: {APP_VERSION}")
@@ -1084,14 +1113,24 @@ class UpdateMixin:
         cancel_btn = msg.addButton("Отмена", QMessageBox.RejectRole)
         msg.setDefaultButton(cancel_btn)
         msg.exec()
+        print("Pending release data:", self.updater._pending_release_data if hasattr(self.updater, '_pending_release_data') else "None")
 
         clicked = msg.clickedButton()
         if clicked == download_btn:
-            # Запускаем скачивание и установку
+            self.logger.debug("Download button clicked, trying to apply update from release data")
             if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
-                self.updater.apply_update_from_release(self.updater._pending_release_data)
+                data = self.updater._pending_release_data
+                # self.logger.debug(f"Pending release data keys: {list(self.updater._pending_release_data.keys())}")
+                self.logger.debug(
+                    f"_pending_release_data exists, "
+                    f"type={type(data)}, "
+                    f"keys={data.keys() if data else None}"
+                )
+                self.updater.apply_update_from_release(data)
             else:
+                self.logger.error("No pending release data or updater missing")
                 QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
+                
         elif clicked == open_btn:
             QDesktopServices.openUrl(QUrl(release_url))
 
@@ -1162,6 +1201,7 @@ class UpdateMixin:
     )
     @Slot(str)
     def _on_download_error(self, error_msg: str):
+        self.logger.error(f"Download error: {error_msg}")
         self.progress_bar.setVisible(False)
         QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось скачать обновление:\n{error_msg}")
 

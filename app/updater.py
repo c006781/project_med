@@ -13,6 +13,8 @@ import urllib.request
 import platform
 from typing import Optional, Tuple
 
+import requests
+
 
 from app.config.config_manager.manager import AppConfigManager
 from app.utils.logger.logger import AppLogger
@@ -42,8 +44,116 @@ class UpdateChecker(QThread):
     )
     def __init__(self, current_version: str, repo_slug: str):
         super().__init__()
+
+        self.logger = AppLogger.get_instance(
+            name='app.UpdateChecker',
+            # share_file_with = 'system',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'system'
+        )
+
         self.current_version = current_version
         self.repo_slug = repo_slug
+    
+    @AppLogger.get_instance(
+        name='UpdateChecker',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_token(self) -> str:
+        """Получает токен из окружения (через getenv)."""
+        from app.config.conf.getenv import get_getenv
+        token = get_getenv(key='GITHUB_TOKEN', start_value='')
+
+        self.logger.debug(
+            f"DEBUG: "
+            f"Token length = {len(token)}, "
+            f"first 5 chars = {token[:5] if token else 'EMPTY'}"
+        )
+        return token
+
+    @AppLogger.get_instance(
+        name='UpdateChecker',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _build_request(self, token: str = None):
+        """Формирует Request объект для GitHub API."""
+        url = f"https://api.github.com/repos/{self.repo_slug}/releases/latest"
+        headers = {"Accept": "application/vnd.github.v3+json"}
+        if token and token.strip():
+            headers["Authorization"] = f"token {token.strip()}"
+        
+        self.logger.debug(
+            f"url = {url}, "
+            f"token = {token and token.strip()}"
+            f"headers = {headers is not None} "
+        ) 
+
+        return urllib.request.Request(url, headers=headers)
+
+    # @AppLogger.get_instance(
+    #     name='UpdateChecker',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    @staticmethod
+    def _parse_version(v_now: str, v_new: str) -> bool:
+        """Сравнивает версии (True, если v_new > v_now)."""
+        v_now = v_now.split('.')
+        v_new = v_new.split('.')
+        len_v_now = len(v_now)
+        len_v_new = len(v_new)
+        for i in range(min(len_v_now, len_v_new)):
+            try:
+                if int(v_now[i]) < int(v_new[i]):
+                    return True
+            except Exception as e:
+                # self.logger.error(
+                #     f"v_now = {v_now}, "
+                #     f"v_new = {v_new}, "
+                #     f"i = {i}"
+                #     f"err: {e}"
+                # )
+                return False
+            
+        if len_v_now < len_v_new:
+            return True
+
+        return False
+
+    @AppLogger.get_instance(
+        name='UpdateChecker',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _process_response(self, data: dict):
+        """Извлекает и сравнивает версии из данных релиза."""
+        latest_tag = data.get("tag_name", "")
+
+        if latest_tag.startswith("v"):
+            latest_version = latest_tag[1:]
+        else:
+            latest_version = latest_tag
+
+        release_url = data.get("html_url", "")
+
+        has_update = self._parse_version(self.current_version, latest_version)
+
+        return has_update, latest_version, release_url, data
+
 
     @AppLogger.get_instance(
         name='UpdateChecker',
@@ -55,108 +165,27 @@ class UpdateChecker(QThread):
     )
     def run(self):
 
-        logger = AppLogger.get_instance(
-            name='app.UpdateChecker',
-            # share_file_with = 'system',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'system'
-        )
         try:
-            # # Получаем токен из глобальной конфигурации
-            # # from app.config.config_manager.manager import AppConfigManager
-            # config = AppConfigManager.get_instance()
-            # token = config.get('GITHUB_TOKEN', '')
+            token = self._get_token()
+            self.logger.debug(f"Token length = {len(token)}, first 5 chars = {token[:5] if token else 'EMPTY'}")
 
+            req = self._build_request(token)
+            self.logger.debug(f"Request URL: {req.full_url}")
 
-            # Получаем токен из окружения
-            from app.config.conf.getenv import get_getenv as get_getenv
-            token = get_getenv(
-                key = 'GITHUB_TOKEN',
-                start_value=''
-            )
-
-            logger.debug(
-                f"DEBUG: "
-                f"Token length = {len(token)}, "
-                f"first 5 chars = {token[:5] if token else 'EMPTY'}"
-            )
-            # Запрашиваем информацию о последнем релизе
-            url = f"https://api.github.com/repos/{self.repo_slug}/releases/latest"
-            headers = {"Accept": "application/vnd.github.v3+json"}
-            if token and token.strip():
-                headers["Authorization"] = f"token {token.strip()}"
-                
-            logger.debug(f"url = {url}, headers = {headers is not None}")
-
-            req = urllib.request.Request(url, headers=headers)
-
-            logger.debug(f"req = {req is not None}, headers = {headers is not None}")
-            
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.loads(response.read().decode('utf-8'))
 
-            latest_tag = data.get("tag_name", "")
-            logger.debug(f"latest_tag = {latest_tag}")
-            if latest_tag.startswith("v"):
-                latest_version = latest_tag[1:]  # убираем префикс 'v'
-            else:
-                latest_version = latest_tag
-            
-            logger.debug(f"latest_version = {latest_version}")
+            has_update, latest_version, release_url, full_data = self._process_response(data)
+            self.logger.debug(f"has_update = {has_update}, latest_version = {latest_version}, release_url = {release_url}")
 
-            release_url = data.get("html_url", "")
-            logger.debug(f"release_url = {release_url}")
-
-            # Сравниваем версии (простое строковое сравнение, но лучше использовать packaging.version)
-            # Для простоты используем tuple сравнение
-            # def parse_version(v):
-            #     return tuple(map(int, v.split('.')))
-            
-
-            def parse_version(v_now, v_new):
-
-                v_now = v_now.split('.')
-                v_new = v_new.split('.')
-                len_v_now = len(v_now)
-                len_v_new = len(v_new)
-                for i in range(min(len_v_now, len_v_new)):
-                    try:
-                        if int(v_now[i]) < int(v_new[i]):
-                            return True
-                    except Exception as e:
-                        logger.error(
-                            f"v_now = {v_now}, "
-                            f"v_new = {v_new}, "
-                            f"i = {i}"
-                            f"err: {e}"
-                        )
-                        return False
-                    
-                if len_v_now < len_v_new:
-                    return True
-
-                return False
-
-            has_update = False
-            # if parse_version(latest_version) > parse_version(self.current_version):
-            if parse_version(self.current_version, latest_version) :
-                has_update = True
-
-            logger.debug(
-                f"has_update = {has_update}, "
-                f"latest_version = {latest_version}, "
-                f"release_url = {release_url}"
-            )            
-
-            # self.finished.emit(has_update, latest_version, release_url)
-            self.finished.emit(has_update, data)
+            self.finished.emit(has_update, full_data)
         except urllib.error.HTTPError as e:
-            logger.error(f"Ошибка HTTP {e.code}: {e.reason}")
+            self.logger.error(f"Ошибка HTTP {e.code}: {e.reason}")
             self.error.emit(f"Ошибка HTTP {e.code}: {e.reason}")
-
         except Exception as e:
-            logger.error(f"Произошла ошибка: {e}")
+            self.logger.error(f"Произошла ошибка: {e}")
             self.error.emit(str(e))
+            
 
 
 class UpdateDownloader(QThread):
@@ -175,10 +204,91 @@ class UpdateDownloader(QThread):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, download_url: str, dest_dir: str):
+    def __init__(
+        self, 
+        download_url: str, 
+        dest_dir: str,
+        token: str = None
+
+    ):
         super().__init__()
+        
+        self.logger = AppLogger.get_instance(
+            name='app.UpdateDownloader',
+            # share_file_with = 'system',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'system'
+        )
+
         self.download_url = download_url
         self.dest_dir = dest_dir
+        self.token = token
+
+
+    @AppLogger.get_instance(
+        name='UpdateDownloader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_headers(self) -> dict:
+        """Формирует заголовки запроса для GitHub."""
+        headers = {
+            'User-Agent': 'MedicalApp-Updater/1.0',
+            'Accept': 'application/octet-stream'
+        }
+        if self.token and self.token.strip():
+            headers['Authorization'] = f'token {self.token.strip()}'
+
+        self.logger.debug(f"token = {self.token and self.token.strip()}")
+
+        return headers
+
+    @AppLogger.get_instance(
+        name='UpdateDownloader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_temp_file_path(self) -> str:
+        """Создаёт временный файл с правильным расширением."""
+        system = platform.system().lower()
+        file_ext = ".exe" if system == "windows" else ".tar.gz"
+        fd, temp_path = tempfile.mkstemp(
+            suffix=file_ext,
+            prefix="MedicalApp_update_",
+            dir=self.dest_dir
+        )
+        os.close(fd)
+        return temp_path
+
+    @AppLogger.get_instance(
+        name='UpdateDownloader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _download_stream(self, temp_path: str, total_size: int, response):
+        """Потоково записывает данные в файл и обновляет прогресс."""
+        downloaded = 0
+        self.logger.debug(f"total_size = {total_size}")
+        
+        with open(temp_path, 'wb') as out_file:
+
+            for chunk in response.iter_content(chunk_size=8192):
+                # self.logger.debug(f"chunk = {chunk}")
+                if chunk:
+                    out_file.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        self.progress.emit(downloaded, total_size)
+
 
     @AppLogger.get_instance(
         name='UpdateDownloader',
@@ -189,47 +299,33 @@ class UpdateDownloader(QThread):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def run(self):
+        
+        self.logger.debug(f"Download URL: {self.download_url}")
         try:
-            # Определяем имя файла из URL или формируем сами
-            # Для Windows ищем asset с "windows" в имени, для Linux - "linux"
-            system = platform.system().lower()
-            if system == "windows":
-                asset_pattern = "windows"
-                file_ext = ".exe"
-            else:
-                asset_pattern = "linux"
-                file_ext = ".tar.gz"
+            # 1. Подготовка заголовков и временного файла
+            headers = self._get_headers()
+            temp_path = self._get_temp_file_path()
+            self.logger.debug(f"Temp file path: {temp_path}")
 
-            # Чтобы не скачивать всё подряд, нужно сначала получить список assets из API релиза.
-            # Упростим: передадим прямую ссылку на бинарник (её мы получим при проверке).
-            # В нашем случае мы будем передавать URL уже готового asset.
-            # Поэтому здесь просто скачиваем по переданному URL.
+            # 2. Выполнение запроса
+            response = requests.get(self.download_url, headers=headers, stream=True, timeout=30)
+            self.logger.debug(f"Response status: {response.status_code}")
+            response.raise_for_status()
 
-            # Создаём временный файл
-            fd, temp_path = tempfile.mkstemp(suffix=file_ext, prefix="MedicalApp_update_", dir=self.dest_dir)
-            os.close(fd)
+            total_size = int(response.headers.get('content-length', 0))
+            self.logger.debug(f"Total size: {total_size} bytes")
 
-            req = urllib.request.Request(self.download_url)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
-                downloaded = 0
-                with open(temp_path, 'wb') as out_file:
-                    while True:
-                        chunk = response.read(8192)
-                        if not chunk:
-                            break
-                        out_file.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            self.progress.emit(downloaded, total_size)
+            # 3. Скачивание с прогрессом
+            self._download_stream(temp_path, total_size, response)
 
+            # 4. Успешное завершение
             self.finished.emit(temp_path)
-        # except urllib.error.HTTPError as e:
-        #     if e.code == 404:
-        #         self.error.emit("Релизы не найдены. Создайте первый релиз на GitHub.")
-        #     else:
-        #         self.error.emit(f"Ошибка HTTP {e.code}: {e.reason}")
+
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Ошибка HTTP: {e}")
+            self.error.emit(str(e))
         except Exception as e:
+            self.logger.error(f"Произошла ошибка: {e}")
             self.error.emit(str(e))
 
 
@@ -411,30 +507,79 @@ class UpdateApplier(QObject):
     )
     def start(self):
         """Начинает процесс обновления: определяет asset, скачивает, затем заменяет."""
+        logger = AppLogger.get_instance(
+            name='api.UpdateApplier',
+            # share_file_with = 'system',
+            enable_file_logging = 'user',
+            use_name_in_filename = False, # 'system'
+        )
+
+        
+        # Получаем токен для авторизации (если репозиторий приватный)
+        from app.config.conf.getenv import get_getenv
+        token = get_getenv(key='GITHUB_TOKEN', start_value='')
+
         # Определяем URL бинарного файла для текущей ОС
         system = platform.system().lower()
         asset_url = None
+
+        def _tt (
+            asset        
+        ):            
+            # asset_url = asset['browser_download_url']
+            asset_url = asset['url']
+            return asset_url
+
         for asset in self.release_data.get('assets', []):
+            logger.debug(f"asset = {asset}")
+            
             name = asset['name'].lower()
+            logger.debug(f"Checking asset: {name}")
+
             if system == 'windows' and ('windows' in name or name.endswith('.exe')):
-                asset_url = asset['browser_download_url']
-                break
-            elif system == 'linux' and ('linux' in name or name.endswith('.tar.gz')):
-                asset_url = asset['browser_download_url']
+                asset_url = _tt(asset)
+                logger.debug(f"Windows asset found: {asset_url}")
                 break
 
+            elif system == 'linux' and ('linux' in name or name.endswith('.tar.gz')):
+                asset_url = _tt(asset)
+                logger.debug(f"Linux asset found: {asset_url}")
+                break
+        else:
+            # Если не нашли по условию, попробуем взять первый .exe или .tar.gz
+            for asset in self.release_data.get('assets', []):
+                logger.debug(f"asset = {asset}")
+
+                name = asset['name'].lower()
+                logger.debug(f"Checking asset: {name}")
+
+                if system == 'windows' and name.endswith('.exe'):
+                    asset_url = _tt(asset)
+                    logger.debug(f"Fallback Windows asset: {asset_url}")
+                    break
+                elif system == 'linux' and name.endswith('.tar.gz'):
+                    asset_url = _tt(asset)
+                    logger.debug(f"Fallback Linux asset: {asset_url}")
+                    break
+
         if not asset_url:
+            logger.error("No suitable asset found in release")
             self.error.emit("Не найден подходящий файл обновления для вашей ОС")
             return
 
+        logger.debug("start download")
         # Скачиваем
         temp_dir = os.path.join(tempfile.gettempdir(), "MedicalAppUpdates")
+        logger.debug(f"temp_dir = {temp_dir}")
+
         os.makedirs(temp_dir, exist_ok=True)
-        self._downloader = UpdateDownloader(asset_url, temp_dir)
+
+        self._downloader = UpdateDownloader(asset_url, temp_dir, token)
         self._downloader.progress.connect(self.progress.emit)
         self._downloader.finished.connect(self._on_downloaded)
         self._downloader.error.connect(self.error.emit)
         self._downloader.start()
+        logger.debug("end download")
 
     @AppLogger.get_instance(
         name='UpdateApplier',

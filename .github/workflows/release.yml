@@ -19,6 +19,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - name: Create VERSION file from tag  # <-- НОВЫЙ ШАГ
+        run: |
+          $tag = "$env:GITHUB_REF_NAME" -replace '^v',''
+          Write-Output $tag | Out-File -FilePath VERSION -Encoding utf8
+          Get-Content VERSION
+        shell: pwsh
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -36,6 +42,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Create VERSION file from tag  # <-- НОВЫЙ ШАГ
+        run: |
+          TAG=${GITHUB_REF_NAME#v}
+          echo "$TAG" > VERSION
+          cat VERSION
       - name: Build Linux distribution
         run: |
           chmod +x scripts/build_linux.sh

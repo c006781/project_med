@@ -9,19 +9,35 @@
 """
 
 import os
+import platform
+import subprocess
 import sys
+import tempfile
+# import sys
 
+from app.config import APP_VERSION, GITHUB_REPO_SLUG
+
+
+from app.updater import AppUpdater
 from app.utils.logger.logger import AppLogger
 
 from app.config.config_manager.manager import AppConfigManager
+
 from app.network.thread_network import DownloadThread, UploadThread
+
 from app.dependencies import (
     get_patient_service, get_appointment_service,
     get_note_service, get_photo_service, get_sync_service
 )
 
-from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
-from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
+from app.dto.dto_all import (
+    AppointmentDTO, AppointmentNoteDTO, 
+    PatientDTO, PhotoDTO
+)
+from app.dto.field_configs import (
+    APPOINTMENT_CONFIG, NOTE_CONFIG, 
+    PATIENT_CONFIG, PHOTO_CONFIG
+)
 
 from interfaces.gui.gui_window.controllers.page_manager import PageManager
 from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
@@ -29,6 +45,7 @@ from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
 # Импорт миксинов
 # from interfaces.gui.gui_window.mixins.pages_creation_mixin import PagesCreationMixin
@@ -38,13 +55,12 @@ from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHan
 # from interfaces.gui.gui_window.mixins.sync_mixin import SyncMixin
 
 from PySide6.QtWidgets import (
-    QMainWindow, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QMessageBox, QWidget, QVBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
-    QStackedWidget, QFrame
+    QStackedWidget, QFrame, QHBoxLayout
 )
-from PySide6.QtCore import Qt, Slot
-
-from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
+from PySide6.QtCore import QUrl, Qt, Slot
+from PySide6.QtGui import QDesktopServices
 
 
 class PagesCreationMixin:
@@ -971,19 +987,239 @@ class SyncMixin:
         self.logger.info("Сохранение изменений (заглушка)")
         QMessageBox.information(self, "Информация", "Функция сохранения изменений пока не реализована.")
 
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     # Вспомогательные методы управления прогресс-баром (могут вызываться извне)
     def show_progress(self, visible=True):
         """Показать или скрыть прогресс-бар."""
         self.progress_bar.setVisible(visible)
 
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_progress_range(self, minimum, maximum):
         """Установить диапазон значений прогресс-бара."""
         self.progress_bar.setRange(minimum, maximum)
 
+    @AppLogger.get_instance(
+        name='SyncMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_progress_value(self, value):
         """Установить текущее значение прогресса."""
         self.progress_bar.setValue(value)
-        
+
+class UpdateMixin:
+    """
+    Миксин, добавляющий функциональность проверки и загрузки обновлений.
+    """
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _init_updater(self):
+        """Инициализирует модуль обновлений и подключает сигналы."""
+        try:
+            self.updater = AppUpdater(self)
+            # Подключаем сигналы
+            self.updater.update_available.connect(self._on_update_available)
+            self.updater.no_update.connect(self._on_no_update)
+            self.updater.check_error.connect(self._on_update_error)
+            self.updater.download_progress.connect(self._on_download_progress)
+            self.updater.download_finished.connect(self._on_download_finished)
+            self.updater.download_error.connect(self._on_download_error)
+
+            self.logger.info(f"Модуль обновлений инициализирован, версия: {APP_VERSION}")
+        except Exception as e:
+            self.logger.exception(f"Ошибка инициализации модуля обновлений: {e}")
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def check_for_updates(self):
+        """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
+        if hasattr(self, 'updater'):
+            self.updater.check_for_updates()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Система обновлений не инициализирована")
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str, str)
+    def _on_update_available(self, new_version: str, release_url: str):
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Доступно обновление")
+        msg.setText(f"Доступна новая версия {new_version}\nВаша версия: {APP_VERSION}")
+        msg.setInformativeText("Что вы хотите сделать?")
+        download_btn = msg.addButton("Скачать и установить", QMessageBox.ActionRole)
+        open_btn = msg.addButton("Открыть страницу релиза", QMessageBox.ActionRole)
+        cancel_btn = msg.addButton("Отмена", QMessageBox.RejectRole)
+        msg.setDefaultButton(cancel_btn)
+        msg.exec()
+
+        clicked = msg.clickedButton()
+        if clicked == download_btn:
+            # Запускаем скачивание и установку
+            if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
+                self.updater.apply_update_from_release(self.updater._pending_release_data)
+            else:
+                QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
+        elif clicked == open_btn:
+            QDesktopServices.openUrl(QUrl(release_url))
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot()
+    def _on_no_update(self):
+        QMessageBox.information(self, "Проверка обновлений", "У вас установлена последняя версия.")
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str)
+    def _on_update_error(self, error_msg: str):
+        QMessageBox.warning(self, "Ошибка", f"Не удалось проверить обновления:\n{error_msg}")
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(int, int)
+    def _on_download_progress(self, current: int, total: int):
+        """Обновляет прогресс-бар в главном окне."""
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(current)
+        else:
+            self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str)
+    def _on_download_finished(self, file_path: str):
+        self.progress_bar.setVisible(False)
+        reply = QMessageBox.question(
+            self, "Обновление загружено",
+            f"Файл обновления сохранён:\n{file_path}\n\n"
+            "Заменить текущую программу? (потребуется перезапуск)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._apply_update_file(file_path)
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    @Slot(str)
+    def _on_download_error(self, error_msg: str):
+        self.progress_bar.setVisible(False)
+        QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось скачать обновление:\n{error_msg}")
+
+    @AppLogger.get_instance(
+        name='UpdateMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_update_file(self, new_file_path: str):
+        """
+        Заменяет текущий исполняемый файл на новый.
+        Работает только если программа запущена из EXE (собранной).
+        В режиме разработки (из .py) просто показывает сообщение.
+        """
+        if getattr(sys, 'frozen', False):
+            current_exe = sys.executable
+        else:
+            QMessageBox.information(self, "Режим разработки", "В режиме разработки замена файла недоступна. Скопируйте файл вручную.")
+            return
+
+        # Проверяем, что файл не равен текущему
+        if os.path.samefile(new_file_path, current_exe):
+            QMessageBox.warning(self, "Ошибка", "Новый файл совпадает с текущим.")
+            return
+
+        system = platform.system()
+        if system == "Windows":
+            # Создаём bat-скрипт для замены
+            bat_content = f"""@echo off
+timeout /t 2 /nobreak > nul
+copy /Y "{new_file_path}" "{current_exe}"
+start "" "{current_exe}"
+del "%~f0"
+"""
+            bat_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.bat")
+            with open(bat_path, "w") as f:
+                f.write(bat_content)
+            subprocess.Popen([bat_path], shell=True)
+            QApplication.quit()
+        elif system == "Linux":
+            # Создаём shell-скрипт
+            sh_content = f"""#!/bin/bash
+sleep 2
+cp "{new_file_path}" "{current_exe}"
+chmod +x "{current_exe}"
+"{current_exe}" &
+rm "$0"
+"""
+            sh_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
+            with open(sh_path, "w") as f:
+                f.write(sh_content)
+            os.chmod(sh_path, 0o755)
+            subprocess.Popen([sh_path])
+            QApplication.quit()
+        else:
+            QMessageBox.warning(self, "ОС не поддерживается", "Автоматическая замена файла доступна только для Windows и Linux.")  
 
 class MainWindow(
     QMainWindow,
@@ -991,7 +1227,8 @@ class MainWindow(
     ConnectionsMixin,
     DeleteHandlersMixin,
     NavigationMixin,
-    SyncMixin
+    SyncMixin,
+    UpdateMixin, 
 ):
     """
     Главное окно приложения.
@@ -1014,6 +1251,7 @@ class MainWindow(
             - подготавливает UI (шапка, стек страниц, лог-вьюер)
             - инициализирует менеджер страниц
             - подключает сигналы
+            - инициализирует систему обновлений (updater4pyi)
             - проверяет наличие конфигурации и открывает соответствующую страницу
         """
         super().__init__(parent)
@@ -1048,6 +1286,9 @@ class MainWindow(
         # Подключение основных сигналов (кнопки, комбобокс, навигация)
         self._connect_signals()
 
+        # Инициализация системы обновлений (собственный модуль)
+        self._init_updater()
+
         # Определяем, существует ли файл конфигурации
         # from app.config.config_manager.manager import AppConfigManager
         config_manager = AppConfigManager.get_instance()
@@ -1069,6 +1310,22 @@ class MainWindow(
             self.page_manager.switch_to('patient_list')
 
         self.logger.info("Главное окно создано")
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def check_for_updates(self):
+        """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
+        if hasattr(self, 'updater'):
+            self.updater.check_for_updates()
+        else:
+            QMessageBox.warning(self, "Ошибка", "Система обновлений не инициализирована")
+    
 
     # ----------------------------------------------------------------------
     # Методы загрузки данных для страниц списков

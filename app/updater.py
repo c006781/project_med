@@ -675,48 +675,77 @@ class UpdateApplier(QObject):
         system = platform.system().lower()
 
         if system == "windows":
-            # import json
-            # import subprocess
-            # import tempfile
-            # Формируем пути с правильным экранированием через JSON
-            # (это защитит от пробелов, кавычек и русских символов)
             source_escaped = json.dumps(new_file)
             dest_escaped = json.dumps(current_exe)
-            log_path = os.path.join(tempfile.gettempdir(), "MedicalApp_update.log")
-            log_escaped = json.dumps(log_path)
+            log_file = os.path.join(tempfile.gettempdir(), "MedicalApp_update.log")
+            log_escaped = json.dumps(log_file)
 
-            ps_script = f'''$source = {source_escaped}
-    $dest = {dest_escaped}
-    $logFile = {log_escaped}
-    Write-Output "Starting update..." | Out-File $logFile
-    Start-Sleep -Seconds 3
+            ps_script = f"""$source = {source_escaped}
+$dest = {dest_escaped}
+$logFile = {log_escaped}
+$processName = "MedicalApp"
+
+Write-Output "$(Get-Date) - Starting update script" | Out-File $logFile
+
+# Ждём 2 секунды, чтобы приложение успело закрыться само
+Start-Sleep -Seconds 2
+
+# Если процесс ещё висит – убиваем его
+$proc = Get-Process -Name $processName -ErrorAction SilentlyContinue
+if ($proc) {{
+    Write-Output "$(Get-Date) - Process still running, killing it" | Out-File $logFile -Append
+    Stop-Process -Name $processName -Force
+    Start-Sleep -Seconds 1
+}}
+
+# Ждём, пока файл назначения разблокируется (максимум 10 секунд)
+$maxAttempts = 10
+$attempt = 0
+while ($attempt -lt $maxAttempts) {{
     try {{
-        # Принудительно копируем, перезаписывая существующий файл
-        Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
-        Write-Output "OK: File replaced successfully" | Out-File $logFile -Append
-        # Запускаем обновлённое приложение
-        Start-Process -FilePath $dest
-        Write-Output "New process started" | Out-File $logFile -Append
+        $stream = [System.IO.File]::OpenWrite($dest)
+        $stream.Close()
+        break
     }} catch {{
-        $errorMsg = $_.Exception.Message
-        Write-Output "ERROR: $errorMsg" | Out-File $logFile -Append
-        Pause
+        Write-Output "$(Get-Date) - Destination file still locked, waiting..." | Out-File $logFile -Append
+        Start-Sleep -Seconds 1
+        $attempt++
     }}
-    # Самоудаление скрипта
-    Remove-Item -Path $MyInvocation.MyCommand.Path -Force
-    '''
+}}
+
+if ($attempt -eq $maxAttempts) {{
+    Write-Output "$(Get-Date) - ERROR: Destination file still locked after waiting" | Out-File $logFile -Append
+    Read-Host "Press Enter to exit"
+    exit 1
+}}
+
+try {{
+    Copy-Item -Path $source -Destination $dest -Force -ErrorAction Stop
+    Write-Output "$(Get-Date) - OK: File replaced successfully" | Out-File $logFile -Append
+    Start-Process -FilePath $dest
+    Write-Output "$(Get-Date) - New process started" | Out-File $logFile -Append
+}} catch {{
+    $errorMsg = $_.Exception.Message
+    Write-Output "$(Get-Date) - ERROR: $errorMsg" | Out-File $logFile -Append
+    Read-Host "Press Enter to exit"
+}}
+
+Remove-Item -Path $MyInvocation.MyCommand.Path -Force
+"""
             script_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.ps1")
             with open(script_path, "w", encoding="utf-8") as f:
                 f.write(ps_script)
 
-            # Запускаем PowerShell скрипт в скрытом окне, с обходом политики выполнения
-            subprocess.Popen([
-                "powershell.exe",
-                "-ExecutionPolicy", "Bypass",
-                "-WindowStyle", "Hidden",
-                "-File", script_path
-            ])
-            # Принудительно завершаем текущее приложение
+            # Запуск PowerShell полностью скрыто (без окна)
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags = subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", script_path],
+                startupinfo=startupinfo,
+                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0
+            )
             QApplication.quit()
             sys.exit(0)
 

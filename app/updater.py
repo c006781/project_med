@@ -320,6 +320,10 @@ class UpdateDownloader(QThread):
             }
 
             if if_private:
+                # Для приватного репозитория отключаем проверку SSL (иначе SSLEOFError в сборке PyInstaller)
+                param['verify'] = False
+            else:
+                # Для публичного используем сертификаты certifi
                 param['verify'] = certifi.where()   # явно указываем путь к сертификатам
 
             # 2. Выполнение запроса

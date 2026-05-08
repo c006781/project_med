@@ -63,6 +63,7 @@ def main():
     cmd.extend(['--collect-all', 'PySide6'])
 
     cmd.extend(['--collect-data', 'certifi'])
+    cmd.extend(['--hidden-import', 'certifi'])
 
     # Добавляем файл VERSION, если существует
     version_file = root_dir / 'VERSION'

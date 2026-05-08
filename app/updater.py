@@ -735,8 +735,11 @@ if (Test-Path $old) {{
     Write-Log "Old file not found, skipping delete"
 }}
 
-Write-Log "Renaming $new to $old"
-Rename-Item -Path $new -NewName $old -Force
+Write-Log "Copying $new to $old"
+Copy-Item -Path $new -Destination $old -Force
+
+Write-Log "Deleting $new"
+Remove-Item -Path $new -Force
 
 # Очистка временных папок PyInstaller
 $tempDir = [System.IO.Path]::GetTempPath()

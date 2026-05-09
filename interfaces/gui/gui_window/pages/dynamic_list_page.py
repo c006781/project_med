@@ -1437,14 +1437,43 @@ class ListDataMixin:
 
         reload_needed = self._needs_refresh
         select_id = None
+        return_to_page = None
+        return_field = None
 
-        if extra_data is not None:
-            # Запоминаем ID для выделения
-            select_id = extra_data.get('select_id')
-            # Если extra_data отличается от текущего, обновляем и помечаем необходимость перезагрузки
-            if extra_data != self.current_extra:
-                self.current_extra = extra_data
-                reload_needed = True
+        # Сохраняем контекстные параметры (все, кроме служебных)
+        self._context_params = {}
+        if extra_data:
+            for key, value in extra_data.items():
+                if key == 'select_id':
+                    select_id = value
+                elif key == 'return_to_page':
+                    return_to_page = value
+                elif key == 'return_field':
+                    return_field = value
+                else:
+                    self._context_params[key] = value
+
+        # Обновляем current_extra для обратной совместимости (например, для loader_func)
+        new_extra = self._context_params.copy() if self._context_params else None
+        if new_extra != self.current_extra:
+            self.current_extra = new_extra
+            reload_needed = True
+        
+        # Если передан select_id (и не было изменения extra_data), всё равно нужно выделить
+        # Но перезагрузка данных не требуется, если reload_needed = False
+        if not reload_needed and select_id is not None:
+            # Просто выделяем строку без перезагрузки
+            self._select_by_id(select_id)
+            return
+
+
+        # if extra_data is not None:
+        #     # Запоминаем ID для выделения
+        #     select_id = extra_data.get('select_id')
+        #     # Если extra_data отличается от текущего, обновляем и помечаем необходимость перезагрузки
+        #     if extra_data != self.current_extra:
+        #         self.current_extra = extra_data
+        #         reload_needed = True
 
         # Загружаем данные, если:
         # - требуется перезагрузка (reload_needed)
@@ -2738,6 +2767,12 @@ class ListInlineOpsMixin:
             else:
                 defaults[field_name] = None
 
+        # Применяем контекстные параметры (сохранённые при входе на страницу)
+        if hasattr(self, '_context_params') and self._context_params:
+            for key, value in self._context_params.items():
+                if key in self.dto_class.model_fields and (key not in defaults or defaults[key] is None):
+                    defaults[key] = value
+        # Для обратной совместимости (если current_extra всё ещё используется)
         if self.current_extra:
             for key, value in self.current_extra.items():
                 if key in self.dto_class.model_fields and key not in defaults:
@@ -2975,6 +3010,7 @@ class DynamicListPage(
         self.selected_dto = None  # выбранный DTO (объект с атрибутами, соответствующими колонкам)
         self._selection_connected = False  # флаг, который указывает, является ли соединение между сигналами selectionChanged и слотом _on_selection_changed установленным
         self.current_extra = None  # запоминаем последние переданные параметры
+        self._context_params = {}
 
         # настройка интерфейса страницы
         self._needs_refresh = False  # флаг, который указывает, нужно ли перезагружать данные при следующем входе на страницу

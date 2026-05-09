@@ -132,6 +132,7 @@ class PagesCreationMixin:
             exclude_columns=[
                 'photos',
                 'patient_name',
+                'patient_id', 
                 # 'photos',
             ] ,  # колонка с фото не отображается в таблице
             # save_directly=True,  
@@ -373,8 +374,9 @@ class ConnectionsMixin:
             lambda: self.page_manager.switch_to(
                 'appointment_edit',
                 extra_data={
-                    'patient_id': self.appointment_list_page.current_extra.get('patient_id')
-                    if self.appointment_list_page.current_extra else None
+                    # 'patient_id': self.appointment_list_page.current_extra.get('patient_id')
+                    'patient_id': self.appointment_list_page._context_params.get('patient_id')
+                    if self.appointment_list_page._context_params.get('patient_id') is not None else None
                 }
             )
         )

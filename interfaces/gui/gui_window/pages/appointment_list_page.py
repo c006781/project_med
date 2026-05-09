@@ -728,6 +728,14 @@ class AppointmentListPage(
 
         # self._setup_detail_panel()
 
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_top_panel(self):
         super()._setup_top_panel()
         # Ищем горизонтальный layout верхней панели (первый QHBoxLayout в main_layout)
@@ -739,8 +747,26 @@ class AppointmentListPage(
                 item.layout().addWidget(self.patient_info_btn)
                 break
     
+    @AppLogger.get_instance(
+        name = 'AppointmentListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
     def _show_patient_info(self):
-        if not self.selected_dto or self.selected_dto.patient_id is None:
+        """
+        Открывает окно с информацией о пациенте.
+        """
+
+        # Берём patient_id из контекстных параметров (сохраняется при переходе со страницы пациентов)
+        patient_id = self._context_params.get('patient_id')
+        # Если нет в контексте, пробуем взять из выбранного приёма
+        if patient_id is None and self.selected_dto:
+            patient_id = self.selected_dto.patient_id
+            
+        if not patient_id:
             QMessageBox.information(self, "Информация о пациенте", "Пациент не выбран.")
             return
         try:
@@ -750,25 +776,36 @@ class AppointmentListPage(
                 page_title="Просмотр пациента",
                 exclude_fields=['id'],
                 field_configs=PATIENT_CONFIG,
-                save_directly=False,   # не сохраняем
-                readonly=True ,         # режим только для чтения
-                hide_action_buttons=True , # скрываем кнопки
+                save_directly=False,        # не сохраняем
+                readonly=True ,             # режим только для чтения
+                hide_action_buttons=True ,  # скрываем кнопки
             )
+
             # Передаём ID пациента через extra_data
-            edit_page.on_enter(extra_data={'id': self.selected_dto.patient_id})
+            edit_page.on_enter(
+                extra_data={
+                    'id': patient_id,
+                }
+            )
+            
             # Отображаем как диалог (можно встроить в QDialog, но проще создать отдельное окно)
             # from PySide6.QtWidgets import QDialog, QVBoxLayout
             dialog = QDialog(self)
             dialog.setWindowTitle("Информация о пациенте")
+
             layout = QVBoxLayout(dialog)
             layout.addWidget(edit_page)
+
             # Кнопка закрытия (так как сохранение отключено)
             # from PySide6.QtWidgets import QDialogButtonBox
             btn_box = QDialogButtonBox(QDialogButtonBox.Ok)
             btn_box.accepted.connect(dialog.accept)
+
             layout.addWidget(btn_box)
+
             dialog.resize(600, 500)
             dialog.exec()
+
         except Exception as e:
             self.logger.exception(f"Ошибка загрузки пациента: {e}")
             QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить данные пациента: {e}")
@@ -887,6 +924,38 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _has_row_changes(self, appointment_id: int) -> bool:
+        # Находим DTO по id
+        dto = None
+        source_row = self._find_source_row_by_id(appointment_id)
+        if source_row != -1:
+            dto = self.source_model.get_item_at_row(source_row)
+
+        if dto is None:
+            return True
+        
+        original = self.original_data.get(source_row)
+        if original is None:
+            return True
+        
+        # Сравнение основных полей (исключая виртуальные)
+        exclude = ['patient_name', 'has_photos']
+        if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
+            return True
+        
+        # # Проверка черновиков заметки
+        # if appointment_id in self._draft_note_current:
+        #     if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
+        #         return True
+
+        # Проверка черновиков фото
+        if appointment_id in self._draft_photos:
+            draft = self._draft_photos[appointment_id]
+            if draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'):
+                return True
+            
+        return False
+
     # def _has_row_changes(self, source_row: int, dto) -> bool:
     #     """
     #     Проверяет, есть ли изменения в строке по сравнению с оригиналом,
@@ -958,38 +1027,6 @@ class AppointmentListPage(
     #             return True
 
     #     return False
-    def _has_row_changes(self, appointment_id: int) -> bool:
-        # Находим DTO по id
-        dto = None
-        source_row = self._find_source_row_by_id(appointment_id)
-        if source_row != -1:
-            dto = self.source_model.get_item_at_row(source_row)
-
-        if dto is None:
-            return True
-        
-        original = self.original_data.get(source_row)
-        if original is None:
-            return True
-        
-        # Сравнение основных полей (исключая виртуальные)
-        exclude = ['patient_name', 'has_photos']
-        if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
-            return True
-        
-        # # Проверка черновиков заметки
-        # if appointment_id in self._draft_note_current:
-        #     if self._draft_note_current[appointment_id] != self._draft_note_original.get(appointment_id, ""):
-        #         return True
-
-        # Проверка черновиков фото
-        if appointment_id in self._draft_photos:
-            draft = self._draft_photos[appointment_id]
-            if draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'):
-                return True
-            
-        return False
-
 
 
     # @AppLogger.get_instance(

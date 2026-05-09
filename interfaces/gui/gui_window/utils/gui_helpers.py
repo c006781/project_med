@@ -3,24 +3,170 @@
 """
 Вспомогательные функции для GUI.
 """
+import datetime
 from typing import Dict, Any
 
 from app.utils.logger.logger import AppLogger
 
 from PySide6.QtWidgets import (
     # QStyledItemDelegate, 
-    QWidget, QMenu, 
+    QDateEdit, QTimeEdit, QWidget, QMenu, 
     QLineEdit, QTextEdit, 
     # QCompleter, 
     QApplication
 )
 
-from PySide6.QtCore import Qt, QPoint
+from PySide6.QtCore import QDate, QTime, Qt, QPoint
 
 # from PySide6.QtGui import QClipboard
 
 @AppLogger.get_instance(
-    name='system',
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _install_for_date_edit(date_edit: QDateEdit):
+    """Устанавливает русское контекстное меню для QDateEdit."""
+    def show_context_menu(pos):
+        menu = QMenu()
+
+        # Вырезать: копирует и очищает
+        cut_action = menu.addAction("Вырезать\tCtrl+X")
+        cut_action.triggered.connect(_make_cut_date(date_edit))
+
+        # Копировать
+        copy_action = menu.addAction("Копировать\tCtrl+C")
+        copy_action.triggered.connect(lambda: _copy_date_from_edit(date_edit))
+
+        # Вставить
+        paste_action = menu.addAction("Вставить\tCtrl+V")
+        paste_action.triggered.connect(lambda: _paste_date_to_edit(date_edit))
+
+        menu.addSeparator()
+
+        # Удалить (очистить)
+        delete_action = menu.addAction("Удалить\tDel")
+        delete_action.triggered.connect(date_edit.clear)
+
+        # Выделить всё
+        select_all_action = menu.addAction("Выделить всё\tCtrl+A")
+        select_all_action.triggered.connect(date_edit.selectAll)
+
+        menu.exec(date_edit.mapToGlobal(pos))
+
+    def _make_cut_date(editor):
+        def cut():
+            _copy_date_from_edit(editor)
+            editor.clear()
+        return cut
+
+    date_edit.setContextMenuPolicy(Qt.CustomContextMenu)
+    date_edit.customContextMenuRequested.connect(show_context_menu)
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _install_for_time_edit(time_edit: QTimeEdit):
+    """Устанавливает русское контекстное меню для QTimeEdit с горячими клавишами."""
+    def show_context_menu(pos):
+        menu = QMenu()
+
+        cut_action = menu.addAction("Вырезать\tCtrl+X")
+        cut_action.triggered.connect(_make_cut_time(time_edit))
+
+        copy_action = menu.addAction("Копировать\tCtrl+C")
+        copy_action.triggered.connect(lambda: _copy_time_from_edit(time_edit))
+
+        paste_action = menu.addAction("Вставить\tCtrl+V")
+        paste_action.triggered.connect(lambda: _paste_time_to_edit(time_edit))
+
+        menu.addSeparator()
+
+        delete_action = menu.addAction("Удалить\tDel")
+        delete_action.triggered.connect(time_edit.clear)
+
+        select_all_action = menu.addAction("Выделить всё\tCtrl+A")
+        select_all_action.triggered.connect(time_edit.selectAll)
+
+        menu.exec(time_edit.mapToGlobal(pos))
+
+    def _make_cut_time(editor):
+        def cut():
+            _copy_time_from_edit(editor)
+            editor.clear()
+        return cut
+
+    time_edit.setContextMenuPolicy(Qt.CustomContextMenu)
+    time_edit.customContextMenuRequested.connect(show_context_menu)
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _copy_date_from_edit(date_edit):
+    qdate = date_edit.date()
+    if qdate.isValid():
+        QApplication.clipboard().setText(qdate.toString("yyyy-MM-dd"))
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _paste_date_to_edit(date_edit):
+    text = QApplication.clipboard().text().strip()
+    if not text:
+        return
+    try:
+        d = datetime.date.fromisoformat(text)
+        date_edit.setDate(QDate(d.year, d.month, d.day))
+    except ValueError:
+        pass
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _copy_time_from_edit(time_edit):
+    qtime = time_edit.time()
+    if qtime.isValid():
+        QApplication.clipboard().setText(qtime.toString("HH:mm"))
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def _paste_time_to_edit(time_edit):
+    text = QApplication.clipboard().text().strip()
+    if not text:
+        return
+    try:
+        h, m = map(int, text.split(':'))
+        time_edit.setTime(QTime(h, m))
+    except:
+        pass
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -48,7 +194,9 @@ def apply_readonly_to_widgets(
 # """
 
 @AppLogger.get_instance(
-    name='system',
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -81,12 +229,18 @@ def install_standard_context_menu(widget: QWidget):
         _install_for_line_edit(widget)
     elif isinstance(widget, QTextEdit):
         _install_for_text_edit(widget)
+    elif isinstance(widget, QDateEdit):
+        _install_for_date_edit(widget)
+    elif isinstance(widget, QTimeEdit):
+        _install_for_time_edit(widget)
     # Для других виджетов (например, CompleterEdit) – обрабатываем их внутренние поля
     elif hasattr(widget, 'line_edit') and isinstance(widget.line_edit, QLineEdit):
         install_standard_context_menu(widget.line_edit)
 
 @AppLogger.get_instance(
-    name='system',
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -123,7 +277,9 @@ def _install_for_line_edit(line_edit: QLineEdit):
     line_edit.customContextMenuRequested.connect(show_context_menu)
 
 @AppLogger.get_instance(
-    name='system',
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -156,7 +312,9 @@ def _install_for_text_edit(text_edit: QTextEdit):
     text_edit.customContextMenuRequested.connect(show_context_menu)
 
 @AppLogger.get_instance(
-    name='system',
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -210,7 +368,9 @@ def add_copy_paste_to_table(table_widget):
         QApplication.clipboard().setText(text)
     
     @AppLogger.get_instance(
-        name='system',
+        name='gui_helpers.py',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )

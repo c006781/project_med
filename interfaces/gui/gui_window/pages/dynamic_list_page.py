@@ -2510,10 +2510,10 @@ class ListUIMixin:
         }
 
         type_delegate_map = {
-            # datetime.date: DateDelegate,
-            datetime.date: DateStringDelegate,
-            # datetime.time: TimeDelegate,
-            datetime.time: TimeStringDelegate,
+            datetime.date: DateDelegate,
+            datetime.time: TimeDelegate,
+            # datetime.date: DateStringDelegate,
+            # datetime.time: TimeStringDelegate,
             bool: BoolDelegate,
             str: StringDelegate,
         }

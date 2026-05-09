@@ -403,6 +403,7 @@ class DateDelegate(QStyledItemDelegate):
         editor.setCalendarPopup(True)
         editor.setDisplayFormat("yyyy-MM-dd")
         # install_standard_context_menu(editor)
+        install_standard_context_menu(editor)
         return editor
 
     @AppLogger.get_instance(
@@ -464,7 +465,7 @@ class TimeDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         editor = QTimeEdit(parent)
         editor.setDisplayFormat("HH:mm")
-        # install_standard_context_menu(editor)
+        install_standard_context_menu(editor)
         return editor
 
     @AppLogger.get_instance(

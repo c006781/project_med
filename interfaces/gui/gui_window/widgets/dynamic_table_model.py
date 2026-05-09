@@ -94,7 +94,9 @@ class DynamicTableModel(QAbstractTableModel):
         data: List[Any], 
         columns: List[Dict], 
         parent=None,
-        get_unique_values_func=None,
+        get_unique_values_func=None, 
+        column_masks: Dict[int, str] = None,
+        
     ):
         """
         :param data: список DTO (объекты с атрибутами, соответствующими колонкам)
@@ -119,6 +121,8 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._get_unique_values_func = get_unique_values_func 
 
+        self._column_masks = column_masks or {}
+
         # для работы с чекбоксами 
         self._checkbox_column_enabled = False # флаг, указывающий, что в таблице есть колонка с чекбоксами
         self._checkbox_states = {} # словарь {row: bool} для хранения состояний чекбоксов
@@ -126,14 +130,14 @@ class DynamicTableModel(QAbstractTableModel):
         self._field_by_column = {}          # номер колонки -> имя поля
         self._update_column_mapping()
         
-    @AppLogger.get_instance(
-        name = 'DynamicTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'DynamicTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def _get_field_name(self, column: int) -> str:
         """Возвращает имя поля для данного индекса колонки или None."""
         return self._field_by_column.get(column)

@@ -2349,11 +2349,20 @@ class ListUIMixin:
 
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
+        self.column_masks = {}
+        for col_idx, col_info in enumerate(self.columns):
+            field_name = col_info['name']
+            config = self.field_configs.get(field_name, {})
+            mask = config.get('input_mask')
+            if mask:
+                self.column_masks[col_idx] = mask
+
         # Модель таблицы
         self.source_model = DynamicTableModel(
             self.current_data, 
             self.columns,
-            get_unique_values_func=self.get_unique_values_for_column
+            get_unique_values_func=self.get_unique_values_for_column,
+            column_masks=self.column_masks,
         )
 
         self.source_model.row_modified.connect(self._on_row_modified) # Подключаем сигнал изменения строки для отслеживания изменений строк
@@ -2462,7 +2471,7 @@ class ListUIMixin:
         Устанавливает делегаты для колонок на основе типов полей и field_configs.
         Приоритет: choices > widget_type (autocomplete, textarea, date, time) > тип поля
         """
-
+        #  УТОЧНЕНИЕ! ОБЯЗАТЕЛЬНО прощитывать столбец по факту. в ином случае при добавлении системных столбцов - будет ошибка положения!
         # Словарь: тип -> класс делегата (и, возможно, дополнительные параметры)
         
         invert_tip = {
@@ -2517,7 +2526,6 @@ class ListUIMixin:
                 field_type
             )
 
-
             # Автодополнение для строковых полей (если включено в конфигурации)
             if real_type == str and config.get('autocomplete', False):
                 delegate = CompleterStringDelegate( # определяем делегата по реальному типу поля
@@ -2528,14 +2536,28 @@ class ListUIMixin:
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 continue
 
-            # Стандартные делегаты по типу
-            delegate_class = type_delegate_map.get(# определяем класс делегата по реальному типу поля
-                real_type
-            ) 
-            if delegate_class:
-                delegate = delegate_class(self.table_view)
-                self.table_view.setItemDelegateForColumn(model_col, delegate) # устанавливаем делегата
-                continue
+            # # Стандартные делегаты по типу
+            # delegate_class = type_delegate_map.get(# определяем класс делегата по реальному типу поля
+            #     real_type
+            # ) 
+            # if delegate_class:
+            #     delegate = delegate_class(self.table_view)
+            #     self.table_view.setItemDelegateForColumn(model_col, delegate) # устанавливаем делегата
+            #     continue
+
+            if real_type == str:
+                # Для строковых полей используем делегат с поддержкой масок
+                mask = config.get('input_mask')
+                column_masks = {model_col: mask} if mask else None
+                delegate = StringDelegate(self.table_view, column_masks=column_masks)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)
+            else:
+                delegate_class = type_delegate_map.get(real_type)
+                if delegate_class:
+                    delegate = delegate_class(self.table_view)
+                    self.table_view.setItemDelegateForColumn(model_col, delegate)
+                    continue    
+
                 # Для всех остальных типов (int, float и т.д.) оставляем делегат по умолчанию
             # Если тип не найден в словаре – оставляем стандартный делегат (например, для int, float)
 

@@ -4,7 +4,7 @@ from datetime import (
     date, 
     time
 )
-from typing import List
+from typing import Dict, List
 
 from app.utils.logger.logger import AppLogger
 
@@ -42,6 +42,14 @@ class TextPopupDelegate(QStyledItemDelegate):
     """
     # sawe_paint : dict = {}
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None, readonly=False):
         super().__init__(parent)
         self._readonly = readonly
@@ -56,7 +64,15 @@ class TextPopupDelegate(QStyledItemDelegate):
          # Устанавливаем фильтр событий на таблицу, чтобы ловить Leave
         if parent:
             parent.installEventFilter(self)
-
+    
+    # @AppLogger.get_instance(
+    #     name='TextPopupDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def paint(self, painter, option, index):
         # Стандартная отрисовка содержимого ячейки
         super().paint(painter, option, index)
@@ -70,7 +86,15 @@ class TextPopupDelegate(QStyledItemDelegate):
             btn_opt.state = QStyle.State_Enabled
             self._button_rect = btn_rect
             QApplication.style().drawControl(QStyle.CE_PushButton, btn_opt, painter)
-
+    
+    # @AppLogger.get_instance(
+    #     name='TextPopupDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def _get_button_rect(self, cell_rect):
         """Возвращает прямоугольник кнопки в правой части ячейки."""
         btn_w = 20
@@ -107,7 +131,15 @@ class TextPopupDelegate(QStyledItemDelegate):
         
         temp = QRect(x, y, btn_w, btn_h)
         return temp
-
+    
+    # @AppLogger.get_instance(
+    #     name='TextPopupDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def eventFilter(self, obj, event):
         """Перехватываем событие Leave на таблице, чтобы сбросить hover."""
         if obj == self.parent() and event.type() == QEvent.Leave:
@@ -122,8 +154,21 @@ class TextPopupDelegate(QStyledItemDelegate):
                     self.parent().update(idx)
             return False  # не блокируем дальнейшую обработку события
         return super().eventFilter(obj, event)
-
+    
+    # @AppLogger.get_instance(
+    #     name='TextPopupDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def editorEvent(self, event, model, option, index):
+        """
+        Обрабатывает события мыши для ячейки с многострочным текстом.
+        При наведении мыши показывает маленькую кнопку,
+        по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
+        """
         # if event.type() == QEvent.MouseButtonPress:
         #     if self._hovered_row != -1:
         #         old_idx = model.index(self._hovered_row, self._hovered_col)
@@ -164,7 +209,15 @@ class TextPopupDelegate(QStyledItemDelegate):
                 return True
 
         return super().editorEvent(event, model, option, index)
-
+    
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _open_popup(self, model, index):
         """Открывает диалог просмотра/редактирования текста."""
         value = model.data(index, Qt.EditRole)
@@ -189,48 +242,144 @@ class TextPopupDelegate(QStyledItemDelegate):
             new_text = text_edit.toPlainText()
             if new_text != text:
                 model.setData(index, new_text, Qt.EditRole)
-
+    
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_readonly(self, readonly):
         self._readonly = readonly
-
+    
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
         return None
 
 class StringDelegate(QStyledItemDelegate):
     """Делегат для редактирования строковых ячеек с русским контекстным меню."""
+    
+    @AppLogger.get_instance(
+        name='StringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, parent=None, column_masks: Dict[int, str] = None):
+        super().__init__(parent)
+        self.column_masks = column_masks or {}
 
+    @AppLogger.get_instance(
+        name='StringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         editor = QLineEdit(parent)
         install_standard_context_menu(editor)
+        # Установить маску, если есть для этой колонки
+        mask = self.column_masks.get(index.column())
+        if mask:
+            editor.setInputMask(mask)
         return editor
 
+    @AppLogger.get_instance(
+        name='StringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if value is not None:
             editor.setText(str(value))
 
+    @AppLogger.get_instance(
+        name='StringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         model.setData(index, editor.text(), Qt.EditRole)
 
+    @AppLogger.get_instance(
+        name='StringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
 
 class BoolDelegate(QStyledItemDelegate):
     """Делегат для редактирования булевых значений (чекбокс)."""
 
+    @AppLogger.get_instance(
+        name='BoolDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         editor = QCheckBox(parent)
         editor.setCheckable(True)
         return editor
 
+    @AppLogger.get_instance(
+        name='BoolDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         editor.setChecked(bool(value))
 
+    @AppLogger.get_instance(
+        name='BoolDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         model.setData(index, editor.isChecked(), Qt.EditRole)
 
+    @AppLogger.get_instance(
+        name='BoolDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         rect = option.rect
         size = editor.sizeHint()
@@ -241,6 +390,14 @@ class BoolDelegate(QStyledItemDelegate):
 class DateDelegate(QStyledItemDelegate):
     """Делегат для редактирования дат с календарём."""
 
+    @AppLogger.get_instance(
+        name='DateDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         editor = QDateEdit(parent)
         editor.setCalendarPopup(True)
@@ -248,6 +405,14 @@ class DateDelegate(QStyledItemDelegate):
         # install_standard_context_menu(editor)
         return editor
 
+    @AppLogger.get_instance(
+        name='DateDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if isinstance(value, date):
@@ -257,6 +422,14 @@ class DateDelegate(QStyledItemDelegate):
         else:
             editor.setDate(QDate.currentDate())
 
+    @AppLogger.get_instance(
+        name='DateDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         qdate = editor.date()
         if qdate.isValid():
@@ -266,18 +439,42 @@ class DateDelegate(QStyledItemDelegate):
                 Qt.EditRole
             )
 
+    @AppLogger.get_instance(
+        name='DateDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)       
 
 class TimeDelegate(QStyledItemDelegate):
     """Делегат для редактирования времени."""
 
+    @AppLogger.get_instance(
+        name='TimeDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         editor = QTimeEdit(parent)
         editor.setDisplayFormat("HH:mm")
         # install_standard_context_menu(editor)
         return editor
 
+    @AppLogger.get_instance(
+        name='TimeDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if isinstance(value, time):
@@ -287,11 +484,27 @@ class TimeDelegate(QStyledItemDelegate):
         else:
             editor.setTime(QTime.currentTime())
 
+    @AppLogger.get_instance(
+        name='TimeDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         qtime = editor.time()
         if qtime.isValid():
             model.setData(index, time(qtime.hour(), qtime.minute()), Qt.EditRole)
 
+    @AppLogger.get_instance(
+        name='TimeDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)
 
@@ -306,6 +519,14 @@ class ComboBoxDelegate(QStyledItemDelegate):
     Список значений для комбобокса передаётся через параметр choices.
     """
 
+    @AppLogger.get_instance(
+        name='ComboBoxDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None, choices=None):
         """
         :param parent: родительский виджет (обычно QTableView)
@@ -314,6 +535,14 @@ class ComboBoxDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self.choices = choices or []
 
+    @AppLogger.get_instance(
+        name='ComboBoxDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         """Создаёт виджет-редактор (QComboBox) для ячейки."""
         combo = QComboBox(parent)
@@ -321,17 +550,41 @@ class ComboBoxDelegate(QStyledItemDelegate):
         # install_standard_context_menu(combo)   #  (работает только для редактируемых комбобоксов)
         return combo
 
+    @AppLogger.get_instance(
+        name='ComboBoxDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         """Устанавливает текущее значение модели в комбобокс."""
         value = index.model().data(index, Qt.ItemDataRole.EditRole)
         if value is not None:
             editor.setCurrentText(str(value))
 
+    @AppLogger.get_instance(
+        name='ComboBoxDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         """Сохраняет выбранное значение в модель."""
         value = editor.currentText()
         model.setData(index, value, Qt.ItemDataRole.EditRole)
 
+    @AppLogger.get_instance(
+        name='ComboBoxDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         """Обновляет геометрию редактора."""
         editor.setGeometry(option.rect)      
@@ -349,10 +602,26 @@ class ButtonDelegate(QStyledItemDelegate):
     """
     button_clicked = Signal(int)
     
+    @AppLogger.get_instance(
+        name='ButtonDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None, button_text="..."):
         super().__init__(parent)
         self.button_text = button_text
 
+    @AppLogger.get_instance(
+        name='ButtonDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def paint(
         self, 
         painter: QPainter, 
@@ -374,6 +643,14 @@ class ButtonDelegate(QStyledItemDelegate):
 
         painter.restore()
 
+    @AppLogger.get_instance(
+        name='ButtonDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def editorEvent(
         self, 
         event: QEvent, 
@@ -391,6 +668,14 @@ class ButtonDelegate(QStyledItemDelegate):
                 return True
         return False
 
+    @AppLogger.get_instance(
+        name='ButtonDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def sizeHint(self, option, index):
         """Возвращает размер, достаточный для кнопки."""
         return QSize(80, 25)  
@@ -400,6 +685,15 @@ class ButtonDelegate(QStyledItemDelegate):
 
 class DateStringDelegate(StringDelegate):
     """Делегат для редактирования даты как строки с русским контекстным меню."""
+
+    @AppLogger.get_instance(
+        name='DateStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if isinstance(value, date):
@@ -407,6 +701,14 @@ class DateStringDelegate(StringDelegate):
         else:
             editor.setText(str(value) if value else "")
 
+    @AppLogger.get_instance(
+        name='DateStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         """
         Сохраняет текст в модели в формате datetime.date.
@@ -425,6 +727,15 @@ class DateStringDelegate(StringDelegate):
 
 class TimeStringDelegate(StringDelegate):
     """Делегат для редактирования времени как строки с русским контекстным меню."""
+
+    @AppLogger.get_instance(
+        name='TimeStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if isinstance(value, time):
@@ -432,6 +743,14 @@ class TimeStringDelegate(StringDelegate):
         else:
             editor.setText(str(value) if value else "")
 
+    @AppLogger.get_instance(
+        name='TimeStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         text = editor.text().strip()
         if not text:
@@ -459,6 +778,14 @@ class CompleterStringDelegate(QStyledItemDelegate):
     Список вариантов берётся из модели через коллбэк get_unique_values.
     """
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent=None, get_unique_values_func=None, column=None):
         """
         :param parent: родительский виджет (обычно QTableView)
@@ -476,6 +803,14 @@ class CompleterStringDelegate(QStyledItemDelegate):
         self._column = column
         self._cache = {}  # кэш вариантов для столбца (на случай, если функция тяжёлая)
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_values(self) -> List[str]:
         """Возвращает список вариантов для автодополнения (с кэшированием)."""
         if self._column in self._cache:
@@ -486,6 +821,14 @@ class CompleterStringDelegate(QStyledItemDelegate):
         self._cache[self._column] = values
         return values
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         """Создаёт QLineEdit с QCompleter."""
         editor = QLineEdit(parent)
@@ -503,13 +846,37 @@ class CompleterStringDelegate(QStyledItemDelegate):
 
         return editor
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
         if value is not None:
             editor.setText(str(value))
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setModelData(self, editor, model, index):
         model.setData(index, editor.text(), Qt.EditRole)
 
+    @AppLogger.get_instance(
+        name='CompleterStringDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def updateEditorGeometry(self, editor, option, index):
         editor.setGeometry(option.rect)

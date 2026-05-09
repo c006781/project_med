@@ -100,6 +100,7 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'title': 'Телефон',          # Заголовок.
         'editable': True,            # Редактируемое.
         'order': 5,                  # Порядковый номер колонки.
+        'input_mask': '+7 (999) 999-99-99',   #  маска заполнения данных
     },
     'description_id': {
     'title': 'ID описания',

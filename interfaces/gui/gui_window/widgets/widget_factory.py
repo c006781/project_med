@@ -6,6 +6,7 @@
 """
 
 import datetime
+from typing import Any, Dict
 
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.custom_date_time_widgets import CustomDateEdit, CustomTimeEdit
@@ -15,7 +16,7 @@ from .photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QTimeEdit,
-    QSpinBox, QCheckBox, QComboBox
+    QSpinBox, QCheckBox, QComboBox, QWidget
 )
 from PySide6.QtCore import QDate, QTime
 
@@ -37,15 +38,20 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_autocomplete_widget(editable: bool):
+    def create_autocomplete_widget(editable: bool, config: Dict[str, Any] = None)-> QWidget:
         """
         Создаёт CompleterEdit без кнопок (только поле с автодополнением).
         Используется для полей с autocomplete=True.
         """
-        from .completer_edit import CompleterEdit
+        # from .completer_edit import CompleterEdit
         widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        if config and config.get('input_mask'):
+            WidgetFactory._apply_mask(widget.line_edit, config)
+
         widget.setEnabled(editable)
+        
         return widget
+    
 
     @staticmethod
     @AppLogger.get_instance(
@@ -56,19 +62,39 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_text_widget(widget_type: str, editable: bool):
+    def _apply_mask(widget: QLineEdit, config: Dict[str, Any]) -> None:
+        """Устанавливает маску ввода, если она задана в конфигурации."""
+        mask = config.get('input_mask')
+        if mask:
+            widget.setInputMask(mask)
+
+    @staticmethod
+    @AppLogger.get_instance(
+        name='WidgetFactory',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def create_text_widget(widget_type: str, editable: bool, config: Dict[str, Any] = None) -> QWidget:
         """
         Создаёт текстовый виджет: QLineEdit (обычное поле) или QTextEdit (многострочное).
 
         :param widget_type: 'textarea' для QTextEdit, иначе QLineEdit
         :param editable: если False, виджет будет отключён
+        :param config: словарь конфигурации поля (может содержать 'input_mask'
+
         :return: QLineEdit или QTextEdit
+        
         """
         if widget_type == 'textarea':
             w = QTextEdit()
             w.setMaximumHeight(200)   # ограничиваем высоту для многострочного поля
         else:
             w = QLineEdit()
+            if config and config.get('input_mask'):
+                WidgetFactory._apply_mask(w, config)
 
         w.setEnabled(editable)
         return w

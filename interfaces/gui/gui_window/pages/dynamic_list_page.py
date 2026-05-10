@@ -1815,9 +1815,11 @@ class ListEditModeMixin:
         )
 
         if edit_mode:   
-            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked)    
+            self.table_view.doubleClicked.disconnect(self._on_row_double_clicked) 
+            self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)     # Включаем множественное выделение (Shift/Ctrl)
         else:
             self.table_view.doubleClicked.connect(self._on_row_double_clicked )
+            self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)         # В обычном режиме – только одна строка
         
     @AppLogger.get_instance(
         name = 'ListEditModeMixin',
@@ -2370,8 +2372,8 @@ class ListUIMixin:
         self.table_view = FilterTableView()
         self.table_view.setSortingEnabled(True)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection) # В режиме просмотра (по умолчанию) – только одиночное выделение
+        # self.table_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         
         self.table_view.setMouseTracking(True)
         
@@ -3166,8 +3168,15 @@ class DynamicListPage(
     @preserve_selection()
     def _on_edit_mode_toggled(self, checked: bool):
 
+           
+        self._store_current_row() # Сохраняем текущее выделение (для возможного восстановления)
+
         # Вызываем родительский (он переключит edit_mode)
         super()._on_edit_mode_toggled(checked)
+
+        # Сбрасываем выделение, чтобы избежать артефактов
+        self.table_view.clearSelection()
+        self._update_selection_state()
 
         # 0==0
 

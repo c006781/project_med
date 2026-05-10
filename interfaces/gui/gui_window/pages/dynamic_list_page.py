@@ -2740,55 +2740,52 @@ class ListInlineOpsMixin:
         """
         Добавляет новую пустую строку в таблицу.
 
-        Создаёт DTO со значениями по умолчанию (пустые строки, сегодняшняя дата и т.п.),
-        присваивает временный отрицательный ID, добавляет в модель и помечает как новую.
-        """
+        Создаёт DTO со значениями по умолчанию:
+        - для обязательных полей (required=True) – стандартные значения (текущая дата, 0, пустая строка и т.д.)
+        - для необязательных полей – None
+        - для контекстных параметров (например, patient_id) – значения из _context_params
 
+        Временный ID генерируется отрицательным числом.
+        """
         defaults = {}
         for col_info in self.columns:
             field_name = col_info['name']
-
             config = self.field_configs.get(field_name, {})
+
+            # Пропускаем виртуальные и скрытые поля
             if config.get('virtual', False) or config.get('hidden', False):
                 continue
-            
+
             field_info = self.dto_class.model_fields.get(field_name)
             if field_info is None:
                 continue
 
-            field_type = field_info.annotation
-            origin = get_origin(field_type)
-            if origin is Union:
-                args = get_args(field_type)
-                field_type = next((arg for arg in args if arg is not type(None)), None)
+            field_type = self._get_real_type(field_info.annotation)
+            default_value = None
 
-            if field_type is None:
-                defaults[field_name] = None
+            # Обязательное поле – заполняем значением по умолчанию
+            if config.get('required', False):
+                if field_type == datetime.date:
+                    default_value = datetime.date.today()
+                elif field_type == datetime.time:
+                    default_value = datetime.time(0, 0)
+                elif field_type == str:
+                    default_value = ""
+                elif field_type == int:
+                    default_value = 0
+                elif field_type == bool:
+                    default_value = False
+                # иные типы – None
 
-            elif field_type == str:
-                defaults[field_name] = ""
+            defaults[field_name] = default_value
 
-            elif field_type == int:
-                defaults[field_name] = 0
-
-            elif field_type == datetime.date:
-                defaults[field_name] = datetime.date.today()
-
-            elif field_type == datetime.time:
-                defaults[field_name] = datetime.time(0, 0)
-
-            elif field_type == bool:
-                defaults[field_name] = False
-
-            else:
-                defaults[field_name] = None
-
-        # Применяем контекстные параметры (сохранённые при входе на страницу)
+        # Применяем контекстные параметры (например, patient_id)
         if hasattr(self, '_context_params') and self._context_params:
             for key, value in self._context_params.items():
                 if key in self.dto_class.model_fields and (key not in defaults or defaults[key] is None):
                     defaults[key] = value
-        # Для обратной совместимости (если current_extra всё ещё используется)
+
+        # Для обратной совместимости с current_extra
         if self.current_extra:
             for key, value in self.current_extra.items():
                 if key in self.dto_class.model_fields and key not in defaults:
@@ -2800,13 +2797,12 @@ class ListInlineOpsMixin:
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать новую строку: {e}")
             self.logger.exception(f"Ошибка создания пустого DTO: {e}")
             return
-        
+
         new_dto.id = self._next_temp_id
         self._next_temp_id -= 1
 
         row = self.source_model.add_row(new_dto)
         self.new_rows.add(row)
-        # self._update_row_color(row)
         self._set_row_color_by_source_row(row)
         self._update_save_button_state()
 
@@ -2815,9 +2811,95 @@ class ListInlineOpsMixin:
             self.table_view.setCurrentIndex(proxy_index)
             self.table_view.scrollTo(proxy_index)
 
-        self._update_selection_state() # Обновляем состояние выделения
+        self._update_selection_state()
+        self.logger.info(f"Добавлена новая строка (индекс {row}, временный ID={new_dto.id})")
 
-        self.logger.info(f"Добавлена новая строка (индекс {row})")
+
+    # def _add_inline_row(self):
+    #     """
+    #     Добавляет новую пустую строку в таблицу.
+
+    #     Создаёт DTO со значениями по умолчанию (пустые строки, сегодняшняя дата и т.п.),
+    #     присваивает временный отрицательный ID, добавляет в модель и помечает как новую.
+    #     """
+
+    #     defaults = {}
+    #     for col_info in self.columns:
+    #         field_name = col_info['name']
+
+    #         config = self.field_configs.get(field_name, {})
+    #         # Пропускаем виртуальные и скрытые поля
+    #         if config.get('virtual', False) or config.get('hidden', False):
+    #             continue
+            
+    #         field_info = self.dto_class.model_fields.get(field_name)
+    #         if field_info is None:
+    #             continue
+
+    #         # field_type = field_info.annotation
+    #         field_type = self._get_real_type(field_info.annotation)
+
+    #         origin = get_origin(field_type)
+    #         if origin is Union:
+    #             args = get_args(field_type)
+    #             field_type = next((arg for arg in args if arg is not type(None)), None)
+
+    #         if field_type is None:
+    #             defaults[field_name] = None
+
+    #         elif field_type == str:
+    #             defaults[field_name] = ""
+
+    #         elif field_type == int:
+    #             defaults[field_name] = 0
+
+    #         elif field_type == datetime.date:
+    #             defaults[field_name] = datetime.date.today()
+
+    #         elif field_type == datetime.time:
+    #             defaults[field_name] = datetime.time(0, 0)
+
+    #         elif field_type == bool:
+    #             defaults[field_name] = False
+
+    #         else:
+    #             defaults[field_name] = None
+
+    #     # Применяем контекстные параметры (сохранённые при входе на страницу)
+    #     if hasattr(self, '_context_params') and self._context_params:
+    #         for key, value in self._context_params.items():
+    #             if key in self.dto_class.model_fields and (key not in defaults or defaults[key] is None):
+    #                 defaults[key] = value
+    #     # Для обратной совместимости (если current_extra всё ещё используется)
+    #     if self.current_extra:
+    #         for key, value in self.current_extra.items():
+    #             if key in self.dto_class.model_fields and key not in defaults:
+    #                 defaults[key] = value
+
+    #     try:
+    #         new_dto = self.dto_class(**defaults)
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Ошибка", f"Не удалось создать новую строку: {e}")
+    #         self.logger.exception(f"Ошибка создания пустого DTO: {e}")
+    #         return
+        
+    #     new_dto.id = self._next_temp_id
+    #     self._next_temp_id -= 1
+
+    #     row = self.source_model.add_row(new_dto)
+    #     self.new_rows.add(row)
+    #     # self._update_row_color(row)
+    #     self._set_row_color_by_source_row(row)
+    #     self._update_save_button_state()
+
+    #     proxy_index = self.proxy_model.mapFromSource(self.source_model.index(row, 0))
+    #     if proxy_index.isValid():
+    #         self.table_view.setCurrentIndex(proxy_index)
+    #         self.table_view.scrollTo(proxy_index)
+
+    #     self._update_selection_state() # Обновляем состояние выделения
+
+    #     self.logger.info(f"Добавлена новая строка (индекс {row})")
 
     @AppLogger.get_instance(
         name = 'ListFilterMixin',

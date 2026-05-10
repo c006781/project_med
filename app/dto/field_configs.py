@@ -94,6 +94,7 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable': True,            # Редактируемое.
         'widget_type': 'date',       # Тип виджета – календарь (QDateEdit).
         'order': 4,                  # Порядковый номер колонки.
+        'required': True,            # Поле обязательно для заполнения (валидация на стороне сервиса).
     },
     # Поле "phone" – номер телефона.
     'phone': {
@@ -195,6 +196,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'title': 'Дата приёма',      # Заголовок.
         'editable': True,            # Редактируемое.
         'widget_type': 'date',       # Виджет выбора даты.
+        'required': True,            # Поле обязательно для заполнения (валидация на стороне сервиса).
     },
     # Виртуальное поле "reason" – причина обращения.
     'reason_text': {

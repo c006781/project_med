@@ -4,6 +4,9 @@
 
 # from app.config.config_manager.manager import get_config_env
 
+import datetime
+from typing import Any
+
 from app.utils.logger.logger import AppLogger
 
 from app.dependencies import (
@@ -174,6 +177,92 @@ class DynamicEditPage(BasePage):
             
         if self.hide_action_buttons:
             self._set_action_buttons_visible(False)    
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _fill_default_values(self):
+        """
+        Заполняет виджеты формы значениями по умолчанию для полей,
+        помеченных как required=True.
+        """
+        self.logger.debug("=== _fill_default_values START ===")
+
+        for field_name, widget in self.form.widgets.items():
+            config = self.field_configs.get(field_name, {})
+            required = config.get('required', False)
+
+            self.logger.debug(f"Поле {field_name}: required={required}, виджет={type(widget).__name__}")
+
+            if not required:
+                continue
+
+            # Определяем тип поля из DTO
+            field_info = self.dto_class.model_fields.get(field_name)
+            if not field_info:
+                continue
+
+            field_type = self._get_real_type(field_info.annotation)
+            default_value = self._get_default_value_for_field(field_name, field_type)
+
+            self.logger.debug(f"  -> значение по умолчанию: {default_value}")
+
+            if default_value is not None:
+                self.form._set_widget_value(widget, default_value)
+                self.logger.debug(f"Установлено значение по умолчанию для поля {field_name}: {default_value}")
+                widget.update()   # принудительная перерисовка
+
+        self.logger.debug("=== _fill_default_values END ===")
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_real_type(self, field_type):
+        """Извлекает реальный тип из Optional/Union."""
+        from typing import get_origin, get_args, Union
+        origin = get_origin(field_type)
+        if origin is Union:
+            args = get_args(field_type)
+            for arg in args:
+                if arg is not type(None):
+                    return arg
+        return field_type
+
+    @AppLogger.get_instance(
+        name='DynamicEditPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_default_value_for_field(self, field_name: str, field_type) -> Any:
+        """
+        Возвращает значение по умолчанию для поля на основе его типа и конфигурации.
+        Используется при создании новой записи.
+
+        Args:
+            field_name (str): Имя поля.
+            field_type (type): Тип поля (из DTO).
+
+        Returns:
+            Any: Значение по умолчанию или None, если поле необязательное.
+        """
+        config = self.field_configs.get(field_name, {})
+        if config.get('required', False):
+            if field_type == datetime.date:
+                return datetime.date.today()
+            elif field_type == datetime.time:
+                return datetime.time(0, 0)
+            elif field_type == str:
+                return ""
+            elif field_type == int:
+                return 0
+            elif field_type == bool:
+                return False
+        # Для необязательных полей возвращаем None
+        return None
 
     @AppLogger.get_instance(
         name='DynamicEditPage',
@@ -735,6 +824,8 @@ class DynamicEditPage(BasePage):
         self.form._loading = True
         try:
             self.form.clear()
+                   
+            self._fill_default_values()  # Устанавливаем значения по умолчанию для обязательных полей
         finally:
             self.form._loading = False
 

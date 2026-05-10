@@ -139,6 +139,8 @@ class DynamicEditPage(BasePage):
         self.readonly = readonly 
         self.hide_action_buttons = hide_action_buttons
 
+        self._extra_data = None
+
         self._computed_extra_data = None # дополнительные данные, вычисленные из виртуальных полей
 
         self._loading = False # Блокировка сигналов при загрузке
@@ -587,14 +589,18 @@ class DynamicEditPage(BasePage):
         for field_name, widget in self.form.widgets.items():
             config = self.field_configs.get(field_name, {})
             init_key = config.get('init_from_extra')
+            
             if init_key is None:
                 continue
+
             if isinstance(init_key, str):
                 if init_key in extra_data:
                     self.form._set_widget_value(widget, extra_data[init_key])
+            
             elif init_key is True:
                 if field_name in extra_data:
                     self.form._set_widget_value(widget, extra_data[field_name])
+            
             # можно добавить другие варианты (например, callable)
 
 
@@ -839,6 +845,8 @@ class DynamicEditPage(BasePage):
         else:
             self._prepare_new_entity()
 
+        self._extra_data = extra_data   # сохраняем переданные данные        
+
         self._after_load_or_clear(extra_data)  
 
         # После загрузки данных применяем readonly
@@ -1009,7 +1017,7 @@ class DynamicEditPage(BasePage):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _after_save_navigation(self, saved_dto):
+    def _after_save_navigation(self, saved_dto: BaseModel) -> None:
         """
         Выполняет навигацию после сохранения данных из формы.
 
@@ -1018,11 +1026,15 @@ class DynamicEditPage(BasePage):
         Если self._return_to_page_id не задан, то возвращает на список и помечает
         его на обновление.
 
+        Args:
+            saved_dto (BaseModel): Сохранённый DTO (с заполненным id).
+
         """
 
         if not self.page_manager:
             return
         
+        # Если есть целевая страница для возврата (например, из заметок)
         # Если self._return_to_page_id задан, то возвращает на страницу с этим ID,
         # передавая saved_dto в качестве значения для поля self._return_field
         if self._return_to_page_id:
@@ -1035,23 +1047,48 @@ class DynamicEditPage(BasePage):
                 target_page.set_field_value(self._return_field, value)
             # Переходим на target_page
             self.page_manager.switch_to(self._return_to_page_id)
-        else:
-            # Обычный возврат: помечаем список на обновление
-            if hasattr(self, 'list_page_id'):
-                # Получаем страницу списка
-                # list_page = self.page_manager._pages.get(self.list_page_id)
-                # if list_page and hasattr(list_page, 'set_needs_refresh'):
-                #     # Устанавливаем флаг needs_refresh на True, чтобы список обновился
-                #     list_page.set_needs_refresh(True)
+            return
+        # else:
+        #     # Обычный возврат: помечаем список на обновление
+        #     if hasattr(self, 'list_page_id') and self.list_page_id:
 
-                # Переходим на список и передаём ID созданной/обновлённой записи для выделения
-                self.page_manager.switch_to(
-                    self.list_page_id,
-                    extra_data={'select_id': saved_dto.id}
-                )
-            # Возвращаемся на предыдущую страницу
-            # self._go_back()
-            
+        #         # Помечаем страницу списка на обновление (чтобы данные перезагрузились)
+        #         list_page = self.page_manager._pages.get(self.list_page_id)
+        #         if list_page and hasattr(list_page, 'set_needs_refresh'):
+        #             # Устанавливаем флаг needs_refresh на True, чтобы список обновился
+        #             list_page.set_needs_refresh(True)
+
+        #         # Переходим на список и передаём ID созданной/обновлённой записи для выделения
+        #         self.page_manager.switch_to(
+        #             self.list_page_id,
+        #             extra_data={'select_id': saved_dto.id},
+        #             add_to_history=False ,
+        #         )
+        #         # self._go_back() # Возвращаемся на предыдущую страницу
+        #     else:
+        #         # Запасной вариант: просто вернуться назад
+                
+        #         self._go_back() # Возвращаемся на предыдущую страницу
+
+        # Обычный случай: возврат на предыдущую страницу (список)
+        #    Найти страницу списка (если известен её ID)
+        # list_page = None
+        # Помечаем список на обновление (если известен ID)
+        if hasattr(self, 'list_page_id') and self.list_page_id:
+            list_page = self.page_manager._pages.get(self.list_page_id)
+            if list_page and hasattr(list_page, 'set_needs_refresh'):
+                list_page.set_needs_refresh(True)
+
+        # #    Пометить страницу списка на обновление
+        # if list_page and hasattr(list_page, 'set_needs_refresh'):
+        #     list_page.set_needs_refresh(True)
+        #     self.logger.debug(f"Страница списка {self.list_page_id} помечена на обновление")
+
+        #    Вернуться на предыдущую страницу (история сохранит контекст)
+        self._go_back()
+
+
+
     @AppLogger.get_instance(
         name = 'DynamicEditPage',
         # share_file_with = 'system',
@@ -1066,7 +1103,18 @@ class DynamicEditPage(BasePage):
         :return: экземпляр DTO, соответствующий self.dto_class
         """
         data = self._collect_form_data()
+
+        # # Если поле patient_id скрыто, берём его из extra_data (self._computed_extra_data или self.current_extra
+        # if 'patient_id' not in data and self._extra_data and 'patient_id' in self._extra_data:
+        #     data['patient_id'] = self._extra_data['patient_id']
+
+        # Специальная обработка для поля patient_id (если оно есть в DTO и скрыто в форме)
+        if hasattr(self.dto_class, 'model_fields') and 'patient_id' in self.dto_class.model_fields:
+            if 'patient_id' not in data and self._extra_data and 'patient_id' in self._extra_data:
+                data['patient_id'] = self._extra_data['patient_id' ]
+        
         self.logger.debug(f"data: {data}")
+
         return self.dto_class(**data)
     
     @AppLogger.get_instance(

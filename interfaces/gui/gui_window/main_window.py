@@ -376,7 +376,7 @@ class ConnectionsMixin:
                 extra_data={
                     # 'patient_id': self.appointment_list_page.current_extra.get('patient_id')
                     'patient_id': self.appointment_list_page._context_params.get('patient_id')
-                    if self.appointment_list_page._context_params.get('patient_id') is not None else None
+                    # if self.appointment_list_page._context_params.get('patient_id') is not None else None
                 }
             )
         )

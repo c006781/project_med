@@ -153,6 +153,10 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'title': 'ID пациента',
         'editable': False,      # запрещаем редактирование
         # 'hidden': True,       # можно также скрыть поле, если не нужно показывать ID
+        'hidden': False,                       # показываем поле (но только для чтения)
+        'order': 1,                            # порядок отображения
+        'init_from_extra': 'patient_id',       # ключ для извлечения из extra_data
+        'required': True,                      # обязательное поле (проверка при сохранении)
     },
     'reason_id': {
         'title': 'ID причины',

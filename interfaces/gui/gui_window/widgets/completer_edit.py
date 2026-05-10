@@ -49,7 +49,7 @@ class CompleterEdit(QWidget):
 
         # Поле ввода текста
         self.line_edit = QLineEdit()
-        install_standard_context_menu(self.line_edit)
+        install_standard_context_menu(self.line_edit, menu_type='line')
         layout.addWidget(self.line_edit)
 
         self.btn = None

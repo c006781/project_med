@@ -10,7 +10,7 @@ from app.utils.logger.logger import AppLogger
 
 from PySide6.QtWidgets import (
     # QStyledItemDelegate, 
-    QDateEdit, QTimeEdit, QWidget, QMenu, 
+    QDateEdit, QDateTimeEdit, QTimeEdit, QWidget, QMenu, 
     QLineEdit, QTextEdit, 
     # QCompleter, 
     QApplication
@@ -29,6 +29,14 @@ from PySide6.QtCore import QDate, QTime, Qt, QPoint
 )
 def _install_for_date_edit(date_edit: QDateEdit):
     """Устанавливает русское контекстное меню для QDateEdit."""
+    
+    @AppLogger.get_instance(
+        name='_install_for_date_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def show_context_menu(pos):
         menu = QMenu()
 
@@ -48,7 +56,7 @@ def _install_for_date_edit(date_edit: QDateEdit):
 
         # Удалить (очистить)
         delete_action = menu.addAction("Удалить\tDel")
-        delete_action.triggered.connect(date_edit.clear)
+        delete_action.triggered.connect(lambda: _clear_date_edit(date_edit))
 
         # Выделить всё
         select_all_action = menu.addAction("Выделить всё\tCtrl+A")
@@ -56,11 +64,34 @@ def _install_for_date_edit(date_edit: QDateEdit):
 
         menu.exec(date_edit.mapToGlobal(pos))
 
+    @AppLogger.get_instance(
+        name='_install_for_date_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _make_cut_date(editor):
         def cut():
             _copy_date_from_edit(editor)
-            editor.clear()
+            # editor.clear()
+            _clear_date_edit(editor)
         return cut
+    
+    @AppLogger.get_instance(
+        name='_install_for_date_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_date_edit(editor):
+        # Для QDateTimeEdit с setSpecialValueText
+        if hasattr(editor, 'setDate'):
+            editor.setDate(QDate())   # невалидная дата
+            editor.update()
+        else:
+            editor.clear()
 
     date_edit.setContextMenuPolicy(Qt.CustomContextMenu)
     date_edit.customContextMenuRequested.connect(show_context_menu)
@@ -74,6 +105,14 @@ def _install_for_date_edit(date_edit: QDateEdit):
 )
 def _install_for_time_edit(time_edit: QTimeEdit):
     """Устанавливает русское контекстное меню для QTimeEdit с горячими клавишами."""
+
+    @AppLogger.get_instance(
+        name='_install_for_time_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def show_context_menu(pos):
         menu = QMenu()
 
@@ -89,18 +128,41 @@ def _install_for_time_edit(time_edit: QTimeEdit):
         menu.addSeparator()
 
         delete_action = menu.addAction("Удалить\tDel")
-        delete_action.triggered.connect(time_edit.clear)
+        delete_action.triggered.connect(lambda: _clear_time_edit(time_edit))
 
         select_all_action = menu.addAction("Выделить всё\tCtrl+A")
         select_all_action.triggered.connect(time_edit.selectAll)
 
         menu.exec(time_edit.mapToGlobal(pos))
 
+    @AppLogger.get_instance(
+        name='_install_for_time_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _make_cut_time(editor):
         def cut():
             _copy_time_from_edit(editor)
-            editor.clear()
+            # editor.clear()
+            _clear_time_edit(editor)
+
         return cut
+    
+    @AppLogger.get_instance(
+        name='_install_for_time_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_time_edit(editor):
+        if hasattr(editor, 'setTime'):
+            editor.setTime(QTime())
+            editor.update()
+        else:
+            editor.clear()
 
     time_edit.setContextMenuPolicy(Qt.CustomContextMenu)
     time_edit.customContextMenuRequested.connect(show_context_menu)
@@ -200,13 +262,13 @@ def apply_readonly_to_widgets(
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
-def install_standard_context_menu(widget: QWidget):
-    """
-    Устанавливает стандартное контекстное меню для виджета, если он поддерживает
-    операции копирования/вставки/вырезания/выделения.
-    Для QLineEdit и QTextEdit уже есть стандартное меню, но оно может быть отключено.
-    Для кастомных виджетов (например, CompleterEdit) нужно добавить вручную.
-    """
+def install_standard_context_menu(widget: QWidget, menu_type: str = None):
+    # """
+    # Устанавливает стандартное контекстное меню для виджета, если он поддерживает
+    # операции копирования/вставки/вырезания/выделения.
+    # Для QLineEdit и QTextEdit уже есть стандартное меню, но оно может быть отключено.
+    # Для кастомных виджетов (например, CompleterEdit) нужно добавить вручную.
+    # """
     # if hasattr(widget, 'setContextMenuPolicy'):
     #     # Включаем политику по умолчанию, если она была отключена
     #     if widget.contextMenuPolicy() == Qt.ContextMenuPolicy.NoContextMenu:
@@ -222,20 +284,63 @@ def install_standard_context_menu(widget: QWidget):
     # # Для других виджетов можно добавить кастомное меню, если нужно
     # # Например, для QTableWidget – обрабатывается отдельно в таблице
 
+    # """
+    # Устанавливает контекстное меню с русскими командами для QLineEdit и QTextEdit.
+    # """
+    # # Сначала сбрасываем старую политику и отключаем существующие обработчики
+    # widget.setContextMenuPolicy(Qt.DefaultContextMenu)
+    # # Отключаем возможные старые соединения (если были)
+    # try:
+    #     widget.customContextMenuRequested.disconnect()
+    # except (TypeError, RuntimeError):
+    #     pass
+        
+    # if isinstance(widget, QLineEdit):
+    #     _install_for_line_edit(widget)
+    # elif isinstance(widget, QTextEdit):
+    #     _install_for_text_edit(widget)
+    # elif isinstance(widget, QDateEdit):
+    #     _install_for_date_edit(widget)
+    # elif isinstance(widget, QTimeEdit):
+    #     _install_for_time_edit(widget)
+    # elif isinstance(widget, QDateTimeEdit):
+    #     _install_for_date_edit(widget)   # используем ту же логику, что и для QDateEdit
+    # # Для других виджетов (например, CompleterEdit) – обрабатываем их внутренние поля
+    # elif hasattr(widget, 'line_edit') and isinstance(widget.line_edit, QLineEdit):
+    #     install_standard_context_menu(widget.line_edit)
     """
-    Устанавливает контекстное меню с русскими командами для QLineEdit и QTextEdit.
+    Устанавливает контекстное меню для виджета указанного типа.
+    menu_type: 'line', 'text', 'date', 'time'
+    Если виджет уже использует кастомное контекстное меню (политика CustomContextMenu),
+    то ничего не делает – сохраняется существующее меню.
     """
-    if isinstance(widget, QLineEdit):
+    # Если виджет уже имеет кастомное меню – не трогаем
+    if widget.contextMenuPolicy() == Qt.CustomContextMenu:
+        return
+
+    # Если тип не указан, пытаемся определить автоматически
+    if menu_type is None:
+        if isinstance(widget, QLineEdit):
+            menu_type = 'line'
+        elif isinstance(widget, QTextEdit):
+            menu_type = 'text'
+        elif isinstance(widget, QDateEdit):
+            menu_type = 'date'
+        elif isinstance(widget, QTimeEdit):
+            menu_type = 'time'
+        else:
+            return
+
+    # Устанавливаем политику CustomContextMenu и подключаем соответствующее меню
+    if menu_type == 'line':
         _install_for_line_edit(widget)
-    elif isinstance(widget, QTextEdit):
+    elif menu_type == 'text':
         _install_for_text_edit(widget)
-    elif isinstance(widget, QDateEdit):
+    elif menu_type == 'date':
         _install_for_date_edit(widget)
-    elif isinstance(widget, QTimeEdit):
+    elif menu_type == 'time':
         _install_for_time_edit(widget)
-    # Для других виджетов (например, CompleterEdit) – обрабатываем их внутренние поля
-    elif hasattr(widget, 'line_edit') and isinstance(widget.line_edit, QLineEdit):
-        install_standard_context_menu(widget.line_edit)
+
 
 @AppLogger.get_instance(
     name='gui_helpers.py',
@@ -246,6 +351,14 @@ def install_standard_context_menu(widget: QWidget):
 )
 def _install_for_line_edit(line_edit: QLineEdit):
     """Устанавливает кастомное контекстное меню для QLineEdit."""
+
+    @AppLogger.get_instance(
+        name='_install_for_line_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def show_context_menu(pos: QPoint):
         menu = QMenu()
         
@@ -285,6 +398,14 @@ def _install_for_line_edit(line_edit: QLineEdit):
 )
 def _install_for_text_edit(text_edit: QTextEdit):
     """Устанавливает кастомное контекстное меню для QTextEdit."""
+
+    @AppLogger.get_instance(
+        name='_install_for_text_edit',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def show_context_menu(pos: QPoint):
         menu = QMenu()
         
@@ -324,6 +445,14 @@ def add_copy_paste_to_table(table_widget):
     с русским пунктом «Копировать». Копирует выделенные ячейки в буфер обмена
     в формате табуляция/перевод строки.
     """
+
+    @AppLogger.get_instance(
+        name='add_copy_paste_to_table',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, 
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def copy_selection():
         selection_model = table_widget.selectionModel()
         if not selection_model.hasSelection():
@@ -368,7 +497,7 @@ def add_copy_paste_to_table(table_widget):
         QApplication.clipboard().setText(text)
     
     @AppLogger.get_instance(
-        name='gui_helpers.py',
+        name='add_copy_paste_to_table',
         enable_file_logging = 'system',
         use_name_in_filename = False, 
     ).log_execution_time(

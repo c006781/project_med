@@ -4,14 +4,14 @@ from datetime import (
     date, 
     time
 )
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 
 from PySide6.QtWidgets import (
-    QCompleter, QDialog, QDialogButtonBox,
+    QCompleter, QDateTimeEdit, QDialog, QDialogButtonBox,
     QStyle, QStyledItemDelegate,  QLineEdit, 
     QCheckBox, QDateEdit, QTextEdit, 
     QTimeEdit, QComboBox, 
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import (
-    QRect, Qt, 
+    QDateTime, QRect, Qt, 
     # QPoint, 
     QDate, QTime,  QModelIndex, 
     QAbstractItemModel,  QEvent, 
@@ -32,6 +32,8 @@ from PySide6.QtGui import (
     QPainter, 
     # QMouseEvent
 )
+
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import DateEditWidget, TimeEditWidget
 
 class TextPopupDelegate(QStyledItemDelegate):
     """
@@ -291,7 +293,7 @@ class StringDelegate(QStyledItemDelegate):
     )
     def createEditor(self, parent, option, index):
         editor = QLineEdit(parent)
-        install_standard_context_menu(editor)
+        install_standard_context_menu(editor, menu_type='line')
         # Установить маску, если есть для этой колонки
         mask = self.column_masks.get(index.column())
         if mask:
@@ -399,13 +401,39 @@ class DateDelegate(QStyledItemDelegate):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def createEditor(self, parent, option, index):
-        editor = QDateEdit(parent)
+        editor = QDateTimeEdit(parent)
         editor.setCalendarPopup(True)
         editor.setDisplayFormat("yyyy-MM-dd")
-        # install_standard_context_menu(editor)
-        install_standard_context_menu(editor)
-        return editor
+        editor.setSpecialValueText("")          # пустая строка для отображения, если дата не задана
+        # editor.setDate(QDate.currentDate())     # начальная дата (не обязательна, но для визуала)
+        editor.setDateTime(QDateTime())                 # невалидная дата → будет показан specialValueText
+        install_standard_context_menu(editor, menu_type='date')
+        # Устанавливаем фильтр событий для перехвата клавиши Delete
+        editor.installEventFilter(self)
 
+        return editor
+    
+    # @AppLogger.get_instance(
+    #     name='DateDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    def eventFilter(self, obj, event):
+        """Перехватывает клавишу Delete для очистки даты."""
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Delete:
+            if isinstance(obj, QDateTimeEdit):
+                obj.setDateTime(QDateTime())   # невалидная дата
+                # obj.update()
+                # Немедленно завершаем редактирование, чтобы сохранить None
+                self.commitData.emit(obj)
+                self.closeEditor.emit(obj, QStyledItemDelegate.NoHint)
+
+                return True
+        return super().eventFilter(obj, event)
+    
     @AppLogger.get_instance(
         name='DateDelegate',
         # share_file_with = 'system',
@@ -416,12 +444,17 @@ class DateDelegate(QStyledItemDelegate):
     )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
-        if isinstance(value, date):
+
+        if value is None:
+            editor.setDateTime(QDateTime())         
+        elif isinstance(value, date):
             editor.setDate(QDate(value.year, value.month, value.day))
-        elif isinstance(value, QDate):
-            editor.setDate(value)
         else:
-            editor.setDate(QDate.currentDate())
+            editor.setDateTime(QDateTime())
+        # elif isinstance(value, QDate):
+            # editor.setDate(value)
+        # else:
+        #     editor.setDate(QDate.currentDate())
 
     @AppLogger.get_instance(
         name='DateDelegate',
@@ -439,6 +472,9 @@ class DateDelegate(QStyledItemDelegate):
                 date(qdate.year(), qdate.month(), qdate.day()), 
                 Qt.EditRole
             )
+        else:
+            # Если дата не задана (пустое поле), сохраняем None
+            model.setData(index, None, Qt.EditRole)
 
     @AppLogger.get_instance(
         name='DateDelegate',
@@ -463,11 +499,37 @@ class TimeDelegate(QStyledItemDelegate):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def createEditor(self, parent, option, index):
-        editor = QTimeEdit(parent)
+        editor = QDateTimeEdit(parent)
         editor.setDisplayFormat("HH:mm")
+        editor.setSpecialValueText("")          # пустая строка для отображения, если время не задано
+        # editor.setTime(QTime.currentTime())     # начальное время
+        editor.setDateTime(QDateTime())                 # невалидное время
         install_standard_context_menu(editor)
+        # Устанавливаем фильтр событий для перехвата клавиши Delete
+        editor.installEventFilter(self)
+        
         return editor
 
+    # @AppLogger.get_instance(
+    #     name='TimeDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    def eventFilter(self, obj, event):
+        """Перехватывает клавишу Delete для очистки времени."""
+        if event.type() == QEvent.KeyPress and event.key() == Qt.Key_Delete:
+            if isinstance(obj, QDateTimeEdit):
+                obj.setTime(QDateTime())   # невалидное время
+                # obj.update()
+                self.commitData.emit(obj)
+                self.closeEditor.emit(obj, QStyledItemDelegate.NoHint)
+
+                return True
+        return super().eventFilter(obj, event)
+    
     @AppLogger.get_instance(
         name='TimeDelegate',
         # share_file_with = 'system',
@@ -478,12 +540,17 @@ class TimeDelegate(QStyledItemDelegate):
     )
     def setEditorData(self, editor, index):
         value = index.model().data(index, Qt.EditRole)
-        if isinstance(value, time):
+
+        if value is None:
+            editor.setDateTime(QDateTime())          # невалидное время
+        elif isinstance(value, time):
             editor.setTime(QTime(value.hour, value.minute))
-        elif isinstance(value, QTime):
-            editor.setTime(value)
         else:
-            editor.setTime(QTime.currentTime())
+            editor.setDateTime(QDateTime())
+        # elif isinstance(value, QTime):
+        #     editor.setTime(value)
+        # else:
+        #     editor.setTime(QTime.currentTime())
 
     @AppLogger.get_instance(
         name='TimeDelegate',
@@ -497,9 +564,146 @@ class TimeDelegate(QStyledItemDelegate):
         qtime = editor.time()
         if qtime.isValid():
             model.setData(index, time(qtime.hour(), qtime.minute()), Qt.EditRole)
+        else:
+            model.setData(index, None, Qt.EditRole)
 
     @AppLogger.get_instance(
         name='TimeDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+
+class DatePickerDelegate(QStyledItemDelegate):
+    """Делегат для даты с текстовым полем и кнопкой календаря."""
+
+    @AppLogger.get_instance(
+        name='DatePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, parent=None, config: Dict[str, Any] = None):
+        super().__init__(parent)
+        self.config = config  # сохраняем конфигурацию поля для передачи в DateEditWidget
+
+    @AppLogger.get_instance(
+        name='DatePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def createEditor(self, parent, option, index):
+        widget = DateEditWidget(parent, config=self.config)
+        # install_standard_context_menu(widget.line_edit)   # добавить
+        widget.dateChanged.connect(lambda: self.commitData.emit(widget))
+        return widget
+
+    @AppLogger.get_instance(
+        name='DatePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.EditRole)
+        if isinstance(value, date):
+            editor.set_date(value)
+        else:
+            editor.set_date(None)
+
+    @AppLogger.get_instance(
+        name='DatePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def setModelData(self, editor, model, index):
+        val = editor.get_date()
+        model.setData(index, val, Qt.EditRole)
+
+    @AppLogger.get_instance(
+        name='DatePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+class TimePickerDelegate(QStyledItemDelegate):
+    """Делегат для времени с текстовым полем и кнопкой выбора."""
+   
+    @AppLogger.get_instance(
+        name='TimePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, parent=None, config: Dict[str, Any] = None):
+        super().__init__(parent)
+        self.config = config
+
+    @AppLogger.get_instance(
+        name='TimePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def createEditor(self, parent, option, index):
+        widget = TimeEditWidget(parent, config=self.config)
+        # install_standard_context_menu(widget.line_edit)   # добавить
+        widget.timeChanged.connect(lambda: self.commitData.emit(widget))
+        return widget
+
+    @AppLogger.get_instance(
+        name='TimePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.EditRole)
+        if isinstance(value, time):
+            editor.set_time(value)
+        else:
+            editor.set_time(None)
+
+    @AppLogger.get_instance(
+        name='TimePickerDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def setModelData(self, editor, model, index):
+        val = editor.get_time()
+        model.setData(index, val, Qt.EditRole)
+
+    @AppLogger.get_instance(
+        name='TimePickerDelegate',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system'
@@ -833,7 +1037,7 @@ class CompleterStringDelegate(QStyledItemDelegate):
     def createEditor(self, parent, option, index):
         """Создаёт QLineEdit с QCompleter."""
         editor = QLineEdit(parent)
-        install_standard_context_menu(editor)
+        install_standard_context_menu(editor, menu_type='line')
 
         # Выравнивание текста по верхнему краю (и левому)
         editor.setAlignment(Qt.AlignLeft | Qt.AlignTop)

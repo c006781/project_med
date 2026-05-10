@@ -29,6 +29,7 @@ from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import Advanc
 
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     CompleterStringDelegate,
+    DatePickerDelegate,
     DateStringDelegate,
     StringDelegate,
     DateDelegate,
@@ -36,6 +37,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     TimeDelegate,
     BoolDelegate,
     ComboBoxDelegate,
+    TimePickerDelegate,
     TimeStringDelegate,
 )
 
@@ -2510,10 +2512,12 @@ class ListUIMixin:
         }
 
         type_delegate_map = {
-            datetime.date: DateDelegate,
-            datetime.time: TimeDelegate,
+            # datetime.date: DateDelegate,
+            # datetime.time: TimeDelegate,
             # datetime.date: DateStringDelegate,
             # datetime.time: TimeStringDelegate,
+            datetime.date: DatePickerDelegate,
+            datetime.time: TimePickerDelegate,
             bool: BoolDelegate,
             str: StringDelegate,
         }
@@ -2574,12 +2578,24 @@ class ListUIMixin:
             #     self.table_view.setItemDelegateForColumn(model_col, delegate) # устанавливаем делегата
             #     continue
 
+            # Стандартные делегаты по типу
+            delegate_class = type_delegate_map.get(real_type)
+            if delegate_class:
+                # Для DatePickerDelegate и TimePickerDelegate передаём config
+                if delegate_class in (DatePickerDelegate, TimePickerDelegate):
+                    delegate = delegate_class(self.table_view, config=config)
+                else:
+                    delegate = delegate_class(self.table_view)
+                self.table_view.setItemDelegateForColumn(model_col, delegate)
+                continue
+
             if real_type == str:
                 # Для строковых полей используем делегат с поддержкой масок
                 mask = config.get('input_mask')
                 column_masks = {model_col: mask} if mask else None
                 delegate = StringDelegate(self.table_view, column_masks=column_masks)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                continue
             else:
                 delegate_class = type_delegate_map.get(real_type)
                 if delegate_class:

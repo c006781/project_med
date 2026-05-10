@@ -80,9 +80,12 @@ def get_db() -> Database:
     level = AppLogger._parse_log_level('DEBUG')
 )
 def get_patient_service() -> PatientService:
+    db = get_db()
+    appointment_service = get_appointment_service()   # получаем экземпляр
     return PatientService(
-        get_db(), 
-        field_configs=PATIENT_CONFIG
+        db, 
+        field_configs=PATIENT_CONFIG,
+        appointment_service=appointment_service,
     )
 
 

@@ -42,6 +42,7 @@ from contextlib import contextmanager
 from sqlalchemy import func
 
 
+# from app.dependencies import get_appointment_service
 from app.utils.logger import AppLogger
 
 # Импорты модулей
@@ -244,6 +245,40 @@ class BaseService(
         >>> patients = service.get_all()
     """
 
+    @staticmethod
+    def _update_note_field(
+        sess: Session,
+        note_repo, 
+        old_note_id: Optional[int],
+        new_text: Optional[str],
+        create_if_missing: bool = True
+    ):
+        """
+        Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
+        old_note_id – переданный старый ID (может быть None).
+        Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
+        """
+
+        # Если текст не передан и не требуется создавать – ничего не меняем
+        if new_text is None and not create_if_missing:
+            return old_note_id, None
+        
+        # Если есть старая заметка и текст передан – обновляем её
+        if old_note_id is not None:
+            note = note_repo.get_by_id(old_note_id)
+            if note:
+                if new_text is not None:
+                    note.text = new_text
+
+                return old_note_id, None  # ID не изменился, старый не нужно удалять
+            
+        # Создаём новую заметку        
+        new_note = AppointmentNote(text=new_text or "")
+        note_repo.add(new_note)
+        sess.flush()
+
+        return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
@@ -298,6 +333,455 @@ class BaseService(
 
         # Подписываемся на изменения конфигурации
         AppConfigManager.add_change_listener(self._on_config_changed)
+
+    # app/services/services_all.py - внутри класса BaseService
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _create_entity(
+        self,
+        dto: DTOType,
+        # required_kwargs: Dict[str, Any],
+        session: Optional[Session] = None
+    ) -> DTOType:
+        """
+        Универсальный метод создания записи.
+        
+        Параметры:
+            dto: DTO с данными для создания.
+            session: Опциональная сессия.
+        
+        Возвращает:
+            DTO созданной записи.
+        """
+        with self._session_scope(session) as sess:
+            # 1. Проверяем обязательные поля
+            self._validate_required_fields(dto)
+            
+            # 2. Собираем обычные поля
+            creation_kwargs = self._get_creation_kwargs(dto)
+            # Репозиторий для заметок (один на все сущности)
+            note_repo = AppointmentNoteRepository(sess)
+            
+            # Обрабатываем заметки (поля с is_note)
+            note_ids = self._apply_note_updates(dto, sess, note_repo, model_obj=None)
+            
+            # Создаём экземпляр модели, объединяя обязательные поля и ID заметок
+            model_kwargs = {**creation_kwargs, **note_ids}
+            entity = self._model_class(**model_kwargs)
+            
+            repo = self._get_repo(sess)
+            repo.add(entity)
+            sess.flush()
+            
+            return self.get_dto_out(entity)
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_entity(
+        self,
+        dto: DTOType,
+        entity_id: int,
+        session: Optional[Session] = None
+    ) -> DTOType:
+        """
+        Универсальный метод обновления записи.
+        
+        Параметры:
+            dto: DTO с новыми данными.
+            entity_id: ID обновляемой записи.
+            session: Опциональная сессия.
+        
+        Возвращает:
+            DTO обновлённой записи.
+        """
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            # Подгружаем все необходимые связи (из field_configs)
+            relations = self._get_relations_for_eager_loading()
+            entity = repo.get_with_relations(entity_id, relations)
+            if entity is None:
+                raise self._not_found_exception(entity_id)
+            
+            note_repo = AppointmentNoteRepository(sess)
+            
+            # Обновляем заметки
+            new_note_ids = self._apply_note_updates(dto, sess, note_repo, model_obj=entity)
+            for orm_field, value in new_note_ids.items():
+                setattr(entity, orm_field, value)
+            
+            # Обновляем простые поля
+            self._apply_simple_updates(entity, dto)
+            
+            sess.flush()
+            return self.get_dto_out(entity)
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _delete_entity(
+        self,
+        entity_id: int,
+        session: Optional[Session] = None
+    ) -> None:
+        """
+        Универсальный метод удаления записи с очисткой заметок.
+        """
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+
+            # Подгружаем все связи, чтобы потом собрать ID заметок
+            relations = self._get_relations_for_eager_loading()
+
+            entity = repo.get_with_relations(entity_id, relations)
+            if entity is None:
+                raise self._not_found_exception(entity_id)
+            
+            # Собираем ID заметок через field_configs
+            note_ids = set()
+            for mapping in self._get_note_field_mappings():
+                note_id = getattr(entity, mapping['orm_id_field'])
+                if note_id is not None:
+                    note_ids.add(note_id)
+            
+            # Удаляем саму запись
+            repo.delete(entity)
+            sess.flush()
+            
+            # Очищаем неиспользуемые заметки
+            note_service = self._get_note_service()
+            if note_service:
+                for nid in note_ids:
+                    # self._get_note_service().cleanup_unused_note(nid, sess)
+                    note_service.cleanup_unused_note(nid, sess)
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_simple_updatable_fields(self) -> List[Dict[str, Any]]:
+        """
+        Возвращает список полей, которые можно обновлять напрямую (не заметки, не виртуальные).
+        Каждый элемент содержит:
+            - 'name': имя поля в DTO и модели
+            - 'editable': разрешено ли редактирование (по умолчанию True)
+        """
+        updatable = []
+        for field_name, config in self._field_configs.items():
+            # Пропускаем ID (первичный ключ)
+            if field_name == 'id':
+                continue
+
+            # Пропускаем виртуальные поля и заметки
+            if config.get('virtual', False) or config.get('is_note'):
+                continue
+
+            # Пропускаем явно отмеченные как не updatable
+            if config.get('updatable') is False:
+                continue
+
+            # Проверяем, существует ли поле в DTO (безопасность)
+            if not hasattr(self._dto_class, field_name):
+                continue
+
+            updatable.append({
+                'name': field_name,
+                'editable': config.get('editable', True)
+            })
+
+        return updatable
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _apply_simple_updates(self, model_obj: ModelType, dto: DTOType) -> None:
+        """
+        Обновляет простые поля модели из DTO согласно field_configs.
+        """
+        for field_info in self._get_simple_updatable_fields():
+
+            if not field_info.get('editable', True):
+                continue
+
+            field_name = field_info['name']
+            # if field_info['editable']:
+            new_value = getattr(dto, field_name, None)
+            if new_value is not None:
+                setattr(model_obj, field_name, new_value)
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_relations_for_eager_loading(self) -> List[str]:
+        """
+        Возвращает список имён отношений ORM, которые необходимо подгружать
+        для корректного заполнения виртуальных полей DTO.
+        
+        Алгоритм:
+            1. Берём все поля из field_configs.
+            2. Если поле виртуальное (virtual=True) и у него указан source_attr,
+            добавляем source_attr в результат.
+            3. Дополнительно, если поле помечено is_note (уже входит в виртуальные),
+            оно также будет добавлено.
+        
+        Это покрывает:
+            - заметки (description_note, comment_note, reason_note и т.д.)
+            - связанные объекты (patient, appointment и т.п.)
+        """
+        relations = set()
+        for config in self._field_configs.values():
+            # Поля-заметки
+            if config.get('is_note'):
+                source_attr = config.get('source_attr')
+                if source_attr:
+                    relations.add(source_attr)
+            # Можно также добавить source_attr для обычных виртуальных полей,
+            # если они требуют подгрузки (например, 'patient' для patient_name)
+            elif config.get('virtual') and config.get('source_attr'):
+                # Например, поле patient_name имеет source_attr='patient'
+                relations.add(config['source_attr'])
+        
+        return list(relations)
+    
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_creation_kwargs(self, dto: DTOType) -> Dict[str, Any]:
+        """
+        Собирает словарь аргументов для создания экземпляра модели.
+        Включает все поля, которые:
+            - не являются виртуальными (virtual=False)
+            - не являются заметками (is_none)
+            - не являются ID самой модели (поле 'id' пропускаем)
+        """
+        kwargs = {}
+        for field_name, config in self._field_configs.items():
+            # Пропускаем ID
+            if field_name == 'id':
+                continue
+
+            # Пропускаем виртуальные поля
+            if config.get('virtual', False):
+                continue
+
+            # Пропускаем заметки (они обрабатываются отдельно)
+            if config.get('is_note', None) is not None:
+                continue
+
+            # if config.get('updatable') is False:
+            #     continue
+            
+            # Берём значение из DTO, если оно не None
+            value = getattr(dto, field_name, None)
+            if value is not None:
+                kwargs[field_name] = value
+            else:
+                self.logger.debug(f"Field {field_name} has no value in DTO")
+
+        return kwargs
+
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(        
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _validate_required_fields(self, dto: DTOType) -> None:
+        """
+        Проверяет, что все поля, помеченные в field_configs как required=True,
+        присутствуют в DTO и не пусты (для строк – не пустая строка).
+        
+        Исключения: поля с is_note и virtual пропускаются (они не хранятся в БД напрямую).
+        """
+        missing = []
+        for field_name, config in self._field_configs.items():
+            if not config.get('required', False):
+                continue
+            # Пропускаем виртуальные поля и заметки – они не являются столбцами БД
+            if config.get('virtual', False) or config.get('is_note'):
+                continue
+            
+            value = getattr(dto, field_name, None)
+            if value is None:
+                missing.append(field_name)
+            elif isinstance(value, str) and not value.strip():
+                missing.append(field_name)
+        
+        if missing:
+            titles = [self._field_configs.get(f, {}).get('title', f) for f in missing]
+            raise ValueError(f"Обязательные поля не заполнены: {', '.join(titles)}")
+
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(        
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_note_field_mappings(self) -> List[Dict[str, str]]:
+        """
+        Анализирует field_configs и возвращает список словарей для полей-заметок.
+        
+        Каждый словарь содержит:
+            - dto_field: имя поля в DTO (текст заметки)
+            - id_field: имя поля в DTO для ID заметки (обычно dto_field без '_text' + '_id')
+            - relation_name: имя атрибута отношения в ORM-модели (source_attr)
+            - orm_id_field: имя колонки в модели для внешнего ключа (строится из relation_name + '_id')
+            
+        Пример для Appointment:
+            {
+                'dto_field': 'reason_text',
+                'id_field': 'reason_id',
+                'relation_name': 'reason_note',
+                'orm_id_field': 'reason_id'
+            }
+
+        Условия отбора:
+            - поле должно быть виртуальным (virtual=True)
+            - поле должно иметь явный признак is_note=True
+            - должна быть указана source_attr (отношение к заметке)
+            - должен быть указан compute (хотя бы пустой, но для динамики мы полагаемся на source_attr)
+        """
+        mappings = []
+        for field_name, config in self._field_configs.items():
+            # Проверяем, что поле помечено как заметка
+
+            id_field = config.get('is_note', None)
+            if not id_field:
+                continue # Проверяем, что поле помечено как заметка
+
+            if not isinstance(id_field, str) or not id_field.strip():
+                continue  # поле не является заметкой или указан неверно
+
+            # Дополнительная защита: убеждаемся, что поле виртуальное
+            if not config.get('virtual', False):
+                self.logger.warning(
+                    f"Поле {field_name} помечено is_note=True, но virtual=False. Игнорирую."
+                )
+                continue
+
+            compute = config.get('compute')
+            if not compute:
+                self.logger.warning(
+                    f"Поле {field_name} помечено is_note=True, но не имеет compute. Виртуальное поле не будет заполняться."
+                )
+                continue
+
+            # args = compute.get('args', [])
+            # if not args:
+            #     self.logger.warning(
+            #         f"Поле {field_name} помечено is_note=True, но args есть. Игнорирую."
+            #     )
+            #     continue
+
+            source_attr = config.get('source_attr')
+            if not source_attr:
+                self.logger.warning(
+                    f"Для заметки {field_name} не указан source_attr. Игнорирую."
+                )
+                continue
+
+            # # Определяем ID-поле: отрезаем '_text' и добавляем '_id'
+            # if field_name.endswith('_text'):
+            #     id_field = field_name[:-5] + '_id'
+            # else:
+            #     id_field = field_name + '_id'
+            
+            # Имя внешнего ключа в ORM: обычно совпадает с id_field
+            orm_id_field = id_field
+            
+            mappings.append({
+                'dto_field': field_name,
+                'id_field': id_field,
+                'relation_name': source_attr,
+                'orm_id_field': orm_id_field, # в Appointment колонки называются так же
+            })
+
+        return mappings
+    
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_note_service(self) -> 'NoteService':
+        # """Должен быть переопределён в наследниках, возвращая экземпляр NoteService."""
+        raise NotImplementedError
+        # return None
+
+
+    @AppLogger.get_instance(
+        name = 'BaseService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,  # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_note_updates(self, dto, session, note_repo, model_obj=None) -> Dict[str, Optional[int]]:
+        """
+        Общая логика обновления заметок.
+        Если model_obj is None - создание, иначе обновление.
+        Возвращает словарь {orm_id_field: new_id}, а также (для обновления) выполняет очистку старых.
+        """
+        old_ids = {}
+        new_ids = {}
+
+        for mapping in self._get_note_field_mappings():
+            orm_field = mapping['orm_id_field']
+            text = getattr(dto, mapping['dto_field'], None)
+
+            old_id = getattr(model_obj, orm_field) if model_obj else None
+            old_ids[orm_field] = old_id
+
+            if text is not None:
+                new_id, _ = self._update_note_field(
+                    session, 
+                    note_repo, 
+                    old_id, 
+                    text, 
+                    create_if_missing=False
+                )
+                new_ids[orm_field] = new_id
+            else:
+                new_ids[orm_field] = old_id
+
+        # если обновление - чистим старые заметки
+        if model_obj:
+            note_service = self._get_note_service()
+            if note_service:
+                for orm_field, old_id in old_ids.items():
+                    new_id = new_ids.get(orm_field)
+                    if old_id is not None and old_id != new_id:
+                        # self._get_note_service().cleanup_unused_note(old_id, session)
+                        note_service.cleanup_unused_note(old_id, session)
+
+
+        return new_ids
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -821,6 +1305,7 @@ class PatientService(
         db: Database,
         field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
         logger_name: Optional[str] = None,
+        appointment_service: Optional['AppointmentService'] = None, 
     ):
         """
         Инициализирует экземпляр сервиса.
@@ -845,6 +1330,20 @@ class PatientService(
             field_configs=field_configs,
             logger_name = logger_name,
         )
+
+        self._note_service = NoteService(db, logger_name=logger_name + ".NoteService")
+        self._appointment_service = appointment_service   # сохраняем
+
+    @AppLogger.get_instance(
+        name = 'PatientService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    ) 
+    def _get_note_service(self) -> 'NoteService':
+        return self._note_service
 
     # Переопределяем create, так как логика создания специфична
     @AppLogger.get_instance(
@@ -886,57 +1385,75 @@ class PatientService(
             f"result {session}"
         )
 
-        if not patient_dto.first_name or not patient_dto.last_name:
-            self.logger.warning("Попытка создания пациента без имени/фамилии")
-            raise PatientValidationError("first_name/last_name", "Имя и фамилия обязательны")
+        # if not patient_dto.first_name or not patient_dto.last_name:
+        #     self.logger.warning("Попытка создания пациента без имени/фамилии")
+        #     raise PatientValidationError("first_name/last_name", "Имя и фамилия обязательны")
 
-        self.logger.debug(
-            f"Создание пациента: {patient_dto}"
+        # self.logger.debug(
+        #     f"Создание пациента: {patient_dto}"
+        # )
+        # required = {
+        #     'first_name': patient_dto.first_name,
+        #     'middle_name': patient_dto.middle_name,
+        #     'last_name': patient_dto.last_name,
+        #     'birth_date': patient_dto.birth_date,
+        #     'phone': patient_dto.phone,
+        # }
+        return self._create_entity(
+            patient_dto, 
+            # required, 
+            session
         )
 
-        with self._session_scope(session) as sess:
-            # Репозиторий для заметок
-            note_repo = AppointmentNoteRepository(sess)   # создаём репозиторий
+        # with self._session_scope(session) as sess:
+        #     # Репозиторий для заметок
+        #     note_repo = AppointmentNoteRepository(sess)   # создаём репозиторий
 
-            # Создаём заметки для description и comment, если они не пустые
-            description_note = None
-            if patient_dto.description:
-                description_note = AppointmentNote(text=patient_dto.description)
-                note_repo.add(description_note) 
+        #     # # Создаём заметки для description и comment, если они не пустые
+        #     # description_note = None
+        #     # if patient_dto.description:
+        #     #     description_note = AppointmentNote(text=patient_dto.description)
+        #     #     note_repo.add(description_note) 
 
-            comment_note = None
-            if patient_dto.comment:
-                comment_note = AppointmentNote(text=patient_dto.comment)
-                note_repo.add(comment_note) 
+        #     # comment_note = None
+        #     # if patient_dto.comment:
+        #     #     comment_note = AppointmentNote(text=patient_dto.comment)
+        #     #     note_repo.add(comment_note) 
+            
+        #     new_ids = self._apply_note_updates(
+        #         patient_dto, 
+        #         sess, 
+        #         note_repo, 
+        #         model_obj=None
+        #     )
+           
+        #     # sess.flush()  # чтобы получить id заметок   
 
-            sess.flush()  # чтобы получить id заметок   
+        #     # Создаём ORM-объект
+        #     patient = self._model_class(
+        #         first_name=patient_dto.first_name,
+        #         middle_name=patient_dto.middle_name,
+        #         last_name=patient_dto.last_name,
+        #         birth_date=patient_dto.birth_date,
+        #         phone=patient_dto.phone,
+        #         **new_ids,
+        #         # description_id=description_note.id if description_note else None,
+        #         # comment_id=comment_note.id if comment_note else None,
+        #     )
 
+        #     # Используем репозиторий для добавления пациента
+        #     repo = self._get_repo(sess)
+        #     repo.add(patient)
+        #     sess.flush() # Чтобы получить id, делаем flush (коммит будет в session_scope)
 
+        #     # dto_out = self._dto_class.from_orm(patient)
+        #     # dto_out = self._dto_class.model_validate(patient)
+        #     dto_out = self.get_dto_out(patient)
 
-            # Создаём ORM-объект
-            patient = self._model_class(
-                first_name=patient_dto.first_name,
-                middle_name=patient_dto.middle_name,
-                last_name=patient_dto.last_name,
-                birth_date=patient_dto.birth_date,
-                phone=patient_dto.phone,
-                description_id=description_note.id if description_note else None,
-                comment_id=comment_note.id if comment_note else None,
-            )
+        #     self.logger.info(f"Создан пациент с id={dto_out.id}")
+        #     self.logger.debug(f"dto_out {dto_out}")
 
-            # Используем репозиторий для добавления пациента
-            repo = self._get_repo(sess)
-            repo.add(patient)
-            sess.flush() # Чтобы получить id, делаем flush (коммит будет в session_scope)
-
-            # dto_out = self._dto_class.from_orm(patient)
-            # dto_out = self._dto_class.model_validate(patient)
-            dto_out = self.get_dto_out(patient)
-
-            self.logger.info(f"Создан пациент с id={dto_out.id}")
-            self.logger.debug(f"dto_out {dto_out}")
-
-            return dto_out
+        #     return dto_out
            
     @AppLogger.get_instance(
         name = 'PatientService',
@@ -980,83 +1497,114 @@ class PatientService(
         self.logger.debug(
             f"Обновление пациента id={patient_dto.id}"
         )
+        return self._update_entity(patient_dto, patient_dto.id, session)
 
-        with self._session_scope(session) as sess:
-            # ВАЖНО: используем get_with_relations, чтобы подгрузить description_note и comment_note
-            # У PatientRepository уже есть метод get_with_relations, унаследованный от BaseRepository
+        # with self._session_scope(session) as sess:
+        #     # ВАЖНО: используем get_with_relations, чтобы подгрузить description_note и comment_note
+        #     # У PatientRepository уже есть метод get_with_relations, унаследованный от BaseRepository
 
-            repo = self._get_repo(sess)
-            # patient = repo.get_by_id(patient_dto.id)
-            patient = repo.get_with_relations(
-                patient_dto.id, 
-                ['description_note', 'comment_note']
-            )
+        #     repo = self._get_repo(sess)
+        #     # patient = repo.get_by_id(patient_dto.id)
+        #     # patient = repo.get_with_relations(
+        #     #     patient_dto.id, 
+        #     #     ['description_note', 'comment_note']
+        #     # )
 
-            if patient is None:
-                raise PatientNotFoundError(patient_dto.id)
+        #     relations = self._get_relations_for_eager_loading()
+        #     patient = repo.get_with_relations(patient_dto.id, relations)
 
-            # Сохраняем старые ID заметок до изменения
-            old_description_id = patient.description_id
-            old_comment_id = patient.comment_id
+        #     if patient is None:
+        #         raise PatientNotFoundError(patient_dto.id)
 
-            # Обновляем поля
-            patient.first_name = patient_dto.first_name
-            patient.middle_name = patient_dto.middle_name
-            patient.last_name = patient_dto.last_name
-            patient.birth_date = patient_dto.birth_date
-            patient.phone = patient_dto.phone
+        #     note_repo = AppointmentNoteRepository(sess) 
+        #     # note_service = NoteService(
+        #     #     self._db, 
+        #     #     logger_name=self.logger.name + ".NoteService"
+        #     # )
+
+        #     # # Сохраняем старые ID заметок до изменения
+        #     # old_description_id = patient.description_id
+        #     # old_comment_id = patient.comment_id
+
+        #     # # Обновляем поля
+        #     # patient.first_name = patient_dto.first_name
+        #     # patient.middle_name = patient_dto.middle_name
+        #     # patient.last_name = patient_dto.last_name
+        #     # patient.birth_date = patient_dto.birth_date
+        #     # patient.phone = patient_dto.phone
             
-            note_repo = AppointmentNoteRepository(sess)
-            note_service = NoteService(
-                self._db, 
-                logger_name=self.logger.name + ".NoteService"
-            )
+        #     # # Обработка заметки description
+        #     # if patient_dto.description is not None:
+        #     #     if patient.description_id:
+        #     #         note = note_repo.get_by_id(patient.description_id)  
+        #     #         if note:
+        #     #             note.text = patient_dto.description
+        #     #             # ID не меняется
+        #     #     else:
+        #     #         new_note = AppointmentNote(text=patient_dto.description)
+        #     #         note_repo.add(new_note)
+        #     #         sess.flush()
+        #     #         patient.description_id = new_note.id
+        #     #         # Старая заметка (old_description_id) будет удалена позже, если она не используется
 
-            # Обработка заметки description
-            if patient_dto.description is not None:
-                if patient.description_id:
-                    note = note_repo.get_by_id(patient.description_id)  
-                    if note:
-                        note.text = patient_dto.description
-                        # ID не меняется
-                else:
-                    new_note = AppointmentNote(text=patient_dto.description)
-                    note_repo.add(new_note)
-                    sess.flush()
-                    patient.description_id = new_note.id
-                    # Старая заметка (old_description_id) будет удалена позже, если она не используется
+        #     # # Аналогично для comment
+        #     # if patient_dto.comment is not None:
+        #     #     if patient.comment_id:
+        #     #         note = note_repo.get_by_id(patient.comment_id)
+        #     #         if note:
+        #     #             note.text = patient_dto.comment
+        #     #             # ID не меняется
+        #     #     else:
+        #     #         new_note = AppointmentNote(text=patient_dto.comment)
+        #     #         note_repo.add(new_note)
+        #     #         sess.flush()
+        #     #         patient.comment_id = new_note.id
+        #     #         # Старая заметка (old_comment_id) будет удалена позже, если она не используется
 
-            # Аналогично для comment
-            if patient_dto.comment is not None:
-                if patient.comment_id:
-                    note = note_repo.get_by_id(patient.comment_id)
-                    if note:
-                        note.text = patient_dto.comment
-                        # ID не меняется
-                else:
-                    new_note = AppointmentNote(text=patient_dto.comment)
-                    note_repo.add(new_note)
-                    sess.flush()
-                    patient.comment_id = new_note.id
-                    # Старая заметка (old_comment_id) будет удалена позже, если она не используется
+        #     # # === Очистка старых заметок, которые больше не используются ===
+        #     # # Если description_id изменился (был и стал другим) – удаляем старую заметку
+        #     # if old_description_id is not None and old_description_id != patient.description_id:
+        #     #     note_service.cleanup_unused_note(old_description_id, sess)
 
-            # === Очистка старых заметок, которые больше не используются ===
-            # Если description_id изменился (был и стал другим) – удаляем старую заметку
-            if old_description_id is not None and old_description_id != patient.description_id:
-                note_service.cleanup_unused_note(old_description_id, sess)
+        #     # if old_comment_id is not None and old_comment_id != patient.comment_id:
+        #     #     note_service.cleanup_unused_note(old_comment_id, sess)
 
-            if old_comment_id is not None and old_comment_id != patient.comment_id:
-                note_service.cleanup_unused_note(old_comment_id, sess)
+        #     # # commit произойдёт автоматически при выходе из session_scope
+        #     # # updated_dto = self._dto_class.from_orm(patient)
+        #     # # sess.commit()  # Явный коммит
 
-            # commit произойдёт автоматически при выходе из session_scope
-            # updated_dto = self._dto_class.from_orm(patient)
-            # sess.commit()  # Явный коммит
-            updated_dto = self.get_dto_out(patient)
+        #     # Применяем изменения заметок через общий метод
+        #     new_ids = self._apply_note_updates(
+        #         dto=patient_dto,
+        #         session=sess,
+        #         note_repo=note_repo,
+        #         model_obj=patient
+        #     )
 
-            self.logger.info(f"Обновлён пациент id={updated_dto.id}")
-            self.logger.debug(f"updated_dto {updated_dto}") 
+        #     # Обновляем поля пациента
+        #     for orm_field, value in new_ids.items():
+        #         setattr(patient, orm_field, value)
 
-            return updated_dto  
+        #     # Обновляем простые поля (имя, дата, телефон)
+        #     # patient.first_name = patient_dto.first_name
+        #     # patient.middle_name = patient_dto.middle_name
+        #     # patient.last_name = patient_dto.last_name
+        #     # patient.birth_date = patient_dto.birth_date
+        #     # patient.phone = patient_dto.phone
+        #     self._apply_simple_updates(patient, patient_dto)  # динамическое обновление простых полей
+
+        #     # # Очистка старых заметок
+        #     # for orm_field, old_id in old_ids.items():
+        #     #     new_id = new_ids.get(orm_field)
+        #     #     if old_id is not None and old_id != new_id:
+        #     #         self._note_service.cleanup_unused_note(old_id, sess)
+
+        #     updated_dto = self.get_dto_out(patient)
+
+        #     self.logger.info(f"Обновлён пациент id={updated_dto.id}")
+        #     self.logger.debug(f"updated_dto {updated_dto}") 
+
+        #     return updated_dto  
         
     @AppLogger.get_instance(
         name = 'PatientService',
@@ -1152,6 +1700,10 @@ class PatientService(
             PatientNotFoundError: Если пациент не найден.
         """
 
+        # Проверяем, что AppointmentService передан
+        if self._appointment_service is None:
+            raise RuntimeError("AppointmentService не передан")
+
         self.logger.debug(f"Удаление пациента id={patient_id}")
         
         with self._session_scope(session) as sess:
@@ -1168,26 +1720,67 @@ class PatientService(
             if patient is None:
                 raise PatientNotFoundError(patient_id)
 
-            # Собираем ID заметок, привязанных к приёмам этого пациента
-            note_ids = [app.note_id for app in patient.appointments if app.note_id]
+            # # Проверяем, что AppointmentService передан
+            # if self._appointment_service is None:
+            #     raise RuntimeError("AppointmentService не передан в PatientService")
+        
+            # # Собираем ID заметок, привязанных к приёмам этого пациента
+            # note_ids = [app.note_id for app in patient.appointments if app.note_id]
 
-            if patient.description_id:
-                note_ids.append(patient.description_id)
+            # if patient.description_id:
+            #     note_ids.append(patient.description_id)
 
-            if patient.comment_id:
-                note_ids.append(patient.comment_id)
+            # if patient.comment_id:
+            #     note_ids.append(patient.comment_id)
 
-            # Удаляем пациента — каскадно удалятся все его приёмы и фото
-            sess.delete(patient)
-            sess.flush() # принудительно выполняем удаление, чтобы обновить состояние БД
+            # Собираем ID заметок
+            # note_ids = set()
+            # # Заметки из приёмов
+            # for app in patient.appointments:
+            #     for mapping in self._get_note_field_mappings():
+            #         note_id = getattr(app, mapping['orm_id_field'])
+            #         if note_id:
+            #             note_ids.add(note_id)
+            # from app.dependencies import get_appointment_service  # импорт внутри метода так как циклы
+            # appointment_service = get_appointment_service()
+            # Удаляем все приёмы пациента через AppointmentService (каскадное удаление фото и заметок)
+            # for appointment in patient.appointments[:]:  # копия списка, т.к. он будет меняться
+            #     try:
+            #         self._appointment_service.delete_appointment(appointment.id, session=sess)
+            #     except Exception as e:
+            #         self.logger.exception(f"Ошибка удаления приёма {appointment.id}: {e}")
+            #         raise
+
+
+            # # Собираем ID заметок самого пациента (поля-заметки, помеченные is_note)
+            # note_ids = set()
+            # for mapping in self._get_note_field_mappings():
+            #     note_id = getattr(patient, mapping['orm_id_field'])
+            #     if note_id:
+            #         note_ids.add(note_id)
+
+            # # Удаляем пациента — каскадно удалятся все его приёмы и фото
+            # sess.delete(patient)
+            # sess.flush() # принудительно выполняем удаление, чтобы обновить состояние БД
+
+            # Удаляем все приёмы через сервис
+            for app in patient.appointments[:]:
+                self._appointment_service.delete_appointment(app.id, session=sess)
+
+            # Теперь удаляем самого пациента (базовый метод удалит его заметки)
+            self._delete_entity(patient_id, session=sess)
+
 
             # Проверяем каждую заметку: остались ли ещё приёмы, ссылающиеся на неё           
-            note_service = NoteService(
-                self._db, 
-                logger_name=self.logger.name + ".NoteService"
-            )
-            for note_id in note_ids:
-                note_service.cleanup_unused_note(note_id, sess)
+            # note_service = NoteService(
+            #     self._db, 
+            #     logger_name=self.logger.name + ".NoteService"
+            # )
+
+            # # Очищаем неиспользуемые заметки
+            # for note_id in note_ids:
+            #     # note_service.cleanup_unused_note(note_id, sess)
+            #     self._note_service.cleanup_unused_note(note_id, sess)
 
             self.logger.info(f"Удалён пациент id={patient_id}")
    
@@ -1268,6 +1861,11 @@ class PatientService(
 
         return self.update_patient(dto)
 
+    def reload_config(self) -> None:
+        super().reload_config()
+        from app.dependencies import get_appointment_service # оставить тут, так как циклы
+        self._appointment_service = get_appointment_service()
+        self.logger.info("PatientService: appointment_service перезагружен")
 
 class NoteService(
     BaseService[
@@ -1400,7 +1998,8 @@ class NoteService(
         """
         self.logger.debug(f"Удаление заметки id={note_id}")
 
-        super().delete(note_id, session=session)
+        # super().delete(note_id, session=session)
+        self._delete_entity(note_id, session) # чтобы соответствовать единому универсальному подходу
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -1410,7 +2009,11 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def create(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+    def create(
+        self, 
+        dto: AppointmentNoteDTO,
+        session: Optional[Session] = None,    
+    ) -> AppointmentNoteDTO:
         """
         Создает заметку.
         
@@ -1419,7 +2022,9 @@ class NoteService(
         :return: созданная заметка
         :rtype: AppointmentNoteDTO
         """
-        return self.create_note(dto.text)
+        # return self.create_note(dto.text)
+        return self._create_entity(dto, session)
+    
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -1429,7 +2034,11 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def update(self, dto: AppointmentNoteDTO) -> AppointmentNoteDTO:
+    def update(
+        self, 
+        dto: AppointmentNoteDTO,
+        session: Optional[Session] = None,
+    ) -> AppointmentNoteDTO:
         """
         Обновляет заметку по ID.
         
@@ -1438,7 +2047,10 @@ class NoteService(
         :return: обновленная заметка
         :rtype: AppointmentNoteDTO
         """
-        return self.update_note(dto.id, dto.text)
+        # return self.update_note(dto.id, dto.text)
+        if dto.id is None:
+            raise ValueError("ID заметки не указан")
+        return self._update_entity(dto, dto.id, session)
     
     # ----------------------------------------------------------------------
     # Специфические методы сервиса
@@ -1474,7 +2086,11 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def create_note(self, text: str, session: Optional[Session] = None) -> AppointmentNoteDTO:
+    def create_note(
+        self, 
+        text: str, 
+        session: Optional[Session] = None
+    ) -> AppointmentNoteDTO:
         """
         Создаёт новую заметку с указанным текстом.
 
@@ -1487,19 +2103,22 @@ class NoteService(
         """
         self.logger.debug("Создание заметки")
 
-        with self._session_scope(session) as sess:
-            note = self._model_class(text=text)
+        # with self._session_scope(session) as sess:
+        #     note = self._model_class(text=text)
 
-            sess.add(note)
-            sess.flush()
+        #     sess.add(note)
+        #     sess.flush()
 
-            # dto_out = self._dto_class.from_orm(note)
-            dto_out = self.get_dto_out(note)
+        #     # dto_out = self._dto_class.from_orm(note)
+        #     dto_out = self.get_dto_out(note)
 
-            self.logger.info(f"Создана заметка id={dto_out.id}")
+        #     self.logger.info(f"Создана заметка id={dto_out.id}")
 
-            return dto_out
-
+        #     return dto_out
+        
+        # dto = AppointmentNoteDTO(text=text)
+        # return self.create(dto, session)
+        return self.create(AppointmentNoteDTO(text=text), session)
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -1532,34 +2151,35 @@ class NoteService(
 
         # Логгируем начало обновления заметки
         self.logger.debug(f"Обновление заметки id={note_id}")
+        dto = AppointmentNoteDTO(id=note_id, text=text)
+        return self.update(dto, session)
+        # # Создаем сессию для работы с репозиторием
+        # with self._session_scope(session) as sess:
+            
+        #     # Получаем репозиторий для работы с заметками
+        #     repo = self._get_repo(sess)
+            
+        #     # Получаем заметку по ID
+        #     note = repo.get_by_id(note_id)
+            
+        #     # Если заметка не найдена, выбрасываем исключение
+        #     if note is None:
+        #         err_ = AppointmentNoteNotFoundError(note_id)
+        #         self.logger.exception(err_.message)
+        #         raise err_
+            
+        #     # Обновляем текст заметки
+        #     note.text = text
+            
+        #     # Получаем обновленный DTO из обновленной заметки
+        #     # updated_dto = self._dto_class.from_orm(note)
+        #     updated_dto = self.get_dto_out(note)
+            
+        #     # Логгируем обновленной заметки
+        #     self.logger.info(f"Обновлена заметка id={updated_dto.id}")
 
-        # Создаем сессию для работы с репозиторием
-        with self._session_scope(session) as sess:
-            
-            # Получаем репозиторий для работы с заметками
-            repo = self._get_repo(sess)
-            
-            # Получаем заметку по ID
-            note = repo.get_by_id(note_id)
-            
-            # Если заметка не найдена, выбрасываем исключение
-            if note is None:
-                err_ = AppointmentNoteNotFoundError(note_id)
-                self.logger.exception(err_.message)
-                raise err_
-            
-            # Обновляем текст заметки
-            note.text = text
-            
-            # Получаем обновленный DTO из обновленной заметки
-            # updated_dto = self._dto_class.from_orm(note)
-            updated_dto = self.get_dto_out(note)
-            
-            # Логгируем обновленной заметки
-            self.logger.info(f"Обновлена заметка id={updated_dto.id}")
-
-            # Возвращаем обновленный DTO
-            return updated_dto
+        #     # Возвращаем обновленный DTO
+        #     return updated_dto
 
 
     @AppLogger.get_instance(
@@ -1581,7 +2201,8 @@ class NoteService(
         
         self.logger.debug(f"Удаляет запись по ID ({note_id})")
 
-        self.delete(note_id, session=session)
+        # self.delete(note_id, session=session)
+        self.delete(note_id, session)
 
 
     @AppLogger.get_instance(
@@ -1736,7 +2357,16 @@ class NoteService(
 
         return [note.text for note in notes]
 
-
+    @AppLogger.get_instance(
+        name = 'NoteService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )  
+    def _get_note_service(self) -> Optional['NoteService']:
+        return None
 
 class AppointmentService(
         BaseService[
@@ -1805,6 +2435,18 @@ class AppointmentService(
                 logger_name=logger_name + ".NoteService"
             )
 
+
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    ) 
+    def _get_note_service(self) -> 'NoteService':
+        return self._note_service
+    
     # ------------------------------------------------------------
     # Вспомогательный метод для работы с заметками через репозиторий
     # ------------------------------------------------------------
@@ -1817,38 +2459,38 @@ class AppointmentService(
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )  
-    @staticmethod
-    def _update_note_field(
-        sess: Session,
-        note_repo: AppointmentNoteRepository,
-        old_note_id: Optional[int],
-        new_text: Optional[str],
-        create_if_missing: bool = True
-    ) -> Optional[int]:
-        """
-        Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
-        old_note_id – переданный старый ID (может быть None).
-        Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
-        """
-        # Если текст не передан и не требуется создавать – ничего не меняем
-        if new_text is None and not create_if_missing:
-            return old_note_id, None
+    # @staticmethod
+    # def _update_note_field(
+    #     sess: Session,
+    #     note_repo: AppointmentNoteRepository,
+    #     old_note_id: Optional[int],
+    #     new_text: Optional[str],
+    #     create_if_missing: bool = True
+    # ) -> Optional[int]:
+    #     """
+    #     Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
+    #     old_note_id – переданный старый ID (может быть None).
+    #     Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
+    #     """
+    #     # Если текст не передан и не требуется создавать – ничего не меняем
+    #     if new_text is None and not create_if_missing:
+    #         return old_note_id, None
 
-        # Если есть старая заметка и текст передан – обновляем её
-        if old_note_id is not None:
-            note = note_repo.get_by_id(old_note_id)
-            if note:
-                if new_text is not None:
-                    note.text = new_text
+    #     # Если есть старая заметка и текст передан – обновляем её
+    #     if old_note_id is not None:
+    #         note = note_repo.get_by_id(old_note_id)
+    #         if note:
+    #             if new_text is not None:
+    #                 note.text = new_text
 
-                return old_note_id, None   # ID не изменился, старый не нужно удалять
+    #             return old_note_id, None   # ID не изменился, старый не нужно удалять
 
-        # Создаём новую заметку
-        new_note = AppointmentNote(text=new_text or "")
-        note_repo.add(new_note)
-        sess.flush()
+    #     # Создаём новую заметку
+    #     new_note = AppointmentNote(text=new_text or "")
+    #     note_repo.add(new_note)
+    #     sess.flush()
         
-        return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+    #     return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
 
     @AppLogger.get_instance(
         name='AppointmentService',
@@ -1896,6 +2538,9 @@ class AppointmentService(
 
         self._note_service = get_note_service()
         self._photo_service = get_photo_service()
+
+        # from app.dependencies import get_appointment_service # импорт внутри метода так как циклы
+        # self._appointment_service = get_appointment_service()
 
         self.logger.info("AppointmentService: note_service и photo_service перезагружены")
 
@@ -2307,8 +2952,28 @@ class AppointmentService(
 
             # Создаем DTO из полученной записи
             return  self.get_dtos(item)
+      
+    @AppLogger.get_instance(
+        name = 'AppointmentService',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )    
+    def _get_joinedload_Appointment(self) -> List:
+        relations = []
+        # Обязательные связи: пациент (всегда нужен)
+        relations = [joinedload(Appointment.patient)]
         
-
+        # Добавляем заметки из field_configs
+        for mapping in self._get_note_field_mappings():
+            relation_name = mapping['relation_name']
+            if hasattr(Appointment, relation_name):
+                relations.append(joinedload(getattr(Appointment, relation_name)))
+        
+        return relations
+    
     @AppLogger.get_instance(
         name = 'AppointmentService',
         # share_file_with = 'system',
@@ -2348,13 +3013,14 @@ class AppointmentService(
                 # joinedload(Appointment.patient),
                 # joinedload(Appointment.note)
 
-                joinedload(Appointment.patient),
-                joinedload(Appointment.reason_note),
-                joinedload(Appointment.procedure_note),
-                joinedload(Appointment.recommendations_note),
-                joinedload(Appointment.note),
-                joinedload(Appointment.cost_procedure_note),
+                # joinedload(Appointment.patient),
+                # joinedload(Appointment.reason_note),
+                # joinedload(Appointment.procedure_note),
+                # joinedload(Appointment.recommendations_note),
+                # joinedload(Appointment.note),
+                # joinedload(Appointment.cost_procedure_note),
                 # joinedload(Appointment.photos)
+                *self._get_joinedload_Appointment()
             )
 
             query, post_filters = apply_filters(
@@ -2413,89 +3079,126 @@ class AppointmentService(
         :raises PatientNotFoundError: если пациент с указанным ID не найден.
         """
 
-        self.logger.debug(
-            f"Создание приёма: {dto}, "
-            f"note_text={note_text}"
-        )
-
+        # Проверка существования пациента (можно вынести в отдельный метод)
         with self._session_scope(session) as sess:
-            # Проверка существования пациента
             patient_repo = PatientRepository(sess)
-
             if not patient_repo.get_by_id(dto.patient_id):
                 raise PatientNotFoundError(dto.patient_id)
+        # required = {
+        #     'patient_id': dto.patient_id,
+        #     'date': dto.date,
+        #     'date_next': dto.date_next,
+        # }
 
-            note_repo = AppointmentNoteRepository(sess)
+            if note_text is not None: # Это сохранит работоспособность CLI без переписывания его логики. В дальнейшем, если CLI перевести на прямое заполнение DTO, параметр можно будет удалить
+                dto.note_text = note_text
 
-            # Создаём заметки для каждого текстового поля, старых ID нет
-            reason_id, _ = self._update_note_field(            
-                sess, 
-                note_repo, 
-                None, 
-                dto.reason_text,                  
-                create_if_missing=False
-            )
-            procedure_id, _ = self._update_note_field(         
-                sess, 
-                note_repo, 
-                None, 
-                dto.procedure_text,               
-                create_if_missing=False
-            )
-            recommendations_id , _= self._update_note_field(   
-                sess, 
-                note_repo, 
-                None, 
-                dto.recommendations_text,         
-                create_if_missing=False
-            )
-            note_id, _ = self._update_note_field(              
-                sess, 
-                note_repo, 
-                None, 
-                dto.note_text,   
-                create_if_missing=False
-            )
-            cost_procedure_id, _ = self._update_note_field(    
-                sess, 
-                note_repo, 
-                None, 
-                dto.cost_procedure_text,          
-                create_if_missing=False
+            return self._create_entity(
+                dto, 
+                # required, 
+                session = sess
             )
 
-            # # Обработка заметки
-            # note_id = dto.note_id
-            # if note_text:
-            #     # note_service = NoteService( # создаём экземпляр (можно без логгера)
-            #     #     self._db,
-            #     #     logger_name=self.logger.name + ".NoteService" # (можно без логгера)
-            #     #     )  
-            #     note_dto = self._note_service.get_or_create_note(note_text, session=sess)
-            #     note_id = note_dto.id if note_dto else None
+        # self.logger.debug(
+        #     f"Создание приёма: {dto}, "
+        #     f"note_text={note_text}"
+        # )
 
-            # Создаем приём
-            appointment = self._model_class(
-                patient_id=dto.patient_id,
-                date=dto.date,
-                date_next=dto.date_next,
-                reason_id=reason_id,
-                procedure_id=procedure_id,
-                recommendations_id=recommendations_id,
-                note_id=note_id,
-                cost_procedure_id=cost_procedure_id,
-            )
+        # with self._session_scope(session) as sess:
+        #     # Проверка существования пациента
+        #     patient_repo = PatientRepository(sess)
 
-            repo = self._get_repo(sess)
-            repo.add(appointment)
-            sess.flush()  # чтобы получить id
+        #     if not patient_repo.get_by_id(dto.patient_id):
+        #         raise PatientNotFoundError(dto.patient_id)
+
+        #     note_repo = AppointmentNoteRepository(sess)
+
+        #     # Создаём заметки для каждого текстового поля, старых ID нет
+        #     # reason_id, _ = self._update_note_field(            
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     None, 
+        #     #     dto.reason_text,                  
+        #     #     create_if_missing=False
+        #     # )
+        #     # procedure_id, _ = self._update_note_field(         
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     None, 
+        #     #     dto.procedure_text,               
+        #     #     create_if_missing=False
+        #     # )
+        #     # recommendations_id , _= self._update_note_field(   
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     None, 
+        #     #     dto.recommendations_text,         
+        #     #     create_if_missing=False
+        #     # )
+        #     # note_id, _ = self._update_note_field(              
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     None, 
+        #     #     dto.note_text,   
+        #     #     create_if_missing=False
+        #     # )
+        #     # cost_procedure_id, _ = self._update_note_field(    
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     None, 
+        #     #     dto.cost_procedure_text,          
+        #     #     create_if_missing=False
+        #     # )
+
+        #     # # # Обработка заметки
+        #     # # note_id = dto.note_id
+        #     # # if note_text:
+        #     # #     # note_service = NoteService( # создаём экземпляр (можно без логгера)
+        #     # #     #     self._db,
+        #     # #     #     logger_name=self.logger.name + ".NoteService" # (можно без логгера)
+        #     # #     #     )  
+        #     # #     note_dto = self._note_service.get_or_create_note(note_text, session=sess)
+        #     # #     note_id = note_dto.id if note_dto else None
+
+        #     # # Создаем приём
+        #     # appointment = self._model_class(
+        #     #     patient_id=dto.patient_id,
+        #     #     date=dto.date,
+        #     #     date_next=dto.date_next,
+        #     #     reason_id=reason_id,
+        #     #     procedure_id=procedure_id,
+        #     #     recommendations_id=recommendations_id,
+        #     #     note_id=note_id,
+        #     #     cost_procedure_id=cost_procedure_id,
+        #     # )
+
             
-            # dto_out = self._dto_class.from_orm(appointment)
-            dto_out = self.get_dto_out(appointment)
+        #     # Динамическое создание/обновление заметок
+        #     note_ids = self._apply_note_updates(
+        #         dto,
+        #         sess,
+        #         note_repo,
+        #         model_obj=None   # None означает режим создания (нет старой модели)
+        #     )
 
-            self.logger.info(f"Создан приём id={dto_out.id}")
+        #     # Создаём приём
+        #     appointment = self._model_class(
+        #         patient_id=dto.patient_id,
+        #         date=dto.date,
+        #         date_next=dto.date_next,
+        #         **note_ids   # распаковываем словарь {reason_id: val, procedure_id: val, ...}
+        #     )
 
-            return dto_out
+        #     repo = self._get_repo(sess)
+        #     repo.add(appointment)
+        #     sess.flush()  # чтобы получить id
+            
+        #     # dto_out = self._dto_class.from_orm(appointment)
+        #     dto_out = self.get_dto_out(appointment)
+
+        #     self.logger.info(f"Создан приём id={dto_out.id}")
+
+        #     return dto_out
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -2526,91 +3229,138 @@ class AppointmentService(
         :raises ValueError: если ID приёма не указан
         """
         
+        
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
             raise ValueError("ID приёма не указан")
 
         self.logger.debug(f"Обновление приёма id={dto.id}")
 
-        with self._session_scope(session) as sess:            
-            # ВАЖНО: используем get_by_id_with_relations, чтобы подгрузить все связи
-            repo = self._get_repo(sess)
-            appointment = repo.get_by_id_with_relations(dto.id)
-            if appointment is None:
-                raise AppointmentNotFoundError(dto.id)
+
+        if note_text is not None: # Это сохранит работоспособность CLI без переписывания его логики. В дальнейшем, если CLI перевести на прямое заполнение DTO, параметр можно будет удалить
+            dto.note_text = note_text
+
+        return self._update_entity(dto, dto.id, session)
+
+        # with self._session_scope(session) as sess:            
+        #     # ВАЖНО: используем get_by_id_with_relations, чтобы подгрузить все связи
+        #     repo = self._get_repo(sess)
+        #     appointment = repo.get_by_id_with_relations(dto.id)
+        #     if appointment is None:
+        #         raise AppointmentNotFoundError(dto.id)
 
 
-            # Сохраняем старые ID заметок до изменения
-            old_reason_id = appointment.reason_id
-            old_procedure_id = appointment.procedure_id
-            old_recommendations_id = appointment.recommendations_id
-            old_note_id = appointment.note_id
-            old_cost_procedure_id = appointment.cost_procedure_id
+        #     # Обновляем простые поля
+        #     # appointment.date = dto.date
+        #     # appointment.date_next = dto.date_next
+        #     self._apply_simple_updates(appointment, dto) # динамическое обновление простых полей
 
-            # Обновляем простые поля
-            appointment.date = dto.date
-            appointment.date_next = dto.date_next
+        #     # # Сохраняем старые ID заметок до изменения
+        #     # old_reason_id = appointment.reason_id
+        #     # old_procedure_id = appointment.procedure_id
+        #     # old_recommendations_id = appointment.recommendations_id
+        #     # old_note_id = appointment.note_id
+        #     # old_cost_procedure_id = appointment.cost_procedure_id
 
-            note_repo = AppointmentNoteRepository(sess)
 
-            # Обновляем каждую заметку, получаем (новый ID, старый ID)
-            new_reason_id, old_reason = self._update_note_field(
-                sess, 
-                note_repo, 
-                old_reason_id, 
-                dto.reason_text, 
-                create_if_missing=False
-            )
-            new_procedure_id, old_procedure = self._update_note_field(
-                sess, 
-                note_repo, 
-                old_procedure_id, 
-                dto.procedure_text, 
-                create_if_missing=False
-            )
-            new_recommendations_id, old_recommendations = self._update_note_field(
-                sess, 
-                note_repo, 
-                old_recommendations_id, 
-                dto.recommendations_text, 
-                create_if_missing=False
-            )
-            new_note_id, old_note = self._update_note_field(
-                sess, 
-                note_repo, 
-                old_note_id, 
-                dto.note_text, 
-                create_if_missing=False
-            )
-            new_cost_id, old_cost = self._update_note_field(
-                sess, 
-                note_repo, 
-                old_cost_procedure_id, 
-                dto.cost_procedure_text, 
-                create_if_missing=False
-            )
+        #     note_repo = AppointmentNoteRepository(sess)
 
-            # Присваиваем новые ID
-            appointment.reason_id = new_reason_id
-            appointment.procedure_id = new_procedure_id
-            appointment.recommendations_id = new_recommendations_id
-            appointment.note_id = new_note_id
-            appointment.cost_procedure_id = new_cost_id
+        #     # # Обновляем каждую заметку, получаем (новый ID, старый ID)
+        #     # new_reason_id, old_reason = self._update_note_field(
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     old_reason_id, 
+        #     #     dto.reason_text, 
+        #     #     create_if_missing=False
+        #     # )
+        #     # new_procedure_id, old_procedure = self._update_note_field(
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     old_procedure_id, 
+        #     #     dto.procedure_text, 
+        #     #     create_if_missing=False
+        #     # )
+        #     # new_recommendations_id, old_recommendations = self._update_note_field(
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     old_recommendations_id, 
+        #     #     dto.recommendations_text, 
+        #     #     create_if_missing=False
+        #     # )
+        #     # new_note_id, old_note = self._update_note_field(
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     old_note_id, 
+        #     #     dto.note_text, 
+        #     #     create_if_missing=False
+        #     # )
+        #     # new_cost_id, old_cost = self._update_note_field(
+        #     #     sess, 
+        #     #     note_repo, 
+        #     #     old_cost_procedure_id, 
+        #     #     dto.cost_procedure_text, 
+        #     #     create_if_missing=False
+        #     # )
 
-            # Очистка старых заметок, которые больше не используются
-            # Используем сервис заметок (self._note_service), который уже имеет метод cleanup_unused_note
-            for old_id in (old_reason, old_procedure, old_recommendations, old_note, old_cost):
-                if old_id is not None and old_id not in (
-                    appointment.reason_id, appointment.procedure_id,
-                    appointment.recommendations_id, appointment.note_id,
-                    appointment.cost_procedure_id
-                ):
-                    self._note_service.cleanup_unused_note(old_id, sess)
+        #     # # Присваиваем новые ID
+        #     # appointment.reason_id = new_reason_id
+        #     # appointment.procedure_id = new_procedure_id
+        #     # appointment.recommendations_id = new_recommendations_id
+        #     # appointment.note_id = new_note_id
+        #     # appointment.cost_procedure_id = new_cost_id
 
-            updated_dto = self.get_dto_out(appointment)
-            self.logger.info(f"Обновлён приём id={updated_dto.id}")
+        #     # # Очистка старых заметок, которые больше не используются
+        #     # # Используем сервис заметок (self._note_service), который уже имеет метод cleanup_unused_note
+        #     # for old_id in (old_reason, old_procedure, old_recommendations, old_note, old_cost):
+        #     #     if old_id is not None and old_id not in (
+        #     #         appointment.reason_id, appointment.procedure_id,
+        #     #         appointment.recommendations_id, appointment.note_id,
+        #     #         appointment.cost_procedure_id
+        #     #     ):
+        #     #         self._note_service.cleanup_unused_note(old_id, sess)
 
-            return updated_dto   
+        #             # Словари для старых и новых ID заметок
+        # # old_ids = {}
+        # # new_ids = {}
+
+        # # # Получаем маппинги полей-заметок
+        # # for mapping in self._get_note_field_mappings():
+        # #     orm_field = mapping['orm_id_field']          # например 'reason_id'
+        # #     old_id = getattr(appointment, orm_field)     # старый ID из БД
+        # #     old_ids[orm_field] = old_id
+
+        # #     text = getattr(dto, mapping['dto_field'], None)   # текст из DTO
+        # #     if text is not None:
+        # #         new_id, _ = self._update_note_field(
+        # #             sess, 
+        # #             note_repo, 
+        # #             old_id, 
+        # #             text, 
+        # #             create_if_missing=False
+        # #         )
+        # #         new_ids[orm_field] = new_id
+        # #     else:
+        # #         new_ids[orm_field] = old_id
+
+        # new_ids = self._apply_note_updates(dto, sess, note_repo, model_obj=appointment)
+
+        # # Применяем новые ID к объекту приёма
+        # for orm_field, new_id in new_ids.items():
+        #     setattr(appointment, orm_field, new_id)
+        
+        # sess.flush()
+
+        # # # Очистка старых заметок, которые больше не используются
+        # # for orm_field, old_id in old_ids.items():
+        # #     new_id = new_ids.get(orm_field)
+        # #     if old_id is not None and old_id != new_id:
+        # #         self._note_service.cleanup_unused_note(old_id, sess)
+
+        # # Обновлённый DTO
+        # updated_dto = self.get_dto_out(appointment)
+        # self.logger.info(f"Обновлён приём id={updated_dto.id}")
+
+        # return updated_dto   
 
 
 
@@ -2677,31 +3427,41 @@ class AppointmentService(
                 for photo in appointment.photos:
                     self._photo_service.delete_photo(photo.id, session=sess)
 
-            else:
-                self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
+            # else:
+            #     self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
             
-            # # Если приём имел заметку, и она больше не используется, удаляем ее
-            # note_id = appointment.note_id
+            # # # Если приём имел заметку, и она больше не используется, удаляем ее
+            # # note_id = appointment.note_id
 
-            # Сохраняем все ID заметок до удаления приёма
-            note_ids = []
-            for note_id in (
-                appointment.reason_id, appointment.procedure_id,
-                appointment.recommendations_id, appointment.note_id,
-                appointment.cost_procedure_id
-            ):
-                if note_id is not None:
-                    note_ids.append(note_id)
+            # # # Сохраняем все ID заметок до удаления приёма
+            # # note_ids = []
+            # # for note_id in (
+            # #     appointment.reason_id, appointment.procedure_id,
+            # #     appointment.recommendations_id, appointment.note_id,
+            # #     appointment.cost_procedure_id
+            # # ):
+            # #     if note_id is not None:
+            # #         note_ids.append(note_id)
 
+            # # --- ДИНАМИЧЕСКИЙ СБОР ID ЗАМЕТОК ---
+            # note_ids = []
+            # for mapping in self._get_note_field_mappings():
+            #     note_id = getattr(appointment, mapping['orm_id_field'])
+            #     if note_id is not None:
+            #         note_ids.append(note_id)
+            # # --- КОНЕЦ ДИНАМИЧЕСКОГО СБОРА ---
 
             
-            # Удаляем приём
-            repo.delete(appointment)
-            sess.flush()
+            # # Удаляем приём
+            # repo.delete(appointment)
+            # sess.flush()
 
-            # Теперь чистим заметки
-            for nid in note_ids:
-                self._note_service.cleanup_unused_note(nid, sess)
+            # # Очищаем неиспользуемые заметки
+            # for nid in note_ids:
+            #     self._note_service.cleanup_unused_note(nid, sess)
+
+            # Теперь удаляем приём (базовый метод)
+            self._delete_entity(appointment_id, sess)
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -2889,6 +3649,8 @@ class PhotoService(
         session: Optional[Session] = None
     ) -> None:
         """Обновляет описание существующего фото."""
+        # dto = PhotoDTO(id=photo_id, description=description)
+        # self._update_entity(dto, photo_id, session)
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             photo = repo.get_by_id(photo_id)
@@ -3195,44 +3957,66 @@ class PhotoService(
 
         # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
         with self._session_scope(session) as sess:
-            # 2. Получаем репозиторий фотографий
+
             repo = self._get_repo(sess)
-            
-            # 3. Получаем фотографию по ID
             photo = repo.get_by_id(photo_id)
             if photo is None:
-                err_ = PhotoNotFoundError(photo_id)
-                self.logger.exception(err_.message)
+                raise PhotoNotFoundError(photo_id)
+            
+            # После удаления файла вызываем базовый метод для удаления записи
+            # Важно: передаём ту же сессию, чтобы операция была атомарной
+            self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
 
-                raise err_
+            # Удаляем файл
+            file_path = os.path.join(self._storage_path, photo.file_path)
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
-            # 4. Запоминаем путь к файлу до удаления записи
-            file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
+            # # Удаляем запись через базовый метод
+            # self._delete_entity(photo_id, sess)
 
-            # 5. Пытаемся удалить файл
-            try:
-                if os.path.exists(file_path_to_delete):
-                    os.remove(file_path_to_delete)
-                    self.logger.debug(f"Удалён файл {file_path_to_delete}")
+            # # удаляем запись
+            # repo.delete(photo)
 
-                    # попытка уделения папки для хранения фото от удалённого приёма
-                    # Проверяем, не стала ли родительская папка пустой
-                    parent_dir = os.path.dirname(file_path_to_delete)
-                    if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-                        try:
-                            os.rmdir(parent_dir)
-                            self.logger.debug(f"Удалена пустая папка {parent_dir}")
+             
+            # # 2. Получаем репозиторий фотографий
+            # repo = self._get_repo(sess)
+            
+            # # 3. Получаем фотографию по ID
+            # photo = repo.get_by_id(photo_id)
+            # if photo is None:
+            #     err_ = PhotoNotFoundError(photo_id)
+            #     self.logger.exception(err_.message)
 
-                        except OSError as e:
-                            self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+            #     raise err_
+
+            # # 4. Запоминаем путь к файлу до удаления записи
+            # file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
+
+            # # 5. Пытаемся удалить файл
+            # try:
+            #     if os.path.exists(file_path_to_delete):
+            #         os.remove(file_path_to_delete)
+            #         self.logger.debug(f"Удалён файл {file_path_to_delete}")
+
+            #         # попытка уделения папки для хранения фото от удалённого приёма
+            #         # Проверяем, не стала ли родительская папка пустой
+            #         parent_dir = os.path.dirname(file_path_to_delete)
+            #         if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+            #             try:
+            #                 os.rmdir(parent_dir)
+            #                 self.logger.debug(f"Удалена пустая папка {parent_dir}")
+
+            #             except OSError as e:
+            #                 self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
                             
-            except Exception as e:
-                self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
-                raise PhotoFileError(file_path_to_delete, "удаление", str(e))
+            # except Exception as e:
+            #     self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
+            #     raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
-            # 6. Если файл успешно удалён (или не существовал), удаляем запись
-            repo.delete(photo)  # Удаляем запись
-            self.logger.info(f"Удалена запись фото id={photo_id}")
+            # # 6. Если файл успешно удалён (или не существовал), удаляем запись
+            # repo.delete(photo)  # Удаляем запись
+            # self.logger.info(f"Удалена запись фото id={photo_id}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы (не требуют сессии)
@@ -3336,6 +4120,7 @@ class PhotoService(
                 )
     
     # внутри класса PhotoService, после метода __init__ или в любом месте
+
     @AppLogger.get_instance(
         name='PhotoService',
         enable_file_logging='system',
@@ -3347,6 +4132,9 @@ class PhotoService(
 
         super().reload_config()
 
+        # from app.dependencies import get_appointment_service # оставить тут, так как циклы
+        # self._appointment_service = get_appointment_service()
+
         config = AppConfigManager.get_instance()
 
         new_path = config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
@@ -3355,3 +4143,11 @@ class PhotoService(
         self._ensure_storage_exists()  # создаём директорию для хранения,
 
         self.logger.info(f"Путь к фото обновлён: {self._storage_path}")
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_note_service(self) -> Optional['NoteService']:
+        return None

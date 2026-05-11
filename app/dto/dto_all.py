@@ -271,7 +271,7 @@ class PhotoDTO(BaseModel):
         ...     file_path="app_10/5_face.jpg",
         ...     description="Лицо"
         ... )
-    """
+    """ 
 
     model_config = ConfigDict(from_attributes=True)
 

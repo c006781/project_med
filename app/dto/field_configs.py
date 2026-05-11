@@ -32,7 +32,7 @@
 """
 
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # from app.dto.compute_fields import get_patient_full_name
 
@@ -43,16 +43,20 @@ from typing import Dict, Any
 # hidden	bool	Скрыть поле в форме (но виджет остаётся)
 # order	int	Порядок колонки в таблице (сортировка)
 # required	bool	Обязательное ли поле (пока не используется)
-# widget_type	str	Тип виджета: 'date', 'time', 'textarea', 'completer', 'completer_with_edit', 'photo_uploader'
+# widget_type	str Тип виджета: 'date', 'time', 'textarea', 'completer', 'completer_with_edit', 'photo_uploader'
 # virtual	bool	Виртуальное поле, не хранится в БД
 # compute	dict	Настройка вычисления виртуального поля (функция, аргументы)
 # init_from_extra	str/True	Ключ в extra_data, из которого нужно взять значение при переходе на страницу
 # choices	list	Список строк для выпадающего списка
 # choices_provider	str	Имя провайдера для автодополнения (например, 'note_service.get_choices')
-# source	str	(не используется) – для указания источника данных
-# autocomplete  bool -  включает автодополнение в таблице и форме (lkz QLineEdit)
-# is_note: str - Метка, что это виртуальное поле, +  имя поля в DTO и колонки в БД, содержащего внешний ключ на заметку
-# updatable bool - полее не должно обновляться автоматически
+# source	str	    (не используется) – для указания источника данных
+# autocomplete  bool    включает автодополнение в таблице и форме (lkz QLineEdit)
+# is_note   str     Метка, что это виртуальное поле, +  имя поля в DTO и колонки в БД, содержащего внешний ключ на заметку
+# updatable     bool    полее не должно обновляться автоматически
+# eager_load    bool     подгружать вместе с другими полями.
+# eager_load_detail    bool     подгружать вместе с другими полями. (для одиночных запросов)
+# counts    str     явно указана явная метка – отношение для подсчёта
+
 # Параметр 'widget_type':
 #     'textarea' — создаёт QTextEdit для многострочного текста (вместо обычного QLineEdit).
 #     'date' — используется как подсказка, чтобы создать QDateEdit (хотя тип поля datetime.date сам по себе ведёт к этому, но widget_type может явно указать виджет даты).
@@ -158,7 +162,7 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
 # Словарь для сущности "Приём".
 APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
     # Поле "id" – первичный ключ приёма.
-    'id'            : {
+    'id'            : { 
         'title'         : 'ID',     # Заголовок.
         'editable'      : False,    # Не редактируется.
         'hidden'        : True,     # Скрыто в формах.
@@ -295,6 +299,8 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable'      : True,             # Можно редактировать (добавлять/удалять фото).
         'virtual'       : True,             # Виртуальное – обрабатывается специальным виджетом PhotoUploaderWidget.
         'widget_type'   : 'photo_uploader', # Кастомный виджет для работы с фото.
+        'eager_load'    : False,            # для списков
+        'eager_load_detail': True,          # для одиночных запросов
     },
     # Виртуальное поле "has_photos" – индикатор наличия фото (для отображения в таблице).
     'has_photos'    : {
@@ -303,10 +309,12 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'virtual'       : True,
         'order'         : 0,                # Делаем эту колонку самой левой (необязательно).
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
+        'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
         'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
             'func'  : lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
             'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно).
         },
+        'counts': 'photos',                # явная метка – отношение для подсчёта
     },
 }
 
@@ -355,3 +363,28 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         'updatable'     : True,         # полее не должно обновляться автоматически
     },
 }
+
+
+# Импортируем модели (циклических импортов не будет, так как импорт внутри функции не выполняется до вызова)
+from app.database.database_shema.clinic import Patient, Appointment
+
+# Словарь соответствия модель -> конфигурация полей
+MODEL_CONFIG_MAP: Dict = {
+    Patient: PATIENT_CONFIG,
+    Appointment: APPOINTMENT_CONFIG,
+}
+
+def get_note_fields(field_configs: Dict[str, Dict[str, Any]]) -> List[str]:
+    """
+    Возвращает список имён полей, помеченных как is_note, из переданной конфигурации.
+
+    :param field_configs: Словарь конфигурации полей (например, PATIENT_CONFIG)
+    :return: Список строк – имена полей, у которых установлен ключ 'is_note' (независимо от значения, но обычно строка)
+    """
+    note_fields = []
+    for name, cfg in field_configs.items():
+        id_field = cfg.get('is_note')
+        if id_field:
+            note_fields.append(id_field)   # возвращаем 'description_id', а не 'description_text'
+
+    return note_fields

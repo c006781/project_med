@@ -1,4 +1,17 @@
 # interfaces/gui/gui_window/pages/dynamic_list_page.py
+"""
+Модуль универсальной страницы списка (DynamicListPage).
+
+Предоставляет компонент для отображения табличных данных с поддержкой:
+    - Обычного режима (только просмотр, с переходом по двойному клику).
+    - Режима редактирования (inline-редактирование, чекбоксы, массовые операции).
+    - Фильтрации через заголовки столбцов (AdvancedFilterMixin).
+    - Программного управления через интерфейс IDynamicListController.
+
+Экспортируемые классы:
+    - DynamicListPage: Основная страница списка.
+    - Вспомогательные миксины (не предназначены для прямого использования).
+"""
 
 from functools import wraps
 
@@ -13,11 +26,13 @@ from typing import (
     get_args,
     get_origin
 )
+
 import datetime 
 from copy import deepcopy
 
 from app.utils.logger.logger import AppLogger
 
+from interfaces.gui.gui_window.controllers.list_controller import IDynamicListController
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table
@@ -30,15 +45,15 @@ from interfaces.gui.gui_window.widgets.advanced_filter_proxy_model import Advanc
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     CompleterStringDelegate,
     DatePickerDelegate,
-    DateStringDelegate,
+    # DateStringDelegate,
     StringDelegate,
-    DateDelegate,
+    # DateDelegate,
     TextPopupDelegate,
-    TimeDelegate,
+    # TimeDelegate,
     BoolDelegate,
     ComboBoxDelegate,
     TimePickerDelegate,
-    TimeStringDelegate,
+    # TimeStringDelegate,
 )
 
 # from interfaces.gui.gui_window.widgets.delegate.str_delegate import StringDelegate
@@ -174,7 +189,7 @@ def preserve_selection(
     store_method_name='_store_current_row', 
     restore_method_name='_restore_current_row',
     label: Optional[str] = None
-):
+) -> Callable:
     """
     Декоратор для сохранения и восстановления текущей строки в таблице.
 
@@ -182,13 +197,15 @@ def preserve_selection(
     Декоратор сохраняет текущую строку (`store_method_name`), выполняет декорируемый метод,
     затем восстанавливает строку (`restore_method_name`). Если методы не найдены, декоратор не влияет на работу.
 
-    Параметры:
-        store_method_name (str): Имя метода, возвращающего индекс текущей строки в прокси-модели.
-        restore_method_name (str): Имя метода, принимающего индекс строки (в прокси-модели) и восстанавливающего выделение.
-        label (Optional[str]): Произвольная строка – если указана, используется как ключ в хранилище
-            (вместо автоматического "ClassName.method_name").
+    Args:
+        store_method_name (str): Имя метода, возвращающего индекс текущей строки
+            в прокси-модели (по умолчанию '_store_current_row').
+        restore_method_name (str): Имя метода, принимающего индекс строки
+            (в прокси-модели) и восстанавливающего выделение.
+        label (Optional[str]): Если указана, используется как ключ в хранилище
+            вместо автоматического "ClassName.method_name".
 
-    Возвращает:
+    Returns:
         Callable: Декоратор функции.
 
     Пример:
@@ -403,14 +420,18 @@ class AdvancedFilterMixin:
         level = AppLogger._parse_log_level('DEBUG')
     )
     # Переопределяем on_filter_requested (из ListFilterMixin) для поддержки новых операторов
-    def on_filter_requested(self, column, logic, conditions):
+    def on_filter_requested(self, column, logic, conditions) -> None:
         """
         Применяет сложный фильтр к прокси-модели.
 
-        Параметры:
+        Args:
             column (int): Номер столбца.
             logic (str): 'AND' или 'OR' – логика объединения условий.
-            conditions (list): Список словарей с условиями (operator, value, value2).
+            conditions (list): Список словарей с условиями
+                (operator, value, value2).
+
+        Returns:
+            None
         """
 
         self.proxy_model.set_column_filter(column, logic, conditions)
@@ -670,8 +691,13 @@ class SelectionDialogMixin:
         """
         Показывает диалог выбора области для массового действия.
 
-        Возвращает SelectionChoice с выбранным типом и множеством ID.
+        Args:
+            action_name (str): Название действия (отображается в диалоге).
+
+        Returns:
+            SelectionChoice: Объект с выбранным типом и множеством ID.
         """
+
         selected_ids = self._get_selected_ids_from_view()          # обычное выделение
         checkbox_ids = self._get_selected_checkbox_ids()           # чекбоксы
 
@@ -957,7 +983,8 @@ class CheckboxSelectionMixin:
         if self.selected_dto:
             try:
                 fresh_dto = self.service.get_by_id(self.selected_dto.id)
-                self.update_details(fresh_dto)
+                if hasattr(self, 'update_details'):
+                    self.update_details(fresh_dto)
 
             except Exception as e:
                 self.logger.exception(f"Ошибка обновления правой панели после отмены: {e}")
@@ -1330,13 +1357,17 @@ class ListDataMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _load_data(self):
+    def _load_data(self) -> None:
         """
-        Загружает данные из лоадера, обновляет модель и сбрасывает цвета строк.
+        Загружает данные из `loader_func`, обновляет модель, сбрасывает цвета строк,
+        выделение и сохраняет копию исходных данных в `self.original_data`.
 
         Сохраняет копию исходных данных в `self.original_data`.
         Устанавливает флаг `self._data_loaded = True`.
         Вызывает `_clear_selection()` и `_update_save_button_state()`.
+            
+        Returns:
+            None
         """
 
         # Сохраняем ID выбранного DTO (если есть)
@@ -1422,15 +1453,23 @@ class ListDataMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def on_enter(self, extra_data=None):
+    def on_enter(self, extra_data=None) -> None:
         """
         Вызывается при переходе на страницу. Если `extra_data` отличается от текущего,
         перезагружает данные. Поддерживает выделение строки по `select_id`.
 
-        Параметры:
+        Args:
             extra_data (Any, optional): Дополнительные данные, например `{'patient_id': 123}`
                 для фильтрации списка. Если `extra_data` отличается от сохранённого,
                 данные перезагружаются.
+                Поддерживаются ключи:
+                    - 'select_id' (int): ID записи для выделения после загрузки.
+                    - 'return_to_page' (str): Страница для возврата.
+                    - 'return_field' (str): Поле для установки значения при возврате.
+                    - Любые другие ключи сохраняются в self._context_params.
+
+        Returns:
+                None
 
         Примечание:
             Если в `extra_data` передан ключ `select_id`, то после загрузки данных
@@ -1960,8 +1999,15 @@ class ListSaveMixin:
     )
     def _save_deleted(self):
         """
+        Удаляет записи, ID которых находятся в множестве `self.deleted_ids`.
+
         Обновляет изменённые записи (ID из `self.modified_ids`) через сервис.
         После обновления обновляет DTO в модели и сбрасывает пометку modified.
+
+        После успешного удаления очищает `self.deleted_ids`.
+
+        Returns:
+            None
         """
         
         for entity_id in list(self.deleted_ids):
@@ -2034,10 +2080,43 @@ class ListSaveMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _save_new(self):
+    def _save_new(self) -> None:
         """
-        Создаёт новые записи (строки из `self.new_rows`) через сервис.
-        Перед созданием применяет черновики через `_apply_draft_to_new_dto`.
+        Сохраняет в базу данных все новые строки, добавленные в режиме редактирования.
+
+        Метод перебирает все строки, индекс которых сохранён в множестве `self.new_rows`.
+        Для каждой такой строки:
+            1. Извлекает DTO из модели.
+            2. Проверяет обязательные поля через `_validate_required_fields`.
+            3. Применяет черновики (если они есть) через `_apply_draft_to_new_dto`.
+            4. Вызывает `self.service.create(dto)` для сохранения в БД.
+            5. Обновляет DTO в модели только что созданной записью (с присвоенным ID).
+            6. Логирует успешное создание.
+
+        После обработки всех новых строк множество `self.new_rows` очищается.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: Если при проверке обязательных полей обнаруживается,
+                что какое-либо поле, помеченное в `field_configs` как `required=True`,
+                отсутствует в DTO или содержит пустую строку.
+            Любое другое исключение, возникшее при вызове `service.create(dto)`,
+                пробрасывается наверх (например, ошибка целостности БД,
+                нарушение внешнего ключа и т.п.).
+
+        Note:
+            Перед созданием записи метод вызывает `_validate_required_fields(dto)`,
+            который может выбросить `ValueError` с перечнем незаполненных
+            обязательных полей. Это предотвращает сохранение неполных данных.
+
+            После успешного создания новой записи в БД метод обновляет
+            соответствующий DTO в модели, чтобы у строки появился реальный
+            (положительный) ID и исходные данные для last_changes.
+
+            Метод не выполняет автоматический commit – транзакция управляется
+            вышестоящим методом `_save_changes`.
         """
         
         for row in list(self.new_rows):
@@ -2293,7 +2372,8 @@ class ListUIMixin:
         # Кнопка сохранения (отдельная, показывается в режиме редактирования)
         self.save_changes_btn = setup_button(
             name="Сохранить изменения", 
-            fun_connect=self._save_changes, 
+            # fun_connect=self._save_changes, 
+            fun_connect=self.save_all_changes, 
             set_flags=False
         )
         # self.save_changes_btn = QPushButton("Сохранить изменения")
@@ -2461,13 +2541,16 @@ class ListUIMixin:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_header_settings_table(self, header):
+    def _setup_header_settings_table(self, header: QHeaderView) -> None:
         """
         Настраивает поведение заголовка: разрешает изменение размера столбцов,
         делает последний столбец растягивающимся.
 
-        Параметры:
+        Args:
             header (QHeaderView): Заголовок таблицы.
+
+        Returns:
+            None
         """
         
         # header.setStretchLastSection(True) # Растянуть последний столбец
@@ -2748,7 +2831,11 @@ class ListInlineOpsMixin:
         - для контекстных параметров (например, patient_id) – значения из _context_params
 
         Временный ID генерируется отрицательным числом.
+
+        Returns: 
+            None
         """
+
         defaults = {}
         for col_info in self.columns:
             field_name = col_info['name']
@@ -2967,6 +3054,7 @@ class DynamicListPage(
     AdvancedFilterMixin,
     ListInlineOpsMixin,
     BasePage,
+    IDynamicListController, # Интерфейс для управления динамическим списком записей
 ): 
     """
     Универсальная страница списка с поддержкой inline-редактирования, фильтрации,
@@ -3294,7 +3382,45 @@ class DynamicListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _cancel_rows(self, entity_ids:list):
+    def _cancel_rows(self, entity_ids:list) -> None:
+        """
+        Отменяет изменения для списка указанных идентификаторов сущностей.
+
+        Метод последовательно обрабатывает каждый ID из переданного списка:
+            1. Сначала отменяет изменения для всех ID, кроме текущего выбранного
+            (если он есть в списке). Для этих вызовов правые панели не обновляются.
+            2. Затем, если текущий выбранный ID присутствует в списке, отменяет
+            изменения для него с принудительным обновлением правой панели.
+            3. Если текущий выбранный ID не был отменён, но после отмены других
+            строк его DTO мог измениться, перезагружает его данные из БД
+            и обновляет правую панель (если она существует).
+
+        Args:
+            entity_ids (list): Список идентификаторов сущностей (ID записей),
+                            для которых необходимо отменить изменения.
+                            Может содержать как положительные (существующие),
+                            так и отрицательные (временные, новые) ID.
+
+        Returns:
+            None
+
+        Note:
+            Для существующих записей (id > 0) метод выполняет:
+                - очистку черновиков,
+                - перезагрузку свежего DTO из БД,
+                - обновление модели и original_data,
+                - удаление ID из множеств modified_ids и deleted_ids,
+                - обновление цвета строки,
+                - (опционально) обновление правой панели через update_details.
+
+            Для новых записей (id < 0) метод удаляет строку из модели,
+            очищает черновики и сбрасывает выделение.
+
+            Если у класса есть метод update_details (как у AppointmentListPage),
+            он будет вызван; в базовом классе DynamicListPage проверка hasattr
+            предотвращает ошибку.
+        """
+
         if not entity_ids:
             return
         
@@ -3317,7 +3443,8 @@ class DynamicListPage(
         elif self.selected_dto is not None:
             try:
                 fresh_dto = self.service.get_by_id(self.selected_dto.id)
-                self.update_details(fresh_dto)
+                if hasattr(self, 'update_details'):
+                    self.update_details(fresh_dto)
             except Exception as e:
                 self.logger.exception(f"Ошибка обновления правой панели после отмены: {e}")
 
@@ -3833,18 +3960,131 @@ class DynamicListPage(
     def _on_inline_action_selected(self, index):
         """Обрабатывает выбор действия в режиме редактирования."""
         if index == 1:  # Добавить строку
-            self._add_inline_row()
+            # self._add_inline_row()
+            self.add_row()
         elif index == 2:  # Удалить строку
             # if self.selected_dto:
-            self._delete_with_selection_prompt()
+            # self._delete_with_selection_prompt()
+            self.delete_selected_rows()
                 # self._mark_selected_for_deletion()
             # else:
             #     QMessageBox.warning(self, "Внимание", "Выберите строку для удаления.")
         
         elif index == 3:  # Отменить изменения
-            self._cancel_with_selection_prompt()
+            # self._cancel_with_selection_prompt()
+            self.cancel_selected_rows_changes()
 
         # Сбрасываем индекс на заглушку (0), но блокируем сигнал, чтобы не вызывать снова
         self.inline_action_combo.blockSignals(True)
         self.inline_action_combo.setCurrentIndex(0)
         self.inline_action_combo.blockSignals(False)
+
+    # ----------------------------------------------------------------------
+    # Реализация методов IDynamicListController
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def add_row(self) -> None:
+        """
+        Добавляет новую пустую строку в таблицу (делегирует _add_inline_row).
+
+        Returns:
+            None
+        """
+            
+        self._add_inline_row()
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def delete_selected_rows(self) -> None:
+        """Удаляет выбранные строки (делегирует _delete_with_selection_prompt)."""
+        self._delete_with_selection_prompt()
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def cancel_selected_rows_changes(self) -> None:
+        """Отменяет изменения выбранных строк (делегирует _cancel_with_selection_prompt)."""
+        self._cancel_with_selection_prompt()
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def save_all_changes(self) -> bool:
+        """
+        Сохраняет все изменения (делегирует _save_changes).
+        
+        Returns: 
+            bool – True при успешном сохранении, иначе False.
+        """
+
+        return self._save_changes(if_question=True)
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def refresh_data(self) -> None:
+        """Перезагружает данные из БД (делегирует _load_data)."""
+        self._load_data()
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def get_selected_entity_ids(self) -> Set[int]:
+        """
+        Возвращает множество ID сущностей, выбранных в таблице.
+        Объединяет обычное выделение и чекбоксы.
+
+        Returns: 
+            Set[int] – Множество ID выбранных сущностей.
+        """
+
+        selected = self._get_selected_ids_from_view()
+        checkbox = self._get_selected_checkbox_ids()
+
+        return selected.union(checkbox)
+
+    @AppLogger.get_instance(
+        name = 'DynamicListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def is_selection_empty(self) -> bool:
+        """Проверяет, есть ли выбранные строки."""
+        return len(self.get_selected_entity_ids()) == 0

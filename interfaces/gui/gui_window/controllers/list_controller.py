@@ -4,11 +4,16 @@
 Определяет публичные методы управления списком (добавление, удаление, отмена, сохранение).
 """
 
-from abc import ABC, abstractmethod
+from abc import ABC, ABCMeta, abstractmethod
 from typing import Set
+from PySide6.QtCore import QObject
 
+# Создаём метакласс, совместимый с QObjectMeta и ABCMeta
+class QABCMeta(type(QObject), ABCMeta):
+    """Метакласс, объединяющий метакласс QObject и ABCMeta."""
+    pass
 
-class IDynamicListController(ABC):
+class IDynamicListController(ABC, metaclass=QABCMeta):
     """
     Интерфейс для управления динамическим списком записей.
     Используется для инкапсуляции логики работы с таблицей.

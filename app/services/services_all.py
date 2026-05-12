@@ -426,6 +426,46 @@ class BaseService(
         AppConfigManager.add_change_listener(self._on_config_changed)
 
     @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_field_metadata(self) -> List[Dict[str, Any]]:
+        """
+        Возвращает метаданные полей сущности для использования в парсерах и других динамических компонентах.
+
+        Каждый элемент словаря содержит:
+            - name (str): Имя поля в DTO.
+            - title (str): Заголовок (человекочитаемое имя).
+            - widget_type (str): Тип виджета (например, 'textarea', 'date').
+            - is_note (str): Связь с заметкой (если есть).
+            - required (bool): Обязательное ли поле.
+            - editable (bool): Доступно ли редактирование.
+            - hidden (bool): Скрыто ли поле в формах.
+
+        Returns:
+            List[Dict[str, Any]]: Список метаданных для всех полей, определённых в field_configs.
+        """
+            
+        metadata = []
+        for field_name, config in self._field_configs.items():
+            metadata.append(
+                {
+                    'name': field_name,
+                    'title': config.get(
+                        'title', field_name.replace('_', ' ').title()
+                    ),
+                    'widget_type': config.get('widget_type'),
+                    'is_note': config.get('is_note'),
+                    'required': config.get('required', False),
+                    'editable': config.get('editable', True),
+                    'hidden': config.get('hidden', False),
+                    # можно добавить другие параметры по необходимости
+                }
+            )
+        return metadata
+
+    @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
@@ -1513,7 +1553,11 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create(self, dto: DTOType) -> DTOType:
+    def create(
+        self, 
+        dto: DTOType, 
+        session: Optional[Session] = None,
+    ) -> DTOType:
         """
         Создаёт новую запись из DTO.
 
@@ -1533,7 +1577,11 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def update(self, dto: DTOType) -> DTOType:
+    def update(
+        self, 
+        dto: DTOType,
+        session: Optional[Session] = None
+    ) -> DTOType:
         """
         Обновляет существующую запись.
 
@@ -2631,7 +2679,11 @@ class PatientService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def create(self, dto: PatientDTO) -> PatientDTO:
+    def create(
+        self, 
+        dto: PatientDTO, 
+        session: Optional[Session] = None,
+    ) -> PatientDTO:
         """
         Универсальный метод создания, вызывающий create_patient.
         Необходим для совместимости с DynamicEditPage.
@@ -2640,7 +2692,10 @@ class PatientService(
         :return: DTO, содержащий информацию о созданном пациенте
         :rtype: PatientDTO
         """
-        return self.create_patient(dto)
+        return self.create_patient(
+            dto,
+            session=session,
+        )
 
     @AppLogger.get_instance(
         name = 'PatientService',
@@ -2650,13 +2705,20 @@ class PatientService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def update(self, dto: PatientDTO) -> PatientDTO:
+    def update(
+        self, 
+        dto: PatientDTO, 
+        session: Optional[Session] = None, 
+    ) -> PatientDTO:
         """
         Универсальный метод обновления, вызывающий update_patient.
         Возвращает обновленный объект PatientDTO.
         """
 
-        return self.update_patient(dto)
+        return self.update_patient(
+            dto,
+            session=session,
+        )
 
     def reload_config(self) -> None:
         super().reload_config()
@@ -2845,7 +2907,10 @@ class NoteService(
         :rtype: AppointmentNoteDTO
         """
         # return self.create_note(dto.text)
-        return self._create_entity(dto, session)
+        return self._create_entity(
+            dto,
+            session=session,
+        )
     
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -2871,7 +2936,12 @@ class NoteService(
         # return self.update_note(dto.id, dto.text)
         if dto.id is None:
             raise ValueError("ID заметки не указан")
-        return self._update_entity(dto, dto.id, session)
+        
+        return self._update_entity(
+            dto,
+            dto.id, 
+            session=session,
+        )
     
     # ----------------------------------------------------------------------
     # Специфические методы сервиса
@@ -2939,7 +3009,10 @@ class NoteService(
         
         # dto = AppointmentNoteDTO(text=text)
         # return self.create(dto, session)
-        return self.create(AppointmentNoteDTO(text=text), session)
+        return self.create(
+            AppointmentNoteDTO(text=text), 
+            session
+        )
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -3680,7 +3753,11 @@ class AppointmentService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def create(self, dto: AppointmentDTO) -> AppointmentDTO:
+    def create(
+        self, 
+        dto: AppointmentDTO, 
+        session: Optional[Session] = None,
+    ) -> AppointmentDTO:
         """
         Создаёт приём из переданных данных.
 
@@ -3703,7 +3780,8 @@ class AppointmentService(
         # вызываем метод create_appointment для создания приёма
         return self.create_appointment(
             dto, 
-            note_text=note_text
+            note_text=note_text,
+            session=session,
         )
 
     @AppLogger.get_instance(
@@ -3714,7 +3792,11 @@ class AppointmentService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def update(self, dto: AppointmentDTO) -> AppointmentDTO:
+    def update(
+        self, 
+        dto: AppointmentDTO, 
+        session: Optional[Session] = None, 
+    ) -> AppointmentDTO:
         """
         Обновляет существующий приём.
 
@@ -3730,13 +3812,17 @@ class AppointmentService(
         :raises AppointmentNotFoundError: если приём с указанным ID не найден
         :raises ValueError: если ID приёма не указан
         """
-
+        
         # получаем текст заметки из поля dto, если он указан
         note_text = getattr(dto, 'note_text', None)
 
         # вызываем метод update_appointment для обновления приёма
         # и передаем параметр note_text в него
-        return self.update_appointment(dto, note_text=note_text)
+        return self.update_appointment(
+            dto, 
+            note_text=note_text,
+            session=session,
+        )
 
     # ----------------------------------------------------------------------
     # Переопределение методов получения данных с подгрузкой связей

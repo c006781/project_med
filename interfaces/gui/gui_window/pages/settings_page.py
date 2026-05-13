@@ -461,7 +461,8 @@ class SettingsPage(BasePage):
         self.check_token_btn.clicked.connect(self._check_token)
         self.check_path_btn.clicked.connect(self._check_remote_path)
 
-        self.log_dir_edit.textChanged.connect(self._update_log_folder_button)
+        # self.log_dir_edit.textChanged.connect(self._update_log_folder_button)
+        self.log_dir_edit.textChanged.connect(lambda: self._update_log_folder_button())
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -699,7 +700,7 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _update_log_folder_button(self):
+    def _update_log_folder_button(self, text: str = None):
         """Обновляет текст кнопки с путём к папке логов."""
         log_dir = self.log_dir_edit.text().strip()
         if not log_dir:

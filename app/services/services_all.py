@@ -227,7 +227,7 @@ from app.utils.filtering.filtering import apply_filters, apply_post_filters
 
 # Сторонние библиотеки
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import selectinload
 
@@ -430,15 +430,227 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _apply_filters_to_query(
+        self,
+        query: Query,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        fuzzy_threshold: int = 60,
+    ) -> Tuple[Query, List[Tuple]]:
+        """
+        Применяет список фильтров к запросу и возвращает кортеж (query, post_filters).
+
+        Args:
+            query (Query): Исходный запрос SQLAlchemy.
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
+            fuzzy_threshold (int): Порог для нечёткого поиска.
+
+        Returns:
+            Tuple[Query, List[Tuple]]: Модифицированный запрос и список пост-фильтров.
+        """
+        if not filters:
+            return query, []
+        from app.utils.filtering.filtering import apply_filters
+        return apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _apply_order_by(
+        self,
+        query: Query,
+        order_by: Optional[List] = None,
+    ) -> Query:
+        """
+        Применяет сортировку к запросу.
+
+        Args:
+            query (Query): Исходный запрос SQLAlchemy.
+            order_by (Optional[List]): Список имён полей для сортировки.
+                Поле может начинаться с '-' для убывания.
+
+        Returns:
+            Query: Модифицированный запрос.
+        """
+        if not order_by:
+            return query
+
+        order_clauses = []
+        for field_spec in order_by:
+            if field_spec.startswith('-'):
+                field_name = field_spec[1:]
+                order_clauses.append(getattr(self._model_class, field_name).desc())
+            else:
+                order_clauses.append(getattr(self._model_class, field_spec).asc())
+        return query.order_by(*order_clauses)
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_total_count(
         self,
         filters: Optional[List[Dict[str, Any]]] = None,
         session: Optional[Session] = None
     ) -> int:
-        """Возвращает общее количество записей с учётом фильтров (без загрузки данных)."""
+        """
+        Возвращает общее количество записей с учётом фильтров (без загрузки данных).
+
+        Args:
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
+            session (Optional[Session]): Опциональная внешняя сессия.
+
+        Returns:
+            int: Количество записей, удовлетворяющих фильтрам.
+        """
         with self._session_scope(session) as sess:
-            repo = self._get_repo(sess)
-            return repo.count(filters=filters)
+            # repo = self._get_repo(sess)
+            # return repo.count(filters=filters)
+
+            query = sess.query(self._model_class)
+            query, post_filters = self._apply_filters_to_query(query, filters)
+            # post_filters не влияют на количество (только на выборку после загрузки)
+            return query.count()
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_page_filtered(
+        self,
+        offset: int,
+        limit: int,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None,
+        relations: Optional[List] = None,
+        fuzzy_threshold: int = 60,
+        session: Optional[Session] = None,
+    ) -> Tuple[List[DTOType], int]:
+        """
+        Возвращает страницу записей с учётом фильтров, сортировки и подгрузки связей,
+        а также общее количество записей (без пагинации).
+
+        Args:
+            offset (int): Смещение (сколько записей пропустить).
+            limit (int): Максимальное количество записей на странице.
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
+            order_by (Optional[List]): Список полей для сортировки.
+            relations (Optional[List]): Список имён отношений для жадной подгрузки.
+            fuzzy_threshold (int): Порог схожести для нечёткого поиска.
+            session (Optional[Session]): Опциональная внешняя сессия.
+
+        Returns:
+            Tuple[List[DTOType], int]: Кортеж (список DTO на странице, общее количество).
+        """
+
+        with self._session_scope(session) as sess:
+            base_query = sess.query(self._model_class)
+
+            # Применяем фильтры (получаем query и пост-фильтры)
+            filtered_query, post_filters = self._apply_filters_to_query(base_query, filters, fuzzy_threshold)
+
+            # Общее количество до применения пагинации
+            total = filtered_query.count()
+
+            # Применяем сортировку
+            ordered_query = self._apply_order_by(filtered_query, order_by)
+
+            # Применяем жадную подгрузку
+            loaded_query = self._apply_eager_loading(ordered_query, relations)
+
+            # Пагинация
+            items = loaded_query.offset(offset).limit(limit).all()
+
+            # Пост-фильтры (например, нечёткий поиск) применяем уже к загруженным объектам
+            if post_filters:
+                # from app.utils.filtering.filtering import apply_post_filters
+                items = apply_post_filters(items, post_filters, self._model_class)
+
+            # Пост-обработка (например, добавление временных атрибутов для подсчётов)
+            items = self._post_process_items(items, sess)
+
+            # Преобразование в DTO
+            dtos = self.get_dtos(items)
+            return dtos, total
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_page_filtered_exact(
+        self,
+        offset: int,
+        limit: int,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        order_by: Optional[List] = None,
+        relations: Optional[List] = None,
+        fuzzy_threshold: int = 60,
+        session: Optional[Session] = None,
+    ) -> Tuple[List[DTOType], int]:
+        """
+        Возвращает страницу записей с точным учётом пост-фильтров (включая fuzzy).
+
+        **Внимание:** этот метод загружает **все** записи, подходящие под SQL-фильтры,
+        затем применяет пост-фильтры в памяти и только после этого выполняет пагинацию.
+        На больших объёмах данных (тысячи записей) может быть медленным.
+        Рекомендуется использовать только для небольших таблиц или когда точное
+        количество критично, а объём данных не превышает нескольких тысяч строк.
+
+        Args:
+            offset (int): Смещение (сколько записей пропустить).
+            limit (int): Максимальное количество записей на странице.
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров (может включать fuzzy).
+            order_by (Optional[List]): Список полей для сортировки.
+            relations (Optional[List]): Список имён отношений для жадной подгрузки.
+            fuzzy_threshold (int): Порог схожести для нечёткого поиска.
+            session (Optional[Session]): Опциональная внешняя сессия.
+
+        Returns:
+            Tuple[List[DTOType], int]: Кортеж (список DTO на странице, точное общее количество).
+        """
+        with self._session_scope(session) as sess:
+            base_query = sess.query(self._model_class)
+
+            # Применяем SQL-фильтры (без пост-фильтров)
+            filtered_query, post_filters = self._apply_filters_to_query(base_query, filters, fuzzy_threshold)
+
+            # Если нет пост-фильтров – используем обычный get_page_filtered (быстрее)
+            if not post_filters:
+                return self.get_page_filtered(offset, limit, filters, order_by, relations, fuzzy_threshold, session)
+
+            # ---------- Точный режим с пост-фильтрами ----------
+            # Применяем сортировку (сортировка по SQL-столбцам, но результат после пост-фильтров
+            # может быть не полностью отсортирован – это особенность fuzzy)
+            ordered_query = self._apply_order_by(filtered_query, order_by)
+
+            # Жадная подгрузка (если нужна для всех записей)
+            loaded_query = self._apply_eager_loading(ordered_query, relations)
+
+            # Загружаем все объекты (это может быть дорого)
+            all_items = loaded_query.all()
+
+            # Применяем пост-фильтры (например, fuzzy)
+            if post_filters:
+                from app.utils.filtering.filtering import apply_post_filters
+                all_items = apply_post_filters(all_items, post_filters, self._model_class)
+
+            total = len(all_items)
+
+            # Пагинация в памяти
+            paginated_items = all_items[offset:offset + limit]
+
+            # Пост-обработка (добавление временных атрибутов)
+            paginated_items = self._post_process_items(paginated_items, sess)
+
+            # Преобразование в DTO
+            dtos = self.get_dtos(paginated_items)
+
+            return dtos, total
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -1796,7 +2008,11 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _apply_eager_loading(self, query, relations: List[str] = None):
+    def _apply_eager_loading(
+        self, 
+        query, 
+        relations: List[str] = None
+    ):
         """
         Применяет eager loading к запросу.
 
@@ -1810,6 +2026,8 @@ class BaseService(
         Пример:
             query = self._apply_eager_loading(query)
         """
+        if not relations:
+            relations = self._get_relations_for_eager_loading()
         
         options = self._get_eager_loading_options(relations)
 
@@ -1869,6 +2087,7 @@ class BaseService(
         )
 
         with self._session_scope(session) as sess:
+
             query = sess.query(self._model_class)
 
             # Динамически подгружаем связи для виртуальных полей
@@ -1879,9 +2098,10 @@ class BaseService(
             )
             
             # apply_filters теперь возвращает кортеж
-            query, post_filters = apply_filters(
+            # query, post_filters = apply_filters(
+                # self._model_class, 
+            query, post_filters = self._apply_filters_to_query(
                 query, 
-                self._model_class, 
                 filters, 
                 fuzzy_threshold
             )
@@ -1961,34 +2181,36 @@ class BaseService(
             >>> page, total = service.get_page(offset=10, limit=25, order_by=['-date'])
             >>> print(f"Показаны записи 11-35 из {total}")
         """
-        
-        self.logger.debug(
-            f"Запрос страницы {self._model_class.__name__}: "
-            f"offset={offset}, "
-            f"limit={limit}, "
-            f"filters={filters}"
-        )
 
-        with self._session_scope(session) as sess:
-            repo = self._get_repo(sess)
+        return self.get_page_filtered(offset, limit, filters, order_by, relations, session=session)
+    
+        # self.logger.debug(
+        #     f"Запрос страницы {self._model_class.__name__}: "
+        #     f"offset={offset}, "
+        #     f"limit={limit}, "
+        #     f"filters={filters}"
+        # )
 
-            items = repo.get_page(
-                offset, 
-                limit, 
-                filters=filters,
-                order_by=order_by,
-                relations=relations,
-            )
-            total = repo.count(
-                filters=filters
-            )
+        # with self._session_scope(session) as sess:
+        #     repo = self._get_repo(sess)
 
-            items = self._post_process_items(items, sess) 
+        #     items = repo.get_page(
+        #         offset, 
+        #         limit, 
+        #         filters=filters,
+        #         order_by=order_by,
+        #         relations=relations,
+        #     )
+        #     total = repo.count(
+        #         filters=filters
+        #     )
 
-            # dtos = [self._dto_class.from_orm(item) for item in items]
-            dtos = self.get_dtos(items)
+        #     items = self._post_process_items(items, sess) 
 
-            return dtos, total
+        #     # dtos = [self._dto_class.from_orm(item) for item in items]
+        #     dtos = self.get_dtos(items)
+
+        #     return dtos, total
         
     @AppLogger.get_instance(
         name = 'BaseService',

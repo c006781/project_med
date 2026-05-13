@@ -1382,6 +1382,7 @@ class ListDataMixin:
         try:
             self.current_data = self.loader_func(self.current_extra) # Загружаем данные
             self.source_model.update_data(self.current_data) # Обновляем модель
+
             self.original_data = {i: deepcopy(dto) for i, dto in enumerate(self.current_data)}
 
             self.source_model.clear_row_colors() # Очищаем все установленные цвета

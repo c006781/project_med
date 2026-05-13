@@ -139,7 +139,10 @@ class DynamicTableModel(QAbstractTableModel):
     #     level = AppLogger._parse_log_level('DEBUG')
     # )
     def _get_field_name(self, column: int) -> str:
-        """Возвращает имя поля для данного индекса колонки или None."""
+        """
+        Возвращает имя поля для данного индекса колонки или None.
+        """
+
         return self._field_by_column.get(column)
 
     @AppLogger.get_instance(

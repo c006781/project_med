@@ -1108,17 +1108,32 @@ class UpdateMixin:
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     @Slot(str, str)
     def _on_update_available(self, new_version: str, release_url: str):
-        self.logger.debug(f"_on_update_available called: new_version={new_version}, url={release_url}")
+        self._auto_check = False   # сбрасываем флаг автоматической проверки
+
+        self.logger.debug(
+            f"_on_update_available called: "
+            f"new_version={new_version}, "
+            f"url={release_url}"
+        )
+
         msg = QMessageBox(self)
         msg.setWindowTitle("Доступно обновление")
         msg.setText(f"Доступна новая версия {new_version}\nВаша версия: {APP_VERSION}")
         msg.setInformativeText("Что вы хотите сделать?")
         download_btn = msg.addButton("Скачать и установить", QMessageBox.ActionRole)
+
         open_btn = msg.addButton("Открыть страницу релиза", QMessageBox.ActionRole)
         cancel_btn = msg.addButton("Отмена", QMessageBox.RejectRole)
+
         msg.setDefaultButton(cancel_btn)
         msg.exec()
-        print("Pending release data:", self.updater._pending_release_data if hasattr(self.updater, '_pending_release_data') else "None")
+
+        print(
+            "Pending release data:", 
+            self.updater._pending_release_data 
+            if hasattr(self.updater, '_pending_release_data') 
+            else "None"
+        )
 
         clicked = msg.clickedButton()
         if clicked == download_btn:
@@ -1148,6 +1163,10 @@ class UpdateMixin:
     )
     @Slot()
     def _on_no_update(self):
+        # При автоматической проверке не показываем сообщение
+        if getattr(self, '_auto_check', False):
+            self._auto_check = False
+            return
         QMessageBox.information(self, "Проверка обновлений", "У вас установлена последняя версия.")
 
     @AppLogger.get_instance(
@@ -1421,6 +1440,10 @@ class MainWindow(
         # Инициализация системы обновлений (собственный модуль)
         self._init_updater()
 
+        # Автоматическая проверка обновлений при старте (без показа сообщения "нет обновлений")
+        self._auto_check = True
+        self.updater.check_for_updates()
+
         # Определяем, существует ли файл конфигурации
         # from app.config.config_manager.manager import AppConfigManager
         config_manager = AppConfigManager.get_instance()
@@ -1453,6 +1476,9 @@ class MainWindow(
     )
     def check_for_updates(self):
         """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
+
+        self._auto_check = False   # ручная проверка – сообщение "нет обновлений" нужно показывать
+        
         if hasattr(self, 'updater'):
             self.updater.check_for_updates()
         else:

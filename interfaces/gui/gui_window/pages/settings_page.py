@@ -694,7 +694,11 @@ class SettingsPage(BasePage):
 
         self._update_log_folder_button()
 
-
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _update_log_folder_button(self):
         """Обновляет текст кнопки с путём к папке логов."""
         log_dir = self.log_dir_edit.text().strip()
@@ -703,6 +707,11 @@ class SettingsPage(BasePage):
         self.log_folder_btn.setText(log_dir)
         self.log_folder_btn.setToolTip("Нажмите, чтобы открыть папку логов\nПКМ – скопировать путь")
 
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _open_log_folder(self):
         """Открывает папку логов в системном файловом менеджере."""
         log_dir = self.log_dir_edit.text().strip()
@@ -732,6 +741,11 @@ class SettingsPage(BasePage):
         #     url = QUrl.fromLocalFile(log_dir)
         #     QDesktopServices.openUrl(url)
 
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _show_log_folder_context_menu(self, pos):
         """Показывает контекстное меню для кнопки пути логов."""
         log_dir = self.log_dir_edit.text().strip()
@@ -743,6 +757,11 @@ class SettingsPage(BasePage):
         copy_action.triggered.connect(lambda: self._copy_log_path(log_dir))
         menu.exec(self.log_folder_btn.mapToGlobal(pos))
 
+    @AppLogger.get_instance(
+        name='SettingsPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _copy_log_path(self, path: str):
         """Копирует переданный путь в буфер обмена."""
         # from PySide6.QtWidgets import QApplication

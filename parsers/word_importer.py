@@ -13,6 +13,7 @@
 
 import os
 import re
+import shutil
 import sys
 import uuid
 from datetime import date, datetime
@@ -437,6 +438,8 @@ class WordFileParser:
         self.field_metadata = field_metadata or {}
         self.required_fields = [] # возможно нужно разделить на ТБ к которым идёт обращение
 
+        self.temp_dir = None
+
         # self.column_mapping = self._build_mapping_from_config()
         if not field_metadata:
             # fallback – использовать стандартные названия столбцов
@@ -723,8 +726,11 @@ class WordFileParser:
         """
 
         images = []
-        temp_dir = os.path.join(os.path.dirname(self.file_path), "temp_images")
-        os.makedirs(temp_dir, exist_ok=True)
+        self.temp_dir = os.path.join(
+            os.path.dirname(self.file_path), 
+            "temp_images"
+        )
+        os.makedirs(self.temp_dir, exist_ok=True)
 
         for drawing in cell._element.findall('.//' + qn('w:drawing')):
             blip = drawing.find('.//' + qn('a:blip'))
@@ -736,7 +742,7 @@ class WordFileParser:
                         img = image_part.image
                         ext = img.ext
                         filename = f"{uuid.uuid4().hex}.{ext}"
-                        path = os.path.join(temp_dir, filename)
+                        path = os.path.join(self.temp_dir, filename)
 
                         with open(path, 'wb') as f:
                             f.write(img.blob)
@@ -906,7 +912,7 @@ def parse_one_file(
         ValueError: При ошибках структуры документа, отсутствии обязательных полей,
                     проблемах с датами и т.п.
     """
-
+    temp_dir = None
     temps_path = []
     try:
         parser = WordFileParser(
@@ -914,6 +920,8 @@ def parse_one_file(
             field_metadata=appointment_service.get_field_metadata()
         )
         patient_dto, rows = parser.parse()
+
+        temp_dir = parser.temp_dir
 
         for row in rows:
             if 'photos' in row and row['photos']:
@@ -1013,6 +1021,18 @@ def parse_one_file(
         for temp_path in temps_path:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
+
+        if temp_dir:
+            if os.path.exists(temp_dir):   
+                # try:
+                shutil.rmtree(
+                    temp_dir,
+                    ignore_errors=True
+                )
+                # except OSError as e:
+                #     # print(f"Ошибка при удалении папки: {e}") 
+                #     pass
+        
 
 
 # ----------------------------------------------------------------------

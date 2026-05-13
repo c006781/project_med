@@ -36,7 +36,7 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.controllers.list_controller import IDynamicListController
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
-from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table
+from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table, get_visible_row_range
 
 from interfaces.gui.gui_window.widgets.dynamic_table_model import DynamicTableModel
 from interfaces.gui.gui_window.widgets.filter_column import FilterBar
@@ -3240,6 +3240,131 @@ class RowOperationsMixin:
 
         self._update_save_button_state()
         self.table_view.viewport().update()
+
+
+class LazyLoadingMixin:
+    """Миксин для добавления ленивой загрузки в страницу списка."""
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._load_offset = 0
+        self._load_limit = 50          # размер страницы
+        self._buffer_extra = 5         # дополнительных строк за пределами видимости
+        self._is_loading = False
+        self._total_count = 0
+        self._current_filters = None   # дерево фильтров для сервиса
+        self._current_order_by = None  # список полей для сортировки
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def set_load_limit(self, limit: int):
+        self._load_limit = limit
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def set_buffer_extra(self, extra: int):
+        self._buffer_extra = extra
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def can_fetch_more(self) -> bool:
+        return self.source_model.can_fetch_more() and not self._is_loading
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _load_more(self, initial: bool = False):
+        if self._is_loading:
+            return
+        if not initial and not self.can_fetch_more():
+            return
+        self._is_loading = True
+        # абстрактный метод – будет реализован в DynamicListPage
+        self._do_load_page(self._load_offset, self._load_limit, self._current_filters, self._current_order_by)
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_load_finished(self, new_data: List[Any], total: int):
+        """Вызывается после успешной загрузки страницы."""
+        self._total_count = total
+        self.source_model.append_page(new_data)
+        self._load_offset += len(new_data)
+        self._is_loading = False
+        self._update_loading_state()
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_loading_state(self):
+        """Проверяет, нужно ли догрузить следующую страницу."""
+        if not self.table_view or not self.source_model:
+            return
+        first, last = get_visible_row_range(self.table_view)
+        if last < 0:
+            return
+        if last >= self.source_model.rowCount() - self._buffer_extra:
+            self._load_more()
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _setup_lazy_loading(self):
+        """Подключает сигналы таблицы для ленивой загрузки."""
+        self.table_view.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        self.table_view.installEventFilter(self)  # для обработки resizeEvent
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_scroll(self, value):
+        self._update_loading_state()
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def eventFilter(self, obj, event):
+        if obj == self.table_view and event.type() == event.Resize:
+            self._update_loading_state()
+        return super().eventFilter(obj, event)
+    
+    @AppLogger.get_instance(
+        name='LazyLoadingMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def refresh_data(self, reset: bool = True):
+        """Перезагружает данные с первой страницы."""
+        if reset:
+            self._load_offset = 0
+            self.source_model.clear()
+        self._load_more(initial=True)
 
 class DynamicListPage(
     CheckboxSelectionMixin,

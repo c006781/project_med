@@ -213,7 +213,7 @@ from app.exceptions import (
 #         pass #  raise # e # pass
 
 # try:
-from app.utils.filtering.filtering import apply_filters, apply_post_filters
+from app.utils.filtering.filtering import _build_filter_condition, apply_filters, apply_post_filters
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -508,13 +508,23 @@ class BaseService(
             int: Количество записей, удовлетворяющих фильтрам.
         """
         with self._session_scope(session) as sess:
-            # repo = self._get_repo(sess)
-            # return repo.count(filters=filters)
-
             query = sess.query(self._model_class)
-            query, post_filters = self._apply_filters_to_query(query, filters)
-            # post_filters не влияют на количество (только на выборку после загрузки)
+            if filters:
+                # from app.utils.filtering.filtering import _build_filter_condition
+                condition = _build_filter_condition(filters, self._model_class)
+                if condition is not True:
+                    query = query.filter(condition)
+                    
             return query.count()
+        # with self._session_scope(session) as sess:
+        #     # repo = self._get_repo(sess)
+        #     # return repo.count(filters=filters)
+
+        #     query = sess.query(self._model_class)
+        #     query, post_filters = self._apply_filters_to_query(query, filters)
+        #     # post_filters не влияют на количество (только на выборку после загрузки)
+        #     return query.count()
+
 
     @AppLogger.get_instance(
         name='BaseService',

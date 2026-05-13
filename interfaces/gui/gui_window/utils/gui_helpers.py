@@ -10,7 +10,7 @@ from app.utils.logger.logger import AppLogger
 
 from PySide6.QtWidgets import (
     # QStyledItemDelegate, 
-    QDateEdit, QDateTimeEdit, QTimeEdit, QWidget, QMenu, 
+    QDateEdit, QDateTimeEdit, QTableView, QTimeEdit, QWidget, QMenu, 
     QLineEdit, QTextEdit, 
     # QCompleter, 
     QApplication
@@ -511,3 +511,35 @@ def add_copy_paste_to_table(table_widget):
 
     table_widget.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
     table_widget.customContextMenuRequested.connect(show_context_menu)
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def get_visible_row_range(table: QTableView) -> tuple[int, int]:
+    """Возвращает (first_visible_row, last_visible_row) в координатах модели (без прокси)."""
+    if table.model() is None:
+        return -1, -1
+    viewport = table.viewport()
+    top_left = viewport.mapToGlobal(viewport.rect().topLeft())
+    bottom_right = viewport.mapToGlobal(viewport.rect().bottomRight())
+    # более простой способ: использовать indexAt
+    first_idx = table.indexAt(viewport.rect().topLeft())
+    last_idx = table.indexAt(viewport.rect().bottomRight())
+    if not first_idx.isValid():
+        return -1, -1
+    return first_idx.row(), last_idx.row() if last_idx.isValid() else first_idx.row()
+
+@AppLogger.get_instance(
+    name='gui_helpers.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, 
+).log_execution_time(
+    level=AppLogger._parse_log_level('DEBUG')
+)
+def get_visible_row_count(table: QTableView) -> int:
+    first, last = get_visible_row_range(table)
+    return max(0, last - first + 1)

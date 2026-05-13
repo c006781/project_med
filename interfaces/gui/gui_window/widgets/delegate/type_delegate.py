@@ -1179,6 +1179,12 @@ class CompleterStringDelegate(QStyledItemDelegate):
             completer = QCompleter(values)
             completer.setCaseSensitivity(Qt.CaseInsensitive)
             completer.setFilterMode(Qt.MatchFlag.MatchContains)   # поиск по подстроке
+            # Стилизация выпадающего списка автодополнения (подсветка при наведении)
+            completer.popup().setStyleSheet("""
+                QListView::item:hover {
+                    background-color: #d0e0ff;
+                }
+            """)
             editor.setCompleter(completer)
 
         return editor

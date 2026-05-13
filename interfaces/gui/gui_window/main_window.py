@@ -13,6 +13,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+from typing import List
 # import sys
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
@@ -55,11 +56,11 @@ from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploade
 # from interfaces.gui.gui_window.mixins.sync_mixin import SyncMixin
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QMessageBox, QWidget, QVBoxLayout,
+    QApplication, QDialog, QFileDialog, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressDialog, QWidget, QVBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
     QStackedWidget, QFrame, QHBoxLayout
 )
-from PySide6.QtCore import QUrl, Qt, Slot
+from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot
 from PySide6.QtGui import QDesktopServices
 
 
@@ -751,9 +752,11 @@ class SyncMixin:
         """
         if index == 1:          # Настройки
             self._on_settings_clicked()
-        elif index == 3:        # Скачать БД (если использовался insertSeparator, то индекс 2, иначе 3)
+        elif index == 2:        # Парсинг данных с файла
+            self._start_parsing()
+        elif index == 4:        # Скачать БД
             self._start_download()
-        elif index == 4:        # Загрузить БД (индекс 3 или 4)
+        elif index == 5:        # Загрузить БД
             self._start_upload()
 
         # Сбрасываем выбранный индекс, чтобы можно было повторно выбрать то же действие
@@ -1263,6 +1266,92 @@ rm "$0"
         else:
             QMessageBox.warning(self, "ОС не поддерживается", "Автоматическая замена файла доступна только для Windows и Linux.")  
 
+# ========== Диалог прогресса ==========
+class ParsingProgressDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Импорт данных из Word")
+        self.setMinimumWidth(600)
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        self.list_widget = QListWidget()
+        layout.addWidget(self.list_widget)
+        self.cancel_btn = QPushButton("Отмена")
+        self.cancel_btn.clicked.connect(self.reject)
+        layout.addWidget(self.cancel_btn)
+        self._items = {}
+
+    @Slot(list)
+    def set_file_list(self, file_names: list):
+        self.list_widget.clear()
+        self._items.clear()
+        for name in file_names:
+            item = QListWidgetItem(name)
+            item.setData(Qt.UserRole, "pending")
+            self._set_status(item, "⏳ Ожидание")
+            self.list_widget.addItem(item)
+            self._items[name] = item
+
+    @Slot(str, str, str)
+    def update_file_status(self, file_name: str, status: str, error_msg: str = ""):
+        item = self._items.get(file_name)
+        if not item:
+            return
+        if status == "processing":
+            self._set_status(item, "🔄 Обработка...")
+            self.list_widget.scrollToItem(item)
+        elif status == "success":
+            self._set_status(item, "✅ Готово")
+        elif status == "failed":
+            self._set_status(item, f"❌ Ошибка: {error_msg[:60]}")
+        else:
+            self._set_status(item, "⏳ Ожидание")
+        self.list_widget.repaint()
+
+    def _set_status(self, item: QListWidgetItem, text: str):
+        item.setText(f"{item.text()}   {text}")
+
+# ========== Поток парсинга ==========
+class ParsingThread(QThread):
+    finished = Signal(dict)
+    error = Signal(str)
+    file_list_ready = Signal(list)        # список имён файлов
+    status_update = Signal(str, str, str)  # file_name, status, error_msg
+
+    def __init__(self, folder_path, update_existing=False):
+        super().__init__()
+        self.folder_path = folder_path
+        self.update_existing = update_existing
+
+    def run(self):
+        try:
+            from parsers.word_importer import batch_parse
+
+            # Колбэк: получили список всех файлов, которые будут обработаны
+            def on_start(file_names):
+                self.file_list_ready.emit(file_names)
+
+            # Колбэк: обновление статуса файла
+            def on_update(file_name, status, error_msg):
+                self.status_update.emit(file_name, status, error_msg)
+
+            # Вызываем batch_parse с specific_files=None – она сама определит,
+            # какие .docx файлы есть в папке, и отфильтрует уже обработанные по логу.
+            results, log_dir = batch_parse(
+                folder_path=self.folder_path,
+                specific_files=None,
+                update_existing_patient=self.update_existing,
+                progress_callback_start=on_start,
+                progress_callback_update=on_update,
+            )
+            # Добавляем путь к логу в результаты
+            results['log_path'] = os.path.join(log_dir, "parser.log") if log_dir else None
+            self.finished.emit(results)
+
+        except Exception as e:
+            self.error.emit(str(e))
+            
+            
 class MainWindow(
     QMainWindow,
     PagesCreationMixin,
@@ -1276,6 +1365,7 @@ class MainWindow(
     Главное окно приложения.
     Наследует QMainWindow и все миксины, предоставляющие готовую функциональность.
     """
+
 
     @AppLogger.get_instance(
         name='MainWindow',
@@ -1367,7 +1457,74 @@ class MainWindow(
             self.updater.check_for_updates()
         else:
             QMessageBox.warning(self, "Ошибка", "Система обновлений не инициализирована")
-    
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _start_parsing(self):
+        # Диалог выбора папки
+        folder = QFileDialog.getExistingDirectory(
+            self, "Выберите папку с файлами .docx", "",
+            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
+        )
+        if not folder:
+            return
+
+        # Создаём и показываем диалог прогресса
+        self.progress_dialog = ParsingProgressDialog(self)
+        self.progress_dialog.show()
+
+        # Создаём и запускаем поток
+        self.parsing_thread = ParsingThread(folder, update_existing=False)
+        self.parsing_thread.file_list_ready.connect(self.progress_dialog.set_file_list)
+        self.parsing_thread.status_update.connect(self.progress_dialog.update_file_status)
+        self.parsing_thread.finished.connect(self._on_parsing_finished)
+        self.parsing_thread.error.connect(self._on_parsing_error)
+
+        self.parsing_thread.start()
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_parsing_finished(self, results):
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.accept()
+            self.progress_dialog = None
+        total = results.get('total', 0)
+        success = results.get('success', 0)
+        failed = results.get('failed', 0)
+        log_path = results.get('log_path', 'не указан')
+        QMessageBox.information(
+            self, "Парсинг завершён",
+            f"Обработано файлов: {total}\n"
+            f"Успешно: {success}\n"
+            f"Ошибок: {failed}\n"
+            f"Лог сохранён: {log_path}"
+        )
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_parsing_error(self, error_msg):
+        if hasattr(self, 'progress_dialog'):
+            self.progress_dialog.accept()
+            self.progress_dialog = None
+        QMessageBox.critical(self, "Ошибка", f"При выполнении парсинга произошла ошибка:\n{error_msg}")
 
     # ----------------------------------------------------------------------
     # Методы загрузки данных для страниц списков
@@ -1489,11 +1646,14 @@ class MainWindow(
 
         # Выпадающий список действий
         self.action_combo = QComboBox()
+
         self.action_combo.addItem("Файл")          # индекс 0 – заглушка
         self.action_combo.addItem("Настройки")     # индекс 1
-        self.action_combo.insertSeparator(2)       # разделитель 
-        self.action_combo.addItem("Скачать БД с сервера")   # индекс 3
-        self.action_combo.addItem("Загрузить БД на сервер") # индекс 4
+        self.action_combo.addItem("Парсинг данных с файла")  # индекс 2 - парсер
+        self.action_combo.insertSeparator(3)       # index 3 разделитель 
+        self.action_combo.addItem("Скачать БД с сервера")   # индекс 4
+        self.action_combo.addItem("Загрузить БД на сервер") # индекс 5
+
         self.action_combo.setEditable(False)
         self.action_combo.setMaximumWidth(200)
 

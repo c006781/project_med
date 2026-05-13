@@ -17,7 +17,7 @@ import sys
 import uuid
 from datetime import date, datetime
 from typing import (
-    List, Optional, 
+    Callable, List, Optional, 
     Set, Tuple, Dict, 
     Any
 )
@@ -1026,7 +1026,11 @@ def batch_parse(
     db: Database = None,
     patient_service: PatientService = None,
     appointment_service: AppointmentService = None,
-    photo_service: PhotoService = None
+    photo_service: PhotoService = None,
+    
+    progress_callback_start: Optional[Callable[[List[str]], None]] = None,
+    progress_callback_update: Optional[Callable[[str, str, str], None]] = None,
+
 ) -> Dict[str, Any]:
     """
     Обрабатывает все .docx файлы в папке (или указанные).
@@ -1041,6 +1045,10 @@ def batch_parse(
         patient_service (PatientService, optional): Сервис пациентов.
         appointment_service (AppointmentService, optional): Сервис приёмов.
         photo_service (PhotoService, optional): Сервис фото.
+
+        progress_callback_start: вызывается перед началом, передаёт список всех имён файлов.
+        progress_callback_update: вызывается после обработки каждого файла,
+            параметры (file_name, status, error_msg). Статусы: 'processing', 'success', 'failed'.
 
     Returns:
         Dict[str, Any]: Словарь с результатами обработки:
@@ -1096,6 +1104,10 @@ def batch_parse(
         'error_files': []
     }
 
+    # Вызываем callback начала
+    if progress_callback_start:
+        all_names = [os.path.basename(p) for p in file_paths]
+        progress_callback_start(all_names)
 
     with open(log_file, 'a', encoding='utf-8') as log:
         #  Описание: "!!>>\tВремя запуска парсера\tВремя файла\tФайл\tСтатус\tСообщение\n")
@@ -1115,6 +1127,9 @@ def batch_parse(
         for file_path in file_paths:
             file_name = os.path.basename(file_path)
             with db.session_scope() as session:
+
+                if progress_callback_update:
+                    progress_callback_update(file_name, "processing", "")
                 msg = None
                 try:
                     success = parse_one_file(
@@ -1142,6 +1157,8 @@ def batch_parse(
                 if success:
                     results['success'] += 1
                     results['success_files'].append(file_name)
+                    if progress_callback_update:
+                        progress_callback_update(file_name, "success", "")
                 else:
                     results['failed'] += 1
                     results['error_files'].append(
@@ -1150,6 +1167,8 @@ def batch_parse(
                             'error': msg,
                         }
                     )
+                    if progress_callback_update:
+                        progress_callback_update(file_name, "failed", msg)
 
 
                 # if msg:
@@ -1157,13 +1176,69 @@ def batch_parse(
 
             # Автоматический коммит/откат уже выполнен внутри session_scope
 
-    return results
+    return results , log_dir
 
 
 # ----------------------------------------------------------------------
 # Точка входа для дебага
 # ----------------------------------------------------------------------
+
 def pars_start(
+    folder = None,
+    files = None , 
+    update_existing_patient:bool = False ,
+
+    progress_callback_start: Optional[Callable[[List[str]], None]] = None,
+    progress_callback_update: Optional[Callable[[str, str, str], None]] = None,
+) -> dict:
+    """
+    Точка входа для запуска парсера.
+
+    Args:
+        folder (str, optional): Путь к папке .
+        files (List[str], optional): Список файлов .
+        update_existing_patient (bool): Флаг обновления существующих пациентов.
+
+    Returns:
+        dict: Результат работы batch_parse (как указано выше) или пустой словарь при ошибке.
+    """
+
+    results = {'total': 0, 'success': 0, 'failed': 0, 'success_files': [], 'error_files': []}
+
+    log_path = None
+    if not files:
+        files = get_all_docx_files(folder)
+        if not files:
+            # # raise ValueError("В указанной папке нет .docx файлов.")
+            # print("В указанной папке нет .docx файлов.")
+            return results
+
+        # Путь к лог-файлу (предполагаем, что он лежит в той же папке)
+        log_path = os.path.join(folder, "logs_parser", "parser.log")
+
+        # Если лог существует, отфильтровываем уже обработанные файлы
+        if os.path.exists(log_path):
+            to_process = filter_unprocessed_files(files, log_path)
+            # print(f"Из {len(files)} файлов уже обработано успешно: {len(files) - len(to_process)}")
+            files = to_process
+
+    if files:
+        results, log_path = batch_parse(
+            folder, 
+            specific_files=files,
+            update_existing_patient = update_existing_patient,
+
+            progress_callback_start=progress_callback_start,
+            progress_callback_update=progress_callback_update,
+        )
+
+        if log_path:
+            results['log_path'] = log_path
+    
+    return results
+
+
+def pars_start_args(
     folder = None,
     files = None ,     
 ) -> dict:
@@ -1181,7 +1256,7 @@ def pars_start(
         files (List[str], optional): Список файлов (будет переопределён аргументом --files).
 
     Returns:
-        dict: Результат работы batch_parse (как указано выше) или пустой словарь при ошибке.
+        dict: Результат работы pars_start (как указано выше) или пустой словарь при ошибке.
     """
     
     # import sys
@@ -1218,40 +1293,11 @@ def pars_start(
         print("Укажите папку с файлами: --folder /path/to/docx")
         sys.exit(1)
 
-    results = {}
-
-
-    if not files:
-        files = get_all_docx_files(folder)
-        if not files:
-            # raise ValueError("В указанной папке нет .docx файлов.")
-            print("В указанной папке нет .docx файлов.")
-            return results
-
-        # Путь к лог-файлу (предполагаем, что он лежит в той же папке)
-        log_path = os.path.join(folder, "logs_parser", "parser.log")
-
-        # Если лог существует, отфильтровываем уже обработанные файлы
-        if os.path.exists(log_path):
-            to_process = filter_unprocessed_files(files, log_path)
-            # print(f"Из {len(files)} файлов уже обработано успешно: {len(files) - len(to_process)}")
-            files = to_process
-
-    if files:
-        results = batch_parse(
-            folder, 
-            specific_files=files,
-            update_existing_patient = update_existing_patient,
-        )
-
-        # print(f"Обработано файлов: {results['total']}")
-        # print(f"Успешно: {results['success']}, Ошибок: {results['failed']}")
-
-        # if results['success_files']:
-        #     print("Успешные файлы:", results['success_files'])
-
-        # if results['error_files']:
-        #     print("Файлы с ошибками:", results['error_files']) 
+    results = pars_start(
+        folder = folder,
+        files = files,
+        update_existing_patient = update_existing_patient,
+    )
 
     return results
     
@@ -1259,7 +1305,7 @@ def pars_start(
 if __name__ == "__main__":   
     # Пример вызова: python word_importer.py --folder /path/to/docx --files тест1.docx
     
-    pars_start(
+    pars_start_args(
         folder = '/home/admin-rkc/Git/My_cods/project_med/doc',
         files = 'тест1.docx',
     )

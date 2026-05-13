@@ -1,6 +1,7 @@
 # interfaces/gui/gui_window/pages/settings_page.py
 
 import os
+import sys
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
@@ -15,11 +16,11 @@ from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from PySide6.QtWidgets import (
     # QWidget, 
-    QComboBox, QFrame, QLabel, QScrollArea, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QApplication, QComboBox, QFrame, QLabel, QMenu, QScrollArea, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox, QWidget
 )
-from PySide6.QtCore import QThread, QUrl, Signal, Slot, Qt
+from PySide6.QtCore import QProcess, QThread, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QDesktopServices
 
 class SettingsPage(BasePage):
@@ -202,7 +203,9 @@ class SettingsPage(BasePage):
     )
     def _create_settings_widgets(self):
         """Создаёт все виджеты для вкладки «Основные настройки» (без layout)."""
+
         # ----- Группа основных настроек -----
+
         self.basic_group = QGroupBox("Основные настройки")
         form_layout = QFormLayout(self.basic_group)
 
@@ -291,6 +294,7 @@ class SettingsPage(BasePage):
         log_dir_layout.addWidget(self.log_dir_btn)
 
         log_layout.addRow("Папка для логов:", log_dir_layout)
+        # self._update_log_folder_button() # Обновляем текст кнопки
 
         # Временная метка
         self.log_timestamp_check = QCheckBox("Добавлять дату/время в имя файла лога")
@@ -360,9 +364,23 @@ class SettingsPage(BasePage):
         log_layout.addRow("Макс. размер файла (байт):", self.log_max_bytes_spin)
         log_layout.addRow("Количество бэкапов:", self.log_backup_count_spin)
 
+
+        # Кнопка открытия папки логов
+        self.log_folder_btn = QPushButton()
+        self.log_folder_btn.setCursor(Qt.PointingHandCursor)
+        self.log_folder_btn.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_folder_btn.customContextMenuRequested.connect(self._show_log_folder_context_menu)
+        self.log_folder_btn.clicked.connect(self._open_log_folder)
+
+        # Добавляем строку в form layout группы логирования
+        log_layout.addRow("Папка логов:", self.log_folder_btn)
+
         # Кнопка сохранения
         self.save_btn = QPushButton("Сохранить настройки")
         self.save_btn.setMaximumWidth(200)
+
+        # Обновляем текст кнопки пути к папке логов (после того, как она создана)
+        self._update_log_folder_button()
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -442,6 +460,8 @@ class SettingsPage(BasePage):
         self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
         self.check_token_btn.clicked.connect(self._check_token)
         self.check_path_btn.clicked.connect(self._check_remote_path)
+
+        self.log_dir_edit.textChanged.connect(self._update_log_folder_button)
 
     @AppLogger.get_instance(
         name = 'SettingsPage',
@@ -672,6 +692,63 @@ class SettingsPage(BasePage):
         self.log_max_bytes_spin.setValue(int(self.config_manager.get('LOG_MAX_BYTES', 10 * 1024 * 1024)))
         self.log_backup_count_spin.setValue(int(self.config_manager.get('LOG_BACKUP_COUNT', 5)))
 
+        self._update_log_folder_button()
+
+
+    def _update_log_folder_button(self):
+        """Обновляет текст кнопки с путём к папке логов."""
+        log_dir = self.log_dir_edit.text().strip()
+        if not log_dir:
+            log_dir = "не указана"
+        self.log_folder_btn.setText(log_dir)
+        self.log_folder_btn.setToolTip("Нажмите, чтобы открыть папку логов\nПКМ – скопировать путь")
+
+    def _open_log_folder(self):
+        """Открывает папку логов в системном файловом менеджере."""
+        log_dir = self.log_dir_edit.text().strip()
+        еее = os.path.exists(log_dir)
+        if (not log_dir) or (not os.path.exists(log_dir)):
+            QMessageBox.warning(self, "Ошибка", f"Папка логов не существует:\n{log_dir}")
+            return
+        # from PySide6.QtCore import QUrl
+        # from PySide6.QtGui import QDesktopServices
+
+        log_dir = os.path.join(log_dir, '')
+        if sys.platform == 'win32':
+            QProcess.startDetached('explorer', [log_dir])
+        elif sys.platform == 'darwin':
+            QProcess.startDetached('open', [log_dir])
+        else:  # Linux
+            QProcess.startDetached('xdg-open', [log_dir])
+
+        # try:
+        #     url = QUrl.fromLocalFile(log_dir)
+        #     QDesktopServices.openUrl(url)
+        # except:
+        #     # Добавляем слеш в конце, чтобы указать, что это директория
+        #     log_dir = os.path.join(log_dir, '')
+        #     # if not log_dir.endswith('/'):
+        #     #     log_dir += '/'
+        #     url = QUrl.fromLocalFile(log_dir)
+        #     QDesktopServices.openUrl(url)
+
+    def _show_log_folder_context_menu(self, pos):
+        """Показывает контекстное меню для кнопки пути логов."""
+        log_dir = self.log_dir_edit.text().strip()
+        if not log_dir:
+            return
+
+        menu = QMenu(self)
+        copy_action = menu.addAction("Скопировать путь")
+        copy_action.triggered.connect(lambda: self._copy_log_path(log_dir))
+        menu.exec(self.log_folder_btn.mapToGlobal(pos))
+
+    def _copy_log_path(self, path: str):
+        """Копирует переданный путь в буфер обмена."""
+        # from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(path)
+        QMessageBox.information(self, "Копирование", "Путь к папке логов скопирован.")
+
     @AppLogger.get_instance(
         name='SettingsPage',
         enable_file_logging='system',
@@ -690,8 +767,9 @@ class SettingsPage(BasePage):
             def __init__(self, token):
                 super().__init__()
                 self.token = token
+
             def run(self):
-                from app.network.ya_dop import check_token
+                from app.network.ya_dop import check_token # циклы
                 ok = check_token(self.token)
                 msg = "Токен действителен" if ok else "Токен недействителен или нет соединения"
                 self.result.emit(ok, msg)

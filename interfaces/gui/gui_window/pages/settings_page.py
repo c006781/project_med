@@ -208,57 +208,74 @@ class SettingsPage(BasePage):
 
         # Путь к БД
         self.db_path_edit = QLineEdit()
+
         self.db_path_btn = QPushButton("Обзор...")
         self.db_path_btn.setMaximumWidth(80)
+
         self.create_db_btn = QPushButton("Создать тестовую БД")
         self.create_db_btn.setMaximumWidth(150)
         self.create_db_btn.setVisible(False)
+
         db_path_layout = QHBoxLayout()
         db_path_layout.addWidget(self.db_path_edit)
         db_path_layout.addWidget(self.db_path_btn)
         db_path_layout.addWidget(self.create_db_btn)
+        
         form_layout.addRow("Путь к БД:", db_path_layout)
 
         # Папка для фото
         self.photos_path_edit = QLineEdit()
         self.photos_path_btn = QPushButton("Обзор...")
         self.photos_path_btn.setMaximumWidth(80)
+
         photos_layout = QHBoxLayout()
         photos_layout.addWidget(self.photos_path_edit)
         photos_layout.addWidget(self.photos_path_btn)
+
         form_layout.addRow("Папка для фото:", photos_layout)
 
         # Токен Яндекс.Диска
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.Password)
+
         token_layout = QHBoxLayout()
         token_layout.addWidget(self.token_edit)
+
         self.check_token_btn = QPushButton("Проверить")
         self.check_token_btn.setMaximumWidth(80)
+
         token_layout.addWidget(self.check_token_btn)
+
         form_layout.addRow("Токен Яндекс.Диска:", token_layout)
 
         # Удалённый путь БД
         self.remote_path_edit = QLineEdit()
+
         remote_layout = QHBoxLayout()
         remote_layout.addWidget(self.remote_path_edit)
+
         self.check_path_btn = QPushButton("Проверить/Создать")
         self.check_path_btn.setMaximumWidth(120)
+
         remote_layout.addWidget(self.check_path_btn)
+
         form_layout.addRow("Удалённый путь БД:", remote_layout)
 
         # Папка для бекапов
         self.backup_path_edit = QLineEdit()
         self.backup_path_btn = QPushButton("Обзор...")
         self.backup_path_btn.setMaximumWidth(80)
+
         backup_layout = QHBoxLayout()
         backup_layout.addWidget(self.backup_path_edit)
         backup_layout.addWidget(self.backup_path_btn)
+
         form_layout.addRow("Папка для локальных бекапов БД:", backup_layout)
 
         # Количество бекапов
         self.backup_count_spin = QSpinBox()
         self.backup_count_spin.setRange(1, 100)
+
         form_layout.addRow("Количество бекапов:", self.backup_count_spin)
 
         # ----- Группа настроек логирования -----
@@ -268,49 +285,66 @@ class SettingsPage(BasePage):
         # Папка для логов
         self.log_dir_edit = QLineEdit()
         self.log_dir_btn = QPushButton("Обзор...")
+
         log_dir_layout = QHBoxLayout()
         log_dir_layout.addWidget(self.log_dir_edit)
         log_dir_layout.addWidget(self.log_dir_btn)
+
         log_layout.addRow("Папка для логов:", log_dir_layout)
 
         # Временная метка
         self.log_timestamp_check = QCheckBox("Добавлять дату/время в имя файла лога")
+
         log_layout.addRow(self.log_timestamp_check)
 
         # Системный логгер
         system_frame = QFrame()
         system_frame.setFrameShape(QFrame.Box)
         system_frame.setMaximumHeight(180)
+
         system_vbox = QVBoxLayout(system_frame)
         system_vbox.addWidget(QLabel("<b>Системный логгер</b>"))
+
         self.system_enabled_check = QCheckBox("Включить системный логгер")
+
         self.system_console_check = QCheckBox("Вывод в консоль")
+
         self.system_file_check = QCheckBox("Запись в файл")
+
         self.system_level_combo = QComboBox()
         self.system_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+
         system_vbox.addWidget(self.system_enabled_check)
         system_vbox.addWidget(self.system_console_check)
         system_vbox.addWidget(self.system_file_check)
         system_vbox.addWidget(QLabel("Уровень:"))
         system_vbox.addWidget(self.system_level_combo)
+
         log_layout.addRow(system_frame)
 
         # Пользовательский логгер
         user_frame = QFrame()
         user_frame.setFrameShape(QFrame.Box)
         user_frame.setMaximumHeight(180)
+
         user_vbox = QVBoxLayout(user_frame)
         user_vbox.addWidget(QLabel("<b>Пользовательский логгер</b>"))
+        
         self.user_enabled_check = QCheckBox("Включить пользовательский логгер")
+
         self.user_console_check = QCheckBox("Вывод в консоль")
+
         self.user_file_check = QCheckBox("Запись в файл")
+
         self.user_level_combo = QComboBox()
         self.user_level_combo.addItems(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+
         user_vbox.addWidget(self.user_enabled_check)
         user_vbox.addWidget(self.user_console_check)
         user_vbox.addWidget(self.user_file_check)
         user_vbox.addWidget(QLabel("Уровень:"))
         user_vbox.addWidget(self.user_level_combo)
+
         log_layout.addRow(user_frame)
 
         # Ротация
@@ -345,18 +379,20 @@ class SettingsPage(BasePage):
 
        # Горизонтальная панель для версии и кнопки обновления
         self.version_update_widget = QWidget()
+
         version_layout = QHBoxLayout(self.version_update_widget)
         version_layout.setContentsMargins(0, 0, 0, 0)
         version_layout.setSpacing(10)
 
         self.version_label = QLabel(f"Версия: <b>{APP_VERSION}</b>")
         self.version_label.setAlignment(Qt.AlignCenter)
+
         version_layout.addWidget(self.version_label)
 
         self.check_update_btn = QPushButton("Проверить обновления")
         self.check_update_btn.clicked.connect(self._on_check_updates_clicked)
-        version_layout.addWidget(self.check_update_btn)
 
+        version_layout.addWidget(self.check_update_btn)
         version_layout.addStretch()  # чтобы не растягивалось на всю ширину
         version_layout.setAlignment(Qt.AlignCenter)
 
@@ -367,6 +403,7 @@ class SettingsPage(BasePage):
 
         # Виджет-контейнер для ссылки (компактный)
         self.link_widget = QWidget()
+
         link_layout = QHBoxLayout(self.link_widget)
         link_layout.setContentsMargins(0, 0, 0, 0)
         link_layout.setSpacing(10)
@@ -377,10 +414,12 @@ class SettingsPage(BasePage):
         self.link_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.link_label.setAlignment(Qt.AlignLeft)
         self.link_label.setStyleSheet("border: none; background: transparent;")
+
         link_layout.addWidget(self.link_label)
 
         self.open_link_btn = QPushButton("Открыть")
         self.open_link_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(repo_url)))
+
         link_layout.addWidget(self.open_link_btn)
 
 
@@ -425,6 +464,7 @@ class SettingsPage(BasePage):
             self.content_layout.addWidget(self.log_group)
             self.content_layout.addWidget(self.save_btn)
             self.content_layout.addStretch()
+            
         else:           # О программе
             self.content_layout.addWidget(self.about_title)
             self.content_layout.addWidget(self.version_label)

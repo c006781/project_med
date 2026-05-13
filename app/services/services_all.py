@@ -225,13 +225,14 @@ from app.utils.filtering.filtering import apply_filters, apply_post_filters
 
 
 
+from app.utils.virtual_fields import enrich_dto_with_computed_fields
+
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Query, Session
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import selectinload
 
-from app.utils.virtual_fields import enrich_dto_with_computed_fields
 
 
 
@@ -449,7 +450,7 @@ class BaseService(
         """
         if not filters:
             return query, []
-        from app.utils.filtering.filtering import apply_filters
+        # from app.utils.filtering.filtering import apply_filters
         return apply_filters(query, self._model_class, filters, fuzzy_threshold)
 
     @AppLogger.get_instance(
@@ -636,7 +637,7 @@ class BaseService(
 
             # Применяем пост-фильтры (например, fuzzy)
             if post_filters:
-                from app.utils.filtering.filtering import apply_post_filters
+                # from app.utils.filtering.filtering import apply_post_filters
                 all_items = apply_post_filters(all_items, post_filters, self._model_class)
 
             total = len(all_items)

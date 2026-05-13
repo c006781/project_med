@@ -129,7 +129,15 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._field_by_column = {}          # номер колонки -> имя поля
         self._update_column_mapping()
-        
+      
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )  
     def append_data(self, new_data: List[Any]) -> None:
         """Добавляет новые строки в конец модели."""
         if not new_data:

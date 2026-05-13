@@ -130,6 +130,16 @@ class DynamicTableModel(QAbstractTableModel):
         self._field_by_column = {}          # номер колонки -> имя поля
         self._update_column_mapping()
         
+    def append_data(self, new_data: List[Any]) -> None:
+        """Добавляет новые строки в конец модели."""
+        if not new_data:
+            return
+        
+        start = len(self._data)
+        self.beginInsertRows(QModelIndex(), start, start + len(new_data) - 1)
+        self._data.extend(new_data)
+        self.endInsertRows()
+    
     # @AppLogger.get_instance(
     #     name = 'DynamicTableModel',
     #     # share_file_with = 'system',

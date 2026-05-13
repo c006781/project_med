@@ -29,6 +29,7 @@ from docx.text.paragraph import Paragraph
 from docx.oxml.ns import qn
 
 from app.database.database import Database
+from app.database.database_shema.clinic import Patient
 from app.dto.dto_all import PatientDTO, AppointmentDTO
 from app.services.services_all import (
     PatientService, 

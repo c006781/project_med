@@ -11,11 +11,11 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 
 from PySide6.QtWidgets import (
-    QCompleter, QDateTimeEdit, QDialog, QDialogButtonBox,
+    QCompleter, QDateTimeEdit, QDialog, QDialogButtonBox, QHBoxLayout, QListWidget, QPushButton,
     QStyle, QStyledItemDelegate,  QLineEdit, 
-    QCheckBox, QDateEdit, QTextEdit, 
-    QTimeEdit, QComboBox, 
-    # QPushButton, 
+    QCheckBox, QTextEdit, 
+    QComboBox, 
+    # QPushButton, QTimeEdit,  QDateEdit,
     QStyleOptionButton, QApplication,
     QVBoxLayout,
 )
@@ -35,6 +35,120 @@ from PySide6.QtGui import (
 
 from interfaces.gui.gui_window.widgets.custom_date_time_widgets import DateEditWidget, TimeEditWidget
 
+
+# Добавьте новый класс перед определением TextPopupDelegate
+class TextEditDialog(QDialog):
+    """Диалог для редактирования многострочного текста с автодополнением."""
+        
+    @AppLogger.get_instance(
+        name='TextEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def __init__(self, parent, initial_text="", readonly=False, completion_list=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактирование текста")
+        self.resize(600, 400)
+        self.readonly = readonly
+        self.completion_list = completion_list or []
+
+        layout = QVBoxLayout(self)
+
+        # Верхняя панель с кнопками (справа)
+        top_layout = QHBoxLayout()
+        btn_save = QPushButton("Сохранить")
+        btn_cancel = QPushButton("Отмена")
+        btn_save.setDefault(True)
+        if readonly:
+            btn_save.setEnabled(False)
+        top_layout.addStretch()
+        top_layout.addWidget(btn_save)
+        top_layout.addWidget(btn_cancel)
+        layout.addLayout(top_layout)
+
+        # Многострочное поле
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlainText(initial_text)
+        if readonly:
+            self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
+
+        # Список подсказок (автодополнение)
+        self.list_widget = QListWidget()
+        self.list_widget.setMaximumHeight(100)
+        self.list_widget.setVisible(False)
+
+        # Добавляем стиль для подсветки строки при наведении мыши
+        self.list_widget.setStyleSheet("""
+    QListWidget::item:hover {
+        background-color: #d0e0ff;
+    }
+"""
+        )
+
+        layout.addWidget(self.list_widget)
+
+        # Подключаем сигналы
+        self.text_edit.textChanged.connect(self._on_text_changed)
+        self.list_widget.itemClicked.connect(self._on_item_clicked)
+        btn_save.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
+
+    @AppLogger.get_instance(
+        name='TextEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_text_changed(self):
+        """Фильтрует список подсказок по текущему тексту."""
+        if not self.completion_list:
+            return
+        
+        text = self.text_edit.toPlainText().lower()
+        if len(text) >= 1:
+            filtered = [item for item in self.completion_list if text in item.lower()]
+            self.list_widget.clear()
+            self.list_widget.addItems(filtered[:10])  # не более 10
+            self.list_widget.setVisible(bool(filtered))
+        else:
+            self.list_widget.setVisible(False)
+
+    @AppLogger.get_instance(
+        name='TextEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_item_clicked(self, item):
+        """Вставляет выбранный текст в позицию курсора."""
+
+        # cursor = self.text_edit.textCursor()
+        # cursor.insertText(item.text())
+        # self.text_edit.setTextCursor(cursor)
+
+        self.text_edit.setPlainText(item.text())
+        self.list_widget.setVisible(False)
+
+    @AppLogger.get_instance(
+        name='TextEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_text(self):
+
+        return self.text_edit.toPlainText()
+
 class TextPopupDelegate(QStyledItemDelegate):
     """
     Делегат для ячеек с многострочным текстом.
@@ -52,9 +166,16 @@ class TextPopupDelegate(QStyledItemDelegate):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, parent=None, readonly=False):
+    def __init__(
+        self, 
+        parent=None, 
+        readonly=False, 
+        get_completion_list=None,
+    ):
         super().__init__(parent)
         self._readonly = readonly
+        self._get_completion_list = get_completion_list   # функция, возвращающая список строк
+        
         self._hovered_row = -1
         self._hovered_col = -1
         # # для отслеживания изменения hover
@@ -222,28 +343,39 @@ class TextPopupDelegate(QStyledItemDelegate):
     )
     def _open_popup(self, model, index):
         """Открывает диалог просмотра/редактирования текста."""
+        
         value = model.data(index, Qt.EditRole)
         text = str(value) if value is not None else ""
 
-        dialog = QDialog(self.parent())
-        dialog.setWindowTitle("Просмотр текста" if self._readonly else "Редактирование текста")
+        # Получаем список вариантов для автодополнения
+        completion_list = self._get_completion_list() if self._get_completion_list else []
 
-        layout = QVBoxLayout(dialog)
-        text_edit = QTextEdit()
-        text_edit.setPlainText(text)
-        if self._readonly:
-            text_edit.setReadOnly(True)
-        layout.addWidget(text_edit)
-
-        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btn_box.accepted.connect(dialog.accept)
-        btn_box.rejected.connect(dialog.reject)
-        layout.addWidget(btn_box)
-
+        dialog = TextEditDialog(self.parent(), text, self._readonly, completion_list)
         if dialog.exec() == QDialog.Accepted:
-            new_text = text_edit.toPlainText()
+            new_text = dialog.get_text()
             if new_text != text:
                 model.setData(index, new_text, Qt.EditRole)
+
+        # dialog = QDialog(self.parent())
+        # dialog.setWindowTitle("Просмотр текста" if self._readonly else "Редактирование текста")
+
+        # layout = QVBoxLayout(dialog)
+        # text_edit = QTextEdit()
+        # text_edit.setPlainText(text)
+        # if self._readonly:
+        #     text_edit.setReadOnly(True)
+
+        # layout.addWidget(text_edit)
+
+        # btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        # btn_box.accepted.connect(dialog.accept)
+        # btn_box.rejected.connect(dialog.reject)
+        # layout.addWidget(btn_box)
+
+        # if dialog.exec() == QDialog.Accepted:
+        #     new_text = text_edit.toPlainText()
+        #     if new_text != text:
+        #         model.setData(index, new_text, Qt.EditRole)
     
     @AppLogger.get_instance(
         name='TextPopupDelegate',

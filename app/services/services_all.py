@@ -2968,7 +2968,6 @@ class NoteService(
         """
         return self.get_by_id(note_id, session=session)
 
-
     @AppLogger.get_instance(
         name = 'NoteService',
         # share_file_with = 'system',
@@ -3075,7 +3074,6 @@ class NoteService(
         #     # Возвращаем обновленный DTO
         #     return updated_dto
 
-
     @AppLogger.get_instance(
         name = 'NoteService',
         # share_file_with = 'system',
@@ -3097,7 +3095,6 @@ class NoteService(
 
         # self.delete(note_id, session=session)
         self.delete(note_id, session)
-
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -3143,7 +3140,6 @@ class NoteService(
             # return self._dto_class.from_orm(note)
             return self.get_dto_out(note)
 
-
     @AppLogger.get_instance(
         name = 'NoteService',
         # share_file_with = 'system',
@@ -3175,7 +3171,6 @@ class NoteService(
             raise  # пробрасываем дальше
 
         return self.create_note(text, session=session)      
-      
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -3297,6 +3292,19 @@ class NoteService(
         """
         super().reload_config()
         self.logger.info("NoteService: конфигурация перезагружена")
+
+    # спец метод для виртуальных полей  
+
+    @AppLogger.get_instance(
+        name='NoteService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_unique_note_texts(self, session: Optional[Session] = None) -> List[str]:
+        with self._session_scope(session) as sess:
+            # Получаем все уникальные тексты заметок
+            distinct_texts = sess.query(self._model_class.text).distinct().all()
+            return [t[0] for t in distinct_texts if t[0]]
 
 class AppointmentService(
         BaseService[

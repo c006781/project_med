@@ -30,6 +30,7 @@ from typing import (
 import datetime 
 from copy import deepcopy
 
+from app.dependencies import get_note_service
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.controllers.list_controller import IDynamicListController
@@ -2635,7 +2636,11 @@ class ListUIMixin:
                 # field_type = invert_tip.get(widget_type) # определяем по типу поля  
                 # Определяем режим только для чтения (если таблица не в режиме редактирования)
                 # readonly = not self.edit_mode
-                delegate = TextPopupDelegate(self.table_view, readonly=not self.edit_mode)
+                delegate = TextPopupDelegate(
+                    self.table_view, 
+                    readonly=not self.edit_mode,
+                    get_completion_list=lambda col=col_idx: self.get_unique_values_for_column(col)
+                )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)   
                 continue
             
@@ -2786,6 +2791,23 @@ class ListFilterMixin:
             return []
         
         col_name = self.columns[column]['name']
+
+        # Если поле виртуальное, пытаемся получить уникальные тексты заметок
+        config = self.field_configs.get(col_name, {})
+        if config.get('virtual', False):
+            note_field = config.get('is_note')  # например, 'description_id'
+            if note_field:
+                # Получаем сервис заметок (избегаем циклических импортов)
+                # from app.dependencies import get_note_service
+                note_service = get_note_service()
+                if note_service and hasattr(note_service, 'get_unique_note_texts'):
+                    tt = note_service.get_unique_note_texts()
+                    return tt
+                    # return note_service.get_unique_note_texts()
+                
+            return []
+
+        # Обычное поле – запрос к БД через сервис
         values = self.service.get_unique_values(col_name)
 
         # Преобразуем в строки (могут быть даты, числа)

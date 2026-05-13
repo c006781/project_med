@@ -430,6 +430,21 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_total_count(
+        self,
+        filters: Optional[List[Dict[str, Any]]] = None,
+        session: Optional[Session] = None
+    ) -> int:
+        """Возвращает общее количество записей с учётом фильтров (без загрузки данных)."""
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            return repo.count(filters=filters)
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_field_metadata(self) -> List[Dict[str, Any]]:
         """
         Возвращает метаданные полей сущности для использования в парсерах и других динамических компонентах.

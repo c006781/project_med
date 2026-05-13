@@ -7,7 +7,7 @@
 """
 
 from typing import (
-    Dict, List, Optional, Tuple
+    Any, Dict, List, Optional, Tuple
 )
 
 from app.utils.logger.logger import AppLogger
@@ -113,8 +113,8 @@ class PageManager(QObject):
                     self._index_to_page[idx] = page_id
                     break
 
-        # История посещений (список кортежей (id, title))
-        self._history: List[Tuple[str, str]] = []
+       
+        self._history: List[Tuple[str, str, Any]] = [] # История посещений (список кортежей  (id, title, extra_data))
 
         # Текущая страница (по умолчанию первая в стеке)
         current_idx = self._stack.currentIndex()
@@ -124,7 +124,11 @@ class PageManager(QObject):
         )
         self._current_page_title = self._get_page_title(self._current_page_id)
         self._extra_data = None
-        self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+
+        # self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+        # Преобразуем историю в список из двух элементов для сигнала
+        history_for_signal = [(id_, title) for id_, title, _ in self._history]
+        self.navigation_changed.emit(history_for_signal, self._current_page_id)
 
     @AppLogger.get_instance(
         name = 'PageManager',
@@ -207,7 +211,10 @@ class PageManager(QObject):
         # Если нужно сохранить в историю текущую страницу
         self.logger.debug(f'add_to_history and self._current_page_id : {add_to_history and self._current_page_id}')
         if add_to_history and self._current_page_id:
-            self._history.append((self._current_page_id, self._current_page_title))
+            # self._history.append((self._current_page_id, self._current_page_title))
+            current_title = self._get_page_title(self._current_page_id)
+            # Сохраняем текущий extra_data
+            self._history.append((self._current_page_id, current_title, self._extra_data))
 
         # Переключаем
         self._stack.setCurrentIndex(self._page_to_index[page_id])
@@ -216,7 +223,11 @@ class PageManager(QObject):
         self._extra_data = extra_data
 
         # Оповещаем об изменении
-        self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+        # self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+        # Преобразуем историю в список из двух элементов для сигнала
+        history_for_signal = [(id_, title) for id_, title, _ in self._history]
+        self.navigation_changed.emit(history_for_signal, self._current_page_id)
+
         self.page_entered.emit(page_id, extra_data)
 
     @AppLogger.get_instance(
@@ -248,15 +259,21 @@ class PageManager(QObject):
         if current_page and hasattr(current_page, 'on_leave'):
             current_page.on_leave()
 
+        # Извлекаем (id, title, extra_data)
         # Извлекаем последний элемент истории
-        prev_page_id, prev_page_title = self._history.pop()
+        prev_page_id, prev_page_title, prev_extra_data = self._history.pop()
         self._stack.setCurrentIndex(self._page_to_index[prev_page_id])
         self._current_page_id = prev_page_id
         self._current_page_title = prev_page_title
+        self._extra_data = prev_extra_data   # восстанавливаем
 
         # Оповещаем об изменении навигации
-        self.navigation_changed.emit(self._history.copy(), self._current_page_id)
-        self.page_entered.emit(prev_page_id, None)
+        # self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+        self.navigation_changed.emit(
+            [(id_, title) for id_, title, _ in self._history]
+            , self._current_page_id
+        )
+        self.page_entered.emit(prev_page_id, prev_extra_data)
 
     # @AppLogger.get_instance(
     #     name = 'PageManager',
@@ -319,7 +336,10 @@ class PageManager(QObject):
         """
         self._history.clear()
         # Оповещаем об изменении
-        self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+        # self.navigation_changed.emit(self._history.copy(), self._current_page_id)
+
+        history_for_signal = [(id_, title) for id_, title, _ in self._history]
+        self.navigation_changed.emit(history_for_signal, self._current_page_id)
 
     @AppLogger.get_instance(
         name = 'PageManager',

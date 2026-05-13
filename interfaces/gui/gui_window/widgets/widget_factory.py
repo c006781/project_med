@@ -6,19 +6,20 @@
 """
 
 import datetime
+from typing import Any, Dict
 
 from app.utils.logger.logger import AppLogger
-from interfaces.gui.gui_window.widgets.custom_date_time_widgets import CustomDateEdit, CustomTimeEdit
+from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import CustomDateEdit, CustomTimeEdit, DateEditWidget, TimeEditWidget
 
 from .completer_edit import CompleterEdit
 from .photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QTimeEdit,
-    QSpinBox, QCheckBox, QComboBox
+    QSpinBox, QCheckBox, QComboBox, QWidget
 )
 from PySide6.QtCore import QDate, QTime
-
 
 
 
@@ -37,13 +38,13 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_autocomplete_widget(editable: bool):
+    def create_date_picker_widget(editable: bool, config: Dict[str, Any] = None) -> QWidget:
         """
-        Создаёт CompleterEdit без кнопок (только поле с автодополнением).
-        Используется для полей с autocomplete=True.
+        Создаёт виджет для ввода даты с маской и кнопкой календаря.
+        Используется как в таблице, так и в форме редактирования.
         """
-        from .completer_edit import CompleterEdit
-        widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        # from .custom_date_time_widgets import DateEditWidget
+        widget = DateEditWidget(config=config)
         widget.setEnabled(editable)
         return widget
 
@@ -56,21 +57,89 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_text_widget(widget_type: str, editable: bool):
+    def create_time_picker_widget(editable: bool, config: Dict[str, Any] = None) -> QWidget:
+        """
+        Создаёт виджет для ввода времени с маской и кнопкой выбора.
+        Используется как в таблице, так и в форме редактирования.
+        """
+        # from .custom_date_time_widgets import TimeEditWidget
+        widget = TimeEditWidget(config=config)
+        widget.setEnabled(editable)
+        return widget
+    
+    @staticmethod
+    @AppLogger.get_instance(
+        name='WidgetFactory',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def create_autocomplete_widget(editable: bool, config: Dict[str, Any] = None)-> QWidget:
+        """
+        Создаёт CompleterEdit без кнопок (только поле с автодополнением).
+        Используется для полей с autocomplete=True.
+        """
+        # from .completer_edit import CompleterEdit
+        widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        if config and config.get('input_mask'):
+            WidgetFactory._apply_mask(widget.line_edit, config)
+
+        install_standard_context_menu(widget.line_edit, menu_type='line')
+        widget.setEnabled(editable)
+        
+        return widget
+    
+
+    @staticmethod
+    @AppLogger.get_instance(
+        name='WidgetFactory',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_mask(widget: QLineEdit, config: Dict[str, Any]) -> None:
+        """Устанавливает маску ввода, если она задана в конфигурации."""
+        mask = config.get('input_mask')
+        if mask:
+            widget.setInputMask(mask)
+
+    @staticmethod
+    @AppLogger.get_instance(
+        name='WidgetFactory',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def create_text_widget(widget_type: str, editable: bool, config: Dict[str, Any] = None) -> QWidget:
         """
         Создаёт текстовый виджет: QLineEdit (обычное поле) или QTextEdit (многострочное).
 
         :param widget_type: 'textarea' для QTextEdit, иначе QLineEdit
         :param editable: если False, виджет будет отключён
+        :param config: словарь конфигурации поля (может содержать 'input_mask'
+
         :return: QLineEdit или QTextEdit
+        
         """
         if widget_type == 'textarea':
             w = QTextEdit()
+            install_standard_context_menu(w, menu_type='text')
             w.setMaximumHeight(200)   # ограничиваем высоту для многострочного поля
         else:
             w = QLineEdit()
+            if config and config.get('input_mask'):
+                WidgetFactory._apply_mask(w, config)
+            install_standard_context_menu(w, menu_type='line')
 
+        # install_standard_context_menu(w)
         w.setEnabled(editable)
+        
         return w
 
     @staticmethod
@@ -206,13 +275,15 @@ class WidgetFactory:
         if widget_type == 'completer' and not with_buttons:
             # Только поле без кнопок
             widget = CompleterEdit(parent=None, with_create=False, with_edit=False)
+        
         else:
-
             with_create = (widget_type == 'completer_with_create')
             with_edit = (widget_type == 'completer_with_edit')
             widget = CompleterEdit(parent=None, with_create=with_create, with_edit=with_edit)
 
+        install_standard_context_menu(widget.line_edit, menu_type='line')
         widget.setEnabled(editable)
+
         return widget
 
     @staticmethod

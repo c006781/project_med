@@ -7,7 +7,7 @@
 # Стандартные библиотеки Python
 
 import datetime
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Union
 
 
 from difflib import SequenceMatcher
@@ -17,10 +17,129 @@ from app.utils.logger.logger import AppLogger
 
 # Сторонние библиотеки
 
-from sqlalchemy.orm import Query
 from sqlalchemy import Date, Integer, Float, String, Time
+from sqlalchemy.orm import Query
+from sqlalchemy import or_, and_
+
+def _build_filter_condition(filter_node: Union[Dict, List], model) -> Any:
+    """
+    Рекурсивно строит SQLAlchemy условие из узла фильтра.
+
+    Args:
+        filter_node: узел фильтра (лист или составной)
+        model: класс модели SQLAlchemy
+
+    Returns:
+        SQLAlchemy условие (для use in filter())
+    """
+    if isinstance(filter_node, list):
+        # старый формат – список листьев, объединяем через AND
+        conditions = [_build_filter_condition(item, model) for item in filter_node]
+        return and_(*conditions) if conditions else True
+
+    if 'and' in filter_node:
+        subconds = [_build_filter_condition(sub, model) for sub in filter_node['and']]
+        return and_(*subconds)
+
+    if 'or' in filter_node:
+        subconds = [_build_filter_condition(sub, model) for sub in filter_node['or']]
+        return or_(*subconds)
+
+    # Узел-лист
+    column_name = filter_node['column']
+    op = filter_node['operator']
+    value = filter_node.get('value')
+    value2 = filter_node.get('value2')
+
+    if not hasattr(model, column_name):
+        raise ValueError(f"Столбец {column_name} не найден в модели {model.__name__}")
+
+    column = getattr(model, column_name)
+    value = _convert_value(column, value) if value is not None else None
+
+    if op == 'eq':
+        return column == value
+    elif op == 'ne':
+        return column != value
+    elif op == 'gt':
+        return column > value
+    elif op == 'ge':
+        return column >= value
+    elif op == 'lt':
+        return column < value
+    elif op == 'le':
+        return column <= value
+    elif op == 'like':
+        safe = escape_like(value)
+        return column.like(f"%{safe}%", escape='\\')
+    elif op == 'ilike':
+        safe = escape_like(value)
+        return column.ilike(f"%{safe}%", escape='\\')
+    elif op == 'in':
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("Для IN значение должно быть списком")
+        return column.in_(value)
+    elif op == 'not_in':
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("Для NOT_IN значение должно быть списком")
+        return ~column.in_(value)
+    elif op == 'between':
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError("Для BETWEEN значение должно быть списком из двух элементов")
+        v1 = _convert_value(column, value[0])
+        v2 = _convert_value(column, value[1])
+        return column.between(v1, v2)
+    elif op == 'is_null':
+        return column.is_(None)
+    elif op == 'is_not_null':
+        return column.isnot(None)
+    else:
+        raise ValueError(f"Неизвестный оператор: {op}")
 
 
+def apply_filters(query, model, filters, fuzzy_threshold=60):
+    """
+    Применяет фильтры к запросу. filters может быть:
+        - список словарей (старый формат) – объединяются через AND
+        - дерево узлов (новый формат) – может содержать 'and'/'or'
+    Возвращает (query, post_filters).
+    """
+    if not filters:
+        return query, []
+
+    # Разделяем пост-фильтры (fuzzy) и SQL-условия
+    if isinstance(filters, list) and all(isinstance(f, dict) and 'operator' in f for f in filters):
+        # старый формат – список листьев
+        # (для простоты сразу преобразуем в дерево AND)
+        tree = {'and': filters}
+        condition = _build_filter_condition(tree, model)
+        if condition is not True:
+            query = query.filter(condition)
+        # Пост-фильтры (fuzzy) извлекаем из filters
+        post_filters = [f for f in filters if f.get('operator') == 'fuzzy']
+        return query, post_filters
+    else:
+        # новый формат – дерево
+        condition = _build_filter_condition(filters, model)
+        if condition is not True:
+            query = query.filter(condition)
+        # Пост-фильтры нужно собрать рекурсивно
+        post_filters = _collect_post_filters(filters)
+        return query, post_filters
+
+
+def _collect_post_filters(node):
+    """Рекурсивно собирает все узлы с оператором 'fuzzy'."""
+    if isinstance(node, dict):
+        if node.get('operator') == 'fuzzy':
+            return [node]
+        if 'and' in node:
+            return [item for sub in node['and'] for item in _collect_post_filters(sub)]
+        if 'or' in node:
+            return [item for sub in node['or'] for item in _collect_post_filters(sub)]
+    elif isinstance(node, list):
+        return [item for sub in node for item in _collect_post_filters(sub)]
+    return []
 
 class FilterOperator:
     """Константы операторов сравнения."""

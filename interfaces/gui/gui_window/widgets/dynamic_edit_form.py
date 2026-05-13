@@ -12,6 +12,7 @@ from app.config.config_manager.manager import get_config_env
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import DateEditWidget, TimeEditWidget
 
 # Импортируем вынесенные компоненты
 from .completer_edit import CompleterEdit
@@ -46,10 +47,14 @@ class DynamicEditForm(QWidget):
 
     # Словарь для обработки типов полей
     _TYPE_HANDLERS = {
-        str: lambda editable, widget_type=None: WidgetFactory.create_text_widget(widget_type or 'text', editable),
+        # str: lambda editable, widget_type=None: WidgetFactory.create_text_widget(widget_type or 'text', editable),
+        str: lambda editable, widget_type=None, config=None: WidgetFactory.create_text_widget(widget_type or 'text', editable, config),
         int: lambda editable, **kw: WidgetFactory.create_int_widget(editable),
-        datetime.date: lambda editable, **kw: WidgetFactory.create_date_widget(editable),
-        datetime.time: lambda editable, **kw: WidgetFactory.create_time_widget(editable),
+        # datetime.date: lambda editable, **kw: WidgetFactory.create_date_widget(editable),
+        # datetime.time: lambda editable, **kw: WidgetFactory.create_time_widget(editable),
+
+        datetime.date: lambda editable, config=None, **kw: WidgetFactory.create_date_picker_widget(editable, config),
+        datetime.time: lambda editable, config=None, **kw: WidgetFactory.create_time_picker_widget(editable, config),
         bool: lambda editable, **kw: WidgetFactory.create_bool_widget(editable),
     }
 
@@ -58,7 +63,8 @@ class DynamicEditForm(QWidget):
         'choices': lambda editable, choices, **kw: WidgetFactory.create_combobox_widget(choices, editable),
         'photo_uploader': lambda editable, **kw: WidgetFactory.create_photo_uploader_widget(),
         'completer': lambda editable, widget_type, **kw: WidgetFactory.create_completer_edit_widget(widget_type, editable),
-        'autocomplete': lambda editable, **kw: WidgetFactory.create_autocomplete_widget(editable), 
+        # 'autocomplete': lambda editable, **kw: WidgetFactory.create_autocomplete_widget(editable), 
+        'autocomplete': lambda editable, config=None, **kw: WidgetFactory.create_autocomplete_widget(editable, config), 
     }
 
     @classmethod
@@ -130,6 +136,18 @@ class DynamicEditForm(QWidget):
                 lambda w: w.currentText() or None,
                 lambda w: w.setCurrentIndex(0),
                 lambda w, fn, cb: w.currentTextChanged.connect(lambda text, n=fn: cb(n, text)),
+            ),
+            DateEditWidget: (
+                lambda w, v: w.set_date(v),
+                lambda w: w.get_date(),
+                lambda w: w.set_date(None),
+                lambda w, fn, cb: w.dateChanged.connect(lambda val, n=fn: cb(n, val)),
+            ),
+            TimeEditWidget: (
+                lambda w, v: w.set_time(v),
+                lambda w: w.get_time(),
+                lambda w: w.set_time(None),
+                lambda w, fn, cb: w.timeChanged.connect(lambda val, n=fn: cb(n, val)),
             ),
         }
 
@@ -294,7 +312,7 @@ class DynamicEditForm(QWidget):
                 self.logger.warning(f"Не удалось создать виджет для поля {name}")
                 continue
             
-            install_standard_context_menu(widget)   # новая строка
+            # install_standard_context_menu(widget)   
             self.widgets[name] = widget
 
             # Если поле скрыто – не добавляем в layout, но сохраняем в словаре
@@ -363,19 +381,23 @@ class DynamicEditForm(QWidget):
         if choices:
             return self._SPECIAL_HANDLERS['choices'](
                 editable=editable, 
-                choices=choices
+                choices=choices,
             )
         
         # Автодополнение для строковых полей (без кнопок)
         if config.get('autocomplete') and real_type == str:
-            return self._SPECIAL_HANDLERS['autocomplete'](editable=editable)
+            return self._SPECIAL_HANDLERS['autocomplete'](
+                editable=editable,
+                config=config,
+            )
 
         # Специальные типы виджетов
         widget_type = config.get('widget_type')
         if widget_type in self._SPECIAL_HANDLERS:
             return self._SPECIAL_HANDLERS[widget_type](
                 editable=editable, 
-                widget_type=widget_type
+                widget_type=widget_type,
+                config=config,
             )
         
         # # Определяем реальный тип поля
@@ -386,7 +408,8 @@ class DynamicEditForm(QWidget):
         if handler:
             return handler(
                 editable=editable, 
-                widget_type=widget_type
+                widget_type=widget_type,
+                config=config,
         )
 
         return None   # Неподдерживаемый тип – пропускаем

@@ -1,4 +1,4 @@
-# version.py
+# scripts/version.py
 import sys
 from pathlib import Path
 

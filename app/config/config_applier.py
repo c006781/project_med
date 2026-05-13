@@ -43,6 +43,7 @@ from app.config.config_manager.manager import AppConfigManager
 # from app.database import Database
 # from app.services import PhotoService, SyncService
 from app.dependencies import (
+    _SERVICE_PROVIDERS,
     get_sync_service,
     # get_db,
     get_patient_service,
@@ -218,14 +219,20 @@ class ConfigApplier:
         # db.close()
 
         # Новая БД будет создана при следующем get_db()
+        
+
+        # Сбрасываем кэш синглтон-сервисов, чтобы при следующем вызове get_* создались новые экземпляры
+        from app.dependencies import clear_services_cache # оставить тут, так как циклы
+        clear_services_cache()
 
         # Перезагружаем все сервисы, зависящие от БД
-        for i in [
-            get_patient_service,
-            get_appointment_service,
-            get_note_service,
-            get_photo_service,
-        ]:
+        # for i in [
+        #     get_patient_service,
+        #     get_appointment_service,
+        #     get_note_service,
+        #     get_photo_service,
+        # ]:
+        for i in _SERVICE_PROVIDERS:
             i().reload_config()
 
         return True

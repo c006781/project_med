@@ -335,14 +335,14 @@ class AdvancedFilterProxyModel(QSortFilterProxyModel):
             return data is not None and data != ""
         return True  # неизвестный оператор – пропускаем
 
-    @AppLogger.get_instance(
-        name = 'AdvancedFilterProxyModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system',
-    ).log_execution_time(
-        level = AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name = 'AdvancedFilterProxyModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level = AppLogger._parse_log_level('DEBUG')
+    # )
     def data(
         self, 
         index: QModelIndex, 

@@ -77,8 +77,13 @@ class UpdateChecker(QThread):
     )
     def _get_token(self) -> str:
         """Получает токен из окружения (через getenv)."""
-        from app.config.conf.getenv import get_getenv
-        token = get_getenv(key='GITHUB_TOKEN', start_value='')
+
+        token = ''
+        try:
+            from app.config.conf.getenv import get_getenv
+            token = get_getenv(key='GITHUB_TOKEN', start_value='')
+        except Exception as e:
+            self.logger.error(f"Произошла ошибка получения токена: {e}")
 
         self.logger.debug(
             f"DEBUG: "
@@ -183,17 +188,23 @@ class UpdateChecker(QThread):
 
             req = self._build_request(token)
             self.logger.debug(f"Request URL: {req.full_url}")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+            except urllib.error.HTTPError as e:
+                err = f"Ошибка соединения с сервером обновления ({e.code}): {e.reason}"
+                self.logger.error(err)
+                self.error.emit(err)
+                return
 
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode('utf-8'))
 
             has_update, latest_version, release_url, full_data = self._process_response(data)
             self.logger.debug(f"has_update = {has_update}, latest_version = {latest_version}, release_url = {release_url}")
 
             self.finished.emit(has_update, full_data)
         except urllib.error.HTTPError as e:
-            self.logger.error(f"Ошибка HTTP {e.code}: {e.reason}")
-            self.error.emit(f"Ошибка HTTP {e.code}: {e.reason}")
+            self.logger.error(f"Ошибка HTTP1 {e.code}: {e.reason}")
+            self.error.emit(f"Ошибка HTTP1 {e.code}: {e.reason}")
         except Exception as e:
             self.logger.error(f"Произошла ошибка: {e}")
             self.error.emit(str(e))

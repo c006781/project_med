@@ -4,6 +4,7 @@
 Модуль зависимостей: фабричные функции для получения сервисов и работы с БД.
 """
 
+from functools import lru_cache
 import os
 from typing import (
     # get_type_hints,
@@ -35,9 +36,41 @@ from app.services import (
     SyncService
 )
 # from .backend.bd.clinic import create_db
+# from .backend.bd.clinic import create_db
 # from .backend.bd.temp_data_bd import generate_test_data
 
 from pydantic import BaseModel
+
+
+
+# ------------------------------------------------------------
+# Глобальный реестр для заметок
+# ------------------------------------------------------------
+_NOTE_USAGE_MODELS = []   # список кортежей (model_class, [поля_заметок])
+
+from app.dto.field_configs import get_note_fields
+def register_note_model(model_class, field_configs):
+    fields = get_note_fields(field_configs)
+    if fields:
+        _NOTE_USAGE_MODELS.append((model_class, fields))
+
+# Автоматическая регистрация всех моделей из MODEL_CONFIG_MAP
+from app.dto.field_configs import MODEL_CONFIG_MAP
+
+for model_class, field_configs in MODEL_CONFIG_MAP.items():
+    register_note_model(model_class, field_configs)
+
+#############################
+
+_SERVICE_PROVIDERS = []
+
+def register_service_provider(func):
+    _SERVICE_PROVIDERS.append(func)
+    return func
+
+
+
+
 
 @AppLogger.get_instance(
     name = 'dependencies.py',
@@ -72,6 +105,8 @@ def get_db() -> Database:
 
     return Database(db_url)
 
+@register_service_provider
+@lru_cache(maxsize=1)
 @AppLogger.get_instance(
     name = 'dependencies.py',
     enable_file_logging = 'system',
@@ -80,11 +115,34 @@ def get_db() -> Database:
     level = AppLogger._parse_log_level('DEBUG')
 )
 def get_patient_service() -> PatientService:
+    db = get_db()
+    appointment_service = get_appointment_service()   # получаем экземпляр
     return PatientService(
-        get_db(), 
-        field_configs=PATIENT_CONFIG
+        db, 
+        field_configs=PATIENT_CONFIG,
+        appointment_service=appointment_service,
     )
 
+@register_service_provider
+@lru_cache(maxsize=1)
+@AppLogger.get_instance(
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
+).log_execution_time(
+    level = AppLogger._parse_log_level('DEBUG')
+)
+def get_appointment_service() -> AppointmentService:
+    db = get_db()
+    note_service = get_note_service()
+    photo_service = get_photo_service()
+
+    return AppointmentService(
+        db, 
+        note_service=note_service, 
+        photo_service=photo_service,
+        field_configs=APPOINTMENT_CONFIG
+    )
 
 # def get_appointment_service() -> AppointmentService:
 #     db = get_db()
@@ -98,25 +156,20 @@ def get_patient_service() -> PatientService:
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
-def get_appointment_service() -> AppointmentService:
+def clear_services_cache() -> None:
     """
-    Возвращает экземпляр AppointmentService, инициализированный с помощью Database,
-    NoteService и PhotoService.
-
-    Returns:
-        AppointmentService: экземпляр AppointmentService, готовый к работе.
+    Сбрасывает кэш синглтон-сервисов при изменении конфигурации.
+    Вызывается в reload_config сервисов, чтобы гарантировать получение
+    новых экземпляров с обновлёнными настройками.
     """
-    db = get_db()
-    note_service = get_note_service()
-    photo_service = get_photo_service()   
-    # Create an instance of AppointmentService with the database, note service, and photo service.
-    return AppointmentService(
-        db,
-        note_service=note_service,
-        photo_service=photo_service,
-        field_configs=APPOINTMENT_CONFIG
-    )
+    get_patient_service.cache_clear()
+    get_appointment_service.cache_clear()
+    get_note_service.cache_clear()
+    get_photo_service.cache_clear()
+    # Если в будущем появятся другие закэшированные сервисы, добавить их сюда
 
+@register_service_provider
+@lru_cache(maxsize=1)
 @AppLogger.get_instance(
     name = 'dependencies.py',
     enable_file_logging = 'system',
@@ -135,6 +188,8 @@ def get_note_service() -> NoteService:
         field_configs=NOTE_CONFIG
     )
 
+@register_service_provider
+@lru_cache(maxsize=1)
 @AppLogger.get_instance(
     name = 'dependencies.py',
     enable_file_logging = 'system',
@@ -523,25 +578,6 @@ def collect_dto_from_input(
                 click.echo(f"{err_}.")
 
     return data
-
-@AppLogger.get_instance(
-    name = 'dependencies.py',
-    enable_file_logging = 'system',
-    use_name_in_filename = False,
-).log_execution_time(
-    level = AppLogger._parse_log_level('DEBUG')
-)
-def get_appointment_service() -> AppointmentService:
-    db = get_db()
-    note_service = get_note_service()
-    photo_service = get_photo_service()
-
-    return AppointmentService(
-        db, 
-        note_service=note_service, 
-        photo_service=photo_service,
-        field_configs=APPOINTMENT_CONFIG
-    )
 
 AppLogger.get_instance(
     name='dependencies.py',

@@ -91,11 +91,11 @@ class PatientDTO(BaseModel):
     #     None,
     #     description='Электронная почта',
     # )
-    description: Optional[str] = Field(
+    description_text: Optional[str] = Field(
         None, 
         description='Описание пациента (виртуальное)'
     )
-    comment: Optional[str] = Field(
+    comment_text: Optional[str] = Field(
         None, 
         description='Комментарий к пациенту (виртуальное)'
     )
@@ -271,7 +271,7 @@ class PhotoDTO(BaseModel):
         ...     file_path="app_10/5_face.jpg",
         ...     description="Лицо"
         ... )
-    """
+    """ 
 
     model_config = ConfigDict(from_attributes=True)
 

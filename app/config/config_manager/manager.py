@@ -258,9 +258,12 @@ class AppConfigManager(BaseConfigManager):
         
         
         # Для системного логгера
-        'system_enabled': 'True', 
-        'system_console_enabled': 'True',
-        'system_file_enabled': 'True',
+        # 'system_enabled': 'True',
+        'system_enabled': 'False',
+        # 'system_console_enabled': 'True',
+        'system_console_enabled': 'False',
+        # 'system_file_enabled': 'True',
+        'system_file_enabled': 'False',
         'system_LEVEL': 'DEBUG',
         # 'system_enabled': 'False', 
         # 'system_console_enabled': 'False',
@@ -268,9 +271,12 @@ class AppConfigManager(BaseConfigManager):
         # 'system_LEVEL': 'INFO',
         
         # Для пользовательского логгера
-        'user_enabled': 'True',
-        'user_console_enabled': 'True',
-        'user_file_enabled': 'True',
+        # 'user_enabled': 'True',
+        'user_enabled': 'False',
+        # 'user_console_enabled': 'True',
+        'user_console_enabled': 'False',
+        # 'user_file_enabled': 'True',
+        'user_file_enabled': 'False',
         'user_LEVEL': 'DEBUG',
         # 'user_enabled': 'False',
         # 'user_console_enabled': 'False',

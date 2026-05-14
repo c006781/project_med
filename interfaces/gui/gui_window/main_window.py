@@ -58,9 +58,10 @@ from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploade
 # from interfaces.gui.gui_window.mixins.sync_mixin import SyncMixin
 
 from PySide6.QtWidgets import (
-    QApplication, QDialog, QFileDialog, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressDialog, QWidget, QVBoxLayout,
+    QApplication, QDialog, QFileDialog, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressDialog,
+    QWidget, QVBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
-    QStackedWidget, QFrame, QHBoxLayout
+    QStackedWidget, QFrame, QHBoxLayout, QTextEdit
 )
 from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QDesktopServices
@@ -1317,17 +1318,33 @@ rm "$0"
 
 # ========== Диалог прогресса ==========
 class ParsingProgressDialog(QDialog):
+
+    finished_closed = Signal()   # новый сигнал
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Импорт данных из Word")
         self.setMinimumWidth(600)
         self.setModal(True)
         layout = QVBoxLayout(self)
+
+        # Список файлов
         self.list_widget = QListWidget()
         layout.addWidget(self.list_widget)
-        self.cancel_btn = QPushButton("Отмена")
-        self.cancel_btn.clicked.connect(self.reject)
-        layout.addWidget(self.cancel_btn)
+
+        # Область для итоговой информации (создаётся, но скрыта до завершения)
+        self.summary_text = QTextEdit()
+        self.summary_text.setReadOnly(True)
+        self.summary_text.setMaximumHeight(120)
+        self.summary_text.setVisible(False)
+        layout.addWidget(self.summary_text)
+
+        # Кнопка
+        self.close_btn = QPushButton("Отмена")
+        self.close_btn.clicked.connect(self._on_close_clicked)
+        layout.addWidget(self.close_btn)
+
+        self._finished = False
         self._items = {}
 
     @Slot(list)
@@ -1356,6 +1373,42 @@ class ParsingProgressDialog(QDialog):
         else:
             self._set_status(item, "⏳ Ожидание")
         self.list_widget.repaint()
+
+    def set_finished_results(self, total: int, success: int, failed: int, log_path: str):
+        """Вызывается после завершения парсинга – показывает итоговую информацию."""
+        self._finished = True
+        self.summary_text.clear()
+        self.summary_text.append(f"<b>Обработано файлов:</b> {total}")
+        self.summary_text.append(f"<b>Успешно:</b> {success}")
+        self.summary_text.append(f"<b>Ошибок:</b> {failed}")
+        self.summary_text.append(f"<b>Лог сохранён:</b> {log_path}")
+        self.summary_text.setVisible(True)
+
+        self.close_btn.setText("Закрыть")
+        try:
+            self.close_btn.clicked.disconnect()
+        except TypeError:
+            pass
+        self.close_btn.clicked.connect(self._on_close_finished)
+
+    def _on_close_clicked(self):
+        if not self._finished:
+            self.reject()
+
+    def _on_close_finished(self):
+        self.finished_closed.emit()
+        self.accept()
+
+    def reject(self):
+        if not self._finished:
+            super().reject()
+        else:
+            self.accept()
+
+    def closeEvent(self, event):
+        if self._finished:
+            self.finished_closed.emit()
+        event.accept()
 
     def _set_status(self, item: QListWidgetItem, text: str):
         item.setText(f"{item.text()}   {text}")
@@ -1473,7 +1526,7 @@ class MainWindow(
 
 
         # Не вызываем check_for_updates сразу, а планируем через 1 секунду
-        QTimer.singleShot(1000, self._delayed_check_updates)
+        QTimer.singleShot(1500, self._delayed_check_updates)
 
         # Определяем, существует ли файл конфигурации
         # from app.config.config_manager.manager import AppConfigManager
@@ -1584,17 +1637,36 @@ class MainWindow(
         if hasattr(self, 'progress_dialog'):
             self.progress_dialog.accept()
             self.progress_dialog = None
+
         total = results.get('total', 0)
         success = results.get('success', 0)
         failed = results.get('failed', 0)
         log_path = results.get('log_path', 'не указан')
-        QMessageBox.information(
-            self, "Парсинг завершён",
-            f"Обработано файлов: {total}\n"
-            f"Успешно: {success}\n"
-            f"Ошибок: {failed}\n"
-            f"Лог сохранён: {log_path}"
-        )
+
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.set_finished_results(total, success, failed, log_path)
+            if not hasattr(self, '_parsing_closed_connected'):
+                self.progress_dialog.finished_closed.connect(self._on_parsing_dialog_closed)
+                self._parsing_closed_connected = True
+        else:
+            QMessageBox.information(
+                self, "Парсинг завершён",
+                f"Обработано файлов: {total}\nУспешно: {success}\nОшибок: {failed}\nЛог сохранён: {log_path}"
+            )
+            self._refresh_after_parsing()
+
+    def _on_parsing_dialog_closed(self):
+        """Вызывается, когда пользователь закрыл диалог прогресса после завершения парсинга."""
+        self._refresh_after_parsing()
+        self.progress_dialog = None
+        self._parsing_closed_connected = False
+
+    def _refresh_after_parsing(self):
+        """Обновляет страницы, которые могут содержать новые данные."""
+        if hasattr(self, 'patient_list_page'):
+            self.patient_list_page.refresh_data()
+        if hasattr(self, 'appointment_list_page'):
+            self.appointment_list_page.refresh_data()
 
     @AppLogger.get_instance(
         name='MainWindow',
@@ -1605,10 +1677,19 @@ class MainWindow(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _on_parsing_error(self, error_msg):
-        if hasattr(self, 'progress_dialog'):
-            self.progress_dialog.accept()
-            self.progress_dialog = None
-        QMessageBox.critical(self, "Ошибка", f"При выполнении парсинга произошла ошибка:\n{error_msg}")
+        if hasattr(self, 'progress_dialog') and self.progress_dialog:
+            self.progress_dialog.summary_text.setVisible(True)
+            self.progress_dialog.summary_text.clear()
+            self.progress_dialog.summary_text.append(f"<b>Ошибка выполнения парсинга:</b>\n{error_msg}")
+            self.progress_dialog.close_btn.setText("Закрыть")
+            try:
+                self.progress_dialog.close_btn.clicked.disconnect()
+            except TypeError:
+                pass
+            self.progress_dialog.close_btn.clicked.connect(self._on_parsing_dialog_closed)
+            self.progress_dialog._finished = True
+        else:
+            QMessageBox.critical(self, "Ошибка", f"При выполнении парсинга произошла ошибка:\n{error_msg}")
 
     # ----------------------------------------------------------------------
     # Методы загрузки данных для страниц списков

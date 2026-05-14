@@ -20,7 +20,9 @@ from PySide6.QtCore import Qt
 
 
 @AppLogger.get_instance(
-    name = 'system'
+    name = 'main.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     description="main",
     level=AppLogger._parse_log_level('DEBUG')

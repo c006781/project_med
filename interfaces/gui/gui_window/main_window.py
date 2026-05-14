@@ -62,7 +62,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QProgressBar, QComboBox,
     QStackedWidget, QFrame, QHBoxLayout
 )
-from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot
+from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QDesktopServices
 
 
@@ -1470,9 +1470,10 @@ class MainWindow(
         # Инициализация системы обновлений (собственный модуль)
         self._init_updater()
 
-        # Автоматическая проверка обновлений при старте (без показа сообщения "нет обновлений")
-        self._auto_check = True
-        self.updater.check_for_updates()
+
+
+        # Не вызываем check_for_updates сразу, а планируем через 1 секунду
+        QTimer.singleShot(1000, self._delayed_check_updates)
 
         # Определяем, существует ли файл конфигурации
         # from app.config.config_manager.manager import AppConfigManager
@@ -1495,6 +1496,20 @@ class MainWindow(
             self.page_manager.switch_to('patient_list')
 
         self.logger.info("Главное окно создано")
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _delayed_check_updates(self):
+        """Отложенный запуск проверки обновлений."""
+        # Автоматическая проверка обновлений при старте (без показа сообщения "нет обновлений")
+        self._auto_check = True
+        self.updater.check_for_updates()
 
     @AppLogger.get_instance(
         name='MainWindow',

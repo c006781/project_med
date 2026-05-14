@@ -40,6 +40,8 @@ from app.dto.field_configs import (
     PATIENT_CONFIG, PHOTO_CONFIG
 )
 
+from interfaces.gui.gui_window.dialogs.instructions_dialog import InstructionsDialog
+
 from interfaces.gui.gui_window.controllers.page_manager import PageManager
 from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
@@ -754,9 +756,11 @@ class SyncMixin:
             self._on_settings_clicked()
         elif index == 2:        # Парсинг данных с файла
             self._start_parsing()
-        elif index == 4:        # Скачать БД
+        elif index == 3:        # Инструкции
+            self._show_instructions_dialog()
+        elif index == 5:        # Скачать БД
             self._start_download()
-        elif index == 5:        # Загрузить БД
+        elif index == 6:        # Загрузить БД
             self._start_upload()
 
         # Сбрасываем выбранный индекс, чтобы можно было повторно выбрать то же действие
@@ -764,6 +768,26 @@ class SyncMixin:
         self.action_combo.blockSignals(True)
         self.action_combo.setCurrentIndex(0)
         self.action_combo.blockSignals(False)
+    
+    def _correct_remote_path(
+        self,
+        remote: str,
+        local: str,
+    ):
+        # --- ДОБАВЛЕННАЯ ПРОВЕРКА И КОРРЕКЦИЯ REMOTE-ПУТИ ---
+        # Если remote не заканчивается на расширение файла БД, добавляем имя из local
+        # Расширения .db, .sqlite, .sqlite3
+        # import os
+        db_extensions = ('.db', '.sqlite', '.sqlite3')
+        if not remote.lower().endswith(db_extensions):
+            # Извлекаем имя файла из local пути
+            local_filename = os.path.basename(local)
+            # Нормализуем remote (убираем возможный завершающий слэш)
+            remote = remote.rstrip('/\\')
+            remote = f"{remote}/{local_filename}"
+            self.logger.info(f"Корректировка remote пути: добавлено имя файла -> {remote}")  
+
+        return remote
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -786,6 +810,9 @@ class SyncMixin:
         if not token:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
+        
+        # --- ДОБАВЛЕННАЯ ПРОВЕРКА И КОРРЕКЦИЯ REMOTE-ПУТИ ---
+        remote = self._correct_remote_path(remote, local)
 
         # Создаём и настраиваем поток загрузки
         self.download_thread = DownloadThread(token, remote, local)
@@ -820,6 +847,9 @@ class SyncMixin:
         if not token:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
+        
+        # Корректируем удалённый путь (добавляем имя файла, если указана только папка)
+        remote = self._correct_remote_path(remote, local)
 
         self.upload_thread = UploadThread(token, local, remote, overwrite=True)
         self.upload_thread.progress.connect(self._update_progress)
@@ -1128,12 +1158,12 @@ class UpdateMixin:
         msg.setDefaultButton(cancel_btn)
         msg.exec()
 
-        print(
-            "Pending release data:", 
-            self.updater._pending_release_data 
-            if hasattr(self.updater, '_pending_release_data') 
-            else "None"
-        )
+        # print(
+        #     "Pending release data:", 
+        #     self.updater._pending_release_data 
+        #     if hasattr(self.updater, '_pending_release_data') 
+        #     else "None"
+        # )
 
         clicked = msg.clickedButton()
         if clicked == download_btn:
@@ -1474,6 +1504,19 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _show_instructions_dialog(self):
+        """Открывает диалог с инструкциями."""
+        dialog = InstructionsDialog(self)
+        dialog.exec()
+
+    @AppLogger.get_instance(
+        name='MainWindow',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def check_for_updates(self):
         """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
 
@@ -1676,9 +1719,11 @@ class MainWindow(
         self.action_combo.addItem("Файл")          # индекс 0 – заглушка
         self.action_combo.addItem("Настройки")     # индекс 1
         self.action_combo.addItem("Парсинг данных с файла")  # индекс 2 - парсер
-        self.action_combo.insertSeparator(3)       # index 3 разделитель 
-        self.action_combo.addItem("Скачать БД с сервера")   # индекс 4
-        self.action_combo.addItem("Загрузить БД на сервер") # индекс 5
+        self.action_combo.addItem("Инструкции")    # индекс 3   
+        self.action_combo.insertSeparator(4)       # index 4 разделитель 
+        self.action_combo.addItem("Скачать БД с сервера")   # индекс 5
+        self.action_combo.addItem("Загрузить БД на сервер") # индекс 6
+        # ответственная ф-я: def _on_action_selected
 
         self.action_combo.setEditable(False)
         self.action_combo.setMaximumWidth(200)

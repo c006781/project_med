@@ -54,6 +54,12 @@ class DownloadThread(QThread):
         эмити сообщение об ошибке.
         """
         try:
+            # Проверяем существование файла на Яндекс.Диске
+            exists, msg = check_remote_file_exists(self.token, self.remote_path)
+            if not exists:
+                self.error.emit(msg)
+                return
+
             # Вызов функции скачивания файла с Диска
             result = yadisk_download_file(
                 # Токен для авторизации

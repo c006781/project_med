@@ -257,8 +257,8 @@ class SettingsPage(BasePage):
         remote_layout = QHBoxLayout()
         remote_layout.addWidget(self.remote_path_edit)
 
-        self.check_path_btn = QPushButton("Проверить/Создать")
-        self.check_path_btn.setMaximumWidth(120)
+        self.check_path_btn = QPushButton("Проверить наличие папки")
+        self.check_path_btn.setMaximumWidth(180)
 
         remote_layout.addWidget(self.check_path_btn)
 
@@ -857,7 +857,7 @@ class SettingsPage(BasePage):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _on_path_checked(self, ok: bool, message: str):
         self.check_path_btn.setEnabled(True)
-        self.check_path_btn.setText("Проверить/Создать")
+        self.check_path_btn.setText("Проверить наличие папки")
         if ok:
             QMessageBox.information(self, "Результат", message)
         else:

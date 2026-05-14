@@ -5,8 +5,13 @@ import os  # Импорт модуля os для работы с путями ф
 
 # from pathlib import Path
 
+import threading
+
 # Сторонние библиотеки
 from dotenv import load_dotenv, set_key, find_dotenv # pip install python-dotenv
+
+# Глобальная блокировка для операций записи в .env файл
+_env_write_lock = threading.RLock()
 
 def get_dotenv_path(
     name:str = None
@@ -61,12 +66,14 @@ def get_getenv(
 
     # Если ключа нет в .env, то добавляем его с start_value
     if (not thec) and (start_value is not None):
-        save_env_file(# внесение новых ключей
-            env_key = {
-                key : start_value
-            },         
-            dotenv_path = dotenv_path,
-        )
+        # Сохраняем в .env под блокировкой
+        with _env_write_lock:
+            save_env_file( # внесение новых ключей
+                env_key = {
+                    key : start_value
+                },
+                dotenv_path = dotenv_path,
+            )
 
         # И снова загружаем .env, чтобы обновить os.environ
         load_dotenv( 
@@ -114,45 +121,47 @@ def save_env_file(
         dotenv_path : (str) путь к .env
         if_update   : (bool) Принудительное обновление ключа в .env
     """
-    # Если не передан путь к .env, то ищем .env в текущей директории
-    if not dotenv_path:
-        dotenv_path = get_dotenv_path() 
 
-    # Загрузка .env
-    load_dotenv(
-        dotenv_path =   dotenv_path, 
-        # override    =   True,
-    )
+    with _env_write_lock:
+        # Если не передан путь к .env, то ищем .env в текущей директории
+        if not dotenv_path:
+            dotenv_path = get_dotenv_path()
 
-    iterated = False
+        # Загрузка .env
+        load_dotenv(
+            dotenv_path =   dotenv_path,
+            # override    =   True,
+        )
 
-    # Перебрать все ключи в env_key
-    for key, value in env_key.items():
-        # Если ключа нет в .env (или принудительная замена значения ключа)
-        if (
-            not os.getenv(key)  # проверка наличия ключа
-            ) or (if_update):  # если нет ключа или принудительная замена значения ключа
-            iterated = True
+        iterated = False
 
-            # Вносим новый ключ в .env
-            success, message, _ = set_key( 
-                dotenv_path     = dotenv_path, 
-                key_to_set      = key, 
-                value_to_set    = value
-            )
+        # Перебрать все ключи в env_key
+        for key, value in env_key.items():
+            # Если ключа нет в .env (или принудительная замена значения ключа)
+            if (
+                not os.getenv(key)  # проверка наличия ключа
+                ) or (if_update):  # если нет ключа или принудительная замена значения ключа
+                iterated = True
 
-            # Если произошла ошибка при записи, то выбрасываем ошибку
-            if not success:
-                raise ValueError(
-                    f"Ошибка при записи {key}: {message}"
+                # Вносим новый ключ в .env
+                success, message, _ = set_key(
+                    dotenv_path     = dotenv_path,
+                    key_to_set      = key,
+                    value_to_set    = value
                 )
 
-    # Принудительно перезагружаем переменные в os.environ если было хобя бы 1но изменение
-    if iterated:
-        load_dotenv(
-            dotenv_path =   dotenv_path, 
-            override    =   True,
-        )
+                # Если произошла ошибка при записи, то выбрасываем ошибку
+                if not success:
+                    raise ValueError(
+                        f"Ошибка при записи {key}: {message}"
+                    )
+
+        # Принудительно перезагружаем переменные в os.environ если было хобя бы 1но изменение
+        if iterated:
+            load_dotenv(
+                dotenv_path =   dotenv_path,
+                override    =   True,
+            )
 
 
 

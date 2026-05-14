@@ -939,8 +939,9 @@ class AppointmentListPage(
             return True
         
         # Сравнение основных полей (исключая виртуальные)
-        exclude = ['patient_name', 'has_photos']
-        if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
+        # exclude = ['patient_name', 'has_photos']
+        # if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
+        if  dto.model_dump(exclude={'photos'}) != original.model_dump(exclude={'photos'}):
             return True
         
         # # Проверка черновиков заметки
@@ -1302,8 +1303,11 @@ class AppointmentListPage(
                 self._select_row_by_id(current_id) # Восстанавливаем выделение строки в таблице
 
             else:
-                # Если приём больше не существует – очищаем правую панель
-                self._clear_right_panel()
+                # # Если приём больше не существует – очищаем правую панель
+                # self._clear_right_panel() # тут не использовать, так как мешает self.selected_dto...
+
+                # Приём больше не существует – просто выбираем первую строку (она отобразится автоматически)
+                self._select_first_row()
         else:
             # Если не было выделения – просто выбираем первую строку (если есть)
             self._select_first_row()

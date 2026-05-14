@@ -17,7 +17,9 @@ from pydantic import BaseModel
 
 
 @AppLogger.get_instance(
-    name='system',
+    name='virtual_fields.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -35,7 +37,11 @@ def compute_virtual_fields(
     :return: словарь с вычисленными значениями (может содержать и исходные поля)
     """
     result = data.copy() # копируем исходный словарь
-
+    logger =  AppLogger.get_instance(
+        name='api',
+        enable_file_logging = 'user',
+        use_name_in_filename = False,
+    )
     for field_name, config in field_configs.items():
         compute = config.get('compute') # получаем словарь вычислений
         
@@ -48,7 +54,7 @@ def compute_virtual_fields(
 
         args = []
         for arg_name in compute.get('args', []): # получаем позиционные аргументы
-            AppLogger.get_instance( name = 'user').debug(
+            logger.debug(
                 f"arg_name = {arg_name}: "
                 # f"in result ({result}) = {arg_name in result} "
                 f"in result = {arg_name in result} "
@@ -70,21 +76,27 @@ def compute_virtual_fields(
             value = func(*args, **kwargs)
             result[field_name] = value
 
-            AppLogger.get_instance( name = 'user').debug(
-                f"compute_virtual_fields: вычисление виртуального поля {field_name}: args = {args}, kwargs = {kwargs}, value = {value}"
+            logger.debug(
+                f"compute_virtual_fields: "
+                f"вычисление виртуального поля {field_name}: "
+                f"args = {args}, "
+                f"kwargs = {kwargs}, "
+                f"value = {value}"
             )
 
             # 0==0
 
         except Exception as e:
-            AppLogger.get_instance( name = 'user').error(f"Ошибка вычисления виртуального поля {field_name}: {e}")
+            logger.error(f"Ошибка вычисления виртуального поля {field_name}: {e}")
             # при ошибке оставляем None
             result[field_name] = None
             
     return result
 
 @AppLogger.get_instance(
-    name='system',
+    name='virtual_fields.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -107,9 +119,14 @@ def enrich_dto_with_computed_fields(
     # AppLogger.get_instance( name='user',  ).debug(
     #     f" model_obj: {model_obj} field_configs: {field_configs} extra_data: {extra_data}"
     # )
-    AppLogger.get_instance( 
-        name='user',  
-    ).debug(
+
+    logger =  AppLogger.get_instance(
+        name='api',
+        enable_file_logging = 'user',
+        use_name_in_filename = False,
+    )
+
+    logger.debug(
         f"extra_data: {extra_data}"
     )
 
@@ -120,9 +137,7 @@ def enrich_dto_with_computed_fields(
     for config in field_configs.values():
         source_attr = config.get('source_attr')
 
-        AppLogger.get_instance( 
-            name='user',  
-        ).debug(
+        logger.debug(
             f"config: {config} "
             f"source_attr: {source_attr} "
             f"result: {source_attr and source_attr not in extra_data}"
@@ -131,9 +146,7 @@ def enrich_dto_with_computed_fields(
             val = getattr(model_obj, source_attr, None)
             if val is not None:
                 extra_data[source_attr] = val
-                AppLogger.get_instance( 
-                    name='user',  
-                ).debug(
+                logger.debug(
                     f"Добавлен {source_attr} в extra_data"
                 )
 
@@ -150,9 +163,7 @@ def enrich_dto_with_computed_fields(
     # Применяем к DTO
     for field_name, value in computed.items():
 
-        AppLogger.get_instance(
-             name='user',  
-        ).debug(
+        logger.debug(
             f"field_name: {field_name} "
             # f"value: {value} "
             f"result: {value is not None and hasattr(dto, field_name)}"

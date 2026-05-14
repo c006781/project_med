@@ -230,3 +230,33 @@ def check_and_create_path(
             return False, f"Путь не существует: {ya_path}"
     except Exception as e:
         return False, f"Ошибка при проверке/создании пути: {e}"
+
+
+def check_remote_file_exists(ya_token: str, ya_file_path: str) -> Tuple[bool, str]:
+    """
+    Проверяет существование файла на Яндекс.Диске.
+
+    Args:
+        ya_token: OAuth-токен.
+        ya_file_path: Путь к файлу на Яндекс.Диске.
+
+    Returns:
+        Tuple[bool, str]: (существует, сообщение)
+    """
+    # import yadisk
+    y = yadisk.YaDisk(token=ya_token)
+    if not y.check_token():
+        return False, "Неверный токен или нет соединения"
+    
+    if y.exists(ya_file_path):
+        # Проверим, что это файл, а не папка
+        try:
+            info = y.get_meta(ya_file_path)
+            if info.get('type') == 'file':
+                return True, "Файл существует"
+            else:
+                return False, "Указанный путь ведёт к папке, а не к файлу"
+        except:
+            return True, "Файл существует (не удалось определить тип)"
+    else:
+        return False, f"Файл {ya_file_path} не найден на Яндекс.Диске"

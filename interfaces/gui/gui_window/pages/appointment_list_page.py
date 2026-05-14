@@ -939,8 +939,9 @@ class AppointmentListPage(
             return True
         
         # Сравнение основных полей (исключая виртуальные)
-        exclude = ['patient_name', 'has_photos']
-        if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
+        # exclude = ['patient_name', 'has_photos']
+        # if dto.model_dump(exclude=exclude) != original.model_dump(exclude=exclude):
+        if  dto.model_dump(exclude={'photos'}) != original.model_dump(exclude={'photos'}):
             return True
         
         # # Проверка черновиков заметки

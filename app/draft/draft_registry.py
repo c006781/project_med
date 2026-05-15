@@ -59,6 +59,95 @@ class DraftRegistry(QObject):
         self._listeners: Dict[str, Set[Callable[[str, bool], None]]] = defaultdict(set)
         self._prefix_listeners: Dict[str, Set[Callable[[str, bool], None]]] = defaultdict(set)
 
+    # ==================================================================
+    # Работа со статусами сущностей
+    # ==================================================================
+
+    def set_entity_status(
+        self, entity_type: str, entity_id: int, status: Optional[str]
+    ) -> None:
+        """
+        Устанавливает статус сущности. Допустимые статусы:
+        None, 'own', 'child', 'both'.
+        """
+        key = f"__status__:{entity_type}:{entity_id}"
+        if status is None:
+            self.discard(key)
+        else:
+            self.set(key, {"status": status})
+
+    def get_entity_status(
+        self, entity_type: str, entity_id: int
+    ) -> Optional[str]:
+        """Возвращает статус сущности или None."""
+        data = self.get(f"__status__:{entity_type}:{entity_id}")
+        return data["status"] if data else None
+
+    def delete_entity_status(self, entity_type: str, entity_id: int) -> None:
+        """Удаляет статус сущности (сбрасывает до None)."""
+        self.discard(f"__status__:{entity_type}:{entity_id}")
+
+    # ==================================================================
+    # Счётчики потомков (для оптимизации пересчёта статуса родителя)
+    # ==================================================================
+
+    def inc_child_counter(
+        self, parent_type: str, parent_id: int, delta: int = 1
+    ) -> int:
+        """
+        Увеличивает счётчик ненулевых потомков для родителя.
+        Возвращает новое значение счётчика.
+        """
+        key = f"__counter__:{parent_type}:{parent_id}"
+        current = self.get(key)
+        count = current.get("count", 0) if current else 0
+        new_count = max(0, count + delta)
+        if new_count == 0:
+            self.discard(key)
+        else:
+            self.set(key, {"count": new_count})
+        return new_count
+
+    def dec_child_counter(self, parent_type: str, parent_id: int) -> int:
+        """Уменьшает счётчик потомков на 1 (удобная обёртка)."""
+        return self.inc_child_counter(parent_type, parent_id, -1)
+
+    def get_child_counter(
+        self, parent_type: str, parent_id: int
+    ) -> int:
+        """Возвращает текущее значение счётчика потомков."""
+        data = self.get(f"__counter__:{parent_type}:{parent_id}")
+        return data["count"] if data else 0
+
+    # ==================================================================
+    # Управление черновиками и статусами по префиксу (для поддеревьев)
+    # ==================================================================
+
+    def discard_entity_subtree(self, entity_type: str, entity_id: int) -> None:
+        """
+        Удаляет все черновики и статусы, связанные с сущностью и её потомками.
+        Ключи вида "entity_type:entity_id:*", "__status__:entity_type:entity_id",
+        "__counter__:entity_type:entity_id", "__deleted__:entity_type:entity_id",
+        "__new__:entity_type:*".
+        """
+        prefix = f"{entity_type}:{entity_id}:"
+        # Удаляем обычные черновики
+        for key in list(self._storage.keys()):
+            if key.startswith(prefix):
+                self.discard(key)
+        # Удаляем статус самой сущности
+        self.delete_entity_status(entity_type, entity_id)
+        # Удаляем счётчик потомков (если есть)
+        self.discard(f"__counter__:{entity_type}:{entity_id}")
+        # Удаляем метку удаления, если была
+        self.discard(f"__deleted__:{entity_type}:{entity_id}")
+
+    def discard_subtree_by_prefix(self, prefix: str) -> None:
+        """Универсальный метод удаления по префиксу (любые ключи)."""
+        for key in list(self._storage.keys()):
+            if key.startswith(prefix):
+                self.discard(key)
+
     # ----------------------------------------------------------------------
     # Основные операции с черновиками
     # ----------------------------------------------------------------------

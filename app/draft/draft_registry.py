@@ -380,3 +380,39 @@ class DraftRegistry(QObject):
                         cb(key, has_draft)
                     except Exception as e:
                         self.logger.exception(f"Ошибка в callback для префикса {prefix}: {e}")
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def apply_subtree(self, prefix: str, applier: Callable[[str, Dict[str, Any]], None]) -> None:
+        """
+        Применяет все черновики, ключи которых начинаются с prefix, с помощью функции applier,
+        затем удаляет их.
+
+        Args:
+            prefix: Префикс ключа (например, "appointment:123:").
+            applier: Функция, принимающая (key, data) и выполняющая сохранение в БД.
+        """
+        
+        keys = self.get_keys_by_prefix(prefix)
+        for key in keys:
+            data = self.get(key)
+            if data is not None:
+                try:
+                    applier(key, data)
+                except Exception as e:
+                    self.logger.exception(f"Ошибка при применении черновика {key}: {e}")
+                    raise
+                self.discard(key)
+        self.logger.debug(f"Применены черновики по префиксу {prefix}, количество {len(keys)}")
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def discard_subtree(self, prefix: str) -> None:
+        """Удаляет все черновики, ключи которых начинаются с prefix."""
+        self.discard_by_prefix(prefix)

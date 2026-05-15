@@ -1,5 +1,4 @@
 # interfaces/gui/gui_window/widgets/paginated_table_model.py
-
 """
 Модель таблицы с поддержкой ленивой подгрузки страниц (пагинации).
 
@@ -9,67 +8,103 @@
 возможности подгрузки следующих страниц.
 
 Поддерживает:
-    - Чекбоксы (опциональный первый столбец)
-    - Установку цвета фона для строк
-    - Сортировку только по уже загруженным данным (локальная сортировка)
-    - Сигнал row_modified при изменении данных
+    - Отображение полей, заданных в columns.
+    - Редактирование (если ячейка отмечена как editable).
+    - Чекбоксы в отдельном столбце (опционально).
+    - Установку цвета фона для строк.
+    - Локальную сортировку только по уже загруженным данным.
+    - Сигнал row_modified при изменении данных в строке.
+    - Пагинацию: добавление страниц, общее количество, canFetchMore.
 """
 
 import datetime
-from typing import List, Dict, Any, Optional, Callable, Union
-from collections.abc import Sequence
-from functools import partial
+# from enum import Enum
+from typing import (
+    List, Dict, Any, Optional, Callable, 
+    # Type, Union
+)
+# from collections.abc import Sequence
+# from functools import partial
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QColor
 
 from app.utils.logger.logger import AppLogger
 
+from interfaces.gui.gui_window.widgets.base_table_model import BaseTableModel
+from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
 
-class PaginatedTableModel(QAbstractTableModel):
+from PySide6.QtCore import (
+    QModelIndex,  QThread,
+    # QObject, QTimer, 
+    # QAbstractTableModel, QEvent, 
+    Qt, Signal
+)
+from PySide6.QtGui import QColor
+
+
+
+class LoadPageThread(QThread):
+    """Поток для асинхронной загрузки страницы данных."""
+    finished = Signal(list, int)   # (page_data, total_count)
+    error = Signal(str)
+
+    def __init__(self, service, offset, limit, filters, order_by):
+        super().__init__()
+        self.service = service
+        self.offset = offset
+        self.limit = limit
+        self.filters = filters
+        self.order_by = order_by
+
+    def run(self):
+        try:
+            page, total = self.service.get_page_filtered(
+                offset=self.offset,
+                limit=self.limit,
+                filters=self.filters,
+                order_by=self.order_by,
+            )
+            self.finished.emit(page, total)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+
+class PaginatedTableModel(BaseTableModel):
     """
-    Модель таблицы с пагинацией, работающая со списком DTO.
+    Модель таблицы с поддержкой ленивой подгрузки страниц и динамическими столбцами.
+
+    Использует класс TableColumn для описания столбцов, что позволяет гибко управлять
+    видимостью, порядком и системными столбцами (чекбокс, кнопки).
 
     Атрибуты:
-        _data (List[Any]): Загруженные строки (все, что были добавлены через append_page).
-        _total_count (int): Общее количество строк в БД (с учётом фильтров).
-        _columns (List[Dict]): Описание колонок.
-        _checkbox_column_enabled (bool): Флаг включения столбца чекбоксов.
-        _checkbox_states (Dict[int, bool]): Состояния чекбоксов для строк _data.
+        _data (List[Any]): Загруженные DTO.
+        _columns (List[TableColumn]): Список всех столбцов (в порядке отображения).
+        _total_count (int): Общее количество записей в БД (с учётом фильтров).
+        _checkbox_states (Dict[int, bool]): Состояния чекбоксов (для системного столбца __checkbox__).
         _row_colors (Dict[int, QColor]): Цвета строк.
-        _field_by_column (Dict[int, str]): Маппинг индекса колонки -> имя поля.
-        row_modified (Signal): Сигнал, испускаемый при изменении данных в строке (передаёт индекс строки в _data).
+
+    Примечание:
+        При локальной сортировке цвета строк остаются привязанными к исходным индексам _data,
+        что может привести к несоответствию цветов после сортировки. Рекомендуется очищать
+        цвета строк перед сортировкой или использовать серверную сортировку.
     """
 
     row_modified = Signal(int)
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def __init__(
         self,
-        columns: List[Dict],
+        columns: List[TableColumn],
         parent=None,
         get_unique_values_func: Optional[Callable[[int], List[str]]] = None,
-        column_masks: Optional[Dict[int, str]] = None,
     ):
         """
-        Инициализирует модель таблицы.
+        Инициализирует модель.
 
         Args:
-            columns: Список словарей с ключами:
-                - 'name' (str): имя поля в DTO
-                - 'title' (str): заголовок для отображения
-                - 'type' (type): тип данных
-                - 'editable' (bool): можно ли редактировать
-            parent: Родительский объект.
-            get_unique_values_func: Функция для получения уникальных значений столбца
-                (используется делегатами, сама модель не вызывает).
-            column_masks: Словарь {индекс колонки: маска ввода} (передаётся делегатам).
+            columns: Список объектов TableColumn (уже включая системные, если нужно).
+            parent: Родительский QObject.
+            get_unique_values_func: Функция для получения уникальных значений
+                для автодополнения (принимает индекс видимого столбца).
         """
         super().__init__(parent)
 
@@ -79,93 +114,170 @@ class PaginatedTableModel(QAbstractTableModel):
             use_name_in_filename=False,
         )
 
-        self._data: List[Any] = []
-        self._total_count = 0
-        self._columns = columns
-        self._editable_columns = {col['name']: col.get('editable', False) for col in columns}
-        self._checkbox_column_enabled = False
-        self._checkbox_states: Dict[int, bool] = {}
-        self._row_colors: Dict[int, QColor] = {}
+        # ---- Данные ----
+        self._data: List[Any] = []                     # загруженные DTO
+        self._total_count: int = 0                     # общее количество (устанавливается извне)
+
+        # ---- Столбцы ----
+        self._columns: List[TableColumn] = columns     # порядок соответствует отображению
+        self._checkbox_column_system_name = '__checkbox__'
+
+        # ---- Чекбоксы ----
+        self._checkbox_states: Dict[int, bool] = {}    # строка -> состояние
+
+        # ---- Цвета строк ----
+        self._row_colors: Dict[int, QColor] = {}       # строка -> цвет
+
+        # ---- Внешние зависимости ----
         self._get_unique_values_func = get_unique_values_func
-        self._column_masks = column_masks or {}
 
-        self._field_by_column: Dict[int, str] = {}
-        self._update_column_mapping()
+        # Проверка: если есть чекбокс-столбец, он должен быть системным и с правильным system_name
+        self._ensure_checkbox_column()
+
+        self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
+
+    def get_checkbox_state(self, row: int) -> bool:
+        return self._checkbox_states.get(row, False)
 
     # ----------------------------------------------------------------------
-    # Управление пагинацией и общим количеством
+    # Инициализация и проверка столбцов
     # ----------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def set_total_count(self, total: int) -> None:
-        """Устанавливает общее количество записей в БД (необязательно для точного canFetchMore)."""
-        self._total_count = total
-        if self._total_count > 0 and len(self._data) > self._total_count:
-            # Случай, когда загружено больше, чем total – обрезаем
-            self.logger.warning(f"Загружено больше данных ({len(self._data)}) чем total ({total})")
+    def _ensure_checkbox_column(self) -> None:
+        """Убеждается, что в списке столбцов есть чекбокс-столбец (создаёт, если нет)."""
+        for col in self._columns:
+            if col.system_name == self._checkbox_column_system_name:
+                return
+        # Добавляем в начало
+        checkbox_col = TableColumn.create_checkbox_column(order=0)
+        self._columns.insert(0, checkbox_col)
+        # Обновляем order у всех
+        for idx, col in enumerate(self._columns):
+            col.order = idx
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def total_count(self) -> int:
-        """Возвращает общее количество записей (если установлено) или -1."""
-        return self._total_count
+    # ----------------------------------------------------------------------
+    # Работа со столбцами (публичные методы)
+    # ----------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def can_fetch_more(self) -> bool:
-        """Может ли модель загрузить ещё данные."""
-        return self._total_count > 0 and len(self._data) < self._total_count
+    def column_count(self) -> int:
+        """Возвращает общее количество столбцов (включая скрытые)."""
+        return len(self._columns)
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def append_page(self, data: List[Any]) -> None:
+    def visible_column_count(self) -> int:
+        """Возвращает количество видимых столбцов."""
+        return sum(1 for col in self._columns if col.visible)
+
+    def get_column_index(self, system_name: str) -> int:
         """
-        Добавляет очередную страницу данных в конец модели.
-        Вызывается из контроллера после загрузки.
-
-        Args:
-            data: Список DTO новой страницы.
+        Возвращает индекс столбца по системному имени (в модели, с учётом скрытых).
+        Если столбец не найден, возвращает -1.
         """
-        if not data:
+        for idx, col in enumerate(self._columns):
+            if col.system_name == system_name:
+                return idx
+        return -1
+
+    def get_visible_column_index(self, system_name: str) -> int:
+        """
+        Возвращает индекс видимого столбца по системному имени.
+        Учитываются только видимые столбцы, порядок их следования.
+        """
+        visible_idx = 0
+        for col in self._columns:
+            if col.visible:
+                if col.system_name == system_name:
+                    return visible_idx
+                visible_idx += 1
+        return -1
+
+    def get_column_by_system_name(self, system_name: str) -> Optional[TableColumn]:
+        """Возвращает объект столбца по системному имени."""
+        for col in self._columns:
+            if col.system_name == system_name:
+                return col
+        return None
+
+    def set_column_visible(self, system_name: str, visible: bool) -> None:
+        """
+        Изменяет видимость столбца.
+        Меняет флаг в TableColumn и испускает сигнал layoutChanged,
+        который заставляет таблицу перерисовать заголовки, но НЕ сбрасывает данные.
+        """
+        col = self.get_column_by_system_name(system_name)
+        if col is None or col.visible == visible:
             return
-        start = len(self._data)
-        self.beginInsertRows(QModelIndex(), start, start + len(data) - 1)
-        self._data.extend(data)
-        self.endInsertRows()
-        # При добавлении новых строк чекбоксы по умолчанию False
-        for idx in range(start, len(self._data)):
-            self._checkbox_states[idx] = self._checkbox_states.get(idx, False)
+        col.visible = visible
+        # layoutChanged перерисовывает заголовки и обновляет количество столбцов,
+        # но данные остаются на месте (в отличие от beginResetModel).
+        self.layoutChanged.emit()
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    def get_field_name_at_visible_column(self, visible_index: int) -> Optional[str]:
+        """
+        По индексу видимого столбца возвращает имя поля (для DATA-столбцов)
+        или None для системных.
+        """
+        visible_idx = 0
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == visible_index:
+                    return col.field_name if col.column_type == ColumnType.DATA else None
+                visible_idx += 1
+        return None
+
+    # ----------------------------------------------------------------------
+    # Реализация абстрактных методов BaseTableModel
+    # ----------------------------------------------------------------------
+
+    def get_item_at_row(self, row: int) -> Optional[Any]:
+        if 0 <= row < len(self._data):
+            return self._data[row]
+        return None
+
+    def get_all_data(self) -> List[Any]:
+        return self._data[:]
+
+    def update_row(self, row: int, new_dto: Any) -> None:
+        if row < 0 or row >= len(self._data):
+            self.logger.warning(f"update_row: неверный индекс {row}")
+            return
+        self._data[row] = new_dto
+        top_left = self.index(row, 0)
+        bottom_right = self.index(row, self.columnCount() - 1)
+        self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
+
+    def add_row(self, dto: Any) -> int:
+        row = len(self._data)
+        self.beginInsertRows(QModelIndex(), row, row)
+        self._data.append(dto)
+        self._checkbox_states[row] = False
+        self.endInsertRows()
+        self.row_modified.emit(row)
+        return row
+
+    def remove_row(self, row: int) -> Optional[Any]:
+        if row < 0 or row >= len(self._data):
+            return None
+        self.beginRemoveRows(QModelIndex(), row, row)
+        removed = self._data.pop(row)
+        # Сдвигаем чекбоксы
+        new_states = {}
+        for r, state in self._checkbox_states.items():
+            if r > row:
+                new_states[r - 1] = state
+            elif r < row:
+                new_states[r] = state
+        self._checkbox_states = new_states
+        # Сдвигаем цвета (если есть)
+        if row in self._row_colors:
+            del self._row_colors[row]
+        for r in list(self._row_colors.keys()):
+            if r > row:
+                self._row_colors[r - 1] = self._row_colors[r]
+                del self._row_colors[r]
+        self.endRemoveRows()
+        return removed
+
     def clear(self) -> None:
-        """Полностью очищает модель (сбрасываются данные, чекбоксы, цвета)."""
         self.beginResetModel()
         self._data.clear()
         self._checkbox_states.clear()
@@ -173,71 +285,31 @@ class PaginatedTableModel(QAbstractTableModel):
         self._total_count = 0
         self.endResetModel()
 
-    # ----------------------------------------------------------------------
-    # Управление чекбокс-столбцом
-    # ----------------------------------------------------------------------
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def set_checkbox_column_visible(self, visible: bool) -> None:
-        """Включает или отключает столбец чекбоксов (первый столбец)."""
-        if self._checkbox_column_enabled == visible:
+        """Устанавливает флаг видимости чекбокс-столбца в модели."""
+        col = self.get_column_by_system_name(self._checkbox_column_system_name)
+        if col is None or col.visible == visible:
             return
-        self.beginResetModel()
-        self._checkbox_column_enabled = visible
-        if not visible:
-            self._checkbox_states.clear()
-        self._update_column_mapping()
-        self.endResetModel()
+        col.visible = visible
+        self.layoutChanged.emit()   # перестроит всю модель (но данные останутся)
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def set_checkbox_state(self, row: int, checked: bool) -> None:
-        """Устанавливает состояние чекбокса для строки (индекс в _data)."""
-        if not self._checkbox_column_enabled or row < 0 or row >= len(self._data):
+        if not self.get_column_by_system_name(self._checkbox_column_system_name).visible:
+            return
+        if row < 0 or row >= len(self._data):
             return
         self._checkbox_states[row] = checked
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
-    # ----------------------------------------------------------------------
-    # Управление цветом строк
-    # ----------------------------------------------------------------------
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def set_row_color(self, row: int, color: QColor) -> None:
-        """Устанавливает цвет фона для строки."""
         if 0 <= row < len(self._data):
             self._row_colors[row] = color
             top_left = self.index(row, 0)
             bottom_right = self.index(row, self.columnCount() - 1)
             self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def clear_row_colors(self) -> None:
-        """Очищает все установленные цвета строк."""
         self._row_colors.clear()
         if self.rowCount() > 0:
             top_left = self.index(0, 0)
@@ -245,213 +317,76 @@ class PaginatedTableModel(QAbstractTableModel):
             self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
 
     # ----------------------------------------------------------------------
-    # Доступ к данным
+    # Пагинация
     # ----------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def get_item_at_row(self, row: int) -> Optional[Any]:
-        """Возвращает DTO для указанной строки или None."""
-        if 0 <= row < len(self._data):
-            return self._data[row]
-        return None
+    def can_fetch_more(self) -> bool:
+        return self._total_count > 0 and len(self._data) < self._total_count
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def get_all_data(self) -> List[Any]:
-        """Возвращает копию списка всех загруженных DTO."""
-        return self._data[:]
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def update_row(self, row: int, new_dto: Any) -> None:
-        """Заменяет DTO в указанной строке на новый."""
-        if row < 0 or row >= len(self._data):
+    def append_page(self, data: List[Any]) -> None:
+        if not data:
             return
-        self._data[row] = new_dto
-        top_left = self.index(row, 0)
-        bottom_right = self.index(row, self.columnCount() - 1)
-        self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
+        start = len(self._data)
+        self.beginInsertRows(QModelIndex(), start, start + len(data) - 1)
+        self._data.extend(data)
+        for idx in range(start, len(self._data)):
+            if idx not in self._checkbox_states:
+                self._checkbox_states[idx] = False
+        self.endInsertRows()
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def remove_row(self, row: int) -> Optional[Any]:
-        """Удаляет строку и возвращает удалённый DTO."""
-        if row < 0 or row >= len(self._data):
-            return None
-        self.beginRemoveRows(QModelIndex(), row, row)
-        removed = self._data.pop(row)
-        # Сдвигаем состояния чекбоксов для строк > row
-        new_states = {}
-        for r, state in self._checkbox_states.items():
-            if r > row:
-                new_states[r - 1] = state
-            elif r < row:
-                new_states[r] = state
-            # r == row удаляем
-        self._checkbox_states = new_states
-        self.endRemoveRows()
-        return removed
+    def set_total_count(self, total: int) -> None:
+        self._total_count = total
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def add_row(self, dto: Any, at_end: bool = True) -> int:
-        """
-        Добавляет новую строку в конец (или в начало) модели.
-
-        Args:
-            dto: DTO новой записи.
-            at_end: Если True – добавляет в конец, иначе в начало.
-
-        Returns:
-            Индекс добавленной строки.
-        """
-        if at_end:
-            row = len(self._data)
-            self.beginInsertRows(QModelIndex(), row, row)
-            self._data.append(dto)
-            self._checkbox_states[row] = False
-            self.endInsertRows()
-        else:
-            row = 0
-            self.beginInsertRows(QModelIndex(), 0, 0)
-            self._data.insert(0, dto)
-            # Сдвигаем состояния чекбоксов
-            new_states = {}
-            for r, state in self._checkbox_states.items():
-                new_states[r + 1] = state
-            new_states[0] = False
-            self._checkbox_states = new_states
-            self.endInsertRows()
-        self.row_modified.emit(row)
-        return row
-
-    # ----------------------------------------------------------------------
-    # Вспомогательные методы
-    # ----------------------------------------------------------------------
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _update_column_mapping(self) -> None:
-        """Создаёт маппинг: индекс колонки модели -> имя поля (или '__checkbox__')."""
-        self._field_by_column.clear()
-        offset = 1 if self._checkbox_column_enabled else 0
-        if self._checkbox_column_enabled:
-            self._field_by_column[0] = '__checkbox__'
-        for i, col_info in enumerate(self._columns):
-            self._field_by_column[i + offset] = col_info['name']
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _get_field_name(self, column: int) -> Optional[str]:
-        """Возвращает имя поля для индекса колонки."""
-        return self._field_by_column.get(column)
-
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _get_real_type(self, field_type) -> type:
-        """Извлекает реальный тип из Optional/Union."""
-        from typing import get_origin, get_args, Union
-        origin = get_origin(field_type)
-        if origin is Union:
-            args = get_args(field_type)
-            for arg in args:
-                if arg is not type(None):
-                    return arg
-        return field_type
+    def total_count(self) -> int:
+        """Возвращает текущее общее количество записей."""
+        return self._total_count
 
     # ----------------------------------------------------------------------
     # Методы QAbstractTableModel
     # ----------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return len(self._data)
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return len(self._columns) + (1 if self._checkbox_column_enabled else 0)
+        return self.visible_column_count()
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
         if not index.isValid():
             return None
 
-        row, col = index.row(), index.column()
-        field_name = self._get_field_name(col)
-        if field_name is None:
+        row = index.row()
+        visible_col = index.column()
+        if row >= len(self._data):
             return None
 
-        if field_name == '__checkbox__':
+        # Находим столбец по видимому индексу
+        visible_idx = 0
+        target_col = None
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == visible_col:
+                    target_col = col
+                    break
+                visible_idx += 1
+        if target_col is None:
+            return None
+
+        # Чекбокс-столбец (системный)
+        if target_col.system_name == self._checkbox_column_system_name:
             if role == Qt.CheckStateRole:
                 return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
             return None
 
-        # Фоновый цвет строки
+        # Цвет строки
         if role == Qt.BackgroundRole:
             return self._row_colors.get(row)
 
         # Получаем значение из DTO
-        item = self._data[row]
-        value = getattr(item, field_name, None)
+        if target_col.column_type == ColumnType.DATA and target_col.field_name:
+            value = getattr(self._data[row], target_col.field_name, None)
+        else:
+            value = None  # для других системных столбцов (кнопок и т.д.) данные не хранятся
 
         if role == Qt.DisplayRole:
             if value is None:
@@ -466,32 +401,38 @@ class PaginatedTableModel(QAbstractTableModel):
             return value
 
         if role == Qt.TextAlignmentRole:
-            col_info = next((c for c in self._columns if c['name'] == field_name), None)
-            if col_info and col_info.get('type') in (int, float):
+            if target_col.data_type in (int, float):
                 return Qt.AlignRight | Qt.AlignVCenter
             return Qt.AlignLeft | Qt.AlignVCenter
 
         if role == Qt.UserRole:
-            return value   # для сортировки
+            return value
 
         return None
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
         if not index.isValid():
             return False
 
-        row, col = index.row(), index.column()
-        field_name = self._get_field_name(col)
+        row = index.row()
+        visible_col = index.column()
+        if row >= len(self._data):
+            return False
+
+        # Находим столбец по видимому индексу
+        visible_idx = 0
+        target_col = None
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == visible_col:
+                    target_col = col
+                    break
+                visible_idx += 1
+        if target_col is None:
+            return False
 
         # Чекбокс
-        if field_name == '__checkbox__':
+        if target_col.system_name == self._checkbox_column_system_name:
             if role == Qt.CheckStateRole:
                 checked = (value == Qt.Checked.value)
                 old = self._checkbox_states.get(row, False)
@@ -504,90 +445,98 @@ class PaginatedTableModel(QAbstractTableModel):
         if role != Qt.EditRole:
             return False
 
-        col_info = next((c for c in self._columns if c['name'] == field_name), None)
-        if not col_info or not col_info.get('editable', False):
+        if target_col.column_type != ColumnType.DATA or not target_col.editable:
             return False
 
+        # Обновляем значение в DTO
         item = self._data[row]
-        old_value = getattr(item, field_name, None)
+        old_value = getattr(item, target_col.field_name, None)
         if old_value == value:
             return True
 
-        # Преобразование типа
-        target_type = col_info.get('type')
-        if target_type and value is not None:
-            real_type = self._get_real_type(target_type)
+        # Преобразование типа (если нужно)
+        if target_col.data_type and value is not None:
             try:
-                if real_type == int:
+                if target_col.data_type == int:
                     value = int(value)
-                elif real_type == datetime.date and isinstance(value, str):
+                elif target_col.data_type == datetime.date and isinstance(value, str):
                     value = datetime.date.fromisoformat(value)
-                elif real_type == datetime.time and isinstance(value, str):
+                elif target_col.data_type == datetime.time and isinstance(value, str):
                     value = datetime.time.fromisoformat(value)
-                # можно добавить другие типы
-            except (ValueError, TypeError) as e:
-                self.logger.error(f"Ошибка преобразования для поля {field_name}: {e}")
+                # можно добавить другие
+            except (ValueError, TypeError):
                 return False
 
-        setattr(item, field_name, value)
+        setattr(item, target_col.field_name, value)
         self.dataChanged.emit(index, index, [role])
         self.row_modified.emit(row)
         return True
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         if not index.isValid():
             return Qt.NoItemFlags
-        row, col = index.row(), index.column()
+
+        row = index.row()
         if row >= len(self._data):
             return Qt.NoItemFlags
-        field_name = self._get_field_name(col)
-        if field_name == '__checkbox__':
-            return Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
-        col_info = next((c for c in self._columns if c['name'] == field_name), None)
-        if not col_info:
+
+        visible_col = index.column()
+        visible_idx = 0
+        target_col = None
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == visible_col:
+                    target_col = col
+                    break
+                visible_idx += 1
+        if target_col is None:
             return Qt.NoItemFlags
+
+        if target_col.system_name == self._checkbox_column_system_name:
+            return Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
+
         flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
-        if col_info.get('editable', False):
+        if target_col.column_type == ColumnType.DATA and target_col.editable:
             flags |= Qt.ItemIsEditable
         return flags
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole) -> Any:
         if orientation != Qt.Horizontal:
             return None
-        field_name = self._get_field_name(section)
-        if role == Qt.DisplayRole:
-            if field_name == '__checkbox__':
-                return ""
-            col_info = next((c for c in self._columns if c['name'] == field_name), None)
-            if col_info:
-                return col_info['title']
+        if role != Qt.DisplayRole:
+            return None
+
+        visible_idx = 0
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == section:
+                    return col.title
+                visible_idx += 1
         return None
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, 
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
-        """Сортирует только загруженные данные (локально)."""
-        col_info = self._columns[column]
-        field_name = col_info['name']
+        """
+        Сортирует только загруженные данные (локально).
+        ВНИМАНИЕ: цвета строк будут привязаны к прежним индексам и могут не соответствовать
+        данным после сортировки. Рекомендуется очищать цвета перед сортировкой или
+        использовать серверную сортировку.
+        """
+        # Очищаем цвета, так как они привязаны к старым индексам
+        self.clear_row_colors()
+
+        # Находим столбец по видимому индексу
+        visible_idx = 0
+        target_col = None
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == column:
+                    target_col = col
+                    break
+                visible_idx += 1
+        if target_col is None or target_col.column_type != ColumnType.DATA:
+            return
+
+        field_name = target_col.field_name
         reverse = (order == Qt.DescendingOrder)
         self.layoutAboutToBeChanged.emit()
         self._data.sort(key=lambda obj: (getattr(obj, field_name, None) is not None, getattr(obj, field_name, None)), reverse=reverse)

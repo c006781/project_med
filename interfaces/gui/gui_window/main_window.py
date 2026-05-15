@@ -1317,6 +1317,7 @@ rm "$0"
 
 # ========== Диалог прогресса ==========
 class ParsingProgressDialog(QDialog):
+     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Импорт данных из Word")

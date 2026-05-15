@@ -17,7 +17,7 @@ from app.utils.logger.logger import AppLogger
 
 from app.draft.draft_registry import DraftRegistry
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 
 
 class IEditableComponent(ABC):
@@ -38,6 +38,7 @@ class IEditableComponent(ABC):
 
         :return: Строка вида "entity_type:entity_id:subsystem"
         """
+        
         pass
 
     # @AppLogger.get_instance(
@@ -118,7 +119,9 @@ class EditableComponentMixin(QObject, IEditableComponent):
     """
     Базовый миксин для виджетов, реализующих IEditableComponent.
     Предоставляет общую логику подписки на изменения реестра и обновления UI.
-    """
+    """ 
+
+    changed = Signal()   # сигнал, испускаемый при изменении состояния черновика
 
     @AppLogger.get_instance(
         name='EditableComponentMixin',
@@ -126,6 +129,7 @@ class EditableComponentMixin(QObject, IEditableComponent):
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def __init__(self, parent=None):
+
         super().__init__(parent)
 
         self.logger = AppLogger.get_instance(
@@ -133,8 +137,137 @@ class EditableComponentMixin(QObject, IEditableComponent):
             enable_file_logging='user',
             use_name_in_filename=False,
         )
+
         self._registry_subscribed = False
         self._registry = None
+
+        self._children: List[IEditableComponent] = []
+        self._has_child_changes = False
+
+    # ----------------------------------------------------------------------
+    # Управление дочерними компонентами
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def add_child(self, child: IEditableComponent) -> None:
+        """Добавляет дочерний компонент и подписывается на его сигнал changed."""
+
+        if child not in self._children:
+            self._children.append(child)
+            # Если у ребёнка есть сигнал changed, подключаемся
+            if hasattr(child, 'changed'):
+                child.changed.connect(self._on_child_changed)
+            self._update_child_changes()
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def remove_child(self, child: IEditableComponent) -> None:
+        """Удаляет дочерний компонент."""
+
+        if child in self._children:
+            self._children.remove(child)
+            if hasattr(child, 'changed'):
+                child.changed.disconnect(self._on_child_changed)
+            self._update_child_changes()
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_children(self) -> List[IEditableComponent]:
+
+        return self._children.copy()
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_child_changed(self) -> None:
+        """Вызывается при изменении состояния дочернего компонента."""
+
+        self._update_child_changes()
+        self.changed.emit()
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_child_changes(self) -> None:
+        """Пересчитывает флаг _has_child_changes на основе текущих детей."""
+
+        # Для эффективности можно проверять has_changes у детей через реестр
+        # Но проще полагаться на сигналы. При добавлении/удалении – пересчёт.
+        # Здесь не требуется сложная логика, так как каждый ребёнок сам испускает сигнал.
+        # Поэтому просто устанавливаем флаг в True, если есть хотя бы один ребёнок
+        # (сигнал already indicates change). Но для точности можно проверить.
+        self._has_child_changes = any(child.has_changes(self._registry) for child in self._children)
+
+    # ----------------------------------------------------------------------
+    # Методы IHierarchicalEditableComponent
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def has_descendant_changes(self, registry: DraftRegistry) -> bool:
+        """Рекурсивно проверяет наличие изменений в поддереве."""
+
+        if self.has_changes(registry):
+            return True
+        
+        for child in self._children:
+            if hasattr(child, 'has_descendant_changes'):
+                if child.has_descendant_changes(registry):
+                    return True
+                
+            elif child.has_changes(registry):
+                return True
+            
+        return False
+
+    # ----------------------------------------------------------------------
+    # Существующие методы (с добавлением сигнала при изменении)
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def save_to_registry(self, registry: DraftRegistry) -> None:
+        """Сохраняет состояние в реестр и испускает сигнал changed."""
+
+        # super().save_to_registry(registry)
+        self.changed.emit()
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def discard(self, registry: DraftRegistry) -> None:
+        """Отменяет изменения и испускает сигнал changed."""
+
+        # super().discard(registry)
+        self.changed.emit()   
+
+    def _get_child_service(self, child_name: str = None):
+        # заглушка.
+        # В AppointmentListPage переопределить для возврата self._photo_service
+
+        return None    
 
     @AppLogger.get_instance(
         name='EditableComponentMixin',
@@ -149,11 +282,13 @@ class EditableComponentMixin(QObject, IEditableComponent):
         :param registry: Экземпляр DraftRegistry.
         :param prefix: Если передан, подписывается на префикс, иначе на точный ключ.
         """
+
         if self._registry_subscribed and self._registry is registry:
             return
 
         self._registry = registry
         key = self.get_draft_key()
+
         if prefix is not None:
             registry.subscribe_prefix(prefix, self._on_registry_change)
         else:
@@ -172,7 +307,9 @@ class EditableComponentMixin(QObject, IEditableComponent):
         """
         if not self._registry_subscribed:
             return
+        
         key = self.get_draft_key()
+
         if prefix is not None:
             registry.unsubscribe_prefix(prefix, self._on_registry_change)
         else:
@@ -193,6 +330,7 @@ class EditableComponentMixin(QObject, IEditableComponent):
         :param key: Ключ изменённого черновика.
         :param has_draft: True – добавлен, False – удалён.
         """
+
         if key == self.get_draft_key() or key.startswith(self.get_draft_key() + ':'):
             self.on_registry_changed(key, has_draft)
 
@@ -209,6 +347,7 @@ class EditableComponentMixin(QObject, IEditableComponent):
         :param key: Ключ изменённого черновика.
         :param has_draft: True – черновик добавлен, False – удалён.
         """
+
         self.logger.debug(f"Registry changed: {key}, has_draft={has_draft}")
         # По умолчанию просто перезагружаем состояние
         if has_draft:

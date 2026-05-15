@@ -1559,6 +1559,10 @@ class ListChangesMixin:
     Миксин для обработки изменений в таблице: отслеживание modified/delete/new строк,
     обновление цветов, управление кнопкой сохранения.
     """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._exclude_fields_for_comparison = []  # переопределяется в наследниках
     
     # @AppLogger.get_instance(
     #     name = 'ListChangesMixin',
@@ -1794,8 +1798,10 @@ class ListChangesMixin:
         self.logger.debug(f"if original is not None : {original is not None}")
         if original is not None:
             # Сравниваем сериализованные данные (исключаем поля, которые могут меняться)
-            current_dict = dto.model_dump()
-            original_dict = original.model_dump()
+            # current_dict = dto.model_dump()
+            # original_dict = original.model_dump()
+            current_dict = dto.model_dump(exclude=self._exclude_fields_for_comparison)
+            original_dict = original.model_dump(exclude=self._exclude_fields_for_comparison)
 
             self.logger.debug(f"if current_dict == original_dict : {current_dict == original_dict}")
             if current_dict == original_dict:

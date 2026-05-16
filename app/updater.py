@@ -38,6 +38,22 @@ def get_app_dir() -> str:
     else:
         return os.path.dirname(os.path.abspath(__file__))
 
+def is_github_reachable(timeout: float = 3.0) -> bool:
+    """
+    Проверяет доступность GitHub API через HTTP-запрос.
+    """
+
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/zen",
+            headers={"User-Agent": "MedicalApp/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status == 200
+
+    except Exception:
+        return False
+
 class UpdateChecker(QThread):
     """
     Поток для проверки наличия новой версии на GitHub.

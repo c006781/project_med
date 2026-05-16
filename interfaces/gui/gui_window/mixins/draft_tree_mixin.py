@@ -263,9 +263,17 @@ class DraftTreeMixin:
         if delta == 0:
             return
         # Обновляем счётчик в реестре
-        self._draft_registry.inc_child_counter(
+        new_count = self._draft_registry.inc_child_counter(
             self._entity_type, parent_id, delta
         )
+
+        # Добавить проверку на отрицательное значение
+        if new_count < 0:
+            self.logger.warning(
+                f"Счётчик потомков для родителя {parent_id} стал отрицательным ({new_count}). "
+                f"Дельта = {delta}. Возможен дисбаланс вызовов mark_child_change."
+            )
+
         # Пересчитываем статус родителя (с учётом его собственных изменений)
         self._recompute_parent_status(parent_id)
 

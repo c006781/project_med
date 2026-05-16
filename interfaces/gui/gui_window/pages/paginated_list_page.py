@@ -4,7 +4,7 @@
 """
 
 import datetime
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional, Set, List
 
 from app.draft.draft_registry import DraftRegistry
 
@@ -33,7 +33,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 )
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QMessageBox
+# from PySide6.QtWidgets import QMessageBox
 from PySide6.QtGui import QColor
 
 class PaginatedListPage(
@@ -48,11 +48,73 @@ class PaginatedListPage(
     DraftTreeMixin,  
 ):
     """
-    Универсальная страница списка с пагинацией, фильтрацией и редактированием.
+    **Для наследников:**
+        - Если у сущности есть дочерние (например, у приёма – фото), необходимо
+          переопределить метод `_get_child_ids`, чтобы каскадное удаление
+          работало корректно.
+        - Метод `_get_child_ids` должен возвращать список ID уже сохранённых
+          дочерних записей (из БД). Он используется только для существующих
+          сущностей (parent_id > 0). Для новых строк каскадная отмена реализована
+          в `_cancel_new_row`.
+        - Пример переопределения:
+            def _get_child_ids(self, parent_id: int) -> List[int]:
+                return [p.id for p in self.photo_service.get_photos_for_appointment(parent_id)]
 
+        **Требования к дочерним компонентам (виджетам, добавляемым через add_draft_child):**
+            - Дочерний компонент должен реализовывать интерфейс IEditableComponent
+              (методы get_draft_key, load_from_registry, save_to_registry, has_changes,
+              apply, discard). Ы методе `apply` удалять свой черновик после сохранения.
+            - В методе `apply` компонент **обязан** после успешного сохранения изменений
+              в БД **удалить свой черновик** из реестра (например, вызвав
+              `registry.apply_and_clear(self.get_draft_key(), applier)` или вручную
+              `registry.discard(self.get_draft_key())`). Если этого не сделать,
+              черновик останется в реестре и может быть повторно применён при следующем
+              сохранении, что приведёт к дублированию данных или ошибкам.
+            - Рекомендуется использовать стандартный паттерн:
+                def apply(self, registry, parent_id=None, service=None):
+                    key = self.get_draft_key()
+                    def applier(data):
+                        # логика сохранения с использованием parent_id и service
+                        pass
+                    registry.apply_and_clear(key, applier)
 
-   
-    Примечание для наследников:
+            **Примечание о синхронизации счётчиков детей (для будущих ОБЯЗАТЕЛЬНЫХ доработок):**
+            В текущей реализации счётчики детей (`__counter__`) обновляются только при:
+                - добавлении новой строки (`_add_inline_row`),
+                - пометке строки на удаление (`_delete_selected_rows`),
+                - отмене новой строки (`_cancel_new_row`),
+                - удалении существующей строки (`_delete_entity_and_children`).
+
+            При создании дочернего черновика (например, добавлении фото к уже существующему приёму)
+            через дочерний компонент, реализующий `IEditableComponent`, счётчик родителя **не увеличивается**,
+            потому что компонент не имеет прямого доступа к методам `PaginatedListPage` (нарушало бы инкапсуляцию).
+
+            Однако статус родителя всё равно правильно становится `'child'` благодаря рекурсивной проверке
+            `has_descendant_changes`, а цвет строки обновляется через сигнал `entity_status_changed`.
+            Это не приводит к ошибкам, но делает счётчики неточными (они могут показывать 0, хотя дети есть).
+
+            Если в будущем потребуется полагаться на счётчики для быстрого определения статуса без рекурсивного обхода,
+            необходимо реализовать следующий механизм:
+
+                1. В дочернем компоненте (например, `PhotoUploaderWidget`) при создании черновика
+                   (в методе `save_to_registry` или в момент инициализации черновика) получить `parent_id`
+                   и вызвать метод родительской страницы. Для этого компонент должен иметь слабую ссылку
+                   на страницу или получать её через параметр при вызове `apply`.
+
+                2. Вызов должен увеличивать счётчик родителя:
+                   `self._draft_registry.inc_child_counter(self._entity_type, parent_id, +1)`
+                   и запускать пересчёт статуса родителя через `_recompute_parent_status`.
+
+                3. При удалении черновика (отмена или применение) – уменьшать счётчик аналогично.
+
+            Альтернативный подход: отказаться от счётчиков вовсе, а в `_recompute_parent_status`
+            использовать проверку наличия дочерних черновиков по префиксу
+            (например, `any(key.startswith(f"{self._entity_type}:{parent_id}:") for key in registry._storage)`).
+            Это надёжнее и проще, но может быть медленнее при большом количестве черновиков.
+
+            На данный момент синхронизация счётчиков не требуется, но описание оставлено для будущих доработок.
+
+    Дополнительно:
         При переопределении методов _save_new_rows, _save_modified_rows, _save_deleted_rows
         необходимо сохранять контракт возвращаемых значений (для _save_new_rows – словарь).
     """
@@ -120,6 +182,69 @@ class PaginatedListPage(
             selection_model.selectionChanged.connect(self._on_selection_changed_for_draft)
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
+
+    def _get_parent_id_for_new_row(self, dto: Any) -> Optional[int]:
+        """
+        Возвращает ID родительской сущности для новой строки.
+        Должен быть переопределён в наследниках, если новая строка является дочерней.
+        По умолчанию возвращает None (корневая сущность).
+        """
+        return None
+
+    def _get_child_ids(self, parent_id: int) -> List[int]:
+        """
+        Возвращает список ID дочерних сущностей для указанного родителя.
+        **Должен быть переопределён в наследниках**, если у сущности есть дочерние,
+        которые должны удаляться каскадно при удалении родителя.
+
+        Пример переопределения в AppointmentListPage:
+            def _get_child_ids(self, parent_id: int) -> List[int]:
+                return [p.id for p in self.photo_service.get_photos_for_appointment(parent_id)]
+
+        Args:
+            parent_id: ID родительской записи (реальный, из БД, >0).
+
+        Returns:
+            Список ID дочерних записей (могут быть пустым). ID должны соответствовать уже сохранённым в БД записям.
+        """
+
+        # Базовая реализация возвращает пустой список (нет дочерних).
+        # Наследники должны переопределить этот метод, если у них есть дочерние сущности.
+        return []
+
+    def _delete_children(self, parent_id: int) -> None:
+        """
+        Рекурсивно помечает на удаление всех потомков указанной сущности.
+        Используется внутри `_save_deleted_rows`, чтобы при удалении родителя
+        автоматически удалить всех его детей (и внуков).
+
+        **Важно:** Этот метод работает только с уже сохранёнными в БД сущностями
+        (parent_id >= 0). Для новых (временных) строк каскадное удаление
+        реализовано в `_cancel_new_row`.
+
+        Алгоритм:
+            1. Получает список дочерних ID через переопределённый `_get_child_ids`.
+            2. Для каждого дочернего ID:
+                - Если он ещё не помечен на удаление, создаёт ключ "__deleted__".
+                - Увеличивает счётчик родителя (чтобы родитель узнал об удалении потомка).
+                - Рекурсивно вызывает `_delete_children` для потомка (удаление внуков).
+            3. **Защита от зацикливания:** не обрабатывает уже помеченных детей.
+
+        Args:
+            parent_id: ID родительской записи (должен быть >0, т.е. существовать в БД).
+        """
+        for child_id in self._get_child_ids(parent_id):
+            # Если дочерняя уже помечена на удаление – пропускаем
+            if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{child_id}"):
+                self._draft_registry.set(f"__deleted__:{self._entity_type}:{child_id}", {})
+                # Увеличиваем счётчик родителя (для дочерней сущности, не для родителя)
+                # Здесь parent_of_child = parent_id, но увеличение счётчика уже сделано?
+                # Лучше просто пометить, без дополнительных уведомлений, так как родитель всё равно удаляется.
+                # Но для синхронизации счётчиков можно вызвать _update_parent_child_counter(child_id, 1)
+                self._update_parent_child_counter(child_id, 1)
+
+            # Рекурсивно удаляем детей детей
+            self._delete_children(child_id)
 
     def _on_row_modified_from_model(self, row: int):
         """Обработчик прямого редактирования ячейки в таблице."""
@@ -348,6 +473,34 @@ class PaginatedListPage(
                 self._draft_registry.discard(child_key)
                 self.logger.debug(f"Перенесён дочерний черновик {child_key} -> {new_child_key}")
 
+    def _update_parent_counter(
+        self,
+        parent_id,
+        delta: int,
+        temp_id = None
+    ) -> bool:
+        """
+        Увеличивает или уменьшает счётчик родителя для сущности.
+        delta = +1 (появление потомка) или -1 (исчезновение потомка).
+        Возвращает True, если счётчик был изменён, иначе False.
+        """
+        # Уменьшаем счётчик родителя
+        if (parent_id is not None) and (parent_id > 0):
+            # Причина:
+            # Родитель с временным ID (parent_id < 0) не должен влиять на счётчик, так как он сам ещё не сохранён.
+            # Если родитель уже помечен на удаление, то новая строка не должна ИЗМЕНЯТЬ его счётчик, так как родитель всё равно будет удалён. Это предотвращает дисбаланс счётчиков.
+
+            if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+                self.mark_child_change(parent_id, delta)
+                return True
+
+            else:
+                self.logger.debug(
+                    f"Родитель {parent_id} помечен на удаление, счётчик не изменён для "
+                    f'новой строки {temp_id}' if temp_id else 'строки'
+                )
+        return False
+
     def _save_new_rows(self) -> Dict[int, Any]:
         """
         Сохраняет все новые строки, помеченные как __new__, в БД.
@@ -374,14 +527,49 @@ class PaginatedListPage(
         по правильному префиксу и применить их.
         --------------------------------------------------------------------
 
+        **Логика работы и управление счётчиками родителей:**
+        --------------------------------------------------------------------
+        1. При добавлении новой строки в `_add_inline_row`:
+            - Создаётся временный ID (отрицательный).
+            - Вызывается `mark_own_change(temp_id)`, который устанавливает статус 'own'.
+            - Если у строки есть родитель (например, новый приём принадлежит пациенту),
+              то счётчик родителя увеличивается на +1 через `mark_child_change(parent_id, +1)`.
+              Родитель теперь знает, что у него появился потомок с изменениями.
+
+        2. При сохранении строки:
+            - Строка сохраняется в БД, получает реальный ID.
+            - Все дочерние черновики (например, фото) переносятся с префикса временного ID
+              на префикс реального ID (через `_transferring_child_drafts`).
+            - Статус 'own' переносится на реальный ID (через `_update_id_own_in_real_id`).
+            - Удаляется ключ __new__, вызывается `clear_own_change(real_id)`, что сбрасывает
+              статус на None (изменений больше нет).
+
+        3. **Ключевой момент – уменьшение счётчика родителя:**
+            - Поскольку у строки больше нет статуса 'own' (изменения сохранены),
+              родитель, который ранее получил +1, должен узнать, что этот потомок
+              больше не имеет активных изменений.
+            - Поэтому после `clear_own_change(real_id)` мы вызываем `mark_child_change(parent_id, -1)`.
+            - Без этого счётчик родителя останется завышенным, и родитель будет ошибочно
+              считаться имеющим изменённого потомка (статус 'child' вместо None).
+
+        **Важно:** Уменьшение счётчика родителя происходит только для существующих
+            родителей с положительным ID, не помеченных на удаление.
+            Родитель с временным ID (новая строка) игнорируется – его счётчик будет
+            скорректирован при сохранении самой родительской строки.
+
+        **Почему нельзя положиться на дочерние черновики для уменьшения счётчика?**
+            Дочерние черновики (например, фото) при сохранении уменьшают счётчик
+            своего непосредственного родителя (приёма), но не счётчик пациента.
+            Счётчик пациента был увеличен только один раз – при создании приёма.
+            Уменьшить его может только сам приём после сохранения.
+
+        --------------------------------------------------------------------
         Returns:
             Dict[int, Any]: Словарь {временный_id: созданный_DTO} для всех успешно сохранённых строк.
         """
         # Не удаляйте блок переноса дочерних черновиков! Без него фото, добавленные до сохранения родителя, будут потеряны.
         # Не вызывайте mark_child_change после переноса статуса – это нарушит счётчики (родитель получит +1 дважды: один раз от дочернего черновика, второй – здесь).
         # Не переносите статус до переноса дочерних черновиков – порядок не важен, но предпочтительнее сначала перенести черновики, чтобы они уже были на новом ключе, когда статус родителя изменится (хотя родительский статус изменится только после clear_own_change).
-
-
 
         prefix = f"__new__:{self._entity_type}:"
         saved_map = {}
@@ -408,18 +596,22 @@ class PaginatedListPage(
                 # 6. Переносим статус 'own' (если был) с временного ID на реальный
                 self._update_id_own_in_real_id(temp_id, created.id)
 
-                # ВАЖНО: НЕ вызываем mark_child_change для родителя сейчас,
-                # потому что родительский счётчик будет обновлён при сохранении
-                # самих дочерних черновиков (они вызовут mark_child_change сами).
-                # Это обеспечивает симметричность: родитель узнаёт о потомке
-                # только после того, как потомок реально сохранён и дочерние
-                # черновики перенесены.
-
                 # 7. Удаляем ключ __new__ (чтобы не сохранить повторно)
                 self._draft_registry.discard(key)
 
                 # 8. Снимаем флаг собственных изменений (строка сохранена, статус станет None)
                 self.clear_own_change(created.id)
+
+                # =========================================================
+                # ВАЖНО: Уменьшаем счётчик родителя, так как новая строка больше не имеет изменений
+                # (см. детальное объяснение в docstring метода)
+                # =========================================================
+                # Уменьшаем счётчик родителя, так как новая строка больше не имеет изменений
+                parent_id = self._get_parent_id_for_new_row(dto)
+                # if (parent_id is not None) and parent_id > 0:
+                #     if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+                #         self.mark_child_change(parent_id, -1)
+                self._update_parent_counter(parent_id, -1)
 
                 # 9. Запоминаем соответствие для возможного обновления selected_dto
                 saved_map[temp_id] = created
@@ -429,7 +621,7 @@ class PaginatedListPage(
 
         # После сохранения всех новых строк обновляем состояние кнопки сохранения
         if saved_map:
-            self._update_save_button_state()
+            self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
         return saved_map
 
@@ -488,6 +680,94 @@ class PaginatedListPage(
         #
         # return saved_map
 
+    def _filtered_ids_no_deleted(self, entity_ids: List[int]):
+        # Фильтруем ID: оставляем только те, которые не помечены на удаление
+
+        filtered_ids = set()
+        skipped_ids = []
+        for entity_id in entity_ids:
+            # Проверяем наличие ключа удаления
+            if self._draft_registry.has(f"__deleted__:{self._entity_type}:{entity_id}"):
+                skipped_ids.append(entity_id)
+            else:
+                filtered_ids.add(entity_id)
+
+        return filtered_ids, skipped_ids
+    def save_rows_with_children(self, entity_ids: List[int]) -> bool:
+        """
+        Сохраняет основные поля и дочерние черновики для строк с указанными ID.
+        ID должны быть положительными (существующие записи в БД).
+        Строки, помеченные на удаление (__deleted__), автоматически пропускаются.
+        Возвращает True при успехе, False при ошибке.
+
+        Примечание:
+            Этот метод предназначен для выборочного сохранения (например, из контекстного меню).
+            Для сохранения всех изменений используйте стандартную кнопку «Сохранить»,
+            которая вызывает _save_all_changes_impl.
+        """
+
+        # Причина проверки: предотвращаем повторный вход при параллельных вызовах
+        if self._saving_in_progress:
+            self.logger.warning("Сохранение уже выполняется, повторный вызов игнорирован")
+            return False
+
+        self._saving_in_progress = True
+        try:
+            # Фильтруем ID: оставляем только те, которые не помечены на удаление
+            # Причина: строки, помеченные на удаление, не должны сохраняться – они будут удалены
+            filtered_ids, skipped_ids = self._filtered_ids_no_deleted(entity_ids)
+
+            # Логируем пропущенные ID (для отладки)
+            if skipped_ids:
+                self.logger.info(f"Сохранение пропущено для строк, помеченных на удаление: {skipped_ids}")
+
+            if not filtered_ids:
+                self.logger.warning("Нет строк для сохранения (все переданные ID помечены на удаление)")
+                return True
+
+            # 1. Сохраняем основные поля для указанных ID
+            self._save_modified_rows_for_ids(filtered_ids)
+
+            # 2. Сохраняем дочерние черновики для этих же ID
+            self._save_child_components_for_parents(filtered_ids)
+
+            # 3. Перезагружаем данные (чтобы модель обновилась)
+            self.reload_data()
+
+            # # 4. Очищаем реестр от использованных черновиков
+            # self._clear_entity_registry()
+            # причина удаления: save_rows_with_children предназначен для выборочного сохранения только переданных сущностей, а _clear_entity_registry() удаляет все черновики для текущего типа, в том числе для других строк (не вошедших в entity_ids). Это нарушает инкапсуляцию и может привести к неожиданной потере несохранённых изменений в других строках. Удаление этой строки предотвращает побочные эффекты.
+
+            # 4. Очищаем реестр от использованных черновиков только для отфильтрованных
+            for entity_id in filtered_ids:
+                self.clear_entity_drafts(entity_id)
+
+            # # 5. Выходим из режима редактирования (если был включён)
+            # self._exit_edit_mode()
+            # Причина удаления: изменил несколько строк (например, приём А и приём Б). Затем он выбрал только приём А и вызвал этот метод - Режим редактирования выключится , Несохранённые изменения в приёме Б останутся в реестре, но пользователь больше не сможет их сохранить
+
+            self._update_save_button_state() # Обновляем состояние кнопки сохранения
+
+            return True
+
+        except Exception as e:
+            self.logger.exception(f"Ошибка при выборочном сохранении строк: {e}")
+            return False
+
+        finally:
+            self._saving_in_progress = False
+
+    def _save_child_components_for_parents(self, parent_ids: Set[int]) -> None:
+        """
+        Применяет черновики дочерних компонентов для указанных родителей.
+
+        ОБЯЗАТЕЛЬНО: убедится, что дочерний компонент обязательно удаляет черновик после apply. Если нет – вы получите предупреждение, но счётчик не уменьшится
+        """
+
+        for parent_id in parent_ids:
+            if parent_id >= 0:
+                self._save_child_components_for_parent(parent_id)
+
     def _save_modified_rows(self) -> None:
         """Сохраняет изменения существующих строк (только те, у которых есть статус 'own' или 'both')."""
 
@@ -502,24 +782,26 @@ class PaginatedListPage(
                 if status in ('own', 'both'):
                     entity_ids.add(entity_id)
 
-        for entity_id in entity_ids:
-            row = self._find_row_by_id(entity_id)
-            if row < 0:
-                continue
+        self._save_modified_rows_for_ids(entity_ids)
 
-            dto = self.source_model.get_item_at_row(row)
-            if dto is None:
-                continue
-
-            updated = self.service.update(dto)
-            self.source_model.update_row(row, updated)
-
-            # уточнение:
-            # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
-            self.clear_entity_drafts(entity_id) # Удаляет черновики для данной сущности
-
-            # Снимаем флаг собственных изменений (обновляем статус)
-            self.clear_own_change(entity_id)  # снимаем флаг 'own'
+        # for entity_id in entity_ids:
+        #     row = self._find_row_by_id(entity_id)
+        #     if row < 0:
+        #         continue
+        #
+        #     dto = self.source_model.get_item_at_row(row)
+        #     if dto is None:
+        #         continue
+        #
+        #     updated = self.service.update(dto)
+        #     self.source_model.update_row(row, updated)
+        #
+        #     # уточнение:
+        #     # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
+        #     self.clear_entity_drafts(entity_id) # Удаляет черновики для данной сущности
+        #
+        #     # Снимаем флаг собственных изменений (обновляем статус)
+        #     self.clear_own_change(entity_id)  # снимаем флаг 'own'
 
         # """
         # Сохраняет изменения существующих строк, у которых есть черновики.
@@ -574,32 +856,151 @@ class PaginatedListPage(
     #     self._draft_registry.delete_entity_status(self._entity_type, entity_id)
     #     self._draft_registry.discard(f"__counter__:{temp}")
 
+    def _clear_selected_dto(self, entity_id) -> None:
+        if entity_id is None:
+            return
+
+        # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
+        if self.selected_dto and self.selected_dto.id == entity_id:
+            self.selected_dto = None
+
+    # def _save_deleted_rows(self) -> None:
+    #     """
+    #     Удаляет строки, помеченные как __deleted__, и каскадно их потомков.
+    #
+    #     **Важное примечание о каскадном удалении:**
+    #     ----------------------------------------------------------------
+    #     В отличие от каскада в БД (ON DELETE CASCADE), этот метод реализует
+    #     каскад на уровне приложения. Это необходимо, потому что:
+    #         1. Дочерние сущности могут иметь свои черновики, которые нужно очистить.
+    #         2. Счётчики родителей должны быть корректно уменьшены.
+    #         3. Мы не хотим полагаться на конкретную реализацию БД (SQLite, PostgreSQL и т.д.).
+    #
+    #     Алгоритм для каждого удаляемого ID:
+    #         1. Рекурсивно помечает на удаление всех потомков (через `_delete_children`).
+    #         2. Удаляет родителя из БД через сервис.
+    #         3. Очищает реестр от всех ключей, связанных с родителем и его потомками.
+    #         4. Уменьшает счётчик родителя (если есть).
+    #     ----------------------------------------------------------------
+    #     """
+    #
+    #     prefix = f"__deleted__:{self._entity_type}:"
+    #
+    #     for key in list(self._draft_registry.get_keys_by_prefix(prefix)):
+    #         entity_id = int(key.split(':')[-1])
+    #
+    #         # Каскадно помечаем всех детей (и внуков) на удаление
+    #         self._delete_children(entity_id)
+    #
+    #         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
+    #         self._clear_selected_dto(entity_id)
+    #
+    #         # Удаляем из БД (первым делом, чтобы при ошибке не трогать реестр)
+    #         self.service.delete(entity_id)
+    #
+    #         # Удаляем все черновики дочерних сущностей, связанных с этим родителем
+    #         # ВАЖНО: удаляем ВСЕ черновики дочерних сущностей, связанные с удаляемым родителем...
+    #         self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
+    #
+    #         # Удаляем сам ключ __deleted__
+    #         self._draft_registry.discard(key)
+    #
+    #         # Удаляем все черновики, статусы и счётчики для этой сущности
+    #         self._draft_registry.delete_entity_status(self._entity_type, entity_id)
+    #         self._draft_registry.discard(f"__counter__:{self._entity_type}:{entity_id}")
+    #
+    #         # Очищаем кэш статусов в миксине
+    #         self._status_cache.pop(entity_id, None)
+    #
+    #         # Уведомляем родителя удаляемой строки (уменьшаем его счётчик)
+    #         self._update_parent_child_counter(entity_id, -1) # -1 к счётчику родителя # Уведомляем родителей (если есть) # Наследован из DraftTreeMixin
+    #
+    #         # # Удаляем из БД
+    #         # self.service.delete(entity_id)
+
     def _save_deleted_rows(self) -> None:
-        """Удаляет строки, помеченные как __deleted__."""
+        """
+        Удаляет строки, помеченные как __deleted__, и каскадно всех их потомков из БД.
 
+        **Важное примечание о каскадном удалении:**
+        --------------------------------------------------------------------
+        В отличие от каскада в БД (ON DELETE CASCADE), этот метод реализует
+        каскад на уровне приложения. Это необходимо, потому что:
+            1. Дочерние сущности могут иметь свои черновики, которые нужно очистить.
+            2. Счётчики родителей должны быть корректно уменьшены.
+            3. Мы не хотим полагаться на конкретную реализацию БД (SQLite, PostgreSQL и т.д.).
+
+        Алгоритм для каждого удаляемого ID:
+            1. Рекурсивно удаляет всех потомков (вызовом `_delete_entity_and_children`).
+            2. Удаляет родителя из БД через сервис.
+            3. Очищает реестр от всех ключей, связанных с родителем.
+            4. Уменьшает счётчик родителя (если есть).
+        --------------------------------------------------------------------
+        """
         prefix = f"__deleted__:{self._entity_type}:"
-
-        for key in list(self._draft_registry.get_keys_by_prefix(prefix)):
+        keys = list(self._draft_registry.get_keys_by_prefix(prefix))
+        for key in keys:
             entity_id = int(key.split(':')[-1])
-            self.service.delete(entity_id)
+            self._delete_entity_and_children(entity_id)
 
-            # Удаляем сам ключ удаления
-            self._draft_registry.discard(key)
+    def _delete_entity_and_children(self, entity_id: int) -> None:
+        """
+        Рекурсивно удаляет сущность и всех её потомков из БД, а также очищает реестр.
 
-            # Удаляем все черновики, статусы и счётчики для этой сущности
-            self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
-            self._draft_registry.delete_entity_status(self._entity_type, entity_id)
-            self._draft_registry.discard(f"__counter__:{self._entity_type}:{entity_id}")
+        Алгоритм:
+            1. Получает список ID прямых потомков через `_get_child_ids(entity_id)`.
+            2. Для каждого потомка:
+                - Если он ещё не помечен на удаление в реестре – помечает (создаёт ключ __deleted__)
+                  и увеличивает счётчик родителя (чтобы родитель знал об удалении).
+                - Рекурсивно вызывает `_delete_entity_and_children` для потомка.
+            3. Удаляет саму сущность из БД через сервис.
+            4. Очищает все ключи реестра, связанные с этой сущностью:
+               - черновики по префиксу "entity_type:entity_id:"
+               - ключ __deleted__ (если был)
+               - статус (__status__)
+               - счётчик детей (__counter__)
+            5. Очищает кэш статусов в миксине.
+            6. Уведомляет родителя (если есть) об уменьшении счётчика потомков (-1).
 
-            # # Уведомляем родителей (если есть)
-            # parent_id = self._get_parent_id(entity_id)
-            # if parent_id is not None:
-            #     self.mark_child_change(parent_id, -1)
+        **Важно:** Этот метод предполагает, что `_get_child_ids` переопределён в наследнике
+        и возвращает список реальных ID дочерних записей, уже сохранённых в БД.
 
-            # Очищаем кэш статусов в миксине
-            self._status_cache.pop(entity_id, None)
+        Args:
+            entity_id: ID сущности (должен быть >= 0, т.е. существовать в БД).
+        """
+        # Рекурсивно удалить всех потомков
+        for child_id in self._get_child_ids(entity_id):
+            # Если дочерняя ещё не помечена на удаление – помечаем
+            temp = f"__deleted__:{self._entity_type}:{child_id}"
+            if not self._draft_registry.has(temp):
+                self._draft_registry.set(temp, {})
+                # # Увеличиваем счётчик родителя дочерней сущности (чтобы её родитель знал)
+                # self._update_parent_child_counter(child_id, 1) # причин удаления: Этот счётчик уже был увеличен ранее, когда child_id был помечен на удаление (в _delete_selected_rows или при каскадной пометке).
 
-            self._update_parent_child_counter(entity_id, -1) # -1 к счётчику родителя # Уведомляем родителей (если есть) # Наследован из DraftTreeMixin
+            # Рекурсивно удаляем ребёнка и его потомков
+            self._delete_entity_and_children(child_id)
+
+        # Очистить реестр от ключей, связанных с этой сущностью
+
+        self._clean_entity_registry_by_id("__deleted__", entity_id)
+        # #    - черновики по префиксу "entity_type:entity_id:"
+        # self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
+        # #    - ключ __deleted__
+        # self._draft_registry.discard(f"__deleted__:{self._entity_type}:{entity_id}")
+        # #    - статус
+        # self._draft_registry.delete_entity_status(self._entity_type, entity_id)
+
+        #    - счётчик детей
+        self._draft_registry.discard(f"__counter__:{self._entity_type}:{entity_id}")
+
+        # Удалить саму сущность из БД
+        self.service.delete(entity_id)
+
+        # Очистить кэш статусов
+        self._status_cache.pop(entity_id, None)
+
+        # Уменьшить счётчик родителя удаляемой сущности (компенсируем увеличение при пометке к примеру в _delete_selected_rows)
+        self._update_parent_child_counter(entity_id, -1)
 
     @property
     def _saving_in_progress(self) -> bool:
@@ -611,6 +1012,98 @@ class PaginatedListPage(
     @_saving_in_progress.setter
     def _saving_in_progress(self, value):
         self.__saving_in_progress = value  # флаг блокировки
+
+    def _save_child_changes(self, new_map):
+        """
+        Применяет (сохраняет) черновики всех дочерних компонентов для всех родительских сущностей,
+        у которых есть активные дочерние черновики.
+
+        **Логика работы:**
+            1. Сначала обрабатываются все новые строки (те, что были созданы в текущей сессии редактирования).
+               Для каждой такой строки (уже сохранённой в БД, с реальным ID) вызывается
+               `_save_child_components_for_parent()`, которая применяет дочерние черновики
+               (например, фото) к этому родителю.
+            2. Затем собираются ID всех родителей, у которых есть дочерние черновики
+               (статус 'child' или 'both'), через метод `_get_parents_with_child_drafts()`.
+            3. Чтобы не обрабатывать одного родителя дважды (если он уже был обработан как новая строка),
+               используется множество `processed_parents`. В него сразу добавляются ID новых строк.
+            4. Для каждого родителя из полученного списка, который ещё не был обработан,
+               вызывается `_save_child_components_for_parent()`.
+            5. После применения черновиков выполняется **проверка дисбаланса счётчиков**:
+               - Если у родителя после обработки остался статус 'child', но при этом в реестре
+                 нет ни одного активного дочернего черновика (по префиксу), то это указывает на
+                 ошибку в учёте счётчиков. В таком случае счётчик принудительно уменьшается на 1,
+                 чтобы синхронизировать состояние.
+               - Такая ситуация может возникнуть, если дочерний компонент не удалил свой черновик
+                 после применения (нарушение контракта) или если произошла ошибка в логике.
+
+        **Важно:**
+            - Дочерние компоненты **обязаны** после успешного применения удалять свой черновик
+              из реестра (например, через `registry.apply_and_clear()`).
+            - Метод не изменяет основные поля родительских строк – за это отвечает
+              `_save_modified_rows` и другие методы.
+            - Вызов этого метода происходит внутри `_save_all_changes_impl` **после** сохранения
+              новых строк (`_save_new_rows`), но **до** сохранения изменённых и удалённых строк.
+
+        Args:
+            new_map (Dict[int, Any]): Словарь, возвращённый методом `_save_new_rows`,
+                где ключ – временный ID новой строки, значение – созданный DTO с реальным ID.
+                Используется для того, чтобы сразу обработать дочерние черновики для новых родителей
+                и не обрабатывать их повторно в основном цикле.
+
+        Returns:
+            None
+        """
+
+        # # Множество ID родителей, которые уже были обработаны (чтобы избежать дублирования)
+        # processed_parents = set() # причина: Добавить ленивую инициализацию множества processed_parents, чтобы гарантировать, что один родитель не будет обработан дважды в случае, если он появится в _get_parents_with_child_drafts дважды (например, из-за дублирования в реестре – маловероятно, но безопаснее). Это не исправляет ошибку, а повышает надёжность
+
+        # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
+        for temp_id, created in new_map.items():
+            parent_id = created.id
+            self._save_child_components_for_parent(parent_id)
+            # processed_parents.add(parent_id)
+
+        # Множество ID уже обработанных новых строк
+        processed_parent_ids  = {created.id for created in new_map.values()}
+
+        # Обрабатываем всех родителей, у которых есть дочерние черновики
+        # Сохраняем дочерние черновики для всех существующих строк, у которых есть такие черновики
+        for parent_id in self._get_parents_with_child_drafts():
+            # Исключаем новые строки (они уже обработаны)
+            if parent_id in processed_parent_ids:
+                continue
+
+            self._save_child_components_for_parent(parent_id)
+
+            # === ЗАЩИТА ОТ ДИСБАЛАНСА СЧЁТЧИКОВ ===
+            # Если после обработки статус родителя всё ещё 'child', а активных черновиков нет,
+            # принудительно сбрасываем счётчик (уменьшаем на 1).
+            # Это предотвращает ситуацию, когда родитель остаётся жёлтым без реальных изменений.
+            status = self._draft_registry.get_entity_status(self._entity_type, parent_id)
+            if status == 'child':
+                # Проверяем, есть ли дочерние черновики по префиксу
+                prefix = f"{self._entity_type}:{parent_id}:"
+                has_child_drafts = any(
+                    not k.startswith(('__status__', '__counter__', '__deleted__', '__new__'))
+                    for k in self._draft_registry.get_keys_by_prefix(prefix)
+                )
+                if not has_child_drafts:
+                    self.logger.warning(
+                        f"Обнаружен дисбаланс счётчика для родителя {parent_id}: статус 'child', "
+                        "но дочерние черновики отсутствуют. Принудительный сброс."
+                    )
+                    self.mark_child_change(parent_id, -1)
+
+        # Принудительная очистка оставшихся черновиков для всех дочерних префиксов
+        # (на случай, если какой-то компонент забыл удалить свой черновик)
+        for key in list(self._draft_registry.get_keys_by_prefix(f"{self._entity_type}:")):
+            if not key.startswith(('__status__', '__counter__', '__deleted__', '__new__')):
+                self.logger.warning(
+                    f"Обнаружен неочищенный черновик после сохранения: {key}. "
+                    "Это может указывать на ошибку в дочернем компоненте, но черновик не удалён."
+                )
+                # self._draft_registry.discard(key) # Причина удаления: может стереть легитимные черновики, если какой-то компонент ещё не успел их применить (например, из-за ошибки в порядке вызовов). Лучше только логировать, но не удалять.
 
     def _save_all_changes_impl(self) -> bool:
         """Основной метод сохранения (вызывается из EditModeMixin)."""
@@ -632,14 +1125,17 @@ class PaginatedListPage(
             # # Сохраняем дочерние черновики (например, фото)
             # self._save_child_components()
 
-            # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
-            for temp_id, created in new_map.items():
-                self._save_child_components_for_parent(created.id)
+            # # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
+            # for temp_id, created in new_map.items():
+            #     self._save_child_components_for_parent(created.id)
+            #
+            # # Сохраняем дочерние черновики для текущей выбранной строки, если она существует и не новая
+            # if self.selected_dto and self.selected_dto.id >= 0:
+            #     self._save_child_components_for_parent(self.selected_dto.id)
 
-            # Сохраняем дочерние черновики для текущей выбранной строки, если она существует и не новая
-            if self.selected_dto and self.selected_dto.id >= 0:
-                self._save_child_components_for_parent(self.selected_dto.id)
-            
+            # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID) и для всех существующих строк, у которых есть такие черновики
+            self._save_child_changes(new_map)
+
             # Сохраняем изменённые строки
             self._save_modified_rows()
 
@@ -666,6 +1162,27 @@ class PaginatedListPage(
         finally:
             self._saving_in_progress = False
 
+    def _save_modified_rows_for_ids(self, entity_ids: Set[int]) -> None:
+        """Сохраняет изменения основных полей для указанных ID (статус 'own' или 'both')."""
+        for entity_id in entity_ids:
+            row = self._find_row_by_id(entity_id)
+            if row < 0:
+                continue
+
+            dto = self.source_model.get_item_at_row(row)
+            if dto is None:
+                continue
+
+            updated = self.service.update(dto)
+            self.source_model.update_row(row, updated)
+
+            # уточнение:
+            # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
+            self.clear_entity_drafts(entity_id)  # Удаляет черновики для данной сущности
+
+            # Снимаем флаг собственных изменений (обновляем статус)
+            self.clear_own_change(entity_id)  # снимаем флаг 'own'
+
     def reload_with_filters(self, filters_tree):
         """Перезагружает данные с новыми фильтрами и обновляет состояние кнопки сохранения."""
     
@@ -676,19 +1193,105 @@ class PaginatedListPage(
         """
         Применяет черновики всех дочерних компонентов (например, фото) для указанного родителя.
 
+        **Важное требование к дочерним компонентам:**
+            Каждый дочерний компонент в своей реализации метода `apply` **обязан** после
+            успешного сохранения удалить свой черновик из реестра. Если этого не сделать,
+            черновик останется и может быть повторно применён при следующем сохранении,
+            что приведёт к дублированию данных или ошибкам целостности.
+
+            Рекомендуемый паттерн в дочернем компоненте:
+                def apply(self, registry, parent_id=None, service=None):
+                    key = self.get_draft_key()
+                    def applier(data):
+                        # сохранение с использованием parent_id и service
+                        pass
+                    registry.apply_and_clear(key, applier)
+
+        **Логика работы с счётчиком родителя:**
+            - При создании черновика (например, добавлении фото к приёму) счётчик родителя
+              увеличивается на +1 (через `mark_child_change(parent_id, +1)`).
+            - При успешном применении черновика счётчик должен быть уменьшен на -1.
+            - Если дочерний компонент по ошибке не удалил черновик, мы принудительно удаляем
+              его сами и всё равно уменьшаем счётчик, чтобы избежать дисбаланса.
+              Это не скрывает ошибку – в лог записывается сообщение уровня ERROR,
+              привлекающее внимание разработчика.
+
+        **Почему принудительное удаление безопасно?**
+            Черновик уже был применён (сохранён в БД). Его дальнейшее существование в реестре
+            не нужно и может привести к повторному применению при следующем сохранении.
+            Принудительное удаление восстанавливает консистентность реестра.
+
+        ЕЩЁ РАЗ!: Дочерний компонент **НЕ ДОЛЖЕН вызывать mark_child_change внутри apply** – это приведёт к двойному учёту. Весь учёт счётчиков выполняет только PaginatedListPage
+
         Args:
             parent_id: ID родительской сущности (должен быть >= 0, то есть существовать в БД).
         """
+
         if parent_id is None or parent_id < 0:
+            return
+
+        # Проверка: не удалён ли родитель?
+        if self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+            self.logger.warning(f"Попытка сохранить дочерние черновики для удалённого родителя {parent_id}")
             return
 
         for child in self._children_components:
             if hasattr(child, 'apply'):
-                child.apply(
-                    self._draft_registry,
-                    parent_id=parent_id,
-                    service=self._get_child_service()
-                )
+                # Сохраняем ключ черновика до вызова (для проверки)
+                key = child.get_draft_key() if hasattr(child, 'get_draft_key') else None
+                if (key is not None) and self._draft_registry.has(key):
+                    try:
+                        child.apply(
+                            self._draft_registry,
+                            parent_id=parent_id,
+                            service=self._get_child_service()
+                        )
+                    except Exception as e:
+                        self.logger.exception(
+                            f"Ошибка при применении черновика дочернего компонента {child.__class__.__name__} "
+                            f"для родителя {parent_id}: {e}"
+                        )
+                        raise  # прерываем сохранение, так как данные в неконсистентном состоянии
+
+                    # Проверяем, удалён ли черновик
+                    if not self._draft_registry.has(key):  # черновик удалён. причина: Если child.apply не удалит черновик (например, из-за ошибки или если он не использует apply_and_clear), то вы всё равно уменьшите счётчик родителя. Это приведёт к дисбалансу
+                        # Нормальный случай: черновик удалён дочерним компонентом:
+                        # Черновик был успешно удалён – значит, изменения применены
+                        # Уменьшаем счётчик родителя (который был увеличен при создании потомка)
+                        self.mark_child_change(parent_id, -1) # Счётчик родителя увеличивается ровно один раз при создании черновика (в _add_inline_row для дочерней строки или при добавлении черновика через add_draft_child). Поэтому после применения он должен быть уменьшен ровно один раз. Уменьшение должно происходить независимо от способа удаления черновика
+
+                    else: # Проверяем, удалён ли черновик (если компонент предоставил ключ)
+                        # self.logger.warning(
+                        #     f"Дочерний компонент {child.__class__.__name__} не удалил черновик после apply. "
+                        #     f"Ключ {key} остался в реестре. Убедитесь, что метод apply вызывает registry.apply_and_clear "
+                        #     f"или вручную удаляет черновик."
+                        # )
+
+                        # Черновик не был удалён – нарушение контракта.
+                        # Принудительно удаляем черновик и уменьшаем счётчик, чтобы восстановить консистентность.
+                        self.logger.error(
+                            f"Дочерний компонент {child.__class__.__name__} не удалил черновик после apply. "
+                            f"Ключ {key} остался в реестре. Выполнено принудительное удаление черновика "
+                            f"и уменьшение счётчика родителя {parent_id}."
+                        )
+                        self._draft_registry.discard(key)
+                        self.mark_child_change(parent_id, -1)
+
+    def _get_parents_with_child_drafts(self) -> Set[int]:
+        """
+        Возвращает множество ID родительских сущностей, у которых есть дочерние черновики.
+        Используется для применения дочерних черновиков при сохранении всех изменений.
+        """
+        parent_ids = set()
+        for key in self._draft_registry.get_keys_by_prefix(f"__status__:{self._entity_type}:"):
+            parts = key.split(':')
+            if len(parts) >= 3:
+                entity_id = int(parts[2])
+                status = self._draft_registry.get_entity_status(self._entity_type, entity_id)
+                if status in ('child', 'both'):  # есть изменения у потомков
+                    parent_ids.add(entity_id)
+        return parent_ids
+
     # def _save_child_components(self):
     #     """
     #     Сохраняет черновики всех дочерних компонентов (например, фото).
@@ -743,6 +1346,7 @@ class PaginatedListPage(
             f"__deleted__:{self._entity_type}:",
             f"__new__:{self._entity_type}:",
         ]:
+            # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
             self._draft_registry.discard_by_prefix(prefix)
         
         # Очищаем кэш статусов, чтобы при следующей загрузке страницы не осталось старых данных
@@ -1046,7 +1650,7 @@ class PaginatedListPage(
                 continue
 
             # 4) Стандартные делегаты по типу
-            delegate_class = type_delegate_map.get(col.data_type)
+            delegate_class = type_delegate_map.get(col.data_type) # может быть проблема с типизацией!
             if delegate_class:
                 if delegate_class in (DatePickerDelegate, TimePickerDelegate):
                     delegate = delegate_class(self.table_view, config=config)
@@ -1097,10 +1701,7 @@ class PaginatedListPage(
         """
         Добавляет новую пустую строку в конец таблицы (режим редактирования).
 
-        Важно: родитель НЕ уведомляется о появлении новой строки (нет вызова
-        mark_child_change), потому что у новой строки ещё нет реального ID.
-        Уведомление произойдёт только после сохранения строки в БД, когда
-        дочерние черновики будут перенесены на реальный ID и применены.
+
         """
 
         defaults = {}
@@ -1126,6 +1727,7 @@ class PaginatedListPage(
                     defaults[key] = value
 
         dto = self.dto_class(**defaults)
+
         temp_id = self._next_temp_id
         self._next_temp_id -= 1
         dto.id = temp_id
@@ -1137,7 +1739,29 @@ class PaginatedListPage(
         row = self.source_model.add_row(dto)
 
         # Помечаем как имеющую собственные изменения (новая строка)
-        self.mark_own_change(temp_id) # устанавливает статус 'own' для временного ID (без уведомления родителя)
+        self.mark_own_change(temp_id)  # устанавливает статус 'own' для временного ID (без уведомления родителя)
+
+        # # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        # # parent_id = self._get_parent_id_for_new_row(dto)
+        # # if parent_id is not None:
+        # #     self.mark_child_change(parent_id, +1)
+        #
+        # # Увеличиваем счётчик родителя только если родитель существует (ID > 0) и не помечен на удаление
+        #
+        # # if parent_id is not None and parent_id > 0:
+        # #     # Причина:
+        # #     # Родитель с временным ID (parent_id < 0) не должен влиять на счётчик, так как он сам ещё не сохранён.
+        # #     # Если родитель уже помечен на удаление, то новая строка не должна увеличивать его счётчик, так как родитель всё равно будет удалён. Это предотвращает дисбаланс счётчиков.
+        # #
+        # #     if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+        # #         self.mark_child_change(parent_id, +1)
+        # #     else:
+        # #         self.logger.debug(
+        # #             f"Родитель {parent_id} помечен на удаление, счётчик не увеличен для новой строки {temp_id}")
+
+        # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        parent_id = self._get_parent_id_for_new_row(dto)
+        self._update_parent_counter(parent_id, 1, temp_id)
 
         # # Уведомляем родителя о появлении нового потомка с изменениями
         # self._update_parent_child_counter(temp_id, +1)
@@ -1174,29 +1798,152 @@ class PaginatedListPage(
     #     parent_id = self._get_parent_id(entity_id)
     #     if parent_id is not None:
     #         self.mark_child_change(parent_id, delta)
-    def _cancel_new_row(self, entity_id: int):
+
+    def _cancel_draft_new_row(self,  entity_id: int):
+        # Рекурсивно находим и отменяем все дочерние новые строки
+        prefix_new = f"__new__:{self._entity_type}:"
+
+        for key in list(self._draft_registry.get_keys_by_prefix(prefix_new)):
+            child_id = int(key.split(':')[-1])
+
+            # Пропускаем самого себя, чтобы избежать бесконечной рекурсии
+            if child_id == entity_id:
+                continue
+
+            child_data = self._draft_registry.get(key)
+            if child_data and "dto" in child_data:
+                child_dto = child_data["dto"]
+                child_parent_id = self._get_parent_id_for_new_row(child_dto)
+                if child_parent_id == entity_id:
+                    self._cancel_new_row(child_id)
+
+        # # Рекурсивно отменить всех потомков (по префиксу)
+        #
+        # # Удаляем все черновики, привязанные к этому временному ID
+        # prefix = f"{self._entity_type}:{entity_id}:"
+        #
+        # for key in list(self._draft_registry.get_keys_by_prefix(prefix)):
+        #     # Извлечь ID потомка из ключа (например, из "appointment:-1:photos" или "appointment:-1:...")
+        #     parts = key.split(':')
+        #     if len(parts) >= 3 and parts[0] == self._entity_type:
+        #         child_id = int(parts[1])
+        #         if child_id != entity_id and child_id < 0:
+        #             if self._draft_registry.has(f"__new__:{self._entity_type}:{child_id}"):
+        #                 self._cancel_new_row(child_id)
+
+    def _clean_entity_registry_by_id(self, prefix: str, entity_id: int):
         """
-        Отменяет создание новой строки с временным ID.
-        Удаляет все её черновики (включая дочерние), ключ __new__ и саму строку из модели.
+        Удаляет из реестра все ключи, связанные с указанной временной сущностью (новой строкой).
+
+        **Что удаляет:**
+            1. Все черновики, которые начинаются с префикса "{self._entity_type}:{entity_id}:"
+               (например, "appointment:-1:photos", "appointment:-1:notes" и т.д.).
+            2. Ключ удаления/новой строки вида "{prefix}:{self._entity_type}:{entity_id}".
+               Обычно `prefix` равен "__new__" для новых строк или "__deleted__" для удалённых  (без двоеточия).
+            3. Статус сущности (ключ "__status__:{self._entity_type}:{entity_id}").
+
+        **Важно:**
+            - Этот метод не удаляет дочерние **новые строки** (имеющие собственный ключ `__new__`).
+              Для каскадной отмены новых строк следует использовать `_cancel_new_row`.
+            - Метод используется внутри `_cancel_new_row` (очистка после рекурсивного удаления потомков)
+              и внутри `_delete_entity_and_children` (очистка после удаления существующей сущности).
+
+        Args:
+            prefix (str): Префикс служебного ключа. Для новых строк – "__new__",
+                          для удалённых строк – "__deleted__". Может быть и другим в зависимости
+                          от контекста (например, при использовании в `_delete_entity_and_children`
+                          передаётся "__deleted__").
+
+            entity_id (int): Временный (отрицательный) ID новой строки или реальный ID
+                             существующей сущности.
+
+        Returns:
+            None
+
+        Пример:
+            >>> # Отмена новой строки с ID = -1
+            >>> self._clean_entity_registry_by_id("__new__", -1)
+            # Удалит:
+            #   - все ключи вида "appointment:-1:*"
+            #   - ключ "__new__:appointment:-1"
+            #   - статус "__status__:appointment:-1"
         """
 
-        # Удаляем все черновики, привязанные к этому временному ID
-        prefix = f"{self._entity_type}:{entity_id}:"
-        self._draft_registry.discard_by_prefix(prefix)
+        # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
+        self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
 
         # Удаляем ключ __new__
-        self._draft_registry.discard(f"__new__:{self._entity_type}:{entity_id}")
+        self._draft_registry.discard(f"{prefix}:{self._entity_type}:{entity_id}")
 
         # Удаляем статус сущности из реестра (ключ __status__)
         self._draft_registry.delete_entity_status(self._entity_type, entity_id)
 
-        # Удаляем строку из модели
+    def _cancel_new_row(self, entity_id: int):
+        """
+        Полностью отменяет создание новой строки и всех её потомков (новых строк).
+
+        Универсальный метод, работающий при любой глубине вложенности:
+            1. Рекурсивно находит и отменяет все дочерние новые строки.
+            2. Удаляет все черновики, связанные с текущей сущностью (по префиксу).
+            3. Удаляет ключ __new__, статус и строку из модели.
+            4. Уведомляет родителя (если есть) об уменьшении количества потомков.
+
+        --------------------------------------------------------------------
+        НЕ ИСПОЛЬЗУЙТЕ просто `discard_by_prefix` для удаления всей ветки!
+        Это приведёт к тому, что дочерние НОВЫЕ строки (имеющие собственный ключ __new__)
+        останутся в реестре и в модели, указывая на несуществующий временный ID родителя.
+        При следующем сохранении они вызовут ошибки целостности данных.
+
+        ПРАВИЛЬНЫЙ ПОДХОД:
+        1. Сначала удалить все "нестрочные" черновики (фото, заметки) по префиксу.
+        2. Затем рекурсивно найти и отменить все дочерние НОВЫЕ строки,
+           проверяя их DTO на parent_id, указывающий на текущий entity_id.
+        3. Только после этого удалить саму строку и её ключи.
+
+        См. реализацию ниже.
+        --------------------------------------------------------------------
+
+        Args:
+            entity_id: Временный отрицательный ID новой строки.
+        """
+
+        # Получаем DTO до удаления, чтобы узнать родителя
         row = self._find_row_by_id(entity_id)
+        dto = self.source_model.get_item_at_row(row) if row >= 0 else None
+        parent_id = self._get_parent_id_for_new_row(dto) if dto else None
+
+        # # Удаляем все черновики, привязанные к этому временному ID
+        # prefix = f"{self._entity_type}:{entity_id}:"
+
+        #  РЕКУРСИВНОЕ УДАЛЕНИЕ ДОЧЕРНИХ НОВЫХ СТРОК (критически важно!)
+        #    Без этого шага дочерние строки останутся висеть на мёртвого родителя.
+        self._cancel_draft_new_row(entity_id) # отмена новых потомков
+
+        self._clean_entity_registry_by_id("__new__", entity_id)
+        # # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
+        # self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
+        #
+        # # Удаляем ключ __new__
+        # self._draft_registry.discard(f"__new__:{self._entity_type}:{entity_id}")
+        #
+        # # Удаляем статус сущности из реестра (ключ __status__)
+        # self._draft_registry.delete_entity_status(self._entity_type, entity_id)
+
+        self._clear_selected_dto(entity_id)
+
+        # Удаляем строку из модели
         if row >= 0:
             self.source_model.remove_row(row)
 
         # Очищаем кэш статусов
         self._status_cache.pop(entity_id, None)
+
+        # Уведомляем родителя, что потомок исчез (если был уведомлён при создании)
+        # if parent_id is not None:
+        #     # Проверяем, не был ли родитель уже помечен на удаление
+        #     if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+        #         self.mark_child_change(parent_id, -1)
+        self._update_parent_counter(parent_id, -1)
 
     def _delete_selected_rows(self):
         """
@@ -1223,6 +1970,9 @@ class PaginatedListPage(
                 # Новая строка – просто удаляем её (как при отмене)
                 self._cancel_new_row(entity_id)
 
+                # Если это была выбранная строка – сбрасываем выделение
+                self._clear_selected_dto(entity_id)
+
             else:
                 # Существующая строка – помечаем на удаление
                 temp = f"__deleted__:{self._entity_type}:{entity_id}"
@@ -1236,7 +1986,7 @@ class PaginatedListPage(
                     # Помечаем как удалённую
                     self._draft_registry.set(temp, {})
 
-                    # Уведомляем родителя о том, что появился потомок, помеченный на удаление
+                    # Уведомляем родителя о том, что появился потомок, помеченный на удаление (если что компенсимуем в _delete_entity_and_children)
                     # (это увеличит счётчик детей родителя)
                     self._update_parent_child_counter(entity_id, 1) # +1 к счётчику родителя # Если есть родитель, увеличиваем счётчик его потомков  # Наследован из DraftTreeMixin
 
@@ -1310,6 +2060,9 @@ class PaginatedListPage(
 
                 # Родитель НЕ уведомляется, потому что он никогда не получал уведомления
                 # о существовании этой новой строки (см. _add_inline_row).
+
+                # Если это была выбранная строка – сбрасываем выделение
+                self._clear_selected_dto(entity_id)
 
             else:
                 # Если строка была помечена на удаление – снимаем пометку

@@ -1523,8 +1523,6 @@ class MainWindow(
         # Инициализация системы обновлений (собственный модуль)
         self._init_updater()
 
-
-
         # Не вызываем check_for_updates сразу, а планируем через 1 секунду
         QTimer.singleShot(1500, self._delayed_check_updates)
 
@@ -1562,7 +1560,15 @@ class MainWindow(
         """Отложенный запуск проверки обновлений."""
         # Автоматическая проверка обновлений при старте (без показа сообщения "нет обновлений")
         self._auto_check = True
-        self.updater.check_for_updates()
+        # self.updater.check_for_updates()
+
+        # Проверяем доступность GitHub перед автоматической проверкой
+        from app.updater import is_github_reachable
+        if is_github_reachable():
+            self.updater.check_for_updates()
+
+        else:
+            self.logger.info("GitHub недоступен, автоматическая проверка обновлений пропущена")
 
     @AppLogger.get_instance(
         name='MainWindow',

@@ -1,8 +1,25 @@
 # interfaces/gui/gui_window/mixins/edit_mode_mixin.py
 
 """
-Миксин для включения/выключения режима редактирования.
+Миксин для включения/выключения режима редактирования, сохранения и отмены изменений.
+
+**Абстрактные методы, которые должен реализовать класс-наследник:**
+    - _has_unsaved_changes() -> bool
+    - _discard_all_changes() -> None
+    - _save_all_changes_impl() -> bool
+    - reload_data() -> None
+
+**Как использовать:**
+    - Класс, использующий этот миксин, должен определить атрибут `edit_mode` (обычно через property),
+      чтобы хранить состояние режима.
+    - В `_set_edit_mode` вызывается `_update_ui_for_edit_mode` (если он есть), который должен обновлять UI.
+
+**Примечание:** атрибут `edit_mode` не создаётся в миксине, так как он может быть определён в наследнике.
+    Это позволяет гибко настраивать его хранение (например, через property в PaginatedListPage).
+
 """
+
+from abc import ABC, abstractmethod
 
 from app.utils.logger.logger import AppLogger
 
@@ -10,7 +27,7 @@ from PySide6.QtWidgets import QMessageBox
 # from PySide6.QtGui import QColor
 
 
-class EditModeMixin:
+class EditModeMixin(ABC):
     """
     Предоставляет методы для переключения режима редактирования,
     сохранения и отмены изменений.
@@ -43,10 +60,65 @@ class EditModeMixin:
     def _saving_in_progress(self, value):
         self.__saving_in_progress = value
 
+    @property
+    def edit_mode(self) -> bool:
+        if not hasattr(self, '_edit_mode'):
+            self._edit_mode = False
+        return self._edit_mode
 
+    @edit_mode.setter
+    def edit_mode(self, value: bool):
+        self._edit_mode = value
+
+    # ------------------------------------------------------------------
+    # Абстрактные методы, которые должен реализовать наследник
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    def _has_unsaved_changes(self) -> bool:
+        """Возвращает True, если есть несохранённые изменения."""
+        pass
+
+    @abstractmethod
+    def _discard_all_changes(self) -> None:
+        """Отменяет все несохранённые изменения."""
+        pass
+
+    @abstractmethod
+    def reload_data(self) -> None:
+        """Перезагружает данные (должен быть реализован в наследнике)."""
+        pass
+
+    @abstractmethod
+    def _save_all_changes_impl(self) -> bool:
+        """Основной метод сохранения (возвращает True при успехе)."""
+        pass
+
+    # ------------------------------------------------------------------
+    # Публичные методы управления режимом
+    # ------------------------------------------------------------------
 
     def toggle_edit_mode(self, enable: bool):
-        """Включает или выключает режим редактирования."""
+        """
+        Включает или выключает режим редактирования.
+
+        **Логика:**
+            - Если выключаем режим (enable=False) и есть несохранённые изменения (`_has_unsaved_changes()`),
+              показываем диалог с тремя вариантами:
+                * Сохранить – вызывает `_save_all_changes_impl()`.
+                * Не сохранять – вызывает `_discard_all_changes()` (отменяет все изменения).
+                * Отмена – остаёмся в режиме редактирования.
+            - Включаем/выключаем режим через `_set_edit_mode`.
+
+        **Абстрактные методы, которые должен реализовать наследник:**
+            - `_has_unsaved_changes() -> bool` – проверка наличия изменений.
+            - `_discard_all_changes() -> None` – отмена всех изменений.
+            - `_save_all_changes_impl() -> bool` – сохранение всех изменений.
+            - `reload_data() -> None` – перезагрузка данных.
+
+        **Важно:** Не вызывает диалог повторно при выходе из режима после успешного сохранения.
+        """
+
         if enable == self.edit_mode:
             return
         
@@ -70,10 +142,23 @@ class EditModeMixin:
         self._set_edit_mode(enable)
 
     def is_edit_mode(self) -> bool:
+        """Возвращает True, если режим редактирования включён."""
         return getattr(self, 'edit_mode', False)
 
     def save_all_changes(self) -> bool:
-        """Публичный метод – обёртка, предотвращающая повторный вход."""
+        """
+        Публичный метод для сохранения всех изменений (вызывается из UI).
+
+        Использует флаг `_saving_in_progress` для предотвращения повторного входа
+        (например, при многократном нажатии на кнопку «Сохранить»).
+
+        Реальная логика сохранения находится в `_save_all_changes_impl`, который
+        должен быть реализован в наследнике.
+
+        Returns:
+            True, если сохранение прошло успешно, иначе False.
+        """
+
         if self._saving_in_progress:
             self.logger.warning("save_all_changes уже выполняется, повторный вызов игнорирован")
             return False
@@ -85,36 +170,36 @@ class EditModeMixin:
         finally:
             self._saving_in_progress = False
 
-    def _save_all_changes_impl(self) -> bool:
-        """Сохраняет все изменения в БД. Возвращает True при успехе."""
-
-        if not self._has_unsaved_changes():
-            return True
-        
-        reply = QMessageBox.question(
-            self, "Подтверждение",
-            "Сохранить все изменения?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if reply != QMessageBox.StandardButton.Yes:
-            return False
-    
-        try:
-            self._save_new_rows()
-            self._save_modified_rows()
-            self._save_deleted_rows()
-            self.reload_data()
-            self._exit_edit_mode()
-            QMessageBox.information(self, "Успех", "Изменения сохранены.")
-
-            return True
-        
-        except Exception as e:
-            self.logger.exception(f"Ошибка сохранения: {e}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
-
-            return False
+    # def _save_all_changes_impl(self) -> bool:
+    #     """Сохраняет все изменения в БД. Возвращает True при успехе."""
+    #
+    #     if not self._has_unsaved_changes():
+    #         return True
+    #
+    #     reply = QMessageBox.question(
+    #         self, "Подтверждение",
+    #         "Сохранить все изменения?",
+    #         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    #     )
+    #
+    #     if reply != QMessageBox.StandardButton.Yes:
+    #         return False
+    #
+    #     try:
+    #         self._save_new_rows()
+    #         self._save_modified_rows()
+    #         self._save_deleted_rows()
+    #         self.reload_data()
+    #         self._exit_edit_mode()
+    #         QMessageBox.information(self, "Успех", "Изменения сохранены.")
+    #
+    #         return True
+    #
+    #     except Exception as e:
+    #         self.logger.exception(f"Ошибка сохранения: {e}")
+    #         QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить: {e}")
+    #
+    #         return False
 
     def cancel_all_changes(self):
         """Отменяет все изменения и перезагружает данные."""
@@ -122,49 +207,64 @@ class EditModeMixin:
         self.reload_data()
         self._exit_edit_mode()
 
-    def _has_unsaved_changes(self) -> bool:
-        """
-        Возвращает True, если есть несохранённые изменения:
-        - новые строки (new_rows)
-        - удалённые строки (deleted_ids)
-        - изменённые строки (modified_ids)
-        """
-        
-        return bool(self.modified_ids or self.deleted_ids or self.new_rows)
+    # ------------------------------------------------------------------
+    # Вспомогательные методы (могут быть переопределены)
+    # ------------------------------------------------------------------
 
-    def _discard_all_changes(self):
-        self.modified_ids.clear()
-        self.deleted_ids.clear()
-        self.new_rows.clear()
-        self._clear_drafts()
-        self.source_model.clear_row_colors()
+    # def _has_unsaved_changes(self) -> bool:
+    #     """
+    #     Возвращает True, если есть несохранённые изменения:
+    #     - новые строки (new_rows)
+    #     - удалённые строки (deleted_ids)
+    #     - изменённые строки (modified_ids)
+    #     """
+    #
+    #     return bool(self.modified_ids or self.deleted_ids or self.new_rows)
+
+    # def _discard_all_changes(self):
+    #     self.modified_ids.clear()
+    #     self.deleted_ids.clear()
+    #     self.new_rows.clear()
+    #     self._clear_drafts()
+    #     self.source_model.clear_row_colors()
 
     def _set_edit_mode(self, enable: bool):
+        """Устанавливает флаг режима и обновляет UI."""
         self.edit_mode = enable
-        self.source_model.set_checkbox_column_visible(enable)
-        self._update_ui_for_edit_mode(enable)
+
+        if hasattr(self, 'source_model'):
+            self.source_model.set_checkbox_column_visible(enable)
+
+        if hasattr(self, '_update_ui_for_edit_mode'):
+            self._update_ui_for_edit_mode(enable)
+
+    # def _set_edit_mode(self, enable: bool):
+    #     self.edit_mode = enable
+    #     self.source_model.set_checkbox_column_visible(enable)
+    #     self._update_ui_for_edit_mode(enable)
 
     def _exit_edit_mode(self):
+        """Выходит из режима редактирования (без диалога)."""
         if self.edit_mode:
             # self.toggle_edit_mode(False)
 
             # Выходим без диалога, так как изменения уже сохранены (или отменены)
             self._set_edit_mode(False)
 
-    def _save_new_rows(self):
-        raise NotImplementedError
+    # def _save_new_rows(self):
+    #     raise NotImplementedError
+    #
+    # def _save_modified_rows(self):
+    #     raise NotImplementedError
+    #
+    # def _save_deleted_rows(self):
+    #     raise NotImplementedError
 
-    def _save_modified_rows(self):
-        raise NotImplementedError
+    # def reload_data(self):
+    #     """Перезагружает данные – должен быть реализован в наследнике."""
+    #
+    #     raise NotImplementedError
 
-    def _save_deleted_rows(self):
-        raise NotImplementedError
-
-    def reload_data(self):
-        """Перезагружает данные – должен быть реализован в наследнике."""
-
-        raise NotImplementedError
-
-    def _clear_drafts(self):
-        """Очищает черновики – переопределяется в AppointmentListPage."""
-        pass
+    # def _clear_drafts(self):
+    #     """Очищает черновики – переопределяется в AppointmentListPage."""
+    #     pass

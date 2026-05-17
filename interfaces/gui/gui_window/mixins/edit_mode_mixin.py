@@ -4,8 +4,10 @@
 Миксин для включения/выключения режима редактирования.
 """
 
+from app.utils.logger.logger import AppLogger
+
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtGui import QColor
+# from PySide6.QtGui import QColor
 
 
 class EditModeMixin:
@@ -13,8 +15,35 @@ class EditModeMixin:
     Предоставляет методы для переключения режима редактирования,
     сохранения и отмены изменений.
     """
-    def __init__(self):
-        self._saving_in_progress = False   # флаг для защиты от реентерабельности
+
+
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        """Кэш статусов для сущностей (entity_id -> status)."""
+        if not hasattr(self, '_logger'):
+            self._logger = AppLogger.get_instance(
+                name='gui.EditModeMixin',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+        return self._logger
+
+
+    @property
+    def _saving_in_progress(self) -> bool:
+        if not hasattr(self, '__saving_in_progress'):
+            self.__saving_in_progress = False # флаг для защиты от реентерабельности
+        return self.__saving_in_progress
+
+    @_saving_in_progress.setter
+    def _saving_in_progress(self, value):
+        self.__saving_in_progress = value
+
+
 
     def toggle_edit_mode(self, enable: bool):
         """Включает или выключает режим редактирования."""

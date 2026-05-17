@@ -6,9 +6,10 @@
 from typing import Optional, Callable, Dict, Any, Set
 from PySide6.QtCore import Signal
 
+from app.utils.logger.logger import AppLogger
+
 from app.draft.draft_registry import DraftRegistry
 from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
-from app.utils.logger.logger import AppLogger
 
 
 class DraftTreeMixin:
@@ -20,29 +21,33 @@ class DraftTreeMixin:
         - self._draft_component_id (str) – ключ для текущего компонента
         - self._children_components (list) – список дочерних IEditableComponent
         - self.logger (AppLogger)
+        Атрибуты _children_components и _draft_modified будут созданы автоматически пустыми / отключенными
 
     Сигналы:
         draft_modified_changed(bool): Испускается при изменении состояния черновиков в поддереве.
         
     """
 
+    #  self._entity_type - из основного класса
+
     draft_modified_changed = Signal(bool)
 
     entity_status_changed = Signal(int, bool)  # (entity_id, has_changes)
 
-
-    # def _ensure_draft_attrs(self) -> None:
-    #     """Гарантирует наличие атрибутов черновика (ленивая инициализация)."""
-
-    #     if not hasattr(self, '_children_components'):
-    #         self._children_components = []
-
-    #     if not hasattr(self, '_draft_modified'):
-    #         self._draft_modified = False
-
     # ------------------------------------------------------------------
     # Ленивая инициализация атрибутов (без __init__)
     # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        """Кэш статусов для сущностей (entity_id -> status)."""
+        if not hasattr(self, '_logger'):
+            self._logger = AppLogger.get_instance(
+                name='gui.DraftTreeMixin',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+        return self._logger
 
     @property
     def _status_cache(self) -> Dict[int, Optional[str]]:
@@ -69,7 +74,6 @@ class DraftTreeMixin:
     def _children_components(self) -> list:
         if not hasattr(self, '__children_components'):
             self.__children_components = []
-
         return self.__children_components
 
     @_children_components.setter
@@ -81,7 +85,6 @@ class DraftTreeMixin:
     def _draft_modified(self):
         if not hasattr(self, '__draft_modified'):
             self.__draft_modified = False
-
         return self.__draft_modified
 
     @_draft_modified.setter
@@ -128,8 +131,6 @@ class DraftTreeMixin:
         Добавляет дочерний компонент и подписывается на его сигнал changed.
         """
 
-        # self._ensure_draft_attrs()    
-
         if child not in self._children_components:
             self._children_components.append(child)
             if hasattr(child, 'changed'):
@@ -143,8 +144,6 @@ class DraftTreeMixin:
 
     def remove_draft_child(self, child: IHierarchicalEditableComponent) -> None:
         """Удаляет дочерний компонент."""
-
-        # self._ensure_draft_attrs()
 
         if child in self._children_components:
             self._children_components.remove(child)
@@ -176,8 +175,6 @@ class DraftTreeMixin:
         Испускает сигнал draft_modified_changed при изменении состояния.
         """
 
-        # self._ensure_draft_attrs()
-
         has_own = self._draft_registry.has(self._draft_component_id)
         has_child = any(
             (hasattr(child, 'has_descendant_changes') and child.has_descendant_changes(self._draft_registry)) or
@@ -193,8 +190,6 @@ class DraftTreeMixin:
         """
         Применяет все черновики текущего поддерева (рекурсивно по префиксу).
         """
-
-        # self._ensure_draft_attrs()
         
         prefix = self._draft_component_id
         self._draft_registry.apply_subtree(prefix, applier)
@@ -207,8 +202,6 @@ class DraftTreeMixin:
     def clear_child_drafts(self) -> None:
         """Очищает черновики всех дочерних компонентов (без применения)."""
 
-        # self._ensure_draft_attrs()
-        
         for child in self._children_components:
             if hasattr(child, 'discard'):
                 child.discard(self._draft_registry)
@@ -262,12 +255,13 @@ class DraftTreeMixin:
         """
         if delta == 0:
             return
+
         # Обновляем счётчик в реестре
         new_count = self._draft_registry.inc_child_counter(
             self._entity_type, parent_id, delta
         )
 
-        # Добавить проверку на отрицательное значение
+        # Проверка на отрицательное значение
         if new_count < 0:
             self.logger.warning(
                 f"Счётчик потомков для родителя {parent_id} стал отрицательным ({new_count}). "

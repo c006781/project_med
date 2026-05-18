@@ -325,24 +325,24 @@ class PaginatedListPage(
         self.__next_temp_id = value
 
     
-    @property
-    def _saving_in_progress(self) -> bool:
-        """
-        Флаг блокировки повторного входа в методы сохранения (например, при сохранении дочерних
-        и основных полей одновременно). Используется в `_save_all_changes_impl` и `save_rows_with_children`.
+    # @property 
+    # def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
+    #     """
+    #     Флаг блокировки повторного входа в методы сохранения (например, при сохранении дочерних
+    #     и основных полей одновременно). Используется в `_save_all_changes_impl` и `save_rows_with_children`.
 
-        Returns:
-            True, если сохранение уже выполняется в другом потоке/рекурсивном вызове.
-        """
+    #     Returns:
+    #         True, если сохранение уже выполняется в другом потоке/рекурсивном вызове.
+    #     """
 
-        if not hasattr(self, '__saving_in_progress'):
-            self.__saving_in_progress = False # флаг блокировки
+    #     if not hasattr(self, '__saving_in_progress'):
+    #         self.__saving_in_progress = False # флаг блокировки
 
-        return self.__saving_in_progress
+    #     return self.__saving_in_progress
 
-    @_saving_in_progress.setter
-    def _saving_in_progress(self, value: bool):
-        self.__saving_in_progress = value  # флаг блокировки
+    # @_saving_in_progress.setter
+    # def _saving_in_progress(self, value: bool):
+    #     self.__saving_in_progress = value  # флаг блокировки
 
     def __init__(
         self,
@@ -999,6 +999,8 @@ class PaginatedListPage(
                 # Уменьшаем счётчик родителя, так как новая строка больше не имеет изменений.
                 parent_id = self._get_parent_id_for_new_row(dto)
                 self._update_parent_counter(parent_id, -1)  # уменьшаем счётчик
+
+                # незабыть обернуть в try-finally: В PaginatedListPage._save_new_rows вы после сохранения новой строки вызываете self._update_parent_counter(parent_id, -1). Но ранее при добавлении новой строки (_add_inline_row) вы вызывали _update_parent_counter(parent_id, 1). Так что баланс соблюдается. Однако есть нюанс: если в процессе сохранения произойдёт ошибка и _update_parent_counter(parent_id, -1) не выполнится, счётчик останется завышенным. Это не страшно, так как реестр черновиков для временного ID будет очищен, но родительский счётчик не уменьшится. В коде это не обрабатывается (нет try-finally вокруг этого вызова). Рекомендуется поместить вызов в блок try-finally или убедиться, что он выполняется всегда
 
                 # 8. Снимаем флаг собственных изменений (строка сохранена, статус станет None)
                 self.clear_own_change(created.id) # сбрасываем статус (не трогает счётчик)

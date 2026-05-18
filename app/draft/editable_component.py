@@ -33,6 +33,25 @@
     - Рекомендуется наследовать `EditableComponentMixin` для получения готовой логики подписки на реестр,
       управления дочерними компонентами и метода `_notify_parent`.
 
+**Автоматическая синхронизация с реестром (подписка):**
+    - Компонент может подписаться на изменения своего ключа в реестре
+        через вызов `subscribe_to_registry(registry)`. После подписки
+        при любом добавлении/удалении черновика по этому ключу компонент
+        получит сигнал и вызовет `load_from_registry(registry)`.
+    - Это позволяет отказаться от ручных вызовов `_load_drafts_for_children()`
+        со стороны родительской страницы.
+    - При смене родительского ID (например, при переходе на другую строку таблицы)
+        компонент должен переподписаться на новый ключ. Для этого используется
+        метод `update_parent_id(parent_id)`, который должен быть переопределён
+        в наследниках, если ключ зависит от `parent_id`.
+
+**Пример реализации в дочернем компоненте (например, PhotoUploaderWidget):**
+    def update_parent_id(self, parent_id: int):
+        self._parent_id = parent_id
+        if self._registry:
+            self.unsubscribe_from_registry(self._registry)
+            self.subscribe_to_registry(self._registry)     
+
 **Пример реализации для виджета фото (схематично):**
     ```python
     class PhotoUploaderWidget(EditableComponentMixin):
@@ -227,6 +246,25 @@ class EditableComponentMixin(QObject, IEditableComponent):
 
     **Важно:** Если наследник не вызывает `_notify_parent`, родительская страница не узнает
         об изменении количества черновиков, и счётчики детей могут стать неточными.
+
+        **Автоматическая синхронизация с реестром (подписка):**
+        - Компонент может подписаться на изменения своего ключа в реестре
+          через вызов `subscribe_to_registry(registry)`. После подписки
+          при любом добавлении/удалении черновика по этому ключу компонент
+          получит сигнал и вызовет `load_from_registry(registry)`.
+        - Это позволяет отказаться от ручных вызовов `_load_drafts_for_children()`
+          со стороны родительской страницы.
+        - При смене родительского ID (например, при переходе на другую строку таблицы)
+          компонент должен переподписаться на новый ключ. Для этого используется
+          метод `update_parent_id(parent_id)`, который должен быть переопределён
+          в наследниках, если ключ зависит от `parent_id`.
+
+    **Пример использования в дочернем компоненте (например, PhotoUploaderWidget):**
+        def update_parent_id(self, parent_id: int):
+            self._parent_id = parent_id
+            if self._registry:
+                self.unsubscribe_from_registry(self._registry)
+                self.subscribe_to_registry(self._registry)
     """
 
     changed = Signal()   # сигнал, испускаемый при изменении состояния черновика
@@ -611,6 +649,22 @@ class EditableComponentMixin(QObject, IEditableComponent):
 
         self._registry_subscribed = True
 
+    def subscribe_to_registry(self, registry: DraftRegistry) -> None:
+        """
+        Подписывает компонент на изменения в реестре по его ключу.
+        После подписки компонент будет автоматически получать сигнал
+        при добавлении/удалении черновика и вызывать `load_from_registry(registry)`.
+        """
+            
+        self._subscribe_to_registry(registry, prefix=None)
+
+    def unsubscribe_from_registry(self, registry: DraftRegistry) -> None:
+        """
+        Отписывает компонент от реестра.
+        """
+
+        self._unsubscribe_from_registry(registry, prefix=None)
+
     @AppLogger.get_instance(
         name='EditableComponentMixin',
         enable_file_logging='system',
@@ -664,9 +718,26 @@ class EditableComponentMixin(QObject, IEditableComponent):
         """
 
         self.logger.debug(f"Registry changed: {key}, has_draft={has_draft}")
+
         # По умолчанию просто перезагружаем состояние
         if has_draft:
             self.load_from_registry(self._registry)
         else:
             # Черновик удалён – загружаем исходные данные
             self.load_from_registry(self._registry)
+
+
+    @AppLogger.get_instance(
+        name='EditableComponentMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def update_parent_id(self, parent_id: int) -> None:
+        """
+        Обновляет идентификатор родителя и переподписывается на реестр,
+        если ключ черновика зависит от parent_id.
+        Должен быть переопределён в наследниках, у которых ключ динамический.
+        Базовая реализация ничего не делает.
+        """
+
+        pass

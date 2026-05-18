@@ -3,15 +3,46 @@
 Миксин для фильтрации: заголовки таблицы, строка фильтров, глобальный поиск.
 """
 
-from typing import Dict, List, Optional
+from typing import (
+    # Dict, 
+    List, Optional,
+)
 
+from app.dependencies import get_note_service
 from interfaces.gui.gui_window.utils.filter_converter import convert_ui_filters_to_sql
 
+from PySide6.QtCore import (
+    Qt,
+)
 
 class FilterMixin:
     """
     Предоставляет методы для работы с фильтрацией.
     """
+
+    def set_sorting(self, column: int, order: Qt.SortOrder) -> None:
+        """
+        Устанавливает сортировку по указанному столбцу.
+        Преобразует индекс видимого столбца в имя поля и направление.
+
+        Args:
+            column: Индекс видимого столбца (0-based).
+            order: Порядок сортировки (AscendingOrder или DescendingOrder).
+        """
+        
+        col_name = self._get_column_name_by_visible_index(column)
+        if col_name:
+            direction = '-' if order == Qt.DescendingOrder else ''
+            order_by = [f"{direction}{col_name}"]
+            self._current_order_by = order_by
+            self.reload_with_order_by(order_by)
+
+    def _on_sort_indicator_changed(self, logical_index: int, order: Qt.SortOrder) -> None:
+        """
+        Обработчик сигнала сортировки от заголовка таблицы.
+        Вызывается при клике пользователя на заголовок столбца.
+        """
+        self.set_sorting(logical_index, order)
 
     def setup_filtering(self, filter_bar, table_view):
         """Подключает фильтр-бар и заголовок таблицы."""
@@ -83,10 +114,27 @@ class FilterMixin:
         col_name = self._get_column_name_by_visible_index(visible_column)
         if not col_name:
             return []
+        
+        # Проверяем, является ли поле виртуальной заметкой
+        config = self.field_configs.get(col_name, {})
+        if config.get('virtual', False) and config.get('is_note'):
+            note_service = get_note_service()
+            if note_service and hasattr(note_service, 'get_unique_note_texts'):
+                return note_service.get_unique_note_texts()
+            
+            return []
+        
+        # Обычное поле – запрос к БД через сервис
         return self.service.get_unique_values(col_name)
 
     def _get_column_name_by_visible_index(self, visible_index: int) -> Optional[str]:
-        return self.source_model.get_field_name_at_visible_column(visible_index)
+
+        if hasattr(self.source_model, 'get_field_name_at_visible_column'):
+            return self.source_model.get_field_name_at_visible_column(visible_index)
+        # fallback для старых моделей – использовать get_model_column_index
+        # (этот код можно не добавлять, так как все модели теперь имеют метод)
+
+        return None
 
     def _update_filter_bar(self):
         if not hasattr(self, 'filter_bar'):

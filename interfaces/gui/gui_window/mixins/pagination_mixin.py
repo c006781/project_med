@@ -50,6 +50,18 @@ class PaginationMixin:
     предоставляются миксином и не требуют переопределения.
     """
 
+    def reload_with_order_by(self, order_by: List[str]) -> None:
+        """
+        Перезагружает данные с новой сортировкой.
+
+        Args:
+            order_by: Список полей для сортировки (например, ['-date'] или ['last_name']).
+        """
+        
+        self._cancel_loading()
+        self._current_order_by = order_by
+        self._load_first_page()
+
     def setup_pagination(
         self,
         service,
@@ -76,6 +88,7 @@ class PaginationMixin:
         self._pagination_service = service
         self._page_size = page_size
         self._extra_rows = extra_rows
+
         self._loading_in_progress = False
         self._current_offset = 0
         self._current_filters = None
@@ -214,8 +227,17 @@ class PaginationMixin:
         Перезагружает данные с новыми фильтрами.
         Должен вызываться извне при изменении фильтров.
         """
+
+        self._cancel_loading()
         self._current_filters = filters_tree
         self._load_first_page()
+
+    def _cancel_loading(self):
+        if self._load_thread and self._load_thread.isRunning():
+            self._load_thread.quit()
+            self._load_thread.wait(500)
+            self._load_thread = None
+        self._loading_in_progress = False
 
     def _reload_with_order_by(self, order_by: List[str]) -> None:
         """

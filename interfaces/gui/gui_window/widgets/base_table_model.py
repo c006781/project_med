@@ -38,6 +38,15 @@ class BaseTableModel(QAbstractTableModel, ABC):
         _checkbox_states (Dict[int, bool]): Состояния чекбоксов для строк.
         _row_colors (Dict[int, QColor]): Цвета фона строк.
 
+    Методы для работы с чекбоксами:
+        set_checkbox_state(row, checked) – установить состояние чекбокса.
+        get_checkbox_state(row) – получить состояние чекбокса (базовая реализация – False).
+
+    Методы для работы с динамическими столбцами:
+        get_field_name_at_visible_column(visible_index) – вернуть имя поля DTO
+        для видимого столбца, или None для системного столбца (базовая реализация – None).
+     
+
     Note:
         Все методы, работающие с индексами строк, используют "сырые" индексы
         модели (без учёта прокси). Предполагается, что прокси-модели (если есть)
@@ -219,3 +228,36 @@ class BaseTableModel(QAbstractTableModel, ABC):
     #     """
     #     col = self.get_column_by_system_name('__checkbox__')
     #     return col is not None and col.visible
+
+    def get_checkbox_state(self, row: int) -> bool:
+        """
+        Возвращает состояние чекбокса для строки (если модель поддерживает чекбоксы).
+
+        Базовая реализация возвращает False (чекбокс не установлен).
+        Наследники, поддерживающие чекбоксы, должны переопределить этот метод.
+
+        Args:
+            row: Индекс строки.
+
+        Returns:
+            True, если чекбокс установлен, иначе False.
+        """
+
+        return False
+    
+    def get_field_name_at_visible_column(self, visible_index: int) -> Optional[str]:
+        """
+        Возвращает имя поля DTO для видимого столбца по его индексу.
+        Для системных столбцов (например, чекбокс) возвращает None.
+
+        Базовая реализация возвращает None.
+        Наследники, поддерживающие динамические столбцы, должны переопределить этот метод.
+
+        Args:
+            visible_index: Индекс видимого столбца (0-based).
+
+        Returns:
+            Имя поля или None.
+        """
+        
+        return None   

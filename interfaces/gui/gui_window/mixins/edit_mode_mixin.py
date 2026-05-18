@@ -52,15 +52,24 @@ class EditModeMixin(ABC):
         self._logger = value
 
 
-    @property
-    def _saving_in_progress(self) -> bool:
+    @property 
+    def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
+        """
+        Флаг блокировки повторного входа в методы сохранения (например, при сохранении дочерних
+        и основных полей одновременно). Используется в `_save_all_changes_impl` и `save_rows_with_children`.
+
+        Returns:
+            True, если сохранение уже выполняется в другом потоке/рекурсивном вызове.
+        """
+
         if not hasattr(self, '__saving_in_progress'):
-            self.__saving_in_progress = False # флаг для защиты от реентерабельности
+            self.__saving_in_progress = False # флаг блокировки
+
         return self.__saving_in_progress
 
     @_saving_in_progress.setter
-    def _saving_in_progress(self, value):
-        self.__saving_in_progress = value
+    def _saving_in_progress(self, value: bool):
+        self.__saving_in_progress = value  # флаг блокировки
 
     @property
     def edit_mode(self) -> bool:

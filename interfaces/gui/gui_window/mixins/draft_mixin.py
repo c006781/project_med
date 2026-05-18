@@ -23,6 +23,7 @@ class DraftMixin:
         """Сохраняет черновик текущего приёма (фото). Переопределяется в наследниках."""
         if not self.selected_dto:
             return
+        
         self._draft_photos[self.selected_dto.id] = self.photo_widget.dump_state()
 
     def _load_draft_for_appointment(self, appointment_id: int, dto) -> None:
@@ -38,6 +39,7 @@ class DraftMixin:
         if appointment_id not in self._draft_photos:
             return False
         draft = self._draft_photos[appointment_id]
+        
         return bool(draft.get('pending_photos') or draft.get('deleted_photo_ids') or draft.get('modified_photo_ids'))
 
     def _clear_drafts(self, appointment_id: Optional[int] = None) -> None:

@@ -91,6 +91,64 @@ class PaginatedTableModel(BaseTableModel):
 
     row_modified = Signal(int)
 
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        if not hasattr(self, '_logger'):
+            self._logger = AppLogger.get_instance(
+                name='gui.PaginatedTableModel',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
+    @property
+    def _data(self) -> List[Any]:
+        if not hasattr(self, '__data'):
+            self.__data: List[Any] = [] # загруженные DTO
+        return self.__data
+
+    @_data.setter
+    def _data(self, value: List[Any]):
+        self.__data = value
+
+    @property
+    def _total_count(self) -> int:
+        if not hasattr(self, '__total_count'):
+            self.__total_count: int = 0 # общее количество (устанавливается извне)
+        return self.__total_count
+
+    @_total_count.setter
+    def _total_count(self, value: int):
+        self.__total_count = value
+
+    @property
+    def _checkbox_states(self) -> Dict[int, bool]:
+        if not hasattr(self, '__checkbox_states'):
+            self.__checkbox_states: Dict[int, bool] = {}    # строка -> состояние
+        return self.__checkbox_states
+
+    @_checkbox_states.setter
+    def _checkbox_states(self, value: Dict[int, bool]):
+        self.__checkbox_states = value
+
+    @property
+    def _row_colors(self) -> Dict[int, QColor]:
+        if not hasattr(self, '__row_colors'):
+            self.__row_colors: Dict[int, QColor] = {}       # строка -> цвет
+        return self.__row_colors
+
+    @_row_colors.setter
+    def _row_colors(self, value: Dict[int, QColor]):
+        self.__row_colors = value
+
     def __init__(
         self,
         columns: List[TableColumn],
@@ -103,30 +161,29 @@ class PaginatedTableModel(BaseTableModel):
         Args:
             columns: Список объектов TableColumn (уже включая системные, если нужно).
             parent: Родительский QObject.
-            get_unique_values_func: Функция для получения уникальных значений
-                для автодополнения (принимает индекс видимого столбца).
+            get_unique_values_func: Функция для получения уникальных значений для автодополнения (принимает индекс видимого столбца).
         """
         super().__init__(parent)
 
-        self.logger = AppLogger.get_instance(
-            name='gui.PaginatedTableModel',
-            enable_file_logging='user',
-            use_name_in_filename=False,
-        )
+        # self.logger = AppLogger.get_instance(
+        #     name='gui.PaginatedTableModel',
+        #     enable_file_logging='user',
+        #     use_name_in_filename=False,
+        # )
 
         # ---- Данные ----
-        self._data: List[Any] = []                     # загруженные DTO
-        self._total_count: int = 0                     # общее количество (устанавливается извне)
+        # self._data: List[Any] = []                     # загруженные DTO
+        # self._total_count: int = 0                     # общее количество (устанавливается извне)
 
         # ---- Столбцы ----
         self._columns: List[TableColumn] = columns     # порядок соответствует отображению
         self._checkbox_column_system_name = '__checkbox__'
 
         # ---- Чекбоксы ----
-        self._checkbox_states: Dict[int, bool] = {}    # строка -> состояние
+        # self._checkbox_states: Dict[int, bool] = {}    # строка -> состояние
 
         # ---- Цвета строк ----
-        self._row_colors: Dict[int, QColor] = {}       # строка -> цвет
+        # self._row_colors: Dict[int, QColor] = {}       # строка -> цвет
 
         # ---- Внешние зависимости ----
         self._get_unique_values_func = get_unique_values_func
@@ -137,6 +194,22 @@ class PaginatedTableModel(BaseTableModel):
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
 
     def get_checkbox_state(self, row: int) -> bool:
+        """
+        Возвращает состояние чекбокса для строки (с учётом видимости столбца).
+
+        Если столбец чекбоксов не виден, всегда возвращает False, так как пользователь
+        не может изменить состояние, и модель не должна учитывать эти строки при выделении.
+
+        Args:
+            row: Индекс строки в модели.
+
+        Returns:
+            True, если чекбокс установлен и столбец видим, иначе False.
+        """
+
+        if not self.get_column_by_system_name(self._checkbox_column_system_name).visible: # проверить нужность
+            return False
+        
         return self._checkbox_states.get(row, False)
 
     # ----------------------------------------------------------------------
@@ -145,12 +218,15 @@ class PaginatedTableModel(BaseTableModel):
 
     def _ensure_checkbox_column(self) -> None:
         """Убеждается, что в списке столбцов есть чекбокс-столбец (создаёт, если нет)."""
+
         for col in self._columns:
             if col.system_name == self._checkbox_column_system_name:
                 return
+            
         # Добавляем в начало
         checkbox_col = TableColumn.create_checkbox_column(order=0)
         self._columns.insert(0, checkbox_col)
+
         # Обновляем order у всех
         for idx, col in enumerate(self._columns):
             col.order = idx
@@ -161,17 +237,25 @@ class PaginatedTableModel(BaseTableModel):
 
     def column_count(self) -> int:
         """Возвращает общее количество столбцов (включая скрытые)."""
+
         return len(self._columns)
 
     def visible_column_count(self) -> int:
         """Возвращает количество видимых столбцов."""
+
         return sum(1 for col in self._columns if col.visible)
 
     def get_column_index(self, system_name: str) -> int:
         """
         Возвращает индекс столбца по системному имени (в модели, с учётом скрытых).
-        Если столбец не найден, возвращает -1.
+
+        Args:
+            system_name: Уникальное системное имя столбца (например, '__checkbox__').
+
+        Returns:
+            Индекс столбца в списке _columns (0-based) или -1, если столбец не найден.
         """
+
         for idx, col in enumerate(self._columns):
             if col.system_name == system_name:
                 return idx
@@ -180,32 +264,63 @@ class PaginatedTableModel(BaseTableModel):
     def get_visible_column_index(self, system_name: str) -> int:
         """
         Возвращает индекс видимого столбца по системному имени.
+
         Учитываются только видимые столбцы, порядок их следования.
+        Если столбец скрыт или не существует, возвращается -1.
+
+        Args:
+            system_name: Уникальное системное имя столбца.
+
+        Returns:
+            Индекс видимого столбца (0-based) или -1.
         """
+
         visible_idx = 0
+
         for col in self._columns:
             if col.visible:
                 if col.system_name == system_name:
                     return visible_idx
+                
                 visible_idx += 1
+
         return -1
 
     def get_column_by_system_name(self, system_name: str) -> Optional[TableColumn]:
-        """Возвращает объект столбца по системному имени."""
+        """
+        Возвращает объект столбца по системному имени.
+
+        Args:
+            system_name: Уникальное системное имя столбца.
+
+        Returns:
+            Объект TableColumn или None, если столбец не найден.
+        """
+
         for col in self._columns:
             if col.system_name == system_name:
                 return col
+            
         return None
 
     def set_column_visible(self, system_name: str, visible: bool) -> None:
         """
         Изменяет видимость столбца.
-        Меняет флаг в TableColumn и испускает сигнал layoutChanged,
-        который заставляет таблицу перерисовать заголовки, но НЕ сбрасывает данные.
+
+        Меняет флаг visible в соответствующем TableColumn и испускает сигнал layoutChanged, который заставляет таблицу перерисовать заголовки, но НЕ сбрасывает данные.
+
+        Args:
+            system_name: Уникальное системное имя столбца.
+            visible: True – показать столбец, False – скрыть.
+
+        Returns:
+            None
         """
+
         col = self.get_column_by_system_name(system_name)
         if col is None or col.visible == visible:
             return
+        
         col.visible = visible
         # layoutChanged перерисовывает заголовки и обновляет количество столбцов,
         # но данные остаются на месте (в отличие от beginResetModel).
@@ -213,15 +328,24 @@ class PaginatedTableModel(BaseTableModel):
 
     def get_field_name_at_visible_column(self, visible_index: int) -> Optional[str]:
         """
-        По индексу видимого столбца возвращает имя поля (для DATA-столбцов)
-        или None для системных.
+        По индексу видимого столбца возвращает имя поля DTO (для DATA-столбцов) или None.
+
+        Args:
+            visible_index: Индекс видимого столбца (0-based).
+
+        Returns:
+            Имя поля (например, 'last_name') или None для системных столбцов (чекбокс, кнопка).
         """
+
         visible_idx = 0
         for col in self._columns:
             if col.visible:
                 if visible_idx == visible_index:
+
                     return col.field_name if col.column_type == ColumnType.DATA else None
+                
                 visible_idx += 1
+
         return None
 
     # ----------------------------------------------------------------------
@@ -229,36 +353,91 @@ class PaginatedTableModel(BaseTableModel):
     # ----------------------------------------------------------------------
 
     def get_item_at_row(self, row: int) -> Optional[Any]:
+        """
+        Возвращает DTO для указанной строки.
+
+        Args:
+            row: Индекс строки (0-based).
+
+        Returns:
+            DTO или None, если строка не существует.
+        """
+
         if 0 <= row < len(self._data):
             return self._data[row]
+        
         return None
 
     def get_all_data(self) -> List[Any]:
+        """
+        Возвращает копию списка всех загруженных DTO.
+
+        Returns:
+            Список DTO (копия, не ссылка на внутренний список).
+        """
+        
         return self._data[:]
 
     def update_row(self, row: int, new_dto: Any) -> None:
+        """
+        Заменяет DTO в указанной строке на новый.
+
+        После замены испускается сигнал dataChanged для всей строки.
+
+        Args:
+            row: Индекс строки.
+            new_dto: Новый DTO.
+
+        Returns:
+            None
+        """
+
         if row < 0 or row >= len(self._data):
             self.logger.warning(f"update_row: неверный индекс {row}")
             return
+        
         self._data[row] = new_dto
         top_left = self.index(row, 0)
         bottom_right = self.index(row, self.columnCount() - 1)
         self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
 
     def add_row(self, dto: Any) -> int:
+        """
+        Добавляет новую строку в конец модели.
+
+        Args:
+            dto: DTO новой записи.
+
+        Returns:
+            Индекс добавленной строки.
+        """
+
         row = len(self._data)
         self.beginInsertRows(QModelIndex(), row, row)
         self._data.append(dto)
         self._checkbox_states[row] = False
         self.endInsertRows()
         self.row_modified.emit(row)
+
         return row
 
     def remove_row(self, row: int) -> Optional[Any]:
+        """
+        Удаляет строку из модели.
+
+        Args:
+            row: Индекс удаляемой строки.
+
+        Returns:
+            Удалённый DTO или None, если строка не существовала.
+        """
+        
         if row < 0 or row >= len(self._data):
             return None
+        
         self.beginRemoveRows(QModelIndex(), row, row)
         removed = self._data.pop(row)
+
         # Сдвигаем чекбоксы
         new_states = {}
         for r, state in self._checkbox_states.items():
@@ -266,18 +445,30 @@ class PaginatedTableModel(BaseTableModel):
                 new_states[r - 1] = state
             elif r < row:
                 new_states[r] = state
+
         self._checkbox_states = new_states
+
         # Сдвигаем цвета (если есть)
         if row in self._row_colors:
             del self._row_colors[row]
+
         for r in list(self._row_colors.keys()):
             if r > row:
                 self._row_colors[r - 1] = self._row_colors[r]
                 del self._row_colors[r]
+
         self.endRemoveRows()
+
         return removed
 
     def clear(self) -> None:
+        """
+        Полностью очищает модель: удаляет все данные, сбрасывает чекбоксы и цвета.
+
+        Returns:
+            None
+        """
+
         self.beginResetModel()
         self._data.clear()
         self._checkbox_states.clear()
@@ -286,23 +477,57 @@ class PaginatedTableModel(BaseTableModel):
         self.endResetModel()
 
     def set_checkbox_column_visible(self, visible: bool) -> None:
-        """Устанавливает флаг видимости чекбокс-столбца в модели."""
+        """
+        Устанавливает флаг видимости чекбокс-столбца в модели.
+
+        Args:
+            visible: True – показать столбец, False – скрыть.
+
+        Returns:
+            None
+        """
+        
         col = self.get_column_by_system_name(self._checkbox_column_system_name)
         if col is None or col.visible == visible:
             return
+        
         col.visible = visible
         self.layoutChanged.emit()   # перестроит всю модель (но данные останутся)
 
     def set_checkbox_state(self, row: int, checked: bool) -> None:
+        """
+        Устанавливает состояние чекбокса для строки (только если столбец видим).
+
+        Args:
+            row: Индекс строки.
+            checked: True – установить чекбокс, False – снять.
+
+        Returns:
+            None
+        """
+
         if not self.get_column_by_system_name(self._checkbox_column_system_name).visible:
             return
+        
         if row < 0 or row >= len(self._data):
             return
+        
         self._checkbox_states[row] = checked
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
     def set_row_color(self, row: int, color: QColor) -> None:
+        """
+        Устанавливает цвет фона для строки.
+
+        Args:
+            row: Индекс строки.
+            color: Цвет фона.
+
+        Returns:
+            None
+        """
+
         if 0 <= row < len(self._data):
             self._row_colors[row] = color
             top_left = self.index(row, 0)
@@ -310,6 +535,8 @@ class PaginatedTableModel(BaseTableModel):
             self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
 
     def clear_row_colors(self) -> None:
+        """Сбрасывает все установленные цвета строк."""
+
         self._row_colors.clear()
         if self.rowCount() > 0:
             top_left = self.index(0, 0)
@@ -321,24 +548,61 @@ class PaginatedTableModel(BaseTableModel):
     # ----------------------------------------------------------------------
 
     def can_fetch_more(self) -> bool:
+        """
+        Определяет, можно ли загрузить ещё страницы (есть ли незагруженные записи).
+
+        Returns:
+            True, если общее количество записей больше количества уже загруженных, иначе False.
+        """
+
         return self._total_count > 0 and len(self._data) < self._total_count
 
     def append_page(self, data: List[Any]) -> None:
+        """
+        Добавляет очередную страницу данных в конец модели.
+
+        Args:
+            data: Список DTO новой страницы.
+
+        Returns:
+            None
+        """
+
         if not data:
             return
+        
         start = len(self._data)
         self.beginInsertRows(QModelIndex(), start, start + len(data) - 1)
         self._data.extend(data)
+
         for idx in range(start, len(self._data)):
             if idx not in self._checkbox_states:
                 self._checkbox_states[idx] = False
+
         self.endInsertRows()
 
     def set_total_count(self, total: int) -> None:
+        """
+        Устанавливает общее количество записей в БД (с учётом фильтров).
+
+        Args:
+            total: Общее количество записей.
+
+        Returns:
+            None
+        """
+
         self._total_count = total
 
     def total_count(self) -> int:
-        """Возвращает текущее общее количество записей."""
+        """
+        Возвращает текущее общее количество записей в БД (с учётом фильтров).
+
+        Returns:
+            Общее количество записей (устанавливается через set_total_count).
+            Если значение не было установлено, возвращает 0.
+        """
+
         return self._total_count
 
     # ----------------------------------------------------------------------
@@ -346,12 +610,50 @@ class PaginatedTableModel(BaseTableModel):
     # ----------------------------------------------------------------------
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        """
+        Возвращает количество строк в модели.
+
+        Args:
+            parent: Родительский индекс (не используется для плоских таблиц).
+
+        Returns:
+            Количество загруженных строк.
+        """
+
         return len(self._data)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
+        """
+        Возвращает количество видимых столбцов.
+
+        Args:
+            parent: Родительский индекс (не используется).
+
+        Returns:
+            Количество видимых столбцов (системные и DATA).
+        """
+
         return self.visible_column_count()
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
+        """
+        Возвращает данные для ячейки в зависимости от роли.
+
+        Поддерживаемые роли:
+            - Qt.DisplayRole: текстовое представление (даты форматируются).
+            - Qt.EditRole: исходное значение DTO.
+            - Qt.BackgroundRole: цвет фона строки.
+            - Qt.TextAlignmentRole: выравнивание (числа – вправо, остальное – влево).
+            - Qt.UserRole: исходное значение для сортировки.
+        
+        Args:
+            index: Индекс ячейки.
+            role: Роль данных.
+
+        Returns:
+            Значение в зависимости от роли или None.
+        """
+
         if not index.isValid():
             return None
 
@@ -368,7 +670,9 @@ class PaginatedTableModel(BaseTableModel):
                 if visible_idx == visible_col:
                     target_col = col
                     break
+
                 visible_idx += 1
+
         if target_col is None:
             return None
 
@@ -376,6 +680,7 @@ class PaginatedTableModel(BaseTableModel):
         if target_col.system_name == self._checkbox_column_system_name:
             if role == Qt.CheckStateRole:
                 return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
+            
             return None
 
         # Цвет строки
@@ -391,10 +696,13 @@ class PaginatedTableModel(BaseTableModel):
         if role == Qt.DisplayRole:
             if value is None:
                 return ""
+            
             if isinstance(value, datetime.date):
                 return value.isoformat()
+            
             if isinstance(value, datetime.time):
                 return value.strftime("%H:%M")
+            
             return str(value)
 
         if role == Qt.EditRole:
@@ -403,6 +711,7 @@ class PaginatedTableModel(BaseTableModel):
         if role == Qt.TextAlignmentRole:
             if target_col.data_type in (int, float):
                 return Qt.AlignRight | Qt.AlignVCenter
+            
             return Qt.AlignLeft | Qt.AlignVCenter
 
         if role == Qt.UserRole:
@@ -411,6 +720,18 @@ class PaginatedTableModel(BaseTableModel):
         return None
 
     def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
+        """
+        Устанавливает новое значение в ячейку (для редактирования).
+
+        Args:
+            index: Индекс ячейки.
+            value: Новое значение.
+            role: Роль (должен быть Qt.EditRole или Qt.CheckStateRole).
+
+        Returns:
+            True, если значение было установлено, иначе False.
+        """
+
         if not index.isValid():
             return False
 
@@ -427,7 +748,9 @@ class PaginatedTableModel(BaseTableModel):
                 if visible_idx == visible_col:
                     target_col = col
                     break
+
                 visible_idx += 1
+
         if target_col is None:
             return False
 
@@ -439,7 +762,9 @@ class PaginatedTableModel(BaseTableModel):
                 if old != checked:
                     self._checkbox_states[row] = checked
                     self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.CheckStateRole])
+
                 return True
+            
             return False
 
         if role != Qt.EditRole:
@@ -464,15 +789,30 @@ class PaginatedTableModel(BaseTableModel):
                 elif target_col.data_type == datetime.time and isinstance(value, str):
                     value = datetime.time.fromisoformat(value)
                 # можно добавить другие
+
             except (ValueError, TypeError):
                 return False
 
         setattr(item, target_col.field_name, value)
         self.dataChanged.emit(index, index, [role])
         self.row_modified.emit(row)
+
         return True
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
+        """
+        Возвращает флаги для ячейки (редактируемость, выбираемость, чекбоксы).
+
+        Для чекбокс-столбца: флаги пользовательского чекбокса.
+        Для DATA-столбца: редактируем, если `editable == True`.
+
+        Args:
+            index: Индекс ячейки.
+
+        Returns:
+            Комбинация флагов Qt.ItemFlag.
+        """
+
         if not index.isValid():
             return Qt.NoItemFlags
 
@@ -488,7 +828,9 @@ class PaginatedTableModel(BaseTableModel):
                 if visible_idx == visible_col:
                     target_col = col
                     break
+
                 visible_idx += 1
+
         if target_col is None:
             return Qt.NoItemFlags
 
@@ -498,11 +840,30 @@ class PaginatedTableModel(BaseTableModel):
         flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
         if target_col.column_type == ColumnType.DATA and target_col.editable:
             flags |= Qt.ItemIsEditable
+
         return flags
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole) -> Any:
+    def headerData(
+        self, 
+        section: int, 
+        orientation: Qt.Orientation, 
+        role: int = Qt.DisplayRole
+    ) -> Any:
+        """
+        Возвращает заголовок столбца (видимого) для горизонтальной ориентации.
+
+        Args:
+            section: Индекс видимого столбца.
+            orientation: Должен быть Qt.Horizontal.
+            role: Только Qt.DisplayRole.
+
+        Returns:
+            Заголовок столбца или None.
+        """
+
         if orientation != Qt.Horizontal:
             return None
+        
         if role != Qt.DisplayRole:
             return None
 
@@ -511,16 +872,25 @@ class PaginatedTableModel(BaseTableModel):
             if col.visible:
                 if visible_idx == section:
                     return col.title
+                
                 visible_idx += 1
+
         return None
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         """
         Сортирует только загруженные данные (локально).
-        ВНИМАНИЕ: цвета строк будут привязаны к прежним индексам и могут не соответствовать
-        данным после сортировки. Рекомендуется очищать цвета перед сортировкой или
-        использовать серверную сортировку.
+
+        ВНИМАНИЕ: цвета строк будут привязаны к прежним индексам и могут не соответствовать данным после сортировки. Рекомендуется очищать цвета перед сортировкой или использовать серверную сортировку.
+
+        Args:
+            column: Индекс видимого столбца.
+            order: Порядок сортировки (AscendingOrder или DescendingOrder).
+
+        Returns:
+            None
         """
+
         # Очищаем цвета, так как они привязаны к старым индексам
         self.clear_row_colors()
 
@@ -532,7 +902,9 @@ class PaginatedTableModel(BaseTableModel):
                 if visible_idx == column:
                     target_col = col
                     break
+
                 visible_idx += 1
+
         if target_col is None or target_col.column_type != ColumnType.DATA:
             return
 

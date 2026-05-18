@@ -237,7 +237,6 @@ class EditableComponentMixin(QObject, IEditableComponent):
 
     @property
     def logger(self) -> AppLogger:
-        """Кэш статусов для сущностей (entity_id -> status)."""
         if not hasattr(self, '_logger'):
             self._logger = AppLogger.get_instance(
                 name='gui.EditableComponentMixin',
@@ -245,6 +244,10 @@ class EditableComponentMixin(QObject, IEditableComponent):
                 use_name_in_filename = False, # 'system'
             )
         return self._logger
+    
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
 
     @property
     def _registry_subscribed(self) -> bool:

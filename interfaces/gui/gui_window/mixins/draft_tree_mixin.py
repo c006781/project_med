@@ -88,7 +88,6 @@ class DraftTreeMixin:
 
     @property
     def logger(self) -> AppLogger:
-        """Кэш статусов для сущностей (entity_id -> status)."""
         if not hasattr(self, '_logger'):
             self._logger = AppLogger.get_instance(
                 name='gui.DraftTreeMixin',
@@ -103,7 +102,6 @@ class DraftTreeMixin:
 
     @property
     def _status_cache(self) -> Dict[int, Optional[str]]:
-        """Кэш статусов для сущностей (entity_id -> status)."""
         if not hasattr(self, '__status_cache'):
             self.__status_cache = {}
         return self.__status_cache
@@ -114,7 +112,6 @@ class DraftTreeMixin:
 
     @property
     def _parent_cache(self) -> Dict[int, int]:
-        """Кэш parent_id для дочерних сущностей (child_id -> parent_id)."""
         if not hasattr(self, '__parent_cache'):
             self.__parent_cache = {}
         return self.__parent_cache
@@ -125,7 +122,6 @@ class DraftTreeMixin:
 
     @property
     def _children_cache(self) -> Dict[int, Set[int]]:
-        """Кэш множеств дочерних ID для родителя (parent_id -> set[child_id])."""
         if not hasattr(self, '__children_cache'):
             self.__children_cache = {}
         return self.__children_cache
@@ -159,10 +155,37 @@ class DraftTreeMixin:
     def has_descendant_drafts(self) -> bool:
         """
         Возвращает True, если есть изменения в текущем компоненте или любом из его потомков.
+
+        **Область использования:**
+            Это свойство предназначено в первую очередь для UI‑компонентов (например, подсветка вкладки,
+            кнопки сохранения на уровне контейнера), а не для внутренней логики статусов сущностей.
+            В `PaginatedListPage` статусы и счётчики детей управляются через `DraftRegistry`
+            (ключи `__status__` и `__counter__`), а не через это свойство.
+
+        **Как вычисляется:**
+            - Собственные изменения: проверяется наличие черновика по ключу `self._draft_component_id`.
+            - Дочерние изменения: рекурсивно проверяются все компоненты, добавленные через `add_draft_child`,
+            с использованием методов `has_descendant_changes` (если есть) или `has_changes` (иначе).
+            - Результат кэшируется в `self._draft_modified` и обновляется при любом сигнале `changed`
+            от дочерних компонентов или при изменении реестра.
+
+        **Пример использования (внешний UI):**
+            >>> # Допустим, есть вкладка, содержащая несколько страниц с черновиками
+            >>> if current_tab.has_descendant_drafts:
+            ...     tab_indicator.setStyleSheet("background-color: yellow;")
+
+        **Примечания:**
+            - В отличие от статусов сущностей (`'own'`, `'child'`, `'both'`), которые хранятся в реестре
+            и синхронизируются с родителями через счётчики, это свойство вычисляется «лениво»
+            на основе текущего состояния реестра и дочерних компонентов.
+            - Если компонент не имеет дочерних (например, `PhotoUploaderWidget` без своей иерархии),
+            значение свойства равно `self._draft_registry.has(self._draft_component_id)`.
+
+        **Возвращает:**
+            bool: True, если в поддереве (начиная с текущего компонента) есть хотя бы один черновик,
+            иначе False.
         """
-        # Убеждаемся, что атрибуты инициализированы
-        if not hasattr(self, '_draft_modified'):
-            self._draft_modified = False
+        
         return self._draft_modified
 
     # def __init__(self):
@@ -413,16 +436,20 @@ class DraftTreeMixin:
                  всех предков.
 
         **ВАЖНО:**
-            - Этот метод **НЕ изменяет счётчики потомков** (`__counter__`).
-              Счётчики обновляются отдельно через `mark_child_change` при
-              создании/удалении дочерних черновиков.
-            - Если вы вызываете этот метод для снятия флага `'own'` после
-              сохранения строки, не добавляйте сюда вызов `mark_child_change`,
-              иначе счётчик родителя будет уменьшен дважды (один раз здесь,
-              один раз в вызывающем коде, который уже уменьшил счётчик).
-            - Корректное уменьшение счётчика родителя должно выполняться
-              в том месте, где строка перестаёт быть изменённой (например,
-              в `_save_new_rows` или `_save_modified_rows`).
+            Этот метод НЕ изменяет счётчики потомков (`__counter__`).
+           Счётчики обновляются отдельно через `mark_child_change` при
+           создании/удалении дочерних черновиков.
+
+        НЕ ДОБАВЛЯЙТЕ СЮДА ВЫЗОВ `_update_parent_child_counter`!
+        Если вы вызываете этот метод для снятия флага `'own'` после
+        сохранения строки, вызывающий код (например, `_save_new_rows` или
+        `_save_modified_rows_for_ids`) уже уменьшил счётчик родителя.
+        Добавление вызова здесь приведёт к двойному уменьшению счётчика
+        и, как следствие, к отрицательным значениям в реестре и неверным
+        цветам строк.
+
+        Подробнее см. `PaginatedListPage._save_new_rows` и
+        `PaginatedListPage._save_modified_rows_for_ids`.
 
         Args:
             entity_id: ID сущности (может быть временным, отрицательным).

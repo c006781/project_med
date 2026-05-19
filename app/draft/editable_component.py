@@ -168,7 +168,13 @@ class IEditableComponent(ABC):
     #     use_name_in_filename=False,
     # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     @abstractmethod
-    def apply(self, registry: DraftRegistry, parent_id: Optional[int] = None, service=None) -> None:
+    def apply(
+        self, 
+        registry: DraftRegistry, 
+        parent_id: Optional[int] = None, 
+        service=None, 
+        session=None,
+    ) -> None:
         """
         Применяет изменения компонента к БД с помощью переданного сервиса.
         Должен вызывать registry.apply_and_clear(self.get_draft_key(), applier).
@@ -176,6 +182,7 @@ class IEditableComponent(ABC):
         :param registry: Экземпляр DraftRegistry.
         :param parent_id: ID родительской сущности (например, ID приёма для фото).
         :param service: Сервис, необходимый для сохранения.
+        :param session: Сессия SQLAlchemy (опционально, для работы в одной транзакции)
         """
         pass
 
@@ -361,7 +368,16 @@ class EditableComponentMixin(QObject, IEditableComponent):
     def has_changes(self, registry: DraftRegistry) -> bool:
         raise NotImplementedError
 
-    def apply(self, registry: DraftRegistry, parent_id: Optional[int] = None, service=None) -> None:
+    def apply(
+        self, 
+        registry: DraftRegistry, 
+        parent_id: Optional[int] = None, 
+        service=None, 
+        session=None,
+    ) -> None:
+        # базовая реализация может игнорировать session
+        # registry.discard(self.get_draft_key())
+        # self.changed.emit()
         raise NotImplementedError
 
     def set_draft_change_notifier(

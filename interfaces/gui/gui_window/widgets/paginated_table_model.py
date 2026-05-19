@@ -20,7 +20,7 @@
 import datetime
 # from enum import Enum
 from typing import (
-    List, Dict, Any, Optional, Callable, 
+    List, Dict, Any, Optional, Callable, Tuple, 
     # Type, Union
 )
 # from collections.abc import Sequence
@@ -149,6 +149,18 @@ class PaginatedTableModel(BaseTableModel):
     def _row_colors(self, value: Dict[int, QColor]):
         self.__row_colors = value
 
+
+    @property
+    def _sort_specs(self) -> List:
+        if not hasattr(self, '__sort_specs'):
+            self.__sort_specs: List = []  # список (column_index, order)
+        return self.__sort_specs
+
+    @_sort_specs.setter
+    def _sort_specs(self, value: List):
+        self.__sort_specs = value
+
+
     def __init__(
         self,
         columns: List[TableColumn],
@@ -171,6 +183,9 @@ class PaginatedTableModel(BaseTableModel):
         #     use_name_in_filename=False,
         # )
 
+        # ---- Сортировка ----
+        
+
         # ---- Данные ----
         # self._data: List[Any] = []                     # загруженные DTO
         # self._total_count: int = 0                     # общее количество (устанавливается извне)
@@ -192,6 +207,55 @@ class PaginatedTableModel(BaseTableModel):
         self._ensure_checkbox_column()
 
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
+
+    def set_sort_specs(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
+        """
+        Устанавливает спецификации сортировки (столбец, направление) и применяет сортировку.
+        
+        :param specs: список кортежей (видимый_индекс_столбца, порядок). Порядок в списке 
+                    определяет приоритет (первый – первичная сортировка).
+        """
+        self._sort_specs = specs.copy()
+        self._apply_sort()
+
+    def _apply_sort(self) -> None:
+        """Применяет текущие спецификации сортировки к загруженным данным."""
+        if not self._sort_specs:
+            return
+        
+        # Очищаем цвета, так как они привязаны к старым индексам
+        self.clear_row_colors()
+        
+        # Строим ключевые функции для каждой спецификации
+        def sort_key(obj):
+            key_values = []
+            for col_idx, order in self._sort_specs:
+                # Находим столбец по видимому индексу
+                visible_idx = 0
+                target_col = None
+                for col in self._columns:
+                    if col.visible:
+                        if visible_idx == col_idx:
+                            target_col = col
+                            break
+                        visible_idx += 1
+                if target_col is None or target_col.column_type != ColumnType.DATA:
+                    # Если столбец не DATA, пропускаем (сортировка по нему невозможна)
+                    key_values.append((None,))
+                    continue
+                field_name = target_col.field_name
+                value = getattr(obj, field_name, None)
+                # Для корректного сравнения None помещаем в конец или начало
+                # (для возрастания – None идут последними, для убывания – первыми)
+                if order == Qt.AscendingOrder:
+                    key_values.append((value is not None, value))
+                else:
+                    key_values.append((value is None, value))
+            return tuple(key_values)
+        
+        self.layoutAboutToBeChanged.emit()
+        self._data.sort(key=sort_key, reverse=False)  # reverse не нужен, так как знак учтён в ключе
+        self.layoutChanged.emit()
 
     def get_checkbox_state(self, row: int) -> bool:
         """
@@ -234,6 +298,27 @@ class PaginatedTableModel(BaseTableModel):
     # ----------------------------------------------------------------------
     # Работа со столбцами (публичные методы)
     # ----------------------------------------------------------------------
+
+    def get_column_at_visible_index(self, visible_index: int) -> Optional[TableColumn]:
+        """
+        Возвращает объект TableColumn по индексу видимого столбца.
+        
+        Args:
+            visible_index: Индекс столбца, отображаемого в таблице (0-based).
+            
+        Returns:
+            Объект TableColumn или None, если столбец с таким индексом не существует.
+        """
+
+        visible_idx = 0
+        # Находим объект TableColumn по видимому индексу
+        for col in self._columns:
+            if col.visible:
+                if visible_idx == visible_index:
+                    return col
+                
+                visible_idx += 1
+        return None
 
     def column_count(self) -> int:
         """Возвращает общее количество столбцов (включая скрытые)."""
@@ -419,6 +504,14 @@ class PaginatedTableModel(BaseTableModel):
         self.endInsertRows()
         self.row_modified.emit(row)
 
+        # Если есть активные спецификации сортировки, применяем их
+        if self._sort_specs:
+            self._apply_sort()
+            # После сортировки исходный индекс row может измениться, но цвет строки будет восстановлен через layoutChanged
+            # Возвращаем новый индекс? Сложно, но вызывающий код обычно не полагается на него,
+            # кроме как для установки цвета строки, который перекрасится через _on_model_layout_changed.
+            # Поэтому возвращаем исходный row – он всё равно будет неактуален, но это не критично.
+
         return row
 
     def remove_row(self, row: int) -> Optional[Any]:
@@ -473,7 +566,9 @@ class PaginatedTableModel(BaseTableModel):
         self._data.clear()
         self._checkbox_states.clear()
         self._row_colors.clear()
+
         self._total_count = 0
+        self._sort_specs = []
         self.endResetModel()
 
     def set_checkbox_column_visible(self, visible: bool) -> None:
@@ -580,6 +675,10 @@ class PaginatedTableModel(BaseTableModel):
                 self._checkbox_states[idx] = False
 
         self.endInsertRows()
+
+        # Если есть активные спецификации сортировки, применяем их
+        if self._sort_specs:
+            self._apply_sort()
 
     def set_total_count(self, total: int) -> None:
         """
@@ -878,40 +977,43 @@ class PaginatedTableModel(BaseTableModel):
         return None
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
-        """
-        Сортирует только загруженные данные (локально).
+        """Сортировка по одному столбцу (сохраняется обратная совместимость)."""
+        self.set_sort_specs([(column, order)])
 
-        ВНИМАНИЕ: цвета строк будут привязаны к прежним индексам и могут не соответствовать данным после сортировки. Рекомендуется очищать цвета перед сортировкой или использовать серверную сортировку.
+        # """
+        # Сортирует только загруженные данные (локально).
 
-        Args:
-            column: Индекс видимого столбца.
-            order: Порядок сортировки (AscendingOrder или DescendingOrder).
+        # ВНИМАНИЕ: цвета строк будут привязаны к прежним индексам и могут не соответствовать данным после сортировки. Рекомендуется очищать цвета перед сортировкой или использовать серверную сортировку.
 
-        Returns:
-            None
-        """
+        # Args:
+        #     column: Индекс видимого столбца.
+        #     order: Порядок сортировки (AscendingOrder или DescendingOrder).
 
-        # нужно обязательно сделать: метод sort реализован с очисткой цветов. Это приводит к тому, что при сортировке все цвета сбрасываются. Возможно, вы хотели сохранить цвета для отсортированных строк (например, зелёный для новых строк должен перемещаться вместе с ними)
+        # Returns:
+        #     None
+        # """
 
-        # Очищаем цвета, так как они привязаны к старым индексам
-        self.clear_row_colors()
+        # # нужно обязательно сделать: метод sort реализован с очисткой цветов. Это приводит к тому, что при сортировке все цвета сбрасываются. Возможно, вы хотели сохранить цвета для отсортированных строк (например, зелёный для новых строк должен перемещаться вместе с ними)
 
-        # Находим столбец по видимому индексу
-        visible_idx = 0
-        target_col = None
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == column:
-                    target_col = col
-                    break
+        # # Очищаем цвета, так как они привязаны к старым индексам
+        # self.clear_row_colors()
 
-                visible_idx += 1
+        # # Находим столбец по видимому индексу
+        # visible_idx = 0
+        # target_col = None
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == column:
+        #             target_col = col
+        #             break
 
-        if target_col is None or target_col.column_type != ColumnType.DATA:
-            return
+        #         visible_idx += 1
 
-        field_name = target_col.field_name
-        reverse = (order == Qt.DescendingOrder)
-        self.layoutAboutToBeChanged.emit()
-        self._data.sort(key=lambda obj: (getattr(obj, field_name, None) is not None, getattr(obj, field_name, None)), reverse=reverse)
-        self.layoutChanged.emit()
+        # if target_col is None or target_col.column_type != ColumnType.DATA:
+        #     return
+
+        # field_name = target_col.field_name
+        # reverse = (order == Qt.DescendingOrder)
+        # self.layoutAboutToBeChanged.emit()
+        # self._data.sort(key=lambda obj: (getattr(obj, field_name, None) is not None, getattr(obj, field_name, None)), reverse=reverse)
+        # self.layoutChanged.emit()

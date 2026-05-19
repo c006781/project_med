@@ -552,6 +552,23 @@ class PaginatedListPage(
 
         return False
 
+    def _clear_page_drafts_prefixes(self) -> None:
+        """
+        Удаляет все черновики, связанные с текущим типом сущности (страницей) (self._entity_type).         
+        """
+
+        for prefix in [
+            f"{self._entity_type}:",
+            f"__status__:{self._entity_type}:",
+            f"__counter__:{self._entity_type}:",
+            f"__deleted__:{self._entity_type}:",
+            f"__new__:{self._entity_type}:",
+            f"__parent_counter_inc__:{self._entity_type}:",   # Очистка служебных ключей балансировки счётчиков
+
+        ]:
+            # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
+            self._draft_registry.discard_by_prefix(prefix)  
+
     def discard_page_drafts(self) -> None:
         """
         Удаляет все черновики, связанные с текущим типом сущности (страницей) (self._entity_type).
@@ -569,12 +586,7 @@ class PaginatedListPage(
         Примечание: Если используется локальный реестр, вызов эквивалентен `self._draft_registry.clear()`.
         """
 
-        prefix = f"{self._entity_type}:"
-        self._draft_registry.discard_by_prefix(prefix)
-        self._draft_registry.discard_by_prefix(f"__status__:{self._entity_type}:")
-        self._draft_registry.discard_by_prefix(f"__counter__:{self._entity_type}:")
-        self._draft_registry.discard_by_prefix(f"__deleted__:{self._entity_type}:")
-        self._draft_registry.discard_by_prefix(f"__new__:{self._entity_type}:")
+        self._clear_page_drafts_prefixes()       
 
         self._status_cache.clear()
         self.source_model.clear_row_colors()
@@ -690,6 +702,16 @@ class PaginatedListPage(
                 return
 
             self.mark_own_change(dto.id)
+
+    def _on_model_layout_changed(self):
+        """
+        Перекрашивает все загруженные строки после изменения layout модели.
+        Это необходимо для восстановления цветов после локальной сортировки
+        (когда PaginatedTableModel.sort сбрасывает цвета).
+        """
+
+        for row in range(self.source_model.rowCount()):
+            self._update_row_color(row)
 
     # def _load_data(self): # Удалить метод полностью – он больше не нужен # Если в наследниках он переопределялся, их нужно переписать, используя пагинацию
   
@@ -888,9 +910,9 @@ class PaginatedListPage(
 
     def _update_parent_counter(
         self,
-        entity_id,
+        entity_id: Optional[int],
         delta: int,
-        temp_id = None
+        temp_id: Optional[int] = None
     ) -> bool:
         """
         Увеличивает или уменьшает счётчик родителя для сущности.
@@ -900,14 +922,22 @@ class PaginatedListPage(
             - Если родитель уже помечен на удаление, счётчик не изменяется (и логируется предупреждение).
             - Используется только при создании новой строки (_add_inline_row) и при её отмене (_cancel_new_row).
 
+        
+        **Логика:**
+            - Если родитель не указан (entity_id is None) или его ID <= 0 – ничего не делаем, возвращаем False.
+            - Если родитель помечен на удаление – ничего не делаем, возвращаем False.
+            - Иначе вызываем mark_child_change(entity_id, delta) и возвращаем True.
+
+
         Args:
             parent_id: ID родительской сущности (может быть None или отрицательным для новой строки).
             delta: +1 (появление потомка), -1 (исчезновение).
             temp_id: Временный ID новой строки (для логирования).
 
         Returns:
-            True, если счётчик был изменён, иначе False.
+            True, если счётчик был изменён (родитель существует и не удалён), иначе False.
         """
+
         # Уменьшаем счётчик родителя
         if (entity_id is not None) and (entity_id > 0):
             # Причина:
@@ -927,6 +957,61 @@ class PaginatedListPage(
         return False
 
 
+    def _recursive_save_new_row(
+        self, 
+        temp_id: int, 
+        created_id: int,
+        session: Optional[Session] = None
+    ):
+        # Находим и рекурсивно сохраняем всех прямых потомков
+        for child_key in list(self._draft_registry.get_keys_by_prefix("__new__")):
+            child_data = self._draft_registry.get(child_key)
+            if child_data and hasattr(child_data["dto"], 'parent_id'):
+                child_dto = child_data["dto"]
+                if child_dto.parent_id == temp_id:
+                    child_temp_id = int(child_key.split(':')[-1])
+
+                    # Защита от зацикливания (если parent_id указывает на самого себя)
+                    if child_temp_id == temp_id:
+                        self.logger.error(f"Обнаружена циклическая ссылка: parent_id = {child_dto.parent_id} для строки {temp_id}")
+                        continue
+
+                    # Рекурсивно сохраняем потомка, передавая реальный ID текущей строки
+                    self._save_new_row_recursive(child_temp_id, created_id, session=session)
+
+    def _balance_parent_counter(
+        self, 
+        temp_id: int, 
+        created_id: int
+    ):
+        """
+        Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик.
+
+        **Когда вызывается:** сразу после успешного сохранения строки в БД (в `_save_new_row_recursive`).
+
+        **Логика:** находит служебный ключ `__parent_counter_inc__:{temp_id}`, извлекает `parent_id`,
+        уменьшает счётчик родителя на 1 и удаляет ключ. Если ключа нет – ничего не делает.
+
+        Args:
+            temp_id: Временный ID новой строки.
+            created_id: Реальный ID, присвоенный строке в БД (используется только для логирования).
+
+        Returns:
+            None
+        """
+        
+        # --- Балансировка счётчика родителя ---
+        inc_key = f"__parent_counter_inc__:{self._entity_type}:{temp_id}"
+        inc_data = self._draft_registry.get(inc_key)
+
+        if inc_data:
+            parent_id = inc_data.get("parent_id")
+            if parent_id is not None and parent_id > 0:
+                self._update_parent_counter(parent_id, -1)
+                self.logger.debug(f"Уменьшен счётчик родителя {parent_id} после сохранения строки {created_id}")
+
+            self._draft_registry.discard(inc_key)
+
     def _save_new_row_recursive(
         self, 
         temp_id: int, 
@@ -938,26 +1023,25 @@ class PaginatedListPage(
 
         **Алгоритм:**
             1. Проверяет существование ключа `__new__:{entity_type}:{temp_id}` в реестре.
-            2. Если передан `real_parent_id`, обновляет поле `parent_id` в DTO с временного на реальный
+            Если ключа нет – возвращает None.
+            2. Извлекает DTO из реестра.
+            3. Если передан `real_parent_id` и DTO имеет поле `parent_id`, обновляет его на реальный ID
             и перезаписывает DTO в реестре.
-            3. Сохраняет строку в БД через `self.service.create(dto)`, получая реальный ID.
-            4. Переносит дочерние черновики (например, фото) через `_transferring_child_drafts`.
-            5. Переносит статус `'own'` с временного ID на реальный через `_update_id_own_in_real_id`.
-            6. Удаляет ключ `__new__` текущей строки.
-            7. Находит все новые строки, у которых в DTO поле `parent_id` равно текущему `temp_id`,
-            и рекурсивно вызывает `_save_new_row_recursive` для каждого потомка, передавая
-            реальный ID только что сохранённой строки как `real_parent_id`.
-            8. Возвращает созданный DTO (или None, если ключ не найден).
+            4. Сохраняет строку в БД через `self.service.create(dto, session)`, получая реальный ID.
+            5. **Балансирует счётчик родителя:** вызывает `_balance_parent_counter(temp_id, created.id)`.
+            Этот метод находит служебный ключ `__parent_counter_inc__:{temp_id}` (созданный при добавлении)
+            и, если он есть, уменьшает счётчик родителя на 1, удаляя ключ.
+            6. Переносит дочерние черновики (фото, заметки) через `_transferring_child_drafts(temp_id, created.id)`.
+            7. Переносит статус `'own'` с временного ID на реальный через `_update_id_own_in_real_id`.
+            8. Удаляет ключ `__new__` текущей строки.
+            9. Находит все новые строки, у которых в DTO поле `parent_id` равно текущему `temp_id`,
+            и рекурсивно вызывает `_save_new_row_recursive` для каждого потомка,
+            передавая реальный ID только что сохранённой строки как `real_parent_id`.
+            10. Возвращает созданный DTO.
 
         **Важные замечания:**
             - **Этот метод не обновляет счётчики родителей.** Счётчики родителей увеличиваются
-            при создании новой строки в `_add_inline_row` (вызовом `_update_parent_counter`)
-            и уменьшаются при сохранении потомка? Нет, уменьшение не требуется, так как
-            при создании потомка родитель мог быть временным (ID < 0) и счётчик для него
-            не увеличивался. Если родитель существующий, то счётчик был увеличен при создании
-            потомка, и при сохранении потомка мы его не уменьшаем – это корректно, потому что
-            потомок сохраняется и остаётся потомком. Уменьшение происходит только при
-            **удалении** потомка или при отмене его создания.
+            при создании новой строки в `_add_inline_row` 
             - **Перенос дочерних черновиков** (`_transferring_child_drafts`) происходит **после**
             сохранения текущей строки, но **до** рекурсивного сохранения потомков. Это
             гарантирует, что дочерние черновики (фото, заметки) будут привязаны к реальному
@@ -966,6 +1050,28 @@ class PaginatedListPage(
             затем его первый потомок, затем потомок потомка и т.д. Это гарантирует,
             что все внешние ключи будут корректны при сохранении.
 
+        **Балансировка счётчиков (подробно):**
+            - При создании новой строки (в `_add_inline_row`) для существующего родителя
+            создаётся служебный ключ `__parent_counter_inc__:{temp_id}` с ID родителя.
+            - Здесь, после успешного сохранения, этот ключ находится, и счётчик родителя уменьшается,
+            компенсируя предыдущее увеличение.
+            - Для новых родителей (временный ID) такой ключ отсутствует, и балансировка не выполняется.
+            - Балансировка выполняется **до** переноса дочерних черновиков и **до** рекурсивного сохранения потомков,
+            чтобы у родителя уже был правильный счётчик, когда потомки будут сохраняться.
+
+        **Рекурсия и иерархия:**
+            - Метод обрабатывает потомков в глубину: сначала родитель, затем его первый потомок,
+            затем потомок потомка и т.д.
+            - Благодаря передаче `real_parent_id = created.id` все потомки получают правильный
+            реальный ID родителя, что гарантирует целостность внешних ключей.
+            - Обнаружение циклических ссылок предотвращает бесконечную рекурсию.
+
+        **Важные замечания:**
+            - Метод предполагает, что все сервисные вызовы (`create`) принимают опциональный параметр `session`
+            и используют его для выполнения операций в рамках одной транзакции.
+            - Если в процессе сохранения возникает ошибка, транзакция откатывается вышестоящим кодом
+            (в `_save_all_changes_impl_session`), и реестр черновиков остаётся неизменным для этой ветки.
+            - Метод **не изменяет** флаг `_saving_in_progress` – это ответственность вызывающего кода.
 
         **Пример использования (внутри _save_new_rows):**
             >>> created = self._save_new_row_recursive(temp_id=-1, real_parent_id=None)
@@ -1005,8 +1111,23 @@ class PaginatedListPage(
             self.logger.debug(f"Обновлён parent_id новой строки {temp_id} -> {real_parent_id}")
 
         # Сохраняем строку в БД
-        created = self.service.create(dto, session=session)
+        try:
+            created = self.service.create(dto, session=session)
+        except Exception as e:
+            self.logger.error(f"Ошибка сохранения новой строки {temp_id}: {e}")
+            
+            # ВАЖНО: не удаляем служебный ключ __parent_counter_inc__ при ошибке!
+            # Строка сохраняется в реестре (ключ __new__ остаётся), и счётчик родителя уже увеличен.
+            # При повторном успешном сохранении ключ будет использован для балансировки.
+            # Удаление ключа здесь привело бы к завышению счётчика родителя.
+            # Очистка ключа происходит только при успешном сохранении (в _balance_parent_counter)
+            # или при отмене строки (в _cancel_new_row).
+            raise
+        
         self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
+
+        # Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик
+        self._balance_parent_counter(temp_id, created.id)
 
         # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
         self._transferring_child_drafts(temp_id, created.id)
@@ -1018,20 +1139,7 @@ class PaginatedListPage(
         self._draft_registry.discard(key)
 
         # Находим и рекурсивно сохраняем всех прямых потомков
-        for child_key in list(self._draft_registry.get_keys_by_prefix("__new__")):
-            child_data = self._draft_registry.get(child_key)
-            if child_data and hasattr(child_data["dto"], 'parent_id'):
-                child_dto = child_data["dto"]
-                if child_dto.parent_id == temp_id:
-                    child_temp_id = int(child_key.split(':')[-1])
-
-                    # Защита от зацикливания (если parent_id указывает на самого себя)
-                    if child_temp_id == temp_id:
-                        self.logger.error(f"Обнаружена циклическая ссылка: parent_id = {child_dto.parent_id} для строки {temp_id}")
-                        continue
-
-                    # Рекурсивно сохраняем потомка, передавая реальный ID текущей строки
-                    self._save_new_row_recursive(child_temp_id, created.id, session=session)
+        self._recursive_save_new_row(temp_id, created.id, session=session)
 
         return created
 
@@ -1489,6 +1597,18 @@ class PaginatedListPage(
         #     self._update_own_change(entity_id, False)
 
     
+    # def _save_modified_rows(self):
+    #     for entity_id in list(self.modified_ids):
+    #         row = self._find_row_by_id(entity_id)
+    #         if row < 0:
+    #             continue
+    #         dto = self.source_model.get_item_at_row(row)
+    #         if dto:
+    #             updated = self.service.update(dto)
+    #             self.source_model.update_row(row, updated)
+    #             self.original_data[row] = updated
+    #     self.modified_ids.clear()
+
     # def _clear_draft_registry(self, entity_id: int) -> None:
     #     """
     #     Удаляет черновики для данной сущности.
@@ -1509,7 +1629,7 @@ class PaginatedListPage(
     #     self._draft_registry.delete_entity_status(self._entity_type, entity_id)
     #     self._draft_registry.discard(f"__counter__:{temp}")
 
-    def _clear_selected_dto(self, entity_id, new_id = None) -> None:
+    def _clear_selected_dto(self, entity_id, new_dto = None) -> None:
         """
         Сбрасывает текущий выбранный DTO, если он соответствует указанному ID.
 
@@ -1517,7 +1637,7 @@ class PaginatedListPage(
 
         Args:
             entity_id: ID сущности, для которой проверяется совпадение с selected_dto.
-            new_id: новый ID сущности, для которой проверяется совпадение с selected_dto (может быть None).
+            new_dto: dto, на замену при совпадении с entity_id (может быть None).
         """
 
         if entity_id is None:
@@ -1525,7 +1645,7 @@ class PaginatedListPage(
 
         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
         if self.selected_dto and self.selected_dto.id == entity_id:
-            self.selected_dto = new_id
+            self.selected_dto = new_dto
 
     # def _save_deleted_rows(self) -> None:
     #     """
@@ -1581,7 +1701,10 @@ class PaginatedListPage(
     #         # # Удаляем из БД
     #         # self.service.delete(entity_id)
 
-    def _save_deleted_rows(self, session: Optional[Session] = None) -> None:
+    def _save_deleted_rows(
+        self, 
+        session: Optional[Session] = None
+    ) -> None:
         """
         Удаляет строки, помеченные как __deleted__, и каскадно всех их потомков из БД.
 
@@ -1686,8 +1809,11 @@ class PaginatedListPage(
         # Уменьшить счётчик родителя удаляемой сущности (компенсируем увеличение при пометке к примеру в _delete_selected_rows)
         self._update_parent_child_counter(entity_id, -1)
 
-
-    def _save_child_changes(self, new_map, session: Optional[Session] = None):
+    def _save_child_changes(
+        self, 
+        new_map,
+        session: Optional[Session] = None
+    ):
         """
         Применяет (сохраняет) черновики всех дочерних компонентов для всех родительских сущностей, у которых есть активные дочерние черновики.
 
@@ -1847,6 +1973,16 @@ class PaginatedListPage(
 
 
 
+    def _save_all_changes_impl_reload_clear_entity_registry(self) -> bool:
+        # Сохраняем всех изменений внутри единой транзакции.
+        self._save_all_changes_impl_session()
+
+        # Перезагружаем данные (и выходим из режима редактирования?????)
+        self.reload_data() 
+
+        # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
+        self._clear_entity_registry()
+
     def _save_all_changes_impl_session(self) -> bool:
         """
         Выполняет основную логику сохранения всех изменений внутри единой транзакции.
@@ -1921,6 +2057,21 @@ class PaginatedListPage(
                 # Сохраняем новые строки, получаем словарь {temp_id: created_dto}
                 new_map = self._save_new_rows(session=session)
 
+                # # Если текущая выбранная строка была новой – обновляем selected_dto
+                # if self.selected_dto and self.selected_dto.id in new_map:
+                #     self.selected_dto = new_map[self.selected_dto.id]
+
+                # # # Сохраняем дочерние черновики (например, фото)
+                # # self._save_child_components()
+
+                # # # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
+                # # for temp_id, created in new_map.items():
+                # #     self._save_child_components_for_parent(created.id)
+                # #
+                # # # Сохраняем дочерние черновики для текущей выбранной строки, если она существует и не новая
+                # # if self.selected_dto and self.selected_dto.id >= 0:
+                # #     self._save_child_components_for_parent(self.selected_dto.id)
+
                 # Если текущая выбранная строка была новой – обновляем selected_dto
                 if self.selected_dto and self.selected_dto.id in new_map:
                     self.selected_dto = new_map[self.selected_dto.id]
@@ -1961,41 +2112,8 @@ class PaginatedListPage(
         self._saving_in_progress = True 
 
         try:
-            
-            self._save_all_changes_impl_session()
-
-            # # Сохраняем новые строки, получаем словарь {temp_id: created_dto}
-            # new_map = self._save_new_rows()
-
-            # # Если текущая выбранная строка была новой – обновляем selected_dto
-            # if self.selected_dto and self.selected_dto.id in new_map:
-            #     self.selected_dto = new_map[self.selected_dto.id]
-
-            # # # Сохраняем дочерние черновики (например, фото)
-            # # self._save_child_components()
-
-            # # # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
-            # # for temp_id, created in new_map.items():
-            # #     self._save_child_components_for_parent(created.id)
-            # #
-            # # # Сохраняем дочерние черновики для текущей выбранной строки, если она существует и не новая
-            # # if self.selected_dto and self.selected_dto.id >= 0:
-            # #     self._save_child_components_for_parent(self.selected_dto.id)
-
-            # # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID) и для всех существующих строк, у которых есть такие черновики
-            # self._save_child_changes(new_map)
-
-            # # Сохраняем изменённые строки
-            # self._save_modified_rows()
-
-            # # Сохраняем удалённые строки
-            # self._save_deleted_rows()
-
-            # Перезагружаем данные и выходим из режима редактирования
-            self.reload_data()
-
-            # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
-            self._clear_entity_registry()
+            # Сохранение изменений внутри единой транзакции, Перезагружаем данные, Очищаем реестр от служебных ключей
+            self._save_all_changes_impl_reload_clear_entity_registry()
 
             # Выходим из режима редактирования (отключаем чекбоксы, блокируем редактирование)
             self._exit_edit_mode()
@@ -2011,7 +2129,51 @@ class PaginatedListPage(
         finally:
             self._saving_in_progress = False
 
-    def _source_model_update_row(self, row: int, updated):
+    def _source_model_update_row(self, row: int, updated: Any) -> None:
+        """
+        Обновляет строку в модели таблицы и синхронизирует сохранённую копию исходных данных.
+
+        **Назначение:**
+            Данный метод инкапсулирует две операции, которые должны выполняться вместе:
+                1. Обновление DTO в `self.source_model` (основной модели таблицы) через
+                вызов `self.source_model.update_row(row, updated)`.
+                2. Обновление словаря `self.original_data[row]` (копии данных до редактирования)
+                на тот же DTO `updated`.
+
+            Это гарантирует, что после сохранения изменений (например, после вызова
+            `service.update`) исходная копия данных для строки будет соответствовать
+            актуальному состоянию в БД, что предотвращает ложное определение изменений
+            при последующих правках.
+
+        **Когда используется:**
+            - В `_save_modified_rows_for_ids` после успешного обновления строки в БД,
+            перед вызовом `clear_entity_drafts`.
+            - В любом другом месте, где необходимо одновременно обновить модель
+            и синхронизировать эталонные данные для отслеживания изменений.
+
+        **Почему нельзя просто вызвать `self.source_model.update_row`:**
+            Без обновления `self.original_data` при последующем редактировании строки
+            сравнение текущего DTO с оригиналом покажет, что данные «изменились»,
+            даже если пользователь вернул значения к исходным. Это приведёт к
+            ложному появлению жёлтого цвета и ненужному сохранению.
+
+        **Важно:**
+            - Метод не вызывает сигналы модели (они испускаются внутри `update_row`).
+            - Не проверяет, изменилось ли фактически значение DTO – вызывающий код
+            должен быть уверен, что обновление необходимо.
+
+        Args:
+            row (int): Индекс строки в модели (0-based).
+            updated (Any): Новый DTO (обычно возвращённый сервисом после `update`).
+
+        Returns:
+            None
+
+        Example:
+            >>> dto = self.service.update(dto, session=session)
+            >>> self._source_model_update_row(row, dto)
+            >>> # теперь self.original_data[row] == dto
+        """
 
         self.source_model.update_row(row, updated)
 
@@ -2237,15 +2399,7 @@ class PaginatedListPage(
         # метод удаляет все черновики из реестра, включая те, которые могут быть нужны для других страниц (если реестр общий). Поскольку у вас реестр создаётся для каждой страницы отдельно, это не страшно. Но если в будущем вы решите сделать реестр глобальным, лучше удалить этот метод или переопределить его в наследниках. Пока можно оставить.
         # Если в будущем нудно делать реестр глобальным (один на всё приложение), тогда очистку нужно будет делать выборочно (по префиксу типа сущности). Но пока оставляйте как есть
         
-        for prefix in [
-            f"{self._entity_type}:",
-            f"__status__:{self._entity_type}:",
-            f"__counter__:{self._entity_type}:",
-            f"__deleted__:{self._entity_type}:",
-            f"__new__:{self._entity_type}:",
-        ]:
-            # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
-            self._draft_registry.discard_by_prefix(prefix)
+        self._clear_page_drafts_prefixes()
         
         # Очищаем кэш статусов, чтобы при следующей загрузке страницы не осталось старых данных
         self._status_cache.clear()
@@ -2605,8 +2759,11 @@ class PaginatedListPage(
         # from interfaces.gui.gui_window.widgets.paginated_table_model import PaginatedTableModel
         self.source_model = PaginatedTableModel(self.columns, parent=self)
         self.table_view.setModel(self.source_model)
+        
         # self.source_model.row_modified.connect(self._on_row_modified)
         self.source_model.row_modified.connect(self._on_row_modified_from_model)
+
+        self.source_model.layoutChanged.connect(self._on_model_layout_changed)
 
     def _setup_delegates(self) -> None:
         """
@@ -2650,14 +2807,7 @@ class PaginatedListPage(
         # Проходим по всем видимым столбцам
         for visible_idx in range(self.source_model.columnCount()):
             # Находим объект TableColumn по видимому индексу
-            col = None
-            v_idx = 0
-            for c in self.source_model._columns:
-                if c.visible:
-                    if v_idx == visible_idx:
-                        col = c
-                        break
-                    v_idx += 1
+            col = self.source_model.get_column_at_visible_index(visible_idx)
 
             if col is None or col.column_type != ColumnType.DATA:
                 continue
@@ -2718,49 +2868,71 @@ class PaginatedListPage(
 
         self.reload_with_filters(self._current_filters)
 
-    # def _save_new_rows(self):
-    #     for row in list(self.new_rows):
-    #         dto = self.source_model.get_item_at_row(row)
-    #         if dto:
-    #             created = self.service.create(dto)
-    #             self.source_model.update_row(row, created)
-    #             self.original_data[row] = created
-    #     self.new_rows.clear()
 
-    # def _save_modified_rows(self):
-    #     for entity_id in list(self.modified_ids):
-    #         row = self._find_row_by_id(entity_id)
-    #         if row < 0:
-    #             continue
-    #         dto = self.source_model.get_item_at_row(row)
-    #         if dto:
-    #             updated = self.service.update(dto)
-    #             self.source_model.update_row(row, updated)
-    #             self.original_data[row] = updated
-    #     self.modified_ids.clear()
+    def _register_new_row_parent_balance(
+        self,
+        dto: Any,
+        temp_id: int
+    ) -> Optional[int]:
+        """
+        Увеличивает счётчик родителя при создании новой строки и создаёт служебный ключ.
 
-    # def _save_deleted_rows(self):
-    #     for entity_id in list(self.deleted_ids):
-    #         self.service.delete(entity_id)
-    #     self.deleted_ids.clear()
+        **Когда вызывается:** из `_add_inline_row` сразу после создания DTO.
 
+        **Логика:** определяет родителя через `_get_parent_id_for_new_row(dto)`,
+        увеличивает его счётчик (если родитель существует), и если увеличение произошло,
+        создаёт ключ `__parent_counter_inc__:{temp_id}` с ID родителя.
+
+        Returns:
+            int: ID родителя (может быть None, если родителя нет).
+        """
+
+        # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        entity_id = self._get_parent_id_for_new_row(dto)
+        was_incremented = self._update_parent_counter(entity_id, 1, temp_id)
+
+        # Если родитель существовал (ID > 0) и счётчик был увеличен,
+        # сохраняем факт увеличения для последующего уменьшения при сохранении
+        if was_incremented and (entity_id is not None) and entity_id > 0:
+            # Ключ теперь entity_type для изоляции при глобальном реестре
+            self._draft_registry.set(
+                f"__parent_counter_inc__:{self._entity_type}:{temp_id}",
+                {"parent_id": entity_id}
+            )
+    
+        return entity_id
+
+        
     def _add_inline_row(self):
         """
         Добавляет новую пустую строку в конец таблицы (режим редактирования).
 
-        **Что делает метод:**
-            1. Создаёт пустой DTO, заполняя поля значениями по умолчанию.
-            2. Генерирует временный отрицательный ID.
-            3. Сохраняет DTO в реестре по ключу `__new__:{entity_type}:{temp_id}`.
-            4. Добавляет строку в модель таблицы.
-            5. Помечает сущность как имеющую собственные изменения (`mark_own_change`).
-            6. Уведомляет родителя (если есть) о появлении нового потомка с изменениями
-               (увеличивает счётчик родителя через `_update_parent_counter`).
-            7. Обновляет цвет строки (зелёный) и состояние кнопки сохранения.
+        **Алгоритм:**
+            1. Создаёт пустой DTO, заполняя поля значениями по умолчанию:
+                - строковые поля → пустая строка
+                - целочисленные поля → 0
+                - дата → сегодняшняя дата
+                - остальные → None
+            2. Генерирует временный отрицательный ID (self._next_temp_id).
+            3. Сохраняет DTO в реестре черновиков по ключу `__new__:{entity_type}:{temp_id}`.
+            4. Добавляет строку в модель таблицы (self.source_model.add_row).
+            5. Помечает сущность как имеющую собственные изменения (mark_own_change(temp_id)).
+            6. Уведомляет родителя (если есть) о появлении нового потомка:
+                - вызывает `_register_new_row_parent_balance(dto, temp_id)`
+                - этот метод увеличивает счётчик родителя (через `_update_parent_counter(parent_id, +1)`)
+                - если родитель существующий и не удалён, создаёт служебный ключ `__parent_counter_inc__:{temp_id}`
+            7. Обновляет цвет строки (зелёный) и состояние кнопки «Сохранить».
 
-        **Примечание:** Родитель уведомляется только если его ID положителен и он не помечен на удаление.
-            Для новых строк (временный ID родителя) уведомление не отправляется, так как родитель
-            сам ещё не сохранён – его счётчик будет скорректирован при его собственном сохранении.
+        **Балансировка счётчиков:**
+            - При добавлении новой строки **с существующим родителем** счётчик родителя увеличивается,
+            и создаётся служебный ключ, который будет использован при сохранении для уменьшения счётчика.
+            - Для новых родителей (временный ID) счётчик не увеличивается и служебный ключ не создаётся.
+
+        **Примечания:**
+            - Временный ID генерируется отрицательным и уникальным для текущей сессии редактирования.
+            - Метод не вызывает `save_to_registry` – все данные сохраняются напрямую в реестр.
+            - Родитель определяется через переопределяемый метод `_get_parent_id_for_new_row(dto)`.
+            - Если родитель помечен на удаление, счётчик не увеличивается (и ключ не создаётся).
         """
 
         defaults = {}
@@ -2818,14 +2990,24 @@ class PaginatedListPage(
         # #         self.logger.debug(
         # #             f"Родитель {parent_id} помечен на удаление, счётчик не увеличен для новой строки {temp_id}")
 
-        # Уведомляем родителя о появлении нового потомка (если есть родитель)
-        parent_id = self._get_parent_id_for_new_row(dto)
-        self._update_parent_counter(parent_id, 1, temp_id)
+        # # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        # parent_id = self._get_parent_id_for_new_row(dto)
+        # self._update_parent_counter(parent_id, 1, temp_id)
 
-        # # Уведомляем родителя о появлении нового потомка с изменениями
-        # self._update_parent_child_counter(temp_id, +1)
+        # # # Уведомляем родителя о появлении нового потомка с изменениями
+        # # self._update_parent_child_counter(temp_id, +1)
 
-        self._update_row_color(row)
+        # Уведомляем родителя о появлении нового потомка
+        self._register_new_row_parent_balance(dto, temp_id)
+
+        # self._update_row_color(row)  # Перекрашиваем строку
+
+        # После возможной сортировки нужно найти актуальную строку по temp_id
+        actual_row = self._find_row_by_id(temp_id)
+        if actual_row >= 0:
+            self._update_row_color(actual_row)  # Перекрашиваем строку
+        else:
+            self._update_row_color(row)  # fallback  # Перекрашиваем строку
 
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
@@ -2949,14 +3131,20 @@ class PaginatedListPage(
             #   - статус "__status__:appointment:-1"
         """
 
+        prefix_temp = f"{self._entity_type}:{entity_id}"
+
         # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
-        self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
+
+        self._draft_registry.discard_by_prefix(f"{prefix_temp}:")
 
         # Удаляем ключ __new__
-        self._draft_registry.discard(f"{prefix}:{self._entity_type}:{entity_id}")
+        self._draft_registry.discard(f"{prefix}:{prefix_temp}")
 
         # Удаляем статус сущности из реестра (ключ __status__)
         self._draft_registry.delete_entity_status(self._entity_type, entity_id)
+
+        # Удаляем служебный ключ, созданный при добавлении новой строки
+        self._draft_registry.discard(f"__parent_counter_inc__:{prefix_temp}")
 
     def _cancel_new_row(self, entity_id: int):
         """
@@ -2999,6 +3187,10 @@ class PaginatedListPage(
 
         # Удаляет из реестра все ключи, связанные с указанной временной сущностью (новой строкой).
         self._clean_entity_registry_by_id("__new__", entity_id)
+
+        # Удаляем служебный ключ балансировки, если он остался
+        inc_key = f"__parent_counter_inc__:{self._entity_type}:{entity_id}"
+        self._draft_registry.discard(inc_key)
 
         # Если это была выбранная строка – сбрасываем выделение до удаления строки
         self._clear_selected_dto(entity_id)
@@ -3325,17 +3517,9 @@ class PaginatedListPage(
         
         self._saving_in_progress = True
         try:
-            # Сохраняем только для указанного типа
-            self._save_all_changes_impl_session()
-
-            # # Сохраняем только для указанного типа
-            # new_map = self._save_new_rows()
-            # self._save_child_changes(new_map)
-            # self._save_modified_rows()
-            # self._save_deleted_rows()
-
-            self.reload_data()
-            self._clear_entity_registry()
+            # Сохранение изменений внутри единой транзакции, Перезагружаем данные, Очищаем реестр от служебных ключей
+            self._save_all_changes_impl_reload_clear_entity_registry()
+            
             return True
         
         except Exception as e:

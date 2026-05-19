@@ -5,7 +5,7 @@
 
 from typing import (
     # Dict, 
-    List, Optional,
+    List, Optional, Tuple,
 )
 
 from app.dependencies import get_note_service
@@ -23,7 +23,9 @@ class FilterMixin:
     def set_sorting(self, column: int, order: Qt.SortOrder) -> None:
         """
         Устанавливает сортировку по указанному столбцу.
-        Преобразует индекс видимого столбца в имя поля и направление.
+       
+            - Если есть fuzzy-фильтр: локальная сортировка уже загруженных данных.
+            - Иначе: серверная сортировка (перезагрузка страницы с order_by).
 
         Args:
             column: Индекс видимого столбца (0-based).
@@ -31,11 +33,45 @@ class FilterMixin:
         """
         
         col_name = self._get_column_name_by_visible_index(column)
-        if col_name:
+        if not col_name:
+            return
+
+        if self._has_fuzzy_filter():
+            # Локальная сортировка – передаём спецификацию с одним столбцом
+            self.source_model.set_sort_specs([(column, order)])
+
+        else:
+            # Серверная сортировка – формируем order_by как список
             direction = '-' if order == Qt.DescendingOrder else ''
             order_by = [f"{direction}{col_name}"]
+
             self._current_order_by = order_by
             self.reload_with_order_by(order_by)
+
+    def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
+        """
+        Устанавливает многоколоночную сортировку.
+        
+        :param specs: список кортежей (видимый_индекс_столбца, порядок)
+        """
+        if not specs:
+            return
+        if self._has_fuzzy_filter():
+            # Локальная сортировка
+            self.source_model.set_sort_specs(specs)
+
+        else:
+            # Серверная сортировка: преобразуем в список строк
+            order_by = []
+            for col_idx, order in specs:
+                col_name = self._get_column_name_by_visible_index(col_idx)
+                if col_name:
+                    direction = '-' if order == Qt.DescendingOrder else ''
+                    order_by.append(f"{direction}{col_name}")
+
+            if order_by:
+                self._current_order_by = order_by
+                self.reload_with_order_by(order_by)
 
     def _on_sort_indicator_changed(self, logical_index: int, order: Qt.SortOrder) -> None:
         """
@@ -58,12 +94,42 @@ class FilterMixin:
         if hasattr(header, 'set_get_unique_values_func'):
             header.set_get_unique_values_func(self._get_unique_values_for_column)
 
+        # sortIndicatorChanged испускается при клике на заголовок столбца
+        header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
+
         # Подключаем сигналы от фильтр-бара
         if filter_bar:
             filter_bar.filter_removed.connect(self._on_filter_removed)
             filter_bar.all_filters_cleared.connect(self._clear_all_filters)
             if hasattr(filter_bar, 'filter_condition_removed'):
                 filter_bar.filter_condition_removed.connect(self._on_filter_condition_removed)
+
+    def _has_fuzzy_filter(self) -> bool:
+        """
+        Проверяет, есть ли в текущем дереве фильтров оператор 'fuzzy'.
+        Рекурсивный обход.
+        """
+
+        if not self._current_filters:
+            return False
+
+        def check(node):
+            if isinstance(node, dict):
+                if node.get('operator') == 'fuzzy':
+                    return True
+                
+                for value in node.values():
+                    if check(value):
+                        return True
+                    
+            elif isinstance(node, list):
+                for item in node:
+                    if check(item):
+                        return True
+                    
+            return False
+
+        return check(self._current_filters)
 
     def _on_column_filter_requested(self, column: int, logic: str, conditions: list):
         """Обработчик сигнала от заголовка таблицы."""

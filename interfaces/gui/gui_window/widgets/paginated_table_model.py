@@ -20,7 +20,7 @@
 import datetime
 # from enum import Enum
 from typing import (
-    List, Dict, Any, Optional, Callable, Tuple, 
+    List, Dict, Any, Optional, Callable, Tuple, Union, 
     # Type, Union
 )
 # from collections.abc import Sequence
@@ -230,15 +230,22 @@ class PaginatedTableModel(BaseTableModel):
         def sort_key(obj):
             key_values = []
             for col_idx, order in self._sort_specs:
+
+
+                # # Находим столбец по видимому индексу
+                # visible_idx = 0
+                # target_col = None
+                # for col in self._columns:
+                #     if col.visible:
+                #         if visible_idx == col_idx:
+                #             target_col = col
+                #             break
+                #         visible_idx += 1
+
                 # Находим столбец по видимому индексу
-                visible_idx = 0
-                target_col = None
-                for col in self._columns:
-                    if col.visible:
-                        if visible_idx == col_idx:
-                            target_col = col
-                            break
-                        visible_idx += 1
+                target_col = self._column_appears_for_index(col_idx)
+
+
                 if target_col is None or target_col.column_type != ColumnType.DATA:
                     # Если столбец не DATA, пропускаем (сортировка по нему невозможна)
                     key_values.append((None,))
@@ -310,15 +317,21 @@ class PaginatedTableModel(BaseTableModel):
             Объект TableColumn или None, если столбец с таким индексом не существует.
         """
 
-        visible_idx = 0
-        # Находим объект TableColumn по видимому индексу
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == visible_index:
-                    return col
+        # visible_idx = 0
+        # # Находим объект TableColumn по видимому индексу
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == visible_index:
+        #             return col
                 
-                visible_idx += 1
-        return None
+        #         visible_idx += 1
+        # return None
+
+        # Находим столбец по видимому индексу
+        target_col = self._column_appears_for_index(visible_index)
+
+        return target_col
+    
 
     def column_count(self) -> int:
         """Возвращает общее количество столбцов (включая скрытые)."""
@@ -360,16 +373,19 @@ class PaginatedTableModel(BaseTableModel):
             Индекс видимого столбца (0-based) или -1.
         """
 
-        visible_idx = 0
+        # visible_idx = 0
 
-        for col in self._columns:
-            if col.visible:
-                if col.system_name == system_name:
-                    return visible_idx
+        # for col in self._columns:
+        #     if col.visible:
+        #         if col.system_name == system_name:
+        #             return visible_idx
                 
-                visible_idx += 1
+        #         visible_idx += 1
 
-        return -1
+        # Находим номер видимого столбеца по системному имени
+        target_col = self._column_appears_for_index(system_name, if_return_visible_idx=True)
+
+        return -1 if target_col is None else target_col
 
     def get_column_by_system_name(self, system_name: str) -> Optional[TableColumn]:
         """
@@ -382,11 +398,17 @@ class PaginatedTableModel(BaseTableModel):
             Объект TableColumn или None, если столбец не найден.
         """
 
-        for col in self._columns:
-            if col.system_name == system_name:
-                return col
+        # for col in self._columns:
+        #     if col.system_name == system_name:
+        #         return col
             
-        return None
+        # return None
+    
+        # Находим столбец по системному имени
+        target_col = self._column_appears_for_index(system_name, is_visible=False)
+
+        return target_col
+
 
     def set_column_visible(self, system_name: str, visible: bool) -> None:
         """
@@ -422,16 +444,24 @@ class PaginatedTableModel(BaseTableModel):
             Имя поля (например, 'last_name') или None для системных столбцов (чекбокс, кнопка).
         """
 
-        visible_idx = 0
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == visible_index:
+        # visible_idx = 0
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == visible_index:
 
-                    return col.field_name if col.column_type == ColumnType.DATA else None
+        #             return col.field_name if col.column_type == ColumnType.DATA else None
                 
-                visible_idx += 1
+        #         visible_idx += 1
 
-        return None
+        # return None
+
+        # Находим видимый столбец по системному имени
+        target_col = self._column_appears_for_index(visible_index)
+        if target_col is None:
+            return None
+        
+        target_col = target_col.field_name if target_col.column_type == ColumnType.DATA else None
+        return target_col
 
     # ----------------------------------------------------------------------
     # Реализация абстрактных методов BaseTableModel
@@ -482,9 +512,10 @@ class PaginatedTableModel(BaseTableModel):
             return
         
         self._data[row] = new_dto
-        top_left = self.index(row, 0)
-        bottom_right = self.index(row, self.columnCount() - 1)
-        self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
+        # top_left = self.index(row, 0)
+        # bottom_right = self.index(row, self.columnCount() - 1)
+        # self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
+        self._redrawing_lines(row, [Qt.DisplayRole, Qt.EditRole])
 
     def add_row(self, dto: Any) -> int:
         """
@@ -611,32 +642,120 @@ class PaginatedTableModel(BaseTableModel):
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
-    def set_row_color(self, row: int, color: QColor) -> None:
+    # def set_row_color(self, row: int, color: QColor) -> None:
+    #     """
+    #     Устанавливает цвет фона для строки.
+
+    #     Args:
+    #         row: Индекс строки.
+    #         color: Цвет фона.
+
+    #     Returns:
+    #         None
+    #     """
+
+    #     if 0 <= row < len(self._data):
+    #         self._row_colors[row] = color
+    #         top_left = self.index(row, 0)
+    #         bottom_right = self.index(row, self.columnCount() - 1)
+    #         self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
+
+    def set_row_color(self, entity_id: int, color: QColor) -> None:
         """
-        Устанавливает цвет фона для строки.
+        Устанавливает цвет фона для строки по ID сущности.
+        Цвет сохраняется в словаре _row_colors по ключу entity_id.
+        При отрисовке строки (в data) цвет будет извлекаться по ID текущего DTO.
 
         Args:
-            row: Индекс строки.
+            row: ID сущности (из DTO). Может быть отрицательным для новых строк.
             color: Цвет фона.
 
         Returns:
             None
         """
+        if (entity_id is None) or (color is None):
+            return
+            
 
-        if 0 <= row < len(self._data):
-            self._row_colors[row] = color
-            top_left = self.index(row, 0)
-            bottom_right = self.index(row, self.columnCount() - 1)
-            self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
+        self._row_colors[entity_id] = color
+
+        # Обновляем все строки, где DTO имеет этот ID (обычно одна строка)
+        for row, dto in enumerate(self._data):
+            if getattr(dto, 'id', None) == entity_id:
+                self._redrawing_lines(row)
+                break
+    
+    def clear_row_color(self, entity_id: int) -> None:
+        """Удаляет цвет для указанной сущности и обновляет строку."""
+        if entity_id not in self._row_colors:
+            return
+
+        del self._row_colors[entity_id]
+
+        # Находим строку с этим ID и перерисовываем
+        for row, dto in enumerate(self._data):
+            if getattr(dto, 'id', None) == entity_id:
+                # top_left = self.index(row, 0)
+                # bottom_right = self.index(row, self.columnCount() - 1)
+                # self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
+                self._redrawing_lines(row)
+                break
 
     def clear_row_colors(self) -> None:
-        """Сбрасывает все установленные цвета строк."""
+        """
+        Сбрасывает все установленные цвета строк.
+
+        Очищает словарь _row_colors и испускает сигнал dataChanged для всех строк,
+        чтобы представление перерисовало их с новым фоном (без цвета).
+        """
+        if not self._row_colors:
+            return
 
         self._row_colors.clear()
+
         if self.rowCount() > 0:
-            top_left = self.index(0, 0)
-            bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
-            self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
+            # top_left = self.index(0, 0)
+            # bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
+            # self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
+            self._redrawing_lines()
+
+        # """Сбрасывает все установленные цвета строк."""
+
+        # self._row_colors.clear()
+
+        # # Перерисовываем все строки, чтобы убрать цвета
+        # if self.rowCount() > 0:
+        #     self._redrawing_lines()
+
+    def _redrawing_lines(
+            self, 
+            row: Optional[int] = None, 
+            roles: Optional[List[Qt.ItemDataRole]] = None 
+        ) -> None:
+        """
+        Перерисовывает строку по индексу.
+
+        Args:
+            row: Индекс строки.
+            roles: Список ролей, которые нужно перерисовать.
+                None = [Qt.BackgroundRole]
+
+        Returns:
+            None
+        """
+        
+        if roles is None:
+            roles = [Qt.BackgroundRole]
+
+        top_left = self.index(
+            row if row is not None else 0
+            , 0
+        )
+        bottom_right = self.index(
+            row if row is not None else (self.rowCount() - 1),
+            self.columnCount() - 1
+        )
+        self.dataChanged.emit(top_left, bottom_right, roles)
 
     # ----------------------------------------------------------------------
     # Пагинация
@@ -734,57 +853,73 @@ class PaginatedTableModel(BaseTableModel):
 
         return self.visible_column_count()
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
-        """
-        Возвращает данные для ячейки в зависимости от роли.
 
-        Поддерживаемые роли:
-            - Qt.DisplayRole: текстовое представление (даты форматируются).
-            - Qt.EditRole: исходное значение DTO.
-            - Qt.BackgroundRole: цвет фона строки.
-            - Qt.TextAlignmentRole: выравнивание (числа – вправо, остальное – влево).
-            - Qt.UserRole: исходное значение для сортировки.
-        
+    def _column_appears_for_index(
+        self, 
+        value_col: Union[int, str, ColumnType], 
+        is_visible:bool = True,
+        if_return_visible_idx:bool = False
+    )-> Optional[Union[int, TableColumn]]:
+        """
+        Возвращает первый столбец, у которого совпадает:
+            - порядковый индекс (visible_idx) если value_col int
+            - system_name если value_col str
+            - column_type если value_col ColumnType
+        При этом учитывается только видимость (если is_visible=True, то только visible=True).
+
         Args:
-            index: Индекс ячейки.
-            role: Роль данных.
+            value_col: Искомое значение (индекс, имя или тип).
+            is_visible: Если True, учитываются только видимые столбцы;
+                        если False, учитываются все столбцы.
 
         Returns:
-            Значение в зависимости от роли или None.
+            Найденный столбец или None.
         """
 
-        if not index.isValid():
-            return None
-
-        row = index.row()
-        visible_col = index.column()
-        if row >= len(self._data):
-            return None
+        if not isinstance(value_col, (int, str, ColumnType)):
+            raise TypeError(f"value_col должен быть int, str или ColumnType, получен {type(value_col)}")
 
         # Находим столбец по видимому индексу
         visible_idx = 0
-        target_col = None
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == visible_col:
-                    target_col = col
-                    break
 
+        thec_value = None
+
+        # Находим объект TableColumn по видимому индексу
+        for col in self._columns:
+            thec_visible = getattr(col, 'visible', False)
+            if thec_visible or (not is_visible):
+                if isinstance(value_col, int):
+                    thec_value = visible_idx   
+                elif isinstance(value_col, str): 
+                    thec_value = col.system_name  
+                elif isinstance(value_col, ColumnType): 
+                    thec_value = col.column_type  
+                
+                if thec_value == value_col:
+                    return col if not if_return_visible_idx else visible_idx
+                    
                 visible_idx += 1
 
-        if target_col is None:
-            return None
+        return None
 
-        # Чекбокс-столбец (системный)
-        if target_col.system_name == self._checkbox_column_system_name:
-            if role == Qt.CheckStateRole:
-                return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
-            
-            return None
+    def _get_line_color_DTO(
+        self, 
+        role: int, 
+        row: int, 
+        target_col
+    ) -> Any:
 
-        # Цвет строки
+        # # Цвет строки
+        # if role == Qt.BackgroundRole:
+        #     return self._row_colors.get(row)
+
+        # Цвет строки (по ID сущности)
         if role == Qt.BackgroundRole:
-            return self._row_colors.get(row)
+            dto = self._data[row]
+            entity_id = getattr(dto, 'id', None)
+            if entity_id is not None:
+                return self._row_colors.get(entity_id)
+            return None
 
         # Получаем значение из DTO
         if target_col.column_type == ColumnType.DATA and target_col.field_name:
@@ -816,7 +951,48 @@ class PaginatedTableModel(BaseTableModel):
         if role == Qt.UserRole:
             return value
 
-        return None
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
+        """
+        Возвращает данные для ячейки в зависимости от роли.
+
+        Поддерживаемые роли:
+            - Qt.DisplayRole: текстовое представление (даты форматируются).
+            - Qt.EditRole: исходное значение DTO.
+            - Qt.BackgroundRole: цвет фона строки.
+            - Qt.TextAlignmentRole: выравнивание (числа – вправо, остальное – влево).
+            - Qt.UserRole: исходное значение для сортировки.
+        
+        Args:
+            index: Индекс ячейки.
+            role: Роль данных.
+
+        Returns:
+            Значение в зависимости от роли или None.
+        """
+
+        if not index.isValid():
+            return None
+
+        row = index.row()
+        visible_col = index.column()
+        if row >= len(self._data):
+            return None
+
+        # Находим столбец по видимому индексу
+        target_col = self._column_appears_for_index(visible_col)
+
+        if target_col is None:
+            return None
+
+        # Чекбокс-столбец (системный)
+        if target_col.system_name == self._checkbox_column_system_name:
+            if role == Qt.CheckStateRole:
+                return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
+            
+            return None
+
+        # Цвет строки из DTO
+        return self._get_line_color_DTO(role, row, target_col)
 
     def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
         """
@@ -839,16 +1015,19 @@ class PaginatedTableModel(BaseTableModel):
         if row >= len(self._data):
             return False
 
-        # Находим столбец по видимому индексу
-        visible_idx = 0
-        target_col = None
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == visible_col:
-                    target_col = col
-                    break
+        # # Находим столбец по видимому индексу
+        # visible_idx = 0
+        # target_col = None
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == visible_col:
+        #             target_col = col
+        #             break
 
-                visible_idx += 1
+        #         visible_idx += 1
+
+        # Находим столбец по видимому индексу
+        target_col = self._column_appears_for_index(visible_col)
 
         if target_col is None:
             return False
@@ -920,15 +1099,19 @@ class PaginatedTableModel(BaseTableModel):
             return Qt.NoItemFlags
 
         visible_col = index.column()
-        visible_idx = 0
-        target_col = None
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == visible_col:
-                    target_col = col
-                    break
 
-                visible_idx += 1
+        # visible_idx = 0
+        # target_col = None
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == visible_col:
+        #             target_col = col
+        #             break
+
+        #         visible_idx += 1
+        
+        # Находим столбец по видимому индексу
+        target_col = self._column_appears_for_index(visible_col)
 
         if target_col is None:
             return Qt.NoItemFlags
@@ -966,15 +1149,20 @@ class PaginatedTableModel(BaseTableModel):
         if role != Qt.DisplayRole:
             return None
 
-        visible_idx = 0
-        for col in self._columns:
-            if col.visible:
-                if visible_idx == section:
-                    return col.title
+        # visible_idx = 0
+        # for col in self._columns:
+        #     if col.visible:
+        #         if visible_idx == section:
+        #             return col.title
                 
-                visible_idx += 1
+        #         visible_idx += 1
 
-        return None
+        # return None    
+
+        # Находим столбец по видимому индексу
+        target_col = self._column_appears_for_index(section)
+
+        return None if target_col is None else target_col.title
 
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         """Сортировка по одному столбцу (сохраняется обратная совместимость)."""

@@ -2431,6 +2431,11 @@ class PaginatedListPage(
         
         return QColor(255, 255, 255)      # белый
 
+    def _source_model_set_row_color(self, row: int, color: QColor):
+        dto = self.source_model.get_item_at_row(row)
+        if dto:
+            self.source_model.set_row_color(dto.id, color)
+
     def _update_row_color(self, row: int):
         """
         Обновляет цвет строки в таблице на основе статуса сущности.
@@ -2450,7 +2455,8 @@ class PaginatedListPage(
             return
         
         color = self._get_row_color(dto) # этот метод уже использует реестр
-        self.source_model.set_row_color(row, color)
+        # self.source_model.set_row_color(row, color)
+        self._source_model_set_row_color(row, color)
 
     # ------------------------------------------------------------------
     # Методы для работы с выделением и кнопками

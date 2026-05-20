@@ -52,7 +52,27 @@ class UIMixin:
     """
     Миксин для построения пользовательского интерфейса страницы списка.
 
-    Создаёт верхнюю панель, таблицу, фильтр-бар и управляет их состоянием.
+    Создаёт:
+        - Верхнюю панель с кнопками и выпадающими списками (`_create_top_panel`).
+        - Таблицу (`FilterTableView`) с поддержкой фильтрации и сортировки (`_create_table`).
+        - Панель активных фильтров (`FilterBar`) (`_create_filter_bar`).
+        - Делегаты для столбцов (`_setup_delegates`).
+
+    Требования к классу-наследнику:
+        - Должен иметь атрибут `main_layout` (QVBoxLayout), созданный до вызова `setup_ui()`.
+        - Должен реализовывать метод `toggle_edit_mode(enable: bool)` – вызывается при переключении режима.
+        - Должен реализовывать методы `add_row()`, `delete_selected_rows()`, `cancel_selected_rows_changes()`,
+          `save_all_changes()`, `reload_data()`, `get_current_selected_dto()`, `set_global_search(text)`.
+        - Должен иметь сигналы `add_requested`, `edit_requested`, `delete_requested`, `action_requested`.
+
+    Атрибуты, создаваемые миксином:
+        edit_mode_btn (QPushButton): Кнопка переключения режима редактирования.
+        action_combo (QComboBox): Выпадающий список действий (обычный режим).
+        inline_action_combo (QComboBox): Выпадающий список inline-действий (режим редактирования).
+        save_changes_btn (QPushButton): Кнопка сохранения всех изменений.
+        search_edit (QLineEdit): Поле глобального поиска.
+        table_view (FilterTableView): Таблица.
+        filter_bar (FilterBar): Панель активных фильтров.
     """
 
     def setup_ui(self):
@@ -68,9 +88,11 @@ class UIMixin:
             6. Вставляет фильтр-бар перед таблицей.
             7. Вызывает `_setup_delegates()` – устанавливает делегаты (переопределяется в наследнике).
 
-        Требования:
-            - self.main_layout должен существовать (например, создан в `__init__`).
-            - self.table_view будет создан в `_create_table()`.
+        Примечания:
+            - Предполагается, что self.main_layout (QVBoxLayout) уже создан.
+            - После вызова метода таблица и панель фильтров готовы к использованию.
+        Returns:
+            None        
         """
 
         self.main_layout = QVBoxLayout(self)
@@ -198,8 +220,13 @@ class UIMixin:
             - Триггеры редактирования (NoEditTriggers – будут включены в режиме редактирования)
             - Подключение двойного клика к self._on_row_double_clicked
 
-        Примечание:
-            Модель таблицы и прокси-модель должны быть установлены в наследнике.
+        Примечания:
+            - Модель таблицы должна быть установлена отдельно (например, в наследнике).
+            - Если в классе-наследнике есть метод `_on_sort_indicator_changed`,
+            подключает сигнал sortIndicatorChanged заголовка к этому методу.
+
+        Returns:
+            Noneе.
         """
 
         # from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
@@ -210,18 +237,25 @@ class UIMixin:
         self.table_view.setEditTriggers(self.table_view.NoEditTriggers)
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
-        # Подключаем сигнал сортировки, если метод-обработчик определён в классе-наследнике
-        # Обоснование: Мы подключаем сигнал sortIndicatorChanged заголовка таблицы к методу _on_sort_indicator_changed, который должен быть предоставлен одним из миксинов (например, FilterMixin). Проверка hasattr делает код устойчивым к отсутствию обработчика.
-        if hasattr(self, '_on_sort_indicator_changed'):
-            header = self.table_view.horizontalHeader()
-            header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
+        # # Подключаем сигнал сортировки, если метод-обработчик определён в классе-наследнике
+        # # Обоснование: Мы подключаем сигнал sortIndicatorChanged заголовка таблицы к методу _on_sort_indicator_changed, который должен быть предоставлен одним из миксинов (например, FilterMixin). Проверка hasattr делает код устойчивым к отсутствию обработчика.
+        # if hasattr(self, '_on_sort_indicator_changed'): # перенесли в FilterMixin
+        #     header = self.table_view.horizontalHeader()
+        #     header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
     def _create_filter_bar(self):
         """
         Создаёт панель активных фильтров (FilterBar).
 
         Устанавливает:
-            - self.filter_bar (FilterBar) – изначально скрыта.
+            - self.filter_bar (FilterBar)
+            - Панель изначально скрыта (setVisible(False))
+
+        Вставка производится в self.main_layout перед self.table_view.
+        Если self.table_view не найден, панель добавляется в конец.
+
+        Returns:
+            None
         """
 
         # from interfaces.gui.gui_window.widgets.filter_column import FilterBar
@@ -240,6 +274,9 @@ class UIMixin:
 
         Примечание:
             Этот метод вызывается в конце `setup_ui()`.
+
+        Returns:
+            None
         """
 
         # Будет реализовано позже, аналогично DynamicListPage._setup_delegates
@@ -251,12 +288,19 @@ class UIMixin:
 
         Args:
             index (int): Индекс выбранного пункта.
+                0 – заглушка
                 1 → Добавить (испускает сигнал add_requested)
                 2 → Редактировать (испускает edit_requested с текущим DTO)
                 3 → Удалить (испускает delete_requested с текущим DTO)
                 4 → Обновить (вызывает reload_data())
 
         После обработки сбрасывает индекс комбобокса на 0 (заглушку).
+
+        Действия:
+            1 -> испускает сигнал self.add_requested.emit()
+            2 -> испускает self.edit_requested.emit(dto) с текущим выбранным DTO
+            3 -> испускает self.delete_requested.emit(dto) с текущим выбранным DTO
+            4 -> вызывает self.reload_data()
 
         Требования:
             - self.get_current_selected_dto() – возвращает DTO выбранной строки.
@@ -288,11 +332,17 @@ class UIMixin:
 
         Args:
             index (int): Индекс выбранного пункта.
+                0 – заглушка
                 1 → Добавить строку (вызывает add_row())
                 2 → Удалить строку (вызывает delete_selected_rows())
                 3 → Отменить изменения (вызывает cancel_selected_rows_changes())
 
         После обработки сбрасывает индекс комбобокса на 0 (заглушку).
+
+        Действия:
+            1 -> вызывает self.add_row()
+            2 -> вызывает self.delete_selected_rows()
+            3 -> вызывает self.cancel_selected_rows_changes()
 
         Требования:
             - self.add_row(), self.delete_selected_rows(), self.cancel_selected_rows_changes()
@@ -314,7 +364,7 @@ class UIMixin:
         """
         Обработчик нажатия дополнительной кнопки (self.action_btn).
 
-        Испускает сигнал action_requested с текущим DTO.
+        Испускает сигнал self.action_requested.emit(dto) с текущим DTO.
 
         Требования:
             - self.get_current_selected_dto() – возвращает DTO выбранной строки.
@@ -334,6 +384,9 @@ class UIMixin:
 
         Args:
             index (QModelIndex): Индекс ячейки, по которой кликнули.
+
+        Returns:
+            None
         """
 
         if not self.edit_mode:
@@ -345,21 +398,24 @@ class UIMixin:
         """
         Обновляет видимость элементов UI в зависимости от режима редактирования.
 
-        Args:
-            edit_mode (bool): True – режим редактирования включён, False – выключен.
-
         Действия:
             - Скрывает/показывает self.action_combo.
             - Показывает/скрывает self.inline_action_combo.
             - Показывает/скрывает self.save_changes_btn.
+            - Показывает/скрывает self.cancel_parent_btn.
             - Устанавливает режим редактирования таблицы (DoubleClicked / NoEditTriggers).
             - Если есть self.action_btn – включает/отключает его (в обычном режиме активна, в режиме редактирования – нет).
 
         Примечание:
-            Этот метод вызывается из `EditModeMixin._set_edit_mode()`.
+            - Этот метод вызывается из `EditModeMixin._set_edit_mode()`.
+            - В наследниках может быть переопределён для дополнительной кастомизации.
+
+        Args:
+            edit_mode (bool): True – режим редактирования включён, False – выключен.
         """
 
         # описание в def _create_top_panel
+        
         self.action_combo.setVisible(not edit_mode)
         self.inline_action_combo.setVisible(edit_mode)
         self.save_changes_btn.setVisible(edit_mode)

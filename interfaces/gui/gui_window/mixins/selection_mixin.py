@@ -36,6 +36,32 @@ from typing import (
 class SelectionMixin:
     """
     Предоставляет методы для работы с выделением строк (обычное выделение и чекбоксы).
+
+    Требования к классу-наследнику (должны быть определены атрибуты):
+        - self.table_view (QTableView): Таблица, для которой управляется выделение.
+        - self.source_model (BaseTableModel): Модель данных с методами:
+            - get_item_at_row(row) -> Any
+            - get_checkbox_state(row) -> bool
+            - set_checkbox_state(row, checked) -> None
+        - self.proxy_model (Optional[QSortFilterProxyModel]): Если присутствует, индексы автоматически преобразуются.
+        - Желателен метод _update_selection_state() для обновления UI при изменении выделения.
+
+    Атрибуты (лениво инициализируются):
+        _saved_row (int): Сохранённый индекс строки (используется декораторами).
+        selected_dto (Optional[Any]): Кэшированный DTO текущей выделенной строки.
+
+    Example:
+        class MyTablePage(SelectionMixin, QWidget):
+            def __init__(self):
+                super().__init__()
+                self.table_view = QTableView()
+                self.source_model = SomeTableModel()
+                self.table_view.setModel(self.source_model)
+                self.selectionModel().selectionChanged.connect(self._on_selection_changed)
+
+            def _on_selection_changed(self, selected, deselected):
+                self._update_selection_state()  # обновить selected_dto
+                # ... дополнительная логика
     """
     
     # ------------------------------------------------------------------
@@ -125,7 +151,7 @@ class SelectionMixin:
         # # if hasattr(self, 'proxy_model') and self.proxy_model:
         # #     source_index = self.proxy_model.mapToSource(proxy_index)
         
-        # source_index = self._get_source_index_or_proxy_model(proxy_index) # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
+        # source_index = self._map_to_source_index(proxy_index) # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
 
         # return self.source_model.get_item_at_row(source_index.row())
     
@@ -133,7 +159,7 @@ class SelectionMixin:
     # Защищённые методы (вспомогательные)
     # ------------------------------------------------------------------
 
-    def  _get_source_index_or_proxy_model (self, proxy_index):
+    def  _map_to_source_index(self, proxy_index):
         """
         Преобразует индекс из прокси-модели в индекс исходной модели.
 
@@ -141,10 +167,16 @@ class SelectionMixin:
         возвращает переданный индекс без изменений.
 
         Args:
-            proxy_index: Индекс в прокси-модели (QModelIndex).
+            proxy_index (QModelIndex): Индекс в прокси-модели (или исходной модели,
+                если прокси нет).
 
         Returns:
             QModelIndex: Индекс в исходной модели.
+
+        Note:
+            Этот метод используется внутри `_get_selected_rows_indices()` для поддержки
+            как прямых моделей, так и моделей с прокси. В `PaginatedListPage` прокси-модель
+            не используется, поэтому метод просто возвращает переданный индекс.
         """
 
         # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
@@ -255,6 +287,13 @@ class SelectionMixin:
 
         Returns:
             int: Индекс строки или -1, если не найдено.
+
+        Note:
+            Линейный поиск по всем строкам. При большом количестве строк (тысячи)
+            рекомендуется поддерживать словарь соответствия ID → индекс в модели,
+            обновляемый при изменении данных. Для пагинированных страниц
+            (PaginatedListPage) этот метод используется редко и только для
+            существующих записей, поэтому текущая реализация приемлема.
         """
 
         for row in range(self.source_model.rowCount()):
@@ -292,7 +331,7 @@ class SelectionMixin:
         #         # if hasattr(self, 'proxy_model') and self.proxy_model:
         #         #     source_index = self.proxy_model.mapToSource(proxy_index)
 
-        #         source_index = self._get_source_index_or_proxy_model(proxy_index) # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
+        #         source_index = self._map_to_source_index(proxy_index) # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
                 
         #         dto = self.source_model.get_item_at_row(source_index.row())
         #         if dto and dto.id is not None:
@@ -315,7 +354,7 @@ class SelectionMixin:
         
         rows = []
         for proxy_index in selection_model.selectedRows(0):
-            source_index = self._get_source_index_or_proxy_model(proxy_index)
+            source_index = self._map_to_source_index(proxy_index) # если есть прокси модель - переход. 
             if source_index.isValid():
                 rows.append(source_index.row())
                 
@@ -341,7 +380,9 @@ class SelectionMixin:
         """
         Возвращает множество ID сущностей, у которых установлены чекбоксы.
 
-        Использует метод get_checkbox_state модели (если он реализован).
+        Использует метод get_checkbox_state модели (обязан быть реализован в
+        `BaseTableModel` или наследнике). Если чекбокс-столбец скрыт, этот метод
+        всё равно вернёт пустое множество, так как состояния чекбоксов не меняются.
 
         Returns:
             set[int]: ID выбранных через чекбоксы сущностей.
@@ -358,12 +399,17 @@ class SelectionMixin:
                 dto = self.source_model.get_item_at_row(row)
                 if dto and dto.id is not None:
                     ids.add(dto.id)
-                    
+
         return ids
 
     def _clear_checkboxes(self):
         """
         Снимает все чекбоксы в таблице (если модель поддерживает set_checkbox_state).
+
+        Note:
+            Если чекбокс-столбец в данный момент скрыт, вызов всё равно сбросит
+            внутренние состояния чекбоксов в модели, но это не повлияет на UI.
+            Обычно этот метод вызывается при выходе из режима редактирования.
         """
         if hasattr(self.source_model, 'set_checkbox_state'):
             for row in range(self.source_model.rowCount()):

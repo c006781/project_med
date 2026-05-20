@@ -3,6 +3,12 @@
 """
 Миксин для включения/выключения режима редактирования, сохранения и отмены изменений.
 
+**Назначение:**
+    Предоставляет страницам списка (например, PaginatedListPage) универсальный механизм
+    переключения между режимом просмотра и режимом редактирования. В режиме редактирования
+    пользователь может изменять данные прямо в таблице, добавлять/удалять строки,
+    а затем сохранять или отменять изменения.
+
 **Абстрактные методы, которые должен реализовать класс-наследник:**
     - _has_unsaved_changes() -> bool
     - _discard_all_changes() -> None
@@ -17,6 +23,35 @@
 **Примечание:** атрибут `edit_mode` не создаётся в миксине, так как он может быть определён в наследнике.
     Это позволяет гибко настраивать его хранение (например, через property в PaginatedListPage).
 
+Пример:
+    >>> class MyListPage(BasePage, EditModeMixin):
+    ...     def __init__(self):
+    ...         super().__init__()
+    ...         self.edit_mode = False
+    ...         self.edit_mode_btn = QPushButton("Режим редактирования")
+    ...         self.edit_mode_btn.setCheckable(True)
+    ...         self.edit_mode_btn.toggled.connect(self.toggle_edit_mode)
+    ...
+    ...     def _has_unsaved_changes(self) -> bool:
+    ...         return bool(self.modified_ids or self.deleted_ids or self.new_rows)
+    ...
+    ...     def _discard_all_changes(self) -> None:
+    ...         self.modified_ids.clear()
+    ...         self.deleted_ids.clear()
+    ...         self.new_rows.clear()
+    ...         self.reload_data()
+    ...
+    ...     def _save_all_changes_impl(self) -> bool:
+    ...         try:
+    ...             self._save_new_rows()
+    ...             self._save_modified_rows()
+    ...             self._save_deleted_rows()
+    ...             return True
+    ...         except Exception:
+    ...             return False
+    ...
+    ...     def reload_data(self) -> None:
+    ...         self._load_data()
 """
 
 from abc import ABC, abstractmethod
@@ -31,6 +66,12 @@ class EditModeMixin(ABC):
     """
     Предоставляет методы для переключения режима редактирования,
     сохранения и отмены изменений.
+
+    Сигналы (должны быть определены в наследнике при необходимости):
+        - edit_mode_changed(bool): испускается при переключении режима.
+
+    Атрибуты (должны быть определены в наследнике):
+        edit_mode (bool): Текущее состояние режима редактирования.
     """
 
     # ------------------------------------------------------------------
@@ -39,6 +80,8 @@ class EditModeMixin(ABC):
 
     @property
     def logger(self) -> AppLogger:
+        """Логгер для записи событий (ленивая инициализация)."""
+
         if not hasattr(self, '_logger'):
             self._logger = AppLogger.get_instance(
                 name='gui.EditModeMixin',
@@ -55,15 +98,17 @@ class EditModeMixin(ABC):
     @property 
     def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
         """
-        Флаг блокировки повторного входа в методы сохранения (например, при сохранении дочерних
-        и основных полей одновременно). Используется в `_save_all_changes_impl` и `save_rows_with_children`.
+        Флаг блокировки повторного входа в методы сохранения.
+
+        Используется в `_save_all_changes_impl` и `save_rows_with_children`
+        для предотвращения рекурсивных вызовов или одновременного сохранения.
 
         Returns:
-            True, если сохранение уже выполняется в другом потоке/рекурсивном вызове.
+            True, если сохранение уже выполняется в другом вызове.
         """
 
         if not hasattr(self, '__saving_in_progress'):
-            self.__saving_in_progress = False # флаг блокировки
+            self.__saving_in_progress = False  # флаг блокировки
 
         return self.__saving_in_progress
 
@@ -73,6 +118,12 @@ class EditModeMixin(ABC):
 
     @property
     def edit_mode(self) -> bool:
+        """
+        Режим редактирования (True – включён, False – выключен).
+
+        Должен быть переопределён в наследнике.
+        """
+
         if not hasattr(self, '_edit_mode'):
             self._edit_mode = False
         return self._edit_mode
@@ -87,29 +138,52 @@ class EditModeMixin(ABC):
 
     @abstractmethod
     def _has_unsaved_changes(self) -> bool:
-        """Возвращает True, если есть несохранённые изменения."""
+        """
+        Проверяет наличие несохранённых изменений.
+
+        Должен быть реализован в наследнике.
+
+        Returns:
+            True, если есть несохранённые изменения (новые, изменённые, удалённые строки
+            или черновики дочерних компонентов), иначе False.
+        """
         pass
 
     @abstractmethod
     def _discard_all_changes(self) -> None:
-        """
+        """"
         Полностью отменяет все несохранённые изменения.
 
-        ВНИМАНИЕ: При переопределении этого метода в наследниках убедитесь, что вы вызываете
-        `discard_entity_subtree` для всех сущностей, что автоматически уменьшит счётчики родителей.
-        Не нужно вручную обновлять счётчики здесь – они будут скорректированы в `discard_entity_subtree`.
+        **Действия:**
+            - Очищает реестр черновиков для текущего типа сущности.
+            - Удаляет все новые строки, сбрасывает изменённые и удалённые записи.
+            - Перезагружает данные из БД (через reload_data).
+
+        **ВНИМАНИЕ:** При переопределении в наследниках убедитесь, что вы вызываете
+        `discard_entity_subtree` для всех сущностей, что автоматически уменьшит
+        счётчики родителей. Не нужно вручную обновлять счётчики здесь.
+
+        Должен быть реализован в наследнике.
         """
         pass
 
     @abstractmethod
     def reload_data(self) -> None:
-        """Перезагружает данные (должен быть реализован в наследнике)."""
+        """Перезагружает данные из БД (сбрасывает текущую страницу) 
+        (должен быть реализован в наследнике).
+        """
         pass
 
     @abstractmethod
     def _save_all_changes_impl(self) -> bool:
         """
         Основной метод сохранения всех изменений (возвращает True при успехе).
+
+        **Порядок действий (рекомендуемый):**
+            1. Сохранить новые строки (получить реальные ID).
+            2. Применить дочерние черновики (фото, заметки и т.д.).
+            3. Сохранить изменённые существующие строки.
+            4. Удалить помеченные строки.
 
         ВНИМАНИЕ ДЛЯ НАСЛЕДНИКОВ:
             При реализации этого метода убедитесь, что:
@@ -121,6 +195,9 @@ class EditModeMixin(ABC):
             4. ВСЕ обновления счётчиков родителей (увеличение/уменьшение количества активных потомков)
             должны происходить в методах, изменяющих статус сущности (например, в `_save_new_rows`
             и `_save_modified_rows`), а НЕ внутри `clear_own_change`. Это предотвратит двойной учёт.
+        
+        Returns:
+            True, если сохранение прошло успешно, иначе False.
         """
             
         pass
@@ -129,7 +206,7 @@ class EditModeMixin(ABC):
     # Публичные методы управления режимом
     # ------------------------------------------------------------------
 
-    def toggle_edit_mode(self, enable: bool):
+    def toggle_edit_mode(self, enable: bool) -> None:
         """
         Включает или выключает режим редактирования.
 
@@ -147,7 +224,14 @@ class EditModeMixin(ABC):
             - `_save_all_changes_impl() -> bool` – сохранение всех изменений.
             - `reload_data() -> None` – перезагрузка данных.
 
-        **Важно:** Не вызывает диалог повторно при выходе из режима после успешного сохранения.
+        **Важно:** 
+            Не вызывает диалог повторно при выходе из режима после успешного сохранения.
+
+        Args:
+            enable: True – включить режим редактирования, False – выключить.
+
+        Note:
+            Не вызывает диалог повторно при выходе из режима после успешного сохранения.
         """
 
         if enable == self.edit_mode:
@@ -232,8 +316,13 @@ class EditModeMixin(ABC):
     #
     #         return False
 
-    def cancel_all_changes(self):
-        """Отменяет все изменения и перезагружает данные."""
+    def cancel_all_changes(self) -> None:
+        """
+        Отменяет все изменения и перезагружает данные.
+
+        Вызывает `_discard_all_changes()` и `reload_data()`, после чего выходит из режима редактирования.
+        """
+        
         self._discard_all_changes()
         self.reload_data()
         self._exit_edit_mode()
@@ -259,8 +348,14 @@ class EditModeMixin(ABC):
     #     self._clear_drafts()
     #     self.source_model.clear_row_colors()
 
-    def _set_edit_mode(self, enable: bool):
-        """Устанавливает флаг режима и обновляет UI."""
+    def _set_edit_mode(self, enable: bool)-> None:
+        """
+        Устанавливает флаг режима и обновляет UI.
+
+        Args:
+            enable: True – включить режим редактирования, False – выключить.
+        """
+
         self.edit_mode = enable
 
         if hasattr(self, 'source_model'):
@@ -274,7 +369,7 @@ class EditModeMixin(ABC):
     #     self.source_model.set_checkbox_column_visible(enable)
     #     self._update_ui_for_edit_mode(enable)
 
-    def _exit_edit_mode(self):
+    def _exit_edit_mode(self)-> None:
         """Выходит из режима редактирования (без диалога)."""
         if self.edit_mode:
             # self.toggle_edit_mode(False)

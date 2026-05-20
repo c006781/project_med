@@ -1,11 +1,23 @@
 # interfaces/gui/gui_window/widgets/paginated_table_model.py
 """
-Модель таблицы с поддержкой ленивой подгрузки страниц (пагинации).
+Модель таблицы с поддержкой ленивой подгрузки страниц (пагинации) и динамическими столбцами.
 
 В отличие от DynamicTableModel, эта модель не требует полной замены данных
 через update_data. Вместо этого она поддерживает добавление страниц (append_page)
 и предоставляет методы для управления общим количеством записей и флагом
 возможности подгрузки следующих страниц.
+
+Важно:
+    - Этот класс не предназначен для прямого использования в `QSortFilterProxyModel`.
+    - Все операции фильтрации и сортировки должны выполняться на стороне сервера.
+    - Локальная сортировка (`set_sort_specs`) сортирует только загруженные строки.
+
+Особенности:
+    - Использует класс `TableColumn` для описания столбцов (DATA и SYSTEM).
+    - Поддерживает чекбоксы (системный столбец `__checkbox__`).
+    - Цвет строк привязан к ID сущности (а не к индексу), что позволяет сохранять цвета после сортировки.
+    - Ленивая загрузка: методы `can_fetch_more`, `append_page`, `set_total_count`.
+    - Сигнал `row_modified` при изменении данных в строке.
 
 Поддерживает:
     - Отображение полей, заданных в columns.
@@ -15,12 +27,26 @@
     - Локальную сортировку только по уже загруженным данным.
     - Сигнал row_modified при изменении данных в строке.
     - Пагинацию: добавление страниц, общее количество, canFetchMore.
+
+Атрибуты:
+    _data (List[Any]): Загруженные DTO.
+    _columns (List[TableColumn]): Список всех столбцов (в порядке отображения).
+    _total_count (int): Общее количество записей в БД (с учётом фильтров).
+    _checkbox_states (Dict[int, bool]): Состояния чекбоксов (ключ – индекс строки).
+    _row_colors (Dict[int, QColor]): Цвета строк (ключ – ID сущности, может быть отрицательным для новых).
+    _sort_specs (List[Tuple[int, Qt.SortOrder]]): Спецификации локальной сортировки.
+
+Note:
+    При локальной сортировке (`set_sort_specs`) цвета строк остаются привязанными к исходным ID,
+    но строки перемещаются. Это ожидаемое поведение, так как цвета должны следовать за сущностью.
 """
 
 import datetime
 # from enum import Enum
 from typing import (
-    List, Dict, Any, Optional, Callable, Tuple, Union, 
+    List, Dict, Any, 
+    Optional, Callable, 
+    Tuple, Union, 
     # Type, Union
 )
 # from collections.abc import Sequence
@@ -44,6 +70,7 @@ from PySide6.QtGui import QColor
 
 class LoadPageThread(QThread):
     """Поток для асинхронной загрузки страницы данных."""
+
     finished = Signal(list, int)   # (page_data, total_count)
     error = Signal(str)
 
@@ -212,14 +239,25 @@ class PaginatedTableModel(BaseTableModel):
         """
         Устанавливает спецификации сортировки (столбец, направление) и применяет сортировку.
         
-        :param specs: список кортежей (видимый_индекс_столбца, порядок). Порядок в списке 
-                    определяет приоритет (первый – первичная сортировка).
+        Args:
+            specs: Список кортежей (видимый_индекс_столбца, порядок).
+                Порядок в списке определяет приоритет (первый – первичная сортировка).
+
+        Note:
+            Этот метод выполняет сортировку **уже загруженных** данных.
+            Для серверной сортировки используйте `reload_with_order_by` в `PaginationMixin`.
+
+        Warning:
+            Сортировка сбрасывает цвета строк, если они были привязаны к индексам.
+            В текущей реализации цвета привязаны к ID сущности, поэтому они сохраняются.
         """
+
         self._sort_specs = specs.copy()
         self._apply_sort()
 
     def _apply_sort(self) -> None:
         """Применяет текущие спецификации сортировки к загруженным данным."""
+
         if not self._sort_specs:
             return
         
@@ -252,12 +290,14 @@ class PaginatedTableModel(BaseTableModel):
                     continue
                 field_name = target_col.field_name
                 value = getattr(obj, field_name, None)
+
                 # Для корректного сравнения None помещаем в конец или начало
                 # (для возрастания – None идут последними, для убывания – первыми)
                 if order == Qt.AscendingOrder:
                     key_values.append((value is not None, value))
                 else:
                     key_values.append((value is None, value))
+
             return tuple(key_values)
         
         self.layoutAboutToBeChanged.emit()
@@ -357,6 +397,7 @@ class PaginatedTableModel(BaseTableModel):
         for idx, col in enumerate(self._columns):
             if col.system_name == system_name:
                 return idx
+            
         return -1
 
     def get_visible_column_index(self, system_name: str) -> int:
@@ -461,6 +502,7 @@ class PaginatedTableModel(BaseTableModel):
             return None
         
         target_col = target_col.field_name if target_col.column_type == ColumnType.DATA else None
+        
         return target_col
 
     # ----------------------------------------------------------------------
@@ -663,16 +705,16 @@ class PaginatedTableModel(BaseTableModel):
     def set_row_color(self, entity_id: int, color: QColor) -> None:
         """
         Устанавливает цвет фона для строки по ID сущности.
-        Цвет сохраняется в словаре _row_colors по ключу entity_id.
-        При отрисовке строки (в data) цвет будет извлекаться по ID текущего DTO.
 
         Args:
-            row: ID сущности (из DTO). Может быть отрицательным для новых строк.
+            entity_id: ID сущности (из DTO). Может быть отрицательным для новых строк.
             color: Цвет фона.
 
-        Returns:
-            None
+        Note:
+            Цвет сохраняется в словаре `_row_colors` по ключу `entity_id`.
+            При отрисовке строки цвет извлекается по ID текущего DTO.
         """
+
         if (entity_id is None) or (color is None):
             return
             
@@ -743,7 +785,7 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             None
         """
-        
+
         if roles is None:
             roles = [Qt.BackgroundRole]
 
@@ -956,11 +998,12 @@ class PaginatedTableModel(BaseTableModel):
         Возвращает данные для ячейки в зависимости от роли.
 
         Поддерживаемые роли:
-            - Qt.DisplayRole: текстовое представление (даты форматируются).
+            - Qt.DisplayRole: текстовое представление (форматирует даты и время в ISO-строки).
             - Qt.EditRole: исходное значение DTO.
             - Qt.BackgroundRole: цвет фона строки.
             - Qt.TextAlignmentRole: выравнивание (числа – вправо, остальное – влево).
             - Qt.UserRole: исходное значение для сортировки.
+            - Qt.CheckStateRole: возвращает состояние чекбокса (если столбец видим).
         
         Args:
             index: Индекс ячейки.

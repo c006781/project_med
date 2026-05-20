@@ -1,6 +1,23 @@
 # interfaces/gui/gui_window/mixins/filter_mixin.py
 """
-Миксин для фильтрации: заголовки таблицы, строка фильтров, глобальный поиск.
+Миксин для серверной фильтрации и сортировки страниц списка.
+
+Предоставляет методы для:
+    - Преобразования фильтров из UI в дерево условий и вызова `reload_with_filters()`.
+    - Обработки сортировки через заголовки таблицы (`reload_with_order_by()`).
+    - Получения уникальных значений для столбцов (через `service.get_unique_values`).
+    - Управления панелью активных фильтров (`FilterBar`).
+
+Требует наличия в классе-наследнике:
+    - `self._current_filters` (дерево фильтров).
+    - `self._current_order_by` (список полей для сортировки).
+    - `self.reload_with_filters(filters_tree)` (метод перезагрузки данных).
+    - `self.reload_with_order_by(order_by)` (метод перезагрузки с сортировкой).
+    - `self.service` (сервис с методами `get_unique_values`).
+    - `self.source_model` (модель таблицы).
+    - `self._get_column_name_by_visible_index(visible_index)` – возвращает имя поля.
+
+Примечание: данный миксин не использует прокси-модель и полностью совместим с `PaginatedListPage`.
 """
 
 from typing import (
@@ -17,7 +34,49 @@ from PySide6.QtCore import (
 
 class FilterMixin:
     """
-    Предоставляет методы для работы с фильтрацией.
+    Миксин для серверной фильтрации и сортировки в страницах списка.
+
+    **Предназначение:**
+        Обеспечивает фильтрацию данных через перезагрузку страницы с новыми параметрами
+        (`reload_with_filters`), а не через прокси-модель. Сортировка также выполняется
+        на сервере через `reload_with_order_by`.
+
+    **Требования к классу-наследнику:**
+        - Должен иметь атрибуты:
+            * `source_model` (экземпляр `PaginatedTableModel` или аналогичный с методом
+              `get_field_name_at_visible_column`)
+            * `service` (сервис с методами `get_page_filtered` и `get_unique_values`)
+            * `field_configs` (словарь конфигурации полей)
+            * `_current_filters` (дерево фильтров, может быть None)
+            * `_current_order_by` (список полей для сортировки, может быть None)
+            * `reload_with_filters(filters_tree)` – метод для перезагрузки с фильтрами
+            * `reload_with_order_by(order_by)` – метод для перезагрузки с сортировкой
+        - Опционально:
+            * `filter_bar` (экземпляр `FilterBar`) – для отображения активных фильтров
+
+    **Примечание:**
+        Этот миксин **не требует** `proxy_model`. Все операции идут напрямую через
+        `source_model` и сервис. Совместим с `PaginatedListPage`.
+
+    Args:
+        filter_bar: Экземпляр FilterBar (создаётся в UIMixin).
+        table_view: Экземпляр FilterTableView (создаётся в UIMixin).
+
+    Raises:
+        AttributeError: Если у table_view.horizontalHeader() нет сигналов
+            `filter_requested` или `filter_clear_requested` (используется FilterHeaderView).
+
+    Note:
+        Этот метод должен вызываться после создания всех UI-компонентов,
+        обычно в `__init__` страницы после `setup_ui()`.
+
+    Example:
+        >>> class MyListPage(PaginatedListPage, FilterMixin):
+        ...     pass
+        ...
+        >>> page = MyListPage(...)
+        >>> page.setup_filtering(page.filter_bar, page.table_view)
+        >>> # Теперь фильтрация и сортировка через заголовки работают
     """
 
     def set_sorting(self, column: int, order: Qt.SortOrder) -> None:
@@ -108,6 +167,9 @@ class FilterMixin:
         """
         Проверяет, есть ли в текущем дереве фильтров оператор 'fuzzy'.
         Рекурсивный обход.
+
+        Returns:
+            True, если хотя бы один узел содержит operator='fuzzy', иначе False.
         """
 
         if not self._current_filters:
@@ -132,47 +194,136 @@ class FilterMixin:
         return check(self._current_filters)
 
     def _on_column_filter_requested(self, column: int, logic: str, conditions: list):
-        """Обработчик сигнала от заголовка таблицы."""
+        """
+        Обработчик сигнала фильтрации от заголовка таблицы.
+
+        Преобразует условия фильтра в дерево (через `convert_ui_filters_to_sql`)
+        и вызывает `reload_with_filters`.
+
+        Args:
+            column: Номер столбца (видимый индекс).
+            logic: 'AND' или 'OR' – логика объединения условий внутри столбца.
+            conditions: Список словарей, каждый с ключами 'operator', 'value', 'value2'.
+
+        Note:
+            Если передан fuzzy-оператор, он не преобразуется в SQL, но может быть
+            обработан сервисом отдельно (см. `get_page_filtered`).
+        """
+            
         col_name = self._get_column_name_by_visible_index(column)
         if not col_name:
             return
-        tree = convert_ui_filters_to_sql({column: {'logic': logic, 'conditions': conditions}}, {column: col_name})
+        
+        tree = convert_ui_filters_to_sql(
+            {
+                column: {
+                    'logic': logic, 
+                    'conditions': conditions, 
+                }
+            }, {
+                column: col_name
+            }
+        )
         self._current_filters = tree
         self.reload_with_filters(self._current_filters)
+
         self._update_filter_bar()
+
 
     def _clear_column_filter(self, column: int):
-        """Очищает фильтр для столбца."""
-        # Упрощённо: сбрасываем все фильтры
-        self._current_filters = None
-        self.reload_with_filters(self._current_filters)
-        self._update_filter_bar()
+        """Очищает фильтр для указанного столбца."""
+
+        if not self._current_filters:
+            return
+        
+        col_name = self._get_column_name_by_visible_index(column)
+        if not col_name:
+            return
+        
+        # Удаляем все узлы, относящиеся к этому столбцу (рекурсивно)
+        def remove_column(node):
+            if isinstance(node, dict):
+                if node.get('column') == col_name:
+                    return None  # удалить
+                
+                # Пройти по значениям
+                for k, v in list(node.items()):
+                    new_v = remove_column(v)
+
+                    if new_v is None:
+                        del node[k]
+                    else:
+                        node[k] = new_v
+
+                return node if node else None
+            
+            elif isinstance(node, list):
+                new_list = [remove_column(item) for item in node if remove_column(item) is not None]
+
+                return new_list if new_list else None
+            
+            return node
+        
+        new_filters = remove_column(self._current_filters)
+
+        if new_filters is None or (isinstance(new_filters, list) and not new_filters):
+            self._current_filters = None
+        else:
+            self._current_filters = new_filters
+
 
     def _clear_all_filters(self):
+        """Очищает все фильтры."""
+
+        if not self._current_filters:
+            return
+        
         self._current_filters = None
         self.reload_with_filters(self._current_filters)
         self._update_filter_bar()
 
     def set_global_search(self, text: str):
-        """Глобальный поиск по всем текстовым полям."""
+        """
+        Устанавливает глобальный текстовый фильтр (поиск по всем текстовым полям).
+
+        Создаёт дерево фильтров с оператором 'ilike' для каждого строкового поля
+        (не виртуального) и вызывает `reload_with_filters`.
+
+        Args:
+            text: Строка поиска. Если пустая – фильтр сбрасывается.
+        """
+            
         if not text:
             self._current_filters = None
+
         else:
             text_filters = []
             for col_name, config in self.field_configs.items():
                 if config.get('type') == str and not config.get('virtual', False):
-                    text_filters.append({'column': col_name, 'operator': 'ilike', 'value': text})
+                    text_filters.append(
+                        {
+                            'column': col_name, 
+                            'operator': 'ilike', 
+                            'value': text
+                        }
+                    )
+
             if text_filters:
                 self._current_filters = {'or': text_filters}
+
             else:
                 self._current_filters = None
+
         self.reload_with_filters(self._current_filters)
+
         self._update_filter_bar()
 
     def _on_filter_removed(self, column: int):
         self._clear_column_filter(column)
 
-    def _on_filter_condition_removed(self, column: int, condition_index: int):
+    def _on_filter_condition_removed(self, column: int, condition_index: int) -> None:
+        """Обработчик удаления конкретного условия из фильтра (при множественных условиях)."""
+
         # Пока просто очищаем весь фильтр столбца
         self._clear_column_filter(column)
 
@@ -194,12 +345,16 @@ class FilterMixin:
         return self.service.get_unique_values(col_name)
 
     def _get_column_name_by_visible_index(self, visible_index: int) -> Optional[str]:
+        """Возвращает имя поля DTO для видимого столбца."""
 
         if hasattr(self.source_model, 'get_field_name_at_visible_column'):
             return self.source_model.get_field_name_at_visible_column(visible_index)
-        # fallback для старых моделей – использовать get_model_column_index
-        # (этот код можно не добавлять, так как все модели теперь имеют метод)
-
+        # Fallback для старых моделей
+        if hasattr(self.source_model, 'get_model_column_index'):
+            for field_name in self.field_configs.keys():
+                idx = self.source_model.get_model_column_index(field_name)
+                if idx == visible_index:
+                    return field_name
         return None
 
     def _update_filter_bar(self):

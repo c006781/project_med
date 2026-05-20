@@ -1,16 +1,29 @@
 # app/draft/draft_registry.py
 """
-Центральный Реестр черновиков. Использует плоские ключи для хранения данных.
+Центральный реестр черновиков.
+
+Хранит все несохранённые изменения (черновики), статусы сущностей и счётчики потомков.
+Используется в `PaginatedListPage` для организации древовидных черновиков.
+
+Основные возможности:
+    - Хранение произвольных данных по плоским ключам.
+    - Подписка на изменения (сигнал `draft_changed` или callback'и).
+    - Специализированные методы для статусов сущностей и счётчиков потомков.
+    - Операции с префиксами (удаление всех черновиков, начинающихся с определённого префикса).
 
 **Форматы ключей:**
-    - Обычные черновики: "{entity_type}:{entity_id}:{subsystem}" (например, "appointment:123:photos")
-    - Статусы сущностей: "__status__:{entity_type}:{entity_id}"
-    - Счётчики потомков: "__counter__:{entity_type}:{parent_id}"
-    - Новые (не сохранённые) строки: "__new__:{entity_type}:{temp_id}"
-    - Удалённые строки: "__deleted__:{entity_type}:{entity_id}"
 
-**Примечание:** Отрицательные ID (temp_id) допустимы для новых строк и не должны влиять на логику,
-    кроме случаев, когда нужна проверка parent_id > 0.
+    - Обычный черновик:          "{entity_type}:{entity_id}:{subsystem}"  (например, "appointment:123:photos")
+    - Статус сущности:           "__status__:{entity_type}:{entity_id}"
+    - Счётчик потомков:          "__counter__:{entity_type}:{parent_id}"
+    - Новая (не сохранённая) строка: "__new__:{entity_type}:{temp_id}"
+    - Удалённая строка:          "__deleted__:{entity_type}:{entity_id}"
+    - Служебный ключ балансировки счётчика: "__parent_counter_inc__:{entity_type}:{temp_id}"
+
+**Примечания:**
+    - Временные ID (temp_id) для новых строк отрицательные.
+    - Счётчики потомков обновляются через вызовы `mark_child_change` в `DraftTreeMixin`.
+    - Сигнал `draft_changed` испускается при добавлении или удалении черновика.
 """
 
 from typing import (
@@ -19,7 +32,7 @@ from typing import (
     Set
 )
 from collections import defaultdict
-from weakref import ref
+# from weakref import ref
 
 from app.utils.logger.logger import AppLogger
 
@@ -36,6 +49,12 @@ class DraftRegistry(QObject):
 
     Сигналы:
         draft_changed(key: str, has_draft: bool) – испускается при добавлении/удалении черновика.
+
+    Атрибуты:
+        _storage (Dict[str, Dict[str, Any]]): Словарь ключ -> данные.
+        _listeners (Dict[str, Set[Callable]]): Словарь точных ключей -> множество callback'ов.
+        _prefix_listeners (Dict[str, Set[Callable]]): Словарь префиксов -> множество callback'ов.
+        logger (AppLogger): Логгер для записи событий.
     """
 
     draft_changed = Signal(str, bool)
@@ -49,7 +68,8 @@ class DraftRegistry(QObject):
         """
         Инициализирует реестр.
 
-        :param parent: Родительский QObject (необязательно).
+        Args:
+            parent: Родительский QObject (необязательно).
         """
         super().__init__(parent)
 
@@ -71,24 +91,51 @@ class DraftRegistry(QObject):
         self, entity_type: str, entity_id: int, status: Optional[str]
     ) -> None:
         """
-        Устанавливает статус сущности. Допустимые статусы:
-        None, 'own', 'child', 'both'.
+        Устанавливает статус сущности.
+
+        Допустимые статусы: None, 'own', 'child', 'both'.
+
+        Args:
+            entity_type: Тип сущности (например, "appointment").
+            entity_id: ID сущности.
+            status: Новый статус (None для удаления записи о статусе).
         """
+
         key = f"__status__:{entity_type}:{entity_id}"
         if status is None:
             self.discard(key)
+
         else:
             self.set(key, {"status": status})
 
     def get_entity_status(
-        self, entity_type: str, entity_id: int
+        self, 
+        entity_type: str, 
+        entity_id: int,
     ) -> Optional[str]:
-        """Возвращает статус сущности или None."""
+        """
+        Возвращает статус сущности или None.
+
+        Args:
+            entity_type: Тип сущности.
+            entity_id: ID сущности.
+
+        Returns:
+            Статус ('own', 'child', 'both') или None.
+        """
+
         data = self.get(f"__status__:{entity_type}:{entity_id}")
         return data["status"] if data else None
 
     def delete_entity_status(self, entity_type: str, entity_id: int) -> None:
-        """Удаляет статус сущности (сбрасывает до None)."""
+        """
+        Удаляет статус сущности (сбрасывает до None).
+
+        Args:
+            entity_type: Тип сущности.
+            entity_id: ID сущности.
+        """
+
         self.discard(f"__status__:{entity_type}:{entity_id}")
 
     # ==================================================================
@@ -96,30 +143,60 @@ class DraftRegistry(QObject):
     # ==================================================================
 
     def inc_child_counter(
-        self, parent_type: str, parent_id: int, delta: int = 1
+        self, 
+        parent_type: str, 
+        parent_id: int, 
+        delta: int = 1
     ) -> int:
         """
         Увеличивает счётчик ненулевых потомков для родителя.
-        Возвращает новое значение счётчика.
+
+        Args:
+            entity_type: Тип родительской сущности.
+            parent_id: ID родителя.
+            delta: Изменение (обычно +1 или -1).
+
+        Returns:
+            Новое значение счётчика (неотрицательное).
         """
+
         key = f"__counter__:{parent_type}:{parent_id}"
+
         current = self.get(key)
+
         count = current.get("count", 0) if current else 0
+
         new_count = max(0, count + delta)
+
         if new_count == 0:
             self.discard(key)
+
         else:
             self.set(key, {"count": new_count})
+
         return new_count
 
     def dec_child_counter(self, parent_type: str, parent_id: int) -> int:
-        """Уменьшает счётчик потомков на 1 (удобная обёртка)."""
+        """Уменьшает счётчик потомков на -1 (удобная обёртка)."""
+
         return self.inc_child_counter(parent_type, parent_id, -1)
 
     def get_child_counter(
-        self, parent_type: str, parent_id: int
+        self, 
+        parent_type: str, 
+        parent_id: int
     ) -> int:
-        """Возвращает текущее значение счётчика потомков."""
+        """
+        Возвращает текущее значение счётчика потомков.
+
+        Args:
+            entity_type: Тип родительской сущности.
+            parent_id: ID родителя.
+
+        Returns:
+            Количество активных потомков (с ненулевым статусом).
+        """
+                
         data = self.get(f"__counter__:{parent_type}:{parent_id}")
         return data["count"] if data else 0
 
@@ -129,28 +206,47 @@ class DraftRegistry(QObject):
 
     def discard_entity_subtree(self, entity_type: str, entity_id: int) -> None:
         """
-        Удаляет все черновики и статусы, связанные с сущностью и её потомками.
-        Ключи вида "entity_type:entity_id:*", "__status__:entity_type:entity_id",
-        "__counter__:entity_type:entity_id", "__deleted__:entity_type:entity_id",
-        "__new__:entity_type:*".
+        Удаляет черновики и статус ТОЛЬКО для указанной сущности (не рекурсивно).
+
+        ВНИМАНИЕ: Этот метод НЕ удаляет статусы дочерних сущностей.
+        Для полного рекурсивного удаления поддерева используйте
+        `DraftTreeMixin.discard_entity_subtree`.
+
+        Удаляются ключи вида:
+            - "{entity_type}:{entity_id}:*"
+            - "__status__:{entity_type}:{entity_id}"
+            - "__counter__:{entity_type}:{entity_id}"
+            - "__deleted__:{entity_type}:{entity_id}"
+            - "__new__:{entity_type}:*" (для потомков)
+
+        Args:
+            entity_type: Тип сущности.
+            entity_id: ID сущности.
         """
         prefix = f"{entity_type}:{entity_id}:"
+
         # Удаляем обычные черновики
-        for key in list(self._storage.keys()):
-            if key.startswith(prefix):
-                self.discard(key)
+        self.discard_subtree_by_prefix(prefix)
+        # for key in list(self._storage.keys()):
+        #     if key.startswith(prefix):
+        #         discard(key)
+                
         # Удаляем статус самой сущности
         self.delete_entity_status(entity_type, entity_id)
+
         # Удаляем счётчик потомков (если есть)
         self.discard(f"__counter__:{entity_type}:{entity_id}")
+
         # Удаляем метку удаления, если была
         self.discard(f"__deleted__:{entity_type}:{entity_id}")
 
     def discard_subtree_by_prefix(self, prefix: str) -> None:
         """Универсальный метод удаления по префиксу (любые ключи)."""
-        for key in list(self._storage.keys()):
-            if key.startswith(prefix):
-                self.discard(key)
+        # for key in list(self._storage.keys()):
+        #     if key.startswith(prefix):
+        #         self.discard(key)
+
+        self.discard_by_prefix(prefix)
 
     # ----------------------------------------------------------------------
     # Основные операции с черновиками
@@ -163,10 +259,11 @@ class DraftRegistry(QObject):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def set(self, key: str, data: Dict[str, Any]) -> None:
         """
-        Сохраняет черновик для указанного ключа.
+        ССохраняет черновик для указанного ключа.
 
-        :param key: Уникальный ключ (например, "appointment:123:photos").
-        :param data: Словарь с изменениями (структура зависит от компонента).
+        Args:
+            key: Уникальный ключ (например, "appointment:123:photos").
+            data: Словарь с изменениями (структура зависит от компонента).
         """
         was_empty = key not in self._storage
         self._storage[key] = data
@@ -185,8 +282,11 @@ class DraftRegistry(QObject):
         """
         Возвращает черновик для ключа или None.
 
-        :param key: Уникальный ключ.
-        :return: Словарь с изменениями или None.
+        Args:
+            key: Уникальный ключ.
+
+        Returns:
+            Словарь с изменениями или None.
         """
 
         return self._storage.get(key)
@@ -200,13 +300,15 @@ class DraftRegistry(QObject):
         """
         Удаляет черновик для конкретного ключа.
 
-        :param key: Уникальный ключ.
+        Args:
+            key: Уникальный ключ.
         """
 
         if key in self._storage:
             del self._storage[key]
 
             self._notify_draft_changed(key, False)
+
             self.logger.debug(f"Черновик удалён: {key}")
 
     @AppLogger.get_instance(
@@ -218,16 +320,22 @@ class DraftRegistry(QObject):
         """
         Удаляет все черновики, чьи ключи начинаются с указанного префикса.
 
-        :param prefix: Префикс для поиска (например, "appointment:123:").
+        Args:
+            prefix: Префикс (например, "appointment:123:").
         """
+
+        # сбор списка всех ключей, которые начинаются с переданного префикса, перед их удалением
+        # Словарь self._storage изменяется во время итерации, если удалять элементы напрямую в цикле for key in self._storage:, это вызовет ошибку
         keys_to_remove = [key for key in self._storage if key.startswith(prefix)]
 
         if not keys_to_remove:
             return
         
         for key in keys_to_remove:
-            del self._storage[key]
-            self._notify_draft_changed(key, False)
+            # del self._storage[key]
+            # self._notify_draft_changed(key, False)
+        
+            self.discard(key)
 
         self.logger.debug(f"Удалены черновики по префиксу: {prefix}, количество {len(keys_to_remove)}")
 
@@ -240,8 +348,11 @@ class DraftRegistry(QObject):
         """
         Проверяет, существует ли черновик для данного ключа.
 
-        :param key: Уникальный ключ.
-        :return: True, если черновик есть, иначе False.
+        Args:
+            key: Уникальный ключ.
+
+        Returns:
+            True, если черновик есть, иначе False.
         """
 
         return key in self._storage
@@ -255,8 +366,11 @@ class DraftRegistry(QObject):
         """
         Проверяет, существует ли хотя бы один черновик с указанным префиксом.
 
-        :param prefix: Префикс.
-        :return: True, если такие черновики есть, иначе False.
+        Args:
+            prefix: Префикс.
+
+        Returns:
+            True, если такие черновики есть, иначе False.
         """
 
         return any(key.startswith(prefix) for key in self._storage)
@@ -270,8 +384,11 @@ class DraftRegistry(QObject):
         """
         Возвращает множество ключей, начинающихся с указанного префикса.
 
-        :param prefix: Префикс.
-        :return: Множество ключей.
+        Args:
+            prefix: Префикс.
+
+        Returns:
+            Множество ключей.
         """
 
         return {key for key in self._storage if key.startswith(prefix)}
@@ -284,9 +401,11 @@ class DraftRegistry(QObject):
     def get_all_modified_prefixes(self) -> Set[str]:
         """
         Возвращает множество уникальных префиксов (корневых ключей) всех изменённых записей.
+
         Полезно для быстрой проверки любых изменений.
 
-        :return: Множество префиксов (часть ключа до последнего двоеточия).
+        Returns:
+            Множество префиксов (часть ключа до последнего двоеточия).
         """
         prefixes = set()
         for key in self._storage:
@@ -326,8 +445,9 @@ class DraftRegistry(QObject):
         """
         Подписывает callback на изменения черновика с точным ключом.
 
-        :param key: Ключ черновика.
-        :param callback: Функция, принимающая (key, has_draft).
+        Args:
+            key: Ключ черновика.
+            callback: Функция, принимающая (key, has_draft).
         """
 
         self._listeners[key].add(callback)
@@ -341,8 +461,9 @@ class DraftRegistry(QObject):
         """
         Подписывает callback на изменения всех черновиков, ключи которых начинаются с prefix.
 
-        :param prefix: Префикс.
-        :param callback: Функция, принимающая (key, has_draft).
+        Args:
+            prefix: Префикс.
+            callback: Функция, принимающая (key, has_draft).
         """
 
         self._prefix_listeners[prefix].add(callback)
@@ -356,8 +477,9 @@ class DraftRegistry(QObject):
         """
         Отписывает callback от изменений черновика с точным ключом.
 
-        :param key: Ключ черновика.
-        :param callback: Функция.
+        Args:
+            key: Ключ черновика.
+            callback: Функция.
         """
 
         if key in self._listeners:
@@ -372,8 +494,9 @@ class DraftRegistry(QObject):
         """
         Отписывает callback от изменений по префиксу.
 
-        :param prefix: Префикс.
-        :param callback: Функция.
+        Args:
+            prefix: Префикс.
+            callback: Функция.
         """
 
         if prefix in self._prefix_listeners:
@@ -392,8 +515,12 @@ class DraftRegistry(QObject):
         """
         Применяет изменения для ключа с помощью функции applier, затем удаляет черновик.
 
-        :param key: Ключ черновика.
-        :param applier: Функция, принимающая data (словарь) и выполняющая сохранение в БД.
+        Args:
+            key: Ключ черновика.
+            applier: Функция, принимающая data (словарь) и выполняющая сохранение в БД.
+
+        Raises:
+            Exception: Любое исключение из applier пробрасывается, черновик не удаляется.
         """
 
         data = self.get(key)
@@ -418,24 +545,26 @@ class DraftRegistry(QObject):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def apply_by_prefix(self, prefix: str, applier: Callable[[str, Dict[str, Any]], None]) -> None:
         """
-        Применяет все черновики с указанным префиксом, вызывая applier для каждого,
-        затем удаляет их.
+        Применяет все черновики с указанным префиксом, вызывая applier для каждого, затем удаляет их.
 
-        :param prefix: Префикс.
-        :param applier: Функция, принимающая (key, data) и выполняющая сохранение.
+        Args:
+            prefix: Префикс ключа (например, "appointment:123:").
+            applier: Функция, принимающая (key, data) и выполняющая сохранение.
         """
         keys = self.get_keys_by_prefix(prefix)
 
         for key in keys:
-            data = self._storage[key]
-            try:
-                applier(key, data)
+            # data = self._storage[key]
+            data = self.get(key)
+            if data is not None:
+                try:
+                    applier(key, data)
 
-            except Exception as e:
-                self.logger.exception(f"Ошибка при применении черновика {key}: {e}")
-                raise
+                except Exception as e:
+                    self.logger.exception(f"Ошибка при применении черновика {key}: {e}")
+                    raise
 
-            self.discard(key)
+                self.discard(key)
 
         self.logger.debug(f"Применены черновики по префиксу {prefix}, количество {len(keys)}")
 
@@ -481,25 +610,14 @@ class DraftRegistry(QObject):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def apply_subtree(self, prefix: str, applier: Callable[[str, Dict[str, Any]], None]) -> None:
         """
-        Применяет все черновики, ключи которых начинаются с prefix, с помощью функции applier,
-        затем удаляет их.
+        Применяет все черновики, ключи которых начинаются с prefix, с помощью функции applier, затем удаляет их. Синоним apply_by_prefix.
 
         Args:
             prefix: Префикс ключа (например, "appointment:123:").
             applier: Функция, принимающая (key, data) и выполняющая сохранение в БД.
         """
         
-        keys = self.get_keys_by_prefix(prefix)
-        for key in keys:
-            data = self.get(key)
-            if data is not None:
-                try:
-                    applier(key, data)
-                except Exception as e:
-                    self.logger.exception(f"Ошибка при применении черновика {key}: {e}")
-                    raise
-                self.discard(key)
-        self.logger.debug(f"Применены черновики по префиксу {prefix}, количество {len(keys)}")
+        self.apply_by_prefix(prefix, applier)
 
     @AppLogger.get_instance(
         name='DraftRegistry',

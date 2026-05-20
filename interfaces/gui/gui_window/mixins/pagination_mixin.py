@@ -1,6 +1,18 @@
 # interfaces/gui/gui_window/mixins/pagination_mixin.py
 """
-Миксин для ленивой подгрузки страниц.
+Миксин для ленивой подгрузки страниц (виртуальная прокрутка).
+
+Обеспечивает:
+    - Загрузку данных порциями через `LoadPageThread`.
+    - Автоматическую подгрузку следующей страницы при прокрутке или изменении размера окна.
+    - Настройку размера страницы (`page_size`) и количества «запасных» строк (`extra_rows`).
+    - Перезагрузку данных с новыми фильтрами/сортировкой через `reload_with_filters` и `reload_with_order_by`.
+
+Требует наличия в классе-наследнике:
+    - `self.source_model` – модель с методами `append_page`, `set_total_count`, `can_fetch_more`.
+    - `self.table_view` – таблица для получения видимых строк.
+    - `self.service` – сервис с методом `get_page_filtered`.
+    - `self._current_filters` и `self._current_order_by` (устанавливаются извне).
 """
 
 # from inspect import _Object
@@ -16,7 +28,10 @@ from PySide6.QtCore import (
 )
 
 class _ResizeFilter(QObject):
-    """Внутренний класс-фильтр для отслеживания изменения размера родительского виджета."""
+    """
+    Внутренний фильтр событий для отслеживания изменения размера родительского виджета.
+    Используется для того, чтобы при ресайзе окна перепроверить необходимость подгрузки данных.
+    """
     
     def __init__(self, parent_widget, callback_obj):
 
@@ -34,30 +49,56 @@ class _ResizeFilter(QObject):
 
 class PaginationMixin:
     """
-    Миксин для добавления пагинации в страницу списка.
+    Миксин для ленивой подгрузки страниц (виртуальная прокрутка).
 
-    Требует наличия в классе-наследнике:
-        - self.source_model (PaginatedTableModel) – модель с поддержкой append_page, set_total_count
-        - self.table_view (QTableView) – таблица для подключения сигналов скролла
-        - self.service (BaseService) – сервис с методами get_page_filtered, get_total_count
-        - self._current_filters (tree) – текущее дерево фильтров (обновляется извне)
-        - self._current_order_by (list) – текущая сортировка
-        - self.logger (AppLogger)
-        - _on_resize_timeout() – метод, вызываемый при изменении размера родительского виджета
-          (реализован в миксине, но может быть переопределён при необходимости)
+    **Назначение:**
+        Позволяет таблице загружать данные порциями (страницами) по мере прокрутки.
+        Работает совместно с сервисом, имеющим метод `get_page_filtered` (из BaseService).
 
-    Все остальные методы (_maybe_load_more, _load_first_page, _load_next_page, _on_vertical_scroll и т.д.)
-    предоставляются миксином и не требуют переопределения.
+    **Требования к классу-наследнику:**
+        - self.table_view (QTableView) – таблица, для которой настраивается пагинация.
+        - self.source_model (PaginatedTableModel) – модель, поддерживающая `append_page` и `set_total_count`.
+        - self.logger (AppLogger) – для логирования.
+
+    **Параметры пагинации (устанавливаются через setup_pagination):**
+        - page_size (int): количество записей за один запрос (по умолчанию 50).
+        - extra_rows (int): количество "запасных" строк, после которого запускается подгрузка следующей страницы (по умолчанию 5).
+
+    **Основные методы (должны вызываться извне):**
+        - setup_pagination(service, page_size, extra_rows) – инициализация.
+        - reload_with_filters(filters_tree) – перезагрузка с новыми фильтрами.
+        - reload_with_order_by(order_by) – перезагрузка с новой сортировкой.
+        - stop_loading() – отмена текущей загрузки (например, при уходе со страницы).
+
+    **Внутренние методы (не предназначены для вызова извне):**
+        - _load_first_page() – загружает первую страницу.
+        - _load_next_page() – загружает следующую.
+        - _maybe_load_more() – проверяет, нужно ли подгрузить ещё строк (вызывается при скролле и ресайзе).
+        - _on_page_loaded(page, total, append) – обрабатывает загруженные данные.
+        - _on_page_error(error_msg) – обработчик ошибки загрузки.
+
+    **Пример использования в PaginatedListPage:**
+        >>> class MyListPage(PaginationMixin, ...):
+        ...     def __init__(self, service, ...):
+        ...         super().__init__(...)
+        ...         self.setup_pagination(service, page_size=50, extra_rows=5)
+        ...         self.reload_with_filters(None)
     """
 
     def reload_with_order_by(self, order_by: List[str]) -> None:
         """
-        Перезагружает данные с новой сортировкой.
+        
+        Перезагружает данные с новой сортировкой (сбрасывает пагинацию).
 
         Args:
-            order_by: Список полей для сортировки (например, ['-date'] или ['last_name']).
+            order_by: Список полей для сортировки.
+                Пример: ['-date', 'last_name'] (минус = убывание).
+
+        Note:
+            - Отменяет текущую загрузку.
+            - Очищает модель и загружает первую страницу с новым order_by.
         """
-        
+
         self._cancel_loading()
         self._current_order_by = order_by
         self._load_first_page()
@@ -68,6 +109,19 @@ class PaginationMixin:
         page_size: int = 50,
         extra_rows: int = 5,
     ) -> None:
+        """
+        Инициализирует параметры пагинации и подключает сигналы.
+
+        Args:
+            service: Экземпляр сервиса (должен иметь метод get_page_filtered).
+            page_size: Количество записей, загружаемых за один раз.
+            extra_rows: При достижении видимой строки = (общее_загруженное - extra_rows) запускается подгрузка следующей страницы.
+
+        Note:
+            - Вызывает очистку модели и загрузку первой страницы.
+            - Подключает сигнал скролла таблицы к `_maybe_load_more`.
+            - Устанавливает фильтр изменения размера родительского виджета.
+        """
         self._setup_pagination(service, page_size, extra_rows)
         
     def _setup_pagination(
@@ -83,6 +137,11 @@ class PaginationMixin:
             service: Сервис для загрузки данных (должен иметь методы get_page_filtered и get_total_count).
             page_size: Базовый размер страницы (количество строк, загружаемых за один запрос).
             extra_rows: Количество дополнительных строк, подгружаемых "про запас" (чтобы скролл не дёргался).
+            
+        Note:
+            - Вызывает очистку модели и загрузку первой страницы.
+            - Подключает сигнал скролла таблицы к `_maybe_load_more`.
+            - Устанавливает фильтр изменения размера родительского виджета.
         """
 
         self._pagination_service = service
@@ -134,7 +193,11 @@ class PaginationMixin:
         self._maybe_load_more()
 
     def _maybe_load_more(self):
-        """Проверяет, нужно ли подгрузить ещё строки, и если да – запускает загрузку."""
+        """"
+        Проверяет, нужно ли подгрузить следующую страницу (вызывается при скролле и ресайзе).
+        если да – запускает загрузку.
+        """
+
         if self._loading_in_progress:
             return
         if not self.source_model.can_fetch_more():
@@ -179,10 +242,19 @@ class PaginationMixin:
 
     def _load_page(self, offset: int, limit: int, append: bool) -> None:
         """
-        Загружает страницу данных через QThread 
+        Загружает страницу данных в отдельном потоке QThread (LoadPageThread).
 
         Примечание: Необходимо убедиться, что в классе страницы метод _load_page не вызывается повторно, пока поток активен (флаг _loading_in_progress).
+        
+        Args:
+            offset: Смещение от начала (сколько записей пропустить).
+            limit: Количество записей для загрузки.
+            append: Если True, добавляет данные в конец модели; если False, сначала очищает модель.
+
+        Note:
+            Устанавливает флаг _loading_in_progress = True до завершения потока.
         """
+
         if self._loading_in_progress:
             return
         if self._load_thread and self._load_thread.isRunning():
@@ -201,6 +273,20 @@ class PaginationMixin:
         self._load_thread.start()
 
     def _on_page_loaded(self, page, total, append):
+        """
+        Обработчик успешной загрузки страницы.
+
+        Args:
+            page: Список DTO, полученных от сервиса.
+            total: Общее количество записей в БД (с учётом фильтров).
+            append: Если True, данные добавляются к уже загруженным; иначе модель сначала очищается.
+
+        Note:
+            - Вызывает source_model.append_page(page) и source_model.set_total_count(total).
+            - Сбрасывает флаг _loading_in_progress.
+            - При необходимости запускает _maybe_load_more() для дозагрузки следующих страниц.
+        """
+
         if not append:
             self.source_model.clear()
         self.source_model.append_page(page)
@@ -216,6 +302,12 @@ class PaginationMixin:
         self._load_thread = None
 
     def stop_loading(self):
+        """
+        Останавливает текущую загрузку (если поток активен) и сбрасывает флаг `_loading_in_progress`.
+
+        Используется при уходе со страницы или перед перезагрузкой с новыми параметрами.
+        """
+        
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
             self._load_thread.wait(500)
@@ -224,8 +316,17 @@ class PaginationMixin:
 
     def reload_with_filters(self, filters_tree: Union[Dict, List, None]) -> None:
         """
-        Перезагружает данные с новыми фильтрами.
+        Перезагружает данные с новыми фильтрами (сбрасывает пагинацию).
         Должен вызываться извне при изменении фильтров.
+
+        Args:
+            filters_tree: Дерево фильтров в формате, который понимает сервис.
+                Например: {'and': [{'column': 'last_name', 'operator': 'like', 'value': 'Петров'}]}
+                или список старых фильтров (для обратной совместимости).
+
+        Note:
+            - Отменяет текущую загрузку (если есть).
+            - Очищает модель и загружает первую страницу.
         """
 
         self._cancel_loading()

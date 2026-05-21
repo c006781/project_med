@@ -286,7 +286,10 @@ class PaginationMixin:
         Note:
             - Вызывает source_model.append_page(page) и source_model.set_total_count(total).
             - Сбрасывает флаг _loading_in_progress.
-            - При необходимости запускает _maybe_load_more() для дозагрузки следующих страниц.
+            - **Если append == False (загружена первая страница), через QTimer.singleShot(0, ...)**
+            **вызывает _maybe_load_more(), чтобы при необходимости догрузить следующую страницу**
+            **сразу после применения фильтра.** Это обеспечивает заполнение видимой области таблицы
+            без необходимости скролла.ниц.
         """
 
         if not append:

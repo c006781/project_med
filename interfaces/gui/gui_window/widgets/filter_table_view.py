@@ -1,7 +1,29 @@
 # interfaces/gui/gui_window/widgets/filter_table_view.py
 """
-Кастомная таблица (QTableView) и её заголовок (FilterHeaderView) для поддержки
-расширенной фильтрации и сортировки с выпадающими меню.
+Заголовок таблицы с контекстным меню для фильтрации, сортировки и мульти-сортировки.
+
+При клике правой кнопкой мыши на секцию заголовка отображается меню, позволяющее:
+    - Сортировать столбец по возрастанию или убыванию (пункты отключаются при активном fuzzy-фильтре).
+    - Настроить мульти-сортировку (диалог выбора нескольких столбцов).
+    - Сбросить текущую сортировку.
+    - Открыть диалог расширенной фильтрации (поддержка AND/OR, нескольких условий,
+      операторов eq, like, between, in, is_null и др.).
+    - Сбросить фильтр для столбца.
+
+Для чекбокс-столбца (индекс 0) при включённом режиме редактирования
+отображается отдельное меню с пунктами «Выбрать все» / «Снять все».
+
+**Сигналы:**
+    - `filter_requested(column: int, logic: str, conditions: list)` – испускается при настройке фильтра.
+    - `filter_clear_requested(column: int)` – испускается при сбросе фильтра для столбца.
+
+**Важно:** При активном fuzzy-фильтре (определяемом через `parent().has_active_fuzzy_filter()`)
+пункты меню, связанные с сортировкой, отключаются (`setEnabled(False)`).
+
+**Методы:**
+    - `set_multi_sorting(specs)` – перенаправляет запрос мульти-сортировки на родительскую страницу
+      (ищет вверх по иерархии виджет с методом `set_multi_sorting`).
+    - `_show_multi_sort_dialog()` – открывает диалог выбора столбцов для мульти-сортировки.
 
 Модуль предоставляет два основных класса:
 
@@ -355,6 +377,7 @@ class FilterHeaderView(QHeaderView):
             title = model.headerData(col, Qt.Horizontal, Qt.DisplayRole)
             if title:
                 col_combo.addItem(title, col)
+
         add_layout.addWidget(col_combo)
         
         order_combo = QComboBox()
@@ -395,8 +418,13 @@ class FilterHeaderView(QHeaderView):
                 # if hasattr(self.parent(), 'set_multi_sorting'):
                 #     self.parent().set_multi_sorting(specs)
                 # Вызываем метод мульти-сортировки у таблицы (или у страницы)
-                if hasattr(self, 'set_multi_sorting'):
-                    self.set_multi_sorting(specs)
+                # if hasattr(self, 'set_multi_sorting'):
+                #     self.set_multi_sorting(specs)
+                parent = self.parent()
+                while parent and not hasattr(parent, 'set_multi_sorting'):
+                    parent = parent.parent()
+                if parent and hasattr(parent, 'set_multi_sorting'):
+                    parent.set_multi_sorting(specs)
 
             dialog.accept()
         
@@ -425,6 +453,18 @@ class FilterHeaderView(QHeaderView):
         После подтверждения диалога испускается сигнал `filter_requested(logical_index, logic, conditions)`,
         где `conditions` – список словарей с ключами 'operator', 'value', 'value2'.
 
+        **Алгоритм:**
+            1. Получает уникальные значения для столбца (для оператора `in`) через callback
+            `_get_unique_values_func`.
+            2. Получает заголовок столбца из модели.
+            3. **Ищет родительский виджет (страницу) с атрибутом `_column_filters`** и извлекает
+            текущие условия фильтра для этого столбца (`logic` и `conditions`), чтобы
+            предзаполнить диалог.
+            4. Определяет тип данных столбца (через модель или по первой строке).
+            5. Создаёт диалог `FilterColumnDialog` с переданными параметрами.
+            6. При подтверждении испускает сигнал `filter_requested(logical_index, logic, conditions)`.
+
+
         Args:
             logical_index (int): Индекс столбца (видимый) в таблице.
 
@@ -443,24 +483,43 @@ class FilterHeaderView(QHeaderView):
         if not column_title:
             column_title = f"Столбец {logical_index}"
 
+        # # Получаем текущий фильтр для этого столбца (если есть)
+        # model = self.parent().model()
+        # current_logic = None
+        # current_conditions = []
+
+        # if (
+        #     hasattr(self.parent(), 'model')
+        #     and hasattr(model, '_column_filters')
+        #     and logical_index in model._column_filters
+        # ):
+        #     current_filter = model._column_filters[logical_index]
+        #     current_logic = current_filter.get('logic')
+        #     current_conditions = current_filter.get('conditions', [])
+
         # Получаем текущий фильтр для этого столбца (если есть)
-        model = self.parent().model()
+        # В текущей архитектуре фильтры хранятся в FilterMixin страницы, а не в модели.
+        # Чтобы не ломать функциональность, пока оставляем пустые значения.
         current_logic = None
         current_conditions = []
 
-        if (
-            hasattr(self.parent(), 'model')
-            and hasattr(model, '_column_filters')
-            and logical_index in model._column_filters
-        ):
-            current_filter = model._column_filters[logical_index]
-            current_logic = current_filter.get('logic')
-            current_conditions = current_filter.get('conditions', [])
+        parent = self.parent()
+
+        while parent:
+            if hasattr(parent, '_column_filters'):
+                col_filters = getattr(parent, '_column_filters', {})
+                if logical_index in col_filters:
+                    filter_def = col_filters[logical_index]
+                    current_logic = filter_def.get('logic')
+                    current_conditions = filter_def.get('conditions', [])
+                break
+            parent = parent.parent()
 
         # Определяем тип данных столбца
         column_type = str
         if hasattr(self.model(), 'column_type'):
             column_type = self.model().column_type(logical_index)
+
         elif self.model().rowCount() > 0:
             idx = self.model().index(0, logical_index)
             data = self.model().data(idx, Qt.EditRole)

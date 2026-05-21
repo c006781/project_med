@@ -9,19 +9,25 @@
     фильтрации (которая выполнялась по уже загруженным данным).
 
     `PaginatedListPage` решает эти проблемы за счёт:
-        1. **Ленивой подгрузки (виртуальная прокрутка)** – данные загружаются порциями (страницами)
+         - **Ленивой подгрузки (виртуальная прокрутка)** – данные загружаются порциями (страницами)
            по мере прокрутки таблицы. Размер страницы и количество «запасных» строк настраиваются.
-        2. **Фильтрации на стороне сервера** – фильтры, заданные пользователем, преобразуются в SQL
+         - **Фильтрации на стороне сервера** – фильтры, заданные пользователем, преобразуются в SQL
            и применяются в БД, что позволяет получать корректные отфильтрованные страницы.
-        3. **Единого хранилища черновиков (`DraftRegistry`)** – все несохранённые изменения
+         - Сортировка на стороне сервера – при отсутствии fuzzy-фильтра выполняется перезагрузка страницы с новым `order_by`.
+         - **При активном fuzzy-фильтре сортировка отключается** (пункты меню сортировки в заголовке неактивны) 
+         - Хранение фильтров по столбцам – каждый столбец хранит свой словарь условий, что позволяет комбинировать фильтры.
+         - Панель активных фильтров (`FilterBar`) отображает чипы для каждого установленного фильтра.
+         - Мульти-сортировка – выбор нескольких столбцов и направлений через диалог.
+         - Цвет строки привязан к ID сущности (а не к индексу), поэтому не сбрасывается при сортировке.
+         - **Единого хранилища черновиков (`DraftRegistry`)** – все несохранённые изменения
            (редактирование полей, удаление, добавление, а также дочерние черновики, например, фото)
            хранятся в плоском реестре, но логически организованы в дерево с помощью префиксов ключей.
-        4. **Древовидных статусов (`None / 'own' / 'child' / 'both'`)** – каждая сущность (строка)
+         - **Древовидных статусов (`None / 'own' / 'child' / 'both'`)** – каждая сущность (строка)
            имеет статус, который вычисляется на основе собственных изменений и статусов её потомков.
            Статус `'child'` означает, что у сущности нет собственных изменений, но есть изменённые потомки.
            Статус `'both'` – есть и собственные изменения, и изменения у потомков.
            Это позволяет правильно отображать цвет строки (жёлтый) и знать, какие данные нужно сохранить.
-        5. **Счётчиков потомков** – для оптимизации пересчёта статуса родителя вместо рекурсивного
+         - **Счётчиков потомков** – для оптимизации пересчёта статуса родителя вместо рекурсивного
            обхода всех потомков каждый раз используется счётчик активных черновиков у детей.
            Счётчики синхронизируются через callback, передаваемый дочерним компонентам
            (метод `set_draft_change_notifier`).
@@ -127,17 +133,36 @@
         вручную вызывать `_load_drafts_for_children()` после операций
         `discard_entity_subtree`, `apply_subtree` и т.п.
 
-**Пример интеграции в MainWindow:**
-    ```python
-    patient_list_page = PaginatedListPage(
-        service=get_patient_service(),
-        dto_class=PatientDTO,
-        field_configs=PATIENT_CONFIG,
-        page_title="Пациенты",
-        add_action_text="Добавить пациента",
-        entity_type="patient"
-    )
-    
+**Параметры инициализации (`__init__`):**
+    service (BaseService): Сервис для работы с сущностью (должен реализовывать
+        `get_page_filtered`, `create`, `update`, `delete`).
+    dto_class (Type[BaseModel]): Класс DTO (Pydantic) для сущности.
+    field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей.
+    page_title (str): Заголовок страницы (отображается в хлебных крошках).
+    add_action_text (str): Текст кнопки добавления в обычном режиме.
+    action_button_text (Optional[str]): Текст дополнительной кнопки (например, «Приёмы»).
+    parent (Optional[QWidget]): Родительский виджет.
+    exclude_columns (Optional[List[str]]): Список имён полей, которые не отображать в таблице.
+    entity_type (str): Тип сущности (например, "patient", "appointment").
+        Используется для построения ключей в реестре черновиков.
+    shared_registry (Optional[DraftRegistry]): Если передан, используется общий реестр
+        черновиков (для межстраничной работы). Иначе создаётся локальный экземпляр.
+    show_controls (Optional[List[str]]): Список строк, определяющих, какие элементы управления
+        отображать на верхней панели. Допустимые значения:
+        'edit_mode_btn', 'action_combo', 'inline_action_combo', 'save_btn', 'cancel_parent_btn',
+        'action_btn', 'search'. Если None или пустой список, элементы не отображаются.
+
+**Атрибуты (важные для наследников):**
+    _current_filters (Optional[Union[Dict, List]]): Текущее дерево фильтров (формируется из
+        `_column_filters` и `_global_search_text`).
+    _current_order_by (Optional[List[str]]): Список полей для сортировки (например, `['-date', 'last_name']`).
+    _column_filters (Dict[int, Dict]): Словарь фильтров по столбцам (хранится в `FilterMixin`).
+    _global_search_text (str): Текст глобального поиска (хранится в `FilterMixin`).
+
+**Обязательные методы для переопределения в наследниках:**
+    - `_get_parent_id_for_new_row(dto)` – возвращает ID родителя для новой строки (если дочерняя).
+    - `_get_child_ids(parent_id)` – возвращает список ID дочерних записей того же типа (для каскадного удаления).
+
 **Пример создания страницы списка пациентов:**
     >>> from app.dependencies import get_patient_service
     >>> from app.dto import PatientDTO
@@ -149,15 +174,12 @@
     ...     field_configs=PATIENT_CONFIG,
     ...     page_title="Пациенты",
     ...     add_action_text="Добавить пациента",
-    ...     action_button_text="Приёмы",
-    ...     entity_type="patient"
+    ...     entity_type="patient",
+    ...     show_controls=['search', 'edit_mode_btn', 'save_btn']
     ... )
     >>> 
-    >>> # Подключение сигналов (в MainWindow)
-    >>> page.add_requested.connect(lambda: self.page_manager.switch_to('patient_edit'))
-    >>> page.edit_requested.connect(lambda dto: self.page_manager.switch_to('patient_edit', extra_data={'id': dto.id}))
-    >>> page.delete_requested.connect(self._on_patient_delete)
-    >>> page.action_requested.connect(self._on_patient_appointments_requested)
+    >>> # Программное включение режима редактирования
+    >>> page.set_edit_mode(True)
 """
 
 import datetime
@@ -332,6 +354,47 @@ class PaginatedListPage(
     def _next_temp_id(self, value: int):
         self.__next_temp_id = value
 
+    
+    @property
+    def _current_filters(self):
+        if not hasattr(self, '__current_filters'):
+            self.__current_filters = None
+        return self.__current_filters
+
+    @_current_filters.setter
+    def _current_filters(self, value):
+        self.__current_filters = value
+
+
+    @property
+    def _current_order_by(self):
+        if not hasattr(self, '__current_order_by'):
+            self.__current_order_by = None
+        return self.__current_order_by
+
+    @_current_order_by.setter
+    def _current_order_by(self, value):
+        self.__current_order_by = value
+
+    @property
+    def original_data(self) -> Dict[int, Any]:
+        if not hasattr(self, '__original_data'):
+            self.__original_data = {}
+        return self.__original_data
+
+    @original_data.setter
+    def original_data(self, value: Dict[int, Any]) -> None:
+        self.__original_data = value
+
+    @property
+    def _context_params(self) -> Dict:
+        if not hasattr(self, '__context_params'):
+            self.__context_params = {}
+        return self.__context_params
+
+    @_context_params.setter
+    def _context_params(self, value: Dict) -> None:
+        self.__context_params = value
     
     # @property 
     # def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
@@ -2693,8 +2756,40 @@ class PaginatedListPage(
         return self._has_fuzzy_filter()
 
     def on_enter(self, extra_data=None):
+        """
+        Вызывается при переходе на страницу.
+
+        **Что делает:**
+            1. Сохраняет контекстные параметры (все ключи `extra_data`, кроме служебных)
+            в `self._context_params` для использования при добавлении новых строк.
+            2. Если передан флаг `reset_state=True`, сбрасывает сохранённое состояние фильтров
+            и сортировки.
+            3. Если сохранённые фильтры (`_saved_state['filters']`) не `None`,
+            восстанавливает их и перезагружает данные.
+            4. Иначе сбрасывает фильтры и загружает первую страницу без фильтрации.
+            5. Через 100 мс восстанавливает прокрутку и выделение строки.
+
+        Args:
+            extra_data (dict, optional): Может содержать:
+                - 'select_id' (int): ID строки для выделения после загрузки.
+                - 'return_to_page' (str): Страница для возврата (используется в дочерних окнах).
+                - 'return_field' (str): Поле для установки значения при возврате.
+                - 'reset_state' (bool): Сбросить сохранённые фильтры/сортировку.
+                - Любые другие ключи сохраняются в `self._context_params`.
+
+        Returns:
+            None
+        """
+
         # Если передан специальный флаг "reset_state", сбрасываем сохранённое состояние
         reset = extra_data.get('reset_state', False) if extra_data else False
+
+        self._context_params = {}
+        if extra_data:
+            for key, value in extra_data.items():
+                if key not in ('select_id', 'return_to_page', 'return_field', 'reset_state'):
+                    self._context_params[key] = value
+
         if reset:            
             self._saved_state = {  # значения по умолчанию
                 'filters': None,
@@ -3055,15 +3150,18 @@ class PaginatedListPage(
                 - целочисленные поля → 0
                 - дата → сегодняшняя дата
                 - остальные → None
-            2. Генерирует временный отрицательный ID (self._next_temp_id).
-            3. Сохраняет DTO в реестре черновиков по ключу `__new__:{entity_type}:{temp_id}`.
-            4. Добавляет строку в модель таблицы (self.source_model.add_row).
-            5. Помечает сущность как имеющую собственные изменения (mark_own_change(temp_id)).
-            6. Уведомляет родителя (если есть) о появлении нового потомка:
+            
+            2. Если есть контекстные параметры (`self._context_params`), перезаписывает
+                соответствующие поля (например, `patient_id` для дочерних сущностей).
+            3. Генерирует временный отрицательный ID (self._next_temp_id).
+            4. Сохраняет DTO в реестре черновиков по ключу `__new__:{entity_type}:{temp_id}`.
+            5. Добавляет строку в модель таблицы (self.source_model.add_row).
+            6. Помечает сущность как имеющую собственные изменения (mark_own_change(temp_id)).
+            7. Уведомляет родителя (если есть) о появлении нового потомка:
                 - вызывает `_register_new_row_parent_balance(dto, temp_id)`
                 - этот метод увеличивает счётчик родителя (через `_update_parent_counter(parent_id, +1)`)
                 - если родитель существующий и не удалён, создаёт служебный ключ `__parent_counter_inc__:{temp_id}`
-            7. Обновляет цвет строки (зелёный) и состояние кнопки «Сохранить».
+            8. Обновляет цвет строки (зелёный) и состояние кнопки «Сохранить».
 
         **Балансировка счётчиков:**
             - При добавлении новой строки **с существующим родителем** счётчик родителя увеличивается,
@@ -3075,6 +3173,9 @@ class PaginatedListPage(
             - Метод не вызывает `save_to_registry` – все данные сохраняются напрямую в реестр.
             - Родитель определяется через переопределяемый метод `_get_parent_id_for_new_row(dto)`.
             - Если родитель помечен на удаление, счётчик не увеличивается (и ключ не создаётся).
+            - Контекстные параметры из `_context_params` имеют приоритет
+                над значениями по умолчанию и позволяют создавать дочерние строки
+                (например, новый приём для уже выбранного пациента).
         """
 
         defaults = {}

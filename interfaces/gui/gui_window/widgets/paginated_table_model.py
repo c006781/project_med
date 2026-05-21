@@ -46,7 +46,7 @@ import datetime
 from typing import (
     List, Dict, Any, 
     Optional, Callable, 
-    Tuple, Union, 
+    Tuple, Type, Union, 
     # Type, Union
 )
 # from collections.abc import Sequence
@@ -56,6 +56,7 @@ from typing import (
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.widgets.base_table_model import BaseTableModel
+from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
 from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
 
 from PySide6.QtCore import (
@@ -235,6 +236,95 @@ class PaginatedTableModel(BaseTableModel):
 
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
 
+    def add_system_column(
+        self,
+        system_name: str,
+        title: str,
+        position: Optional[int] = None,
+        delegate_class: Optional[Type] = None,
+        delegate_args: Optional[Dict] = None,
+        visible: bool = True,
+        width: Optional[int] = None,
+    ) -> bool:
+        """
+        Добавляет системный столбец в модель.
+
+        Args:
+            system_name: Уникальное системное имя (например, '__checkbox__').
+            title: Заголовок столбца (может быть пустым).
+            position: Позиция для вставки (0 - первый). Если None, добавляется в конец.
+            delegate_class: Класс делегата для отображения/редактирования.
+            delegate_args: Аргументы для делегата.
+            visible: Видим ли столбец изначально.
+            width: Предпочтительная ширина (если None, то по умолчанию).
+
+        Returns:
+            True, если столбец добавлен (или уже существовал), False при ошибке.
+        """
+        # Проверяем, нет ли уже столбца с таким system_name
+        if self.get_column_by_system_name(system_name):
+            return False
+
+        col = TableColumn(
+            system_name=system_name,
+            title=title,
+            column_type=ColumnType.SYSTEM,
+            field_name=None,
+            visible=visible,
+            order=position if position is not None else len(self._columns),
+            delegate_class=delegate_class,
+            delegate_args=delegate_args or {},
+            width=width,
+        )
+        # Вставка с обновлением индексов
+        if position is None:
+            position = len(self._columns)
+
+        self.beginInsertColumns(QModelIndex(), position, position)
+        self._columns.insert(position, col)
+
+        # Обновляем order у всех столбцов после позиции
+        for i in range(position + 1, len(self._columns)):
+            self._columns[i].order = i
+
+        self.endInsertColumns()
+
+        # # Обновляем маппинг (нужно перестроить _field_by_column)
+        # self._update_column_mapping()  # Обновление маппинга не требуется – поиск столбцов выполняется через _column_appears_for_index
+
+        return True
+
+    def add_checkbox_column(self, position: int = 0, visible: bool = False) -> bool:
+        """Добавляет столбец чекбоксов."""
+        return self.add_system_column(
+            system_name='__checkbox__',
+            title='',
+            position=position,
+            delegate_class=None,
+            visible=visible,
+            width=30,
+        )
+
+    def add_button_column(
+        self,
+        system_name: str,
+        title: str = "",
+        button_text: str = "...",
+        position: Optional[int] = None,
+        visible: bool = True,
+    ) -> bool:
+        """Добавляет столбец с кнопкой."""
+        # from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
+        return self.add_system_column(
+            system_name=system_name,
+            title=title,
+            position=position,
+            delegate_class=ButtonDelegate,
+            delegate_args={'button_text': button_text},
+            visible=visible,
+            width=80,
+        )
+
     def set_sort_specs(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
         """
         Устанавливает спецификации сортировки (столбец, направление) и применяет сортировку.
@@ -255,15 +345,26 @@ class PaginatedTableModel(BaseTableModel):
         self._sort_specs = specs.copy()
         self._apply_sort()
 
+    def set_multi_sorting(self, specs):
+        parent = self.parent()
+
+        while parent and not hasattr(parent, 'set_multi_sorting'):
+            parent = parent.parent()
+
+        if parent and hasattr(parent, 'set_multi_sorting'):
+            parent.set_multi_sorting(specs)
+
     def _apply_sort(self) -> None:
         """Применяет текущие спецификации сортировки к загруженным данным."""
 
         if not self._sort_specs:
             return
         
-        # Очищаем цвета, так как они привязаны к старым индексам
-        self.clear_row_colors()
-        
+
+        # # Очищаем цвета, так как они привязаны к старым индексам
+        # self.clear_row_colors() # При локальной сортировке (которая теперь отключена при fuzzy) это не страшно. Но если вы когда-нибудь включите локальную сортировку для других случаев, цвета будут сбрасываться. 
+        # Не очищаем цвета – они привязаны к ID сущности и сохранятся после сортировки
+
         # Строим ключевые функции для каждой спецификации
         def sort_key(obj):
             key_values = []
@@ -288,6 +389,7 @@ class PaginatedTableModel(BaseTableModel):
                     # Если столбец не DATA, пропускаем (сортировка по нему невозможна)
                     key_values.append((None,))
                     continue
+
                 field_name = target_col.field_name
                 value = getattr(obj, field_name, None)
 
@@ -502,7 +604,7 @@ class PaginatedTableModel(BaseTableModel):
             return None
         
         target_col = target_col.field_name if target_col.column_type == ColumnType.DATA else None
-        
+
         return target_col
 
     # ----------------------------------------------------------------------
@@ -600,11 +702,15 @@ class PaginatedTableModel(BaseTableModel):
         
         if row < 0 or row >= len(self._data):
             return None
-        
+
+        # Получаем DTO и ID до удаления
+        dto = self._data[row]
+        entity_id = getattr(dto, 'id', None)
+
         self.beginRemoveRows(QModelIndex(), row, row)
         removed = self._data.pop(row)
 
-        # Сдвигаем чекбоксы
+        # Сдвигаем чекбоксы (они привязаны к индексам строк)
         new_states = {}
         for r, state in self._checkbox_states.items():
             if r > row:
@@ -614,14 +720,21 @@ class PaginatedTableModel(BaseTableModel):
 
         self._checkbox_states = new_states
 
-        # Сдвигаем цвета (если есть)
-        if row in self._row_colors:
-            del self._row_colors[row]
 
-        for r in list(self._row_colors.keys()):
-            if r > row:
-                self._row_colors[r - 1] = self._row_colors[r]
-                del self._row_colors[r]
+        # Удаляем цвет для этого ID (если он был)
+        if entity_id is not None:
+            self.clear_row_color(entity_id)
+
+        # Если цвета хранятся по индексам (старый способ), сдвигаем их (но лучше не надо)
+        # Для обратной совместимости оставим сдвиг, но он уже не нужен, так как цвета по ID   
+        # # Сдвигаем цвета (если есть)
+        # if row in self._row_colors:
+        #     del self._row_colors[row]
+
+        # for r in list(self._row_colors.keys()):
+        #     if r > row:
+        #         self._row_colors[r - 1] = self._row_colors[r]
+        #         del self._row_colors[r]
 
         self.endRemoveRows()
 

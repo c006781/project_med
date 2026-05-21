@@ -165,7 +165,7 @@ import datetime
 from typing import (
     Any, Dict,
     Optional, Set,
-    List,
+    List, Tuple,
 )
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
@@ -199,7 +199,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 
 from sqlalchemy.orm import Session
 
-from PySide6.QtCore import QTimer, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 # from PySide6.QtWidgets import QMessageBox
 from PySide6.QtGui import QColor
 
@@ -283,7 +283,6 @@ class PaginatedListPage(
     delete_requested = Signal(object)
     action_requested = Signal(object)
 
-
     # ------------------------------------------------------------------
     # Ленивая инициализация атрибутов (без __init__)
     # ------------------------------------------------------------------
@@ -365,28 +364,49 @@ class PaginatedListPage(
         exclude_columns=None,
         entity_type: str = "",
         shared_registry: Optional[DraftRegistry] = None, 
+        show_controls: Optional[List[str]] = None, # 
     ):
         """
         Инициализирует страницу списка с пагинацией, фильтрацией и древовидными черновиками.
 
-        **Параметры:**
-            service (BaseService): Сервис для работы с сущностью (должен реализовывать
-                `get_page_filtered`, `get_total_count`, `create`, `update`, `delete`).
+        Args:
+            service (BaseService): Сервис для работы с сущностью. Должен реализовывать
+                методы `get_page_filtered`, `create`, `update`, `delete`.
             dto_class (Type[BaseModel]): Класс DTO (Pydantic) для сущности.
-            field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей (описание столбцов,
-                виджетов, виртуальных полей, заметок и т.д.).
+            field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей – описание столбцов,
+                виджетов, виртуальных полей, заметок и т.д.
             page_title (str): Заголовок страницы (отображается в хлебных крошках).
+                По умолчанию "Список".
             add_action_text (str): Текст кнопки добавления в обычном режиме.
+                Используется только если `show_controls` содержит `'action_btn'`.
+                По умолчанию "Добавить".
             action_button_text (Optional[str]): Текст дополнительной кнопки действия
-                (например, «Приёмы»). Если None, кнопка не создаётся.
-            parent (Optional[QWidget]): Родительский виджет.
+                (например, «Приёмы»). Если None, кнопка не создаётся даже при наличии
+                `'action_btn'` в `show_controls`. По умолчанию None.
+            parent (Optional[QWidget]): Родительский виджет. По умолчанию None.
             exclude_columns (Optional[List[str]]): Список имён полей, которые не должны
-                отображаться в таблице (скрываются полностью).
-            entity_type (str): Тип сущности (например, "patient", "appointment"). Используется
-                для построения ключей в реестре черновиков и для фильтрации по типу.
+                отображаться в таблице (скрываются полностью). По умолчанию None.
+            entity_type (str): Тип сущности (например, "patient", "appointment").
+                Используется для построения ключей в реестре черновиков.
+                По умолчанию "".
             shared_registry (Optional[DraftRegistry]): Если передан, используется общий реестр
                 черновиков (для межстраничной работы). Иначе создаётся собственный локальный
-                экземпляр `DraftRegistry`.
+                экземпляр `DraftRegistry`. По умолчанию None.
+            show_controls (Optional[List[str]]): Список строк, определяющих, какие элементы
+                управления отображать на верхней панели. Допустимые значения:
+                    - `'edit_mode_btn'`     – кнопка переключения режима редактирования,
+                    - `'action_combo'`      – выпадающий список действий в обычном режиме,
+                    - `'inline_action_combo'` – выпадающий список inline-действий в режиме
+                                                редактирования,
+                    - `'save_btn'`          – кнопка сохранения изменений,
+                    - `'cancel_parent_btn'` – кнопка отмены правок строки,
+                    - `'action_btn'`        – дополнительная кнопка действия
+                                            (текст берётся из `action_button_text`),
+                    - `'search'`            – поле глобального поиска.
+                Если None или пустой список, ни один из этих элементов не отображается.
+                Все остальные функции (пагинация, фильтрация, редактирование) остаются
+                доступными через соответствующие методы (`set_edit_mode`, `set_global_search`
+                и т.д.). По умолчанию None.
 
         **Последовательность инициализации:**
             1. Сохраняет переданные параметры в атрибуты.
@@ -427,10 +447,12 @@ class PaginatedListPage(
                 field_configs=PATIENT_CONFIG,
                 page_title="Пациенты",
                 add_action_text="Добавить пациента",
-                entity_type="patient"
+                entity_type="patient",
+                show_controls=['search'],
             )
 
-
+            # Программное включение режима редактирования
+            page.set_edit_mode(True)
         """
 
         # уточнения:
@@ -446,11 +468,16 @@ class PaginatedListPage(
         self.action_button_text = action_button_text
         self.exclude_columns = exclude_columns or []
 
+        self._show_controls = show_controls or []  # Список дополнительных элементов управления
+        
+
         self._entity_type = entity_type
+
 
         self._saved_state = {
             'filters': None,
             'order_by': None,
+            # 'multi_sort_specs': None,# убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
             'scroll_pos': 0,
             'selected_id': None,
         }
@@ -462,7 +489,7 @@ class PaginatedListPage(
 
         self._build_columns()
         self._create_model()
-        self.setup_ui()
+        self.setup_ui()                              # UIMixin прочитает self._show_controls
         self.setup_pagination(service, page_size=50, extra_rows=5)
         self.setup_filtering(self.filter_bar, self.table_view)
 
@@ -470,6 +497,7 @@ class PaginatedListPage(
         if shared_registry is not None: # Если передан shared_registry, используем его (глобальный реестр всего приложения).
             self._draft_registry = shared_registry
             self.logger.debug(f"Используется общий реестр черновиков для страницы {entity_type}")
+
         else:  # Иначе создаём свой локальный реестр.
             self._draft_registry = DraftRegistry(self) # Инициализация реестра черновиков (глобальный, передаётся из главного окна)
             self.logger.debug(f"Создан локальный реестр черновиков для страницы {entity_type}")
@@ -491,6 +519,29 @@ class PaginatedListPage(
             selection_model.selectionChanged.connect(self._on_selection_changed_for_draft)
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
+
+    def set_edit_mode(self, enable: bool) -> None:
+        """
+        Включает или выключает режим редактирования.
+
+        Args:
+            enable: True – включить режим редактирования, False – выключить.
+        """
+        if hasattr(self, 'toggle_edit_mode'):
+            self.toggle_edit_mode(enable)
+
+    def set_global_search(self, text: str) -> None:
+        """
+        Устанавливает глобальный текстовый фильтр (вызывается из внешнего виджета поиска).
+
+        Args:
+            text: Строка поиска (подстрока, регистронезависимая).
+        """
+        super().set_global_search(text)
+
+    def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None: 
+        """Устанавливает мульти-сортировку по списку (индекс столбца, порядок)."""
+        super().set_multi_sorting(specs)  # вызывает метод миксина FilterMixin
 
     def save_children_only(
         self, 
@@ -889,7 +940,12 @@ class PaginatedListPage(
             # Удаляем старый статус временного ID из реестра
             self._draft_registry.delete_entity_status(self._entity_type, temp_id)
             self._status_cache.pop(temp_id, None)
+
             # ВАЖНО: НЕ вызываем mark_child_change для родителя сейчас, потому что родительский счётчик будет обновлён при сохранении самих дочерних черновиков (они вызовут mark_child_change сами).
+        
+        # Цвет строки не переносится, потому что он вычисляется динамически
+        # на основе статуса сущности. При изменении статуса (через entity_status_changed)
+        # будет вызвана перекраска с новым цветом.
 
     def _transferring_child_drafts(
         self,
@@ -969,6 +1025,33 @@ class PaginatedListPage(
         created_id: int,
         session: Optional[Session] = None
     ):
+        """
+        Находит и рекурсивно сохраняет всех прямых потомков новой строки.
+
+        **Алгоритм:**
+            1. Перебирает все ключи `__new__:{entity_type}:{child_id}` в реестре.
+            2. Для каждого такого ключа проверяет, имеет ли DTO атрибут `parent_id`.
+            3. Если `parent_id` == `temp_id` (текущий временный ID родителя), 
+               извлекает `child_temp_id` и рекурсивно вызывает
+               `_save_new_row_recursive(child_temp_id, created_id, session)`,
+               передавая реальный ID уже сохранённого родителя.
+
+        **Важно:**
+            - Этот метод вызывается **после** успешного сохранения родительской строки,
+              когда родитель уже получил реальный ID (`created_id`).
+            - Метод не изменяет счётчики родителей – они уже были обновлены при создании
+              новой строки в `_add_inline_row` и будут скорректированы при сохранении
+              каждого потомка через `_balance_parent_counter`.
+
+        Args:
+            temp_id: Временный отрицательный ID родительской строки (ещё не сохранённой).
+            created_id: Реальный ID, присвоенный родительской строке после сохранения в БД.
+            session: Опциональная сессия SQLAlchemy для работы в одной транзакции.
+
+        Returns:
+            None
+        """
+
         # Находим и рекурсивно сохраняем всех прямых потомков
         for child_key in list(self._draft_registry.get_keys_by_prefix("__new__")):
             child_data = self._draft_registry.get(child_key)
@@ -993,10 +1076,16 @@ class PaginatedListPage(
         """
         Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик.
 
-        **Когда вызывается:** сразу после успешного сохранения строки в БД (в `_save_new_row_recursive`).
+        **Когда вызывается:** 
+            сразу после успешного сохранения строки в БД (в `_save_new_row_recursive`).
 
-        **Логика:** находит служебный ключ `__parent_counter_inc__:{temp_id}`, извлекает `parent_id`,
-        уменьшает счётчик родителя на 1 и удаляет ключ. Если ключа нет – ничего не делает.
+        **Логика:** 
+            находит служебный ключ `__parent_counter_inc__:{temp_id}`, извлекает `parent_id`,
+            уменьшает счётчик родителя на 1 и удаляет ключ. Если ключа нет – ничего не делает.
+
+        **Примечание:** 
+            Параметр `created_id` используется **только для отладки** (записывается в лог)
+            и не влияет на логику метода. Он передан для удобства сопоставления строки в сообщениях лога.
 
         Args:
             temp_id: Временный ID новой строки.
@@ -1140,6 +1229,9 @@ class PaginatedListPage(
 
         # Переносим статус 'own' (если был) с временного ID на реальный
         self._update_id_own_in_real_id(temp_id, created.id)
+
+        # Снимаем флаг собственных изменений (строка сохранена, статус пересчитается с учётом детей)
+        self.clear_own_change(created.id)
 
         # Удаляем ключ __new__ текущей строки
         self._draft_registry.discard(key)
@@ -1639,11 +1731,22 @@ class PaginatedListPage(
         """
         Сбрасывает текущий выбранный DTO, если он соответствует указанному ID.
 
-        Используется при удалении строки, чтобы не оставалась ссылка на удалённый объект.
+        Используется при удалении строки, чтобы `self.selected_dto` не ссылался на удалённый объект.
+        Если передан `new_dto`, то он становится новым `selected_dto` (например, после перезагрузки строки).
+
+        **Пример:**
+            >>> # Удаляем строку с ID=123
+            >>> self._clear_selected_dto(123)
+            >>> # Если selected_dto.id == 123, то selected_dto станет None
+            >>> self._clear_selected_dto(123, fresh_dto)
+            >>> # Если selected_dto.id == 123, он заменится на fresh_dto
 
         Args:
             entity_id: ID сущности, для которой проверяется совпадение с selected_dto.
             new_dto: dto, на замену при совпадении с entity_id (может быть None).
+        
+        Returns:
+            None
         """
 
         if entity_id is None:
@@ -1811,6 +1914,9 @@ class PaginatedListPage(
 
         # Очистить кэш статусов
         self._status_cache.pop(entity_id, None)
+
+        # Удалить цвет для этого ID (строка уже удалена из модели)
+        self.source_model.clear_row_color(entity_id)
 
         # Уменьшить счётчик родителя удаляемой сущности (компенсируем увеличение при пометке к примеру в _delete_selected_rows)
         self._update_parent_child_counter(entity_id, -1)
@@ -2193,11 +2299,25 @@ class PaginatedListPage(
         """
         Сохраняет изменения основных полей для указанных ID (статус 'own' или 'both').
 
-        **Примечание:** Не удаляет черновики дочерних компонентов – они обрабатываются отдельно.
+        *Алгоритм для каждого ID:**
+            1. Пропускает строки, помеченные на удаление (__deleted__).
+            2. Находит DTO в модели, вызывает `service.update()`.
+            3. Обновляет модель и словарь `original_data` через `_source_model_update_row`.
+            4. Вызывает `clear_entity_drafts(entity_id)`, который:
+               - удаляет прямые черновики (основные поля) сущности,
+               - пересчитывает статус (с учётом дочерних черновиков),
+               - при необходимости уменьшает счётчик родителя.
+
+        **Примечание:** 
+            Этот метод не удаляет черновики дочерних компонентов – они
+            обрабатываются отдельно в `_save_child_components_for_parent`.
 
         Args:
             entity_ids: Множество ID сущностей, которые нужно обновить в БД.
             session: Сессия SQLAlchemy (опционально, для работы в одной транзакции).
+
+        Returns:
+            None
         """
 
         for entity_id in entity_ids:
@@ -2505,7 +2625,8 @@ class PaginatedListPage(
         Обновляет состояние кнопки сохранения.
         """
 
-        self.save_changes_btn.setEnabled(self._has_unsaved_changes())
+        if hasattr(self, 'save_changes_btn') and self.save_changes_btn:
+            self.save_changes_btn.setEnabled(self._has_unsaved_changes())
 
     # ------------------------------------------------------------------
     # Обработка изменения выделения строки
@@ -2549,6 +2670,7 @@ class PaginatedListPage(
         self._saved_state = {
             'filters': self._current_filters,
             'order_by': self._current_order_by,
+            # 'multi_sort_specs': self._current_order_by,  # можно хранить то же, что и order_by # убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
             'scroll_pos': self.table_view.verticalScrollBar().value(),
             'selected_id': self.selected_dto.id if self.selected_dto else None,
         }
@@ -2566,6 +2688,9 @@ class PaginatedListPage(
         # Обновляем ключ черновика для выбранной строки
         self._update_draft_key_for_selected() # Без этого дочерние виджеты не будут обновляться после возврата
 
+    def has_active_fuzzy_filter(self) -> bool:
+        """Возвращает True, если в текущих фильтрах есть оператор 'fuzzy'."""
+        return self._has_fuzzy_filter()
 
     def on_enter(self, extra_data=None):
         # Если передан специальный флаг "reset_state", сбрасываем сохранённое состояние
@@ -2574,6 +2699,7 @@ class PaginatedListPage(
             self._saved_state = {  # значения по умолчанию
                 'filters': None,
                 'order_by': None,
+                # 'multi_sort_specs': None, # убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
                 'scroll_pos': 0,
                 'selected_id': None,
             }
@@ -3073,10 +3199,23 @@ class PaginatedListPage(
             2. Для каждого рекурсивно вызывает `_cancel_new_row(child_id)`.
             3. После удаления всех потомков удаляет саму строку и её ключи.
 
-        **Важно:** Без этого шага дочерние новые строки останутся висеть на мёртвого временного ID родителя.
+        **Почему нельзя использовать `discard_by_prefix`:**
+            Простое удаление всех ключей по префиксу `{entity_type}:{entity_id}:`
+            **не удалит** дочерние **новые строки**, которые имеют собственный ключ
+            `__new__:{entity_type}:{child_id}`, потому что они хранятся отдельно.
+            Без рекурсивного вызова `_cancel_new_row` эти дочерние строки останутся
+            в реестре и будут ссылаться на несуществующий временный ID родителя,
+            что при последующем сохранении вызовет ошибки целостности данных.
+
+        **Важно:** 
+            Без этого шага дочерние новые строки останутся висеть на мёртвого временного ID родителя.
 
         Args:
             entity_id: Временный отрицательный ID новой строки.
+        
+        
+        Returns:
+            None
         """
         
         prefix_new = f"__new__:{self._entity_type}:"
@@ -3111,13 +3250,16 @@ class PaginatedListPage(
 
     def _clean_entity_registry_by_id(self, prefix: str, entity_id: int):
         """
-        Удаляет из реестра все ключи, связанные с указанной временной сущностью (новой строкой).
+        Удаляет из реестра все ключи, связанные с указанной сущностью (новой или удалённой).
 
         **Что удаляет:**
             1. Все черновики, которые начинаются с префикса "{self._entity_type}:{entity_id}:"
                (например, "appointment:-1:photos", "appointment:-1:notes" и т.д.).
             2. Ключ удаления/новой строки вида "{prefix}:{self._entity_type}:{entity_id}".
-               Обычно `prefix` равен "__new__" для новых строк или "__deleted__" для удалённых  (без двоеточия).
+                Обычно `prefix` равен :
+                - Если `prefix == "__new__"` – удаляет ключ новой строки.
+                - Если `prefix == "__deleted__"` – удаляет ключ пометки на удаление.
+                (без двоеточия).
             3. Статус сущности (ключ "__status__:{self._entity_type}:{entity_id}").
 
         **Важно:**
@@ -3125,6 +3267,13 @@ class PaginatedListPage(
               Для каскадной отмены новых строк следует использовать `_cancel_new_row`.
             - Метод используется внутри `_cancel_new_row` (очистка после рекурсивного удаления потомков)
               и внутри `_delete_entity_and_children` (очистка после удаления существующей сущности).
+            - Если `prefix == "__deleted__"`, служебный ключ балансировки счётчиков
+              (`__parent_counter_inc__`) не удаляется, так как он не создаётся для удалённых строк.
+
+        **Пример:**
+            >>> # Отмена новой строки с ID = -1
+            >>> self._clean_entity_registry_by_id("__new__", -1)
+            # Удалит все черновики "appointment:-1:*", ключ "__new__:appointment:-1" и статус.
 
         Args:
             prefix (str): Префикс служебного ключа. Для новых строк – "__new__",
@@ -3172,10 +3321,13 @@ class PaginatedListPage(
             3. Удаляет ключ `__new__`, статус и строку из модели.
             4. Уведомляет родителя (если есть) об уменьшении количества потомков.
 
-        **Важно:** Не используйте просто `discard_by_prefix` для удаления всей ветки!
-            Это приведёт к тому, что дочерние НОВЫЕ строки (имеющие собственный ключ `__new__`)
-            останутся в реестре и в модели, указывая на несуществующий временный ID родителя.
-            При следующем сохранении они вызовут ошибки целостности данных.
+        **Важно: Почему нельзя заменить на `discard_by_prefix`:**
+            Простой вызов `self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")`
+            удалит только черновики, но оставит **дочерние новые строки** (имеющие собственные
+            ключи `__new__:{entity_type}:{child_id}`) в реестре. Эти дочерние строки будут
+            ссылаться на мёртвый временный ID родителя, что приведёт к ошибкам целостности
+            при следующем сохранении. Рекурсивный вызов `_cancel_new_row` для каждого потомка
+            гарантирует полную очистку всей иерархии.
 
         ПРАВИЛЬНЫЙ ПОДХОД:
             1. Сначала удалить все "нестрочные" черновики (фото, заметки) по префиксу.
@@ -3187,6 +3339,9 @@ class PaginatedListPage(
 
         Args:
             entity_id: Временный отрицательный ID новой строки.
+        
+        Returns:
+            None
         """
 
         # Получаем DTO до удаления, чтобы узнать родителя
@@ -3214,6 +3369,9 @@ class PaginatedListPage(
         # Удаляем строку из модели
         if row >= 0:
             self.source_model.remove_row(row)
+
+            # # Удаляем цвет для этого ID (теперь он не нужен)
+            # self.source_model.clear_row_color(entity_id) # перенёс в PaginatedTableModel.remove_row
 
         # Очищаем кэш статусов
         self._status_cache.pop(entity_id, None)

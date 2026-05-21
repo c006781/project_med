@@ -96,16 +96,20 @@ class FilterMixin:
             return
 
         if self._has_fuzzy_filter():
-            # Локальная сортировка – передаём спецификацию с одним столбцом
-            self.source_model.set_sort_specs([(column, order)])
+            # # Локальная сортировка – передаём спецификацию с одним столбцом
+            # self.source_model.set_sort_specs([(column, order)])
+            # Локальная сортировка отключена – игнорируем
+            # Можно также показать всплывающее сообщение (опционально)
+            # QMessageBox.information(self, "Сортировка недоступна", "При активном нечётком поиске сортировка не поддерживается.")
+            
+            return
 
-        else:
-            # Серверная сортировка – формируем order_by как список
-            direction = '-' if order == Qt.DescendingOrder else ''
-            order_by = [f"{direction}{col_name}"]
+        # Серверная сортировка – формируем order_by как список
+        direction = '-' if order == Qt.DescendingOrder else ''
+        order_by = [f"{direction}{col_name}"]
 
-            self._current_order_by = order_by
-            self.reload_with_order_by(order_by)
+        self._current_order_by = order_by
+        self.reload_with_order_by(order_by)
 
     def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
         """
@@ -115,22 +119,27 @@ class FilterMixin:
         """
         if not specs:
             return
+        
         if self._has_fuzzy_filter():
-            # Локальная сортировка
-            self.source_model.set_sort_specs(specs)
+            # # Локальная сортировка
+            # self.source_model.set_sort_specs(specs)
+            # Локальная сортировка отключена – игнорируем
+            # Можно также показать всплывающее сообщение (опционально)
+            # QMessageBox.information(self, "Сортировка недоступна", "При активном нечётком поиске сортировка не поддерживается.")
+            
+            return
 
-        else:
-            # Серверная сортировка: преобразуем в список строк
-            order_by = []
-            for col_idx, order in specs:
-                col_name = self._get_column_name_by_visible_index(col_idx)
-                if col_name:
-                    direction = '-' if order == Qt.DescendingOrder else ''
-                    order_by.append(f"{direction}{col_name}")
+        # Серверная сортировка: преобразуем в список строк
+        order_by = []
+        for col_idx, order in specs:
+            col_name = self._get_column_name_by_visible_index(col_idx)
+            if col_name:
+                direction = '-' if order == Qt.DescendingOrder else ''
+                order_by.append(f"{direction}{col_name}")
 
-            if order_by:
-                self._current_order_by = order_by
-                self.reload_with_order_by(order_by)
+        if order_by:
+            self._current_order_by = order_by
+            self.reload_with_order_by(order_by)
 
     def _on_sort_indicator_changed(self, logical_index: int, order: Qt.SortOrder) -> None:
         """

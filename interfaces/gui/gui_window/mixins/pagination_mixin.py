@@ -200,12 +200,14 @@ class PaginationMixin:
 
         if self._loading_in_progress:
             return
+        
         if not self.source_model.can_fetch_more():
             return
 
         # Определяем последнюю видимую строку
         last_visible_row = self._get_last_visible_row()
         total_loaded = self.source_model.rowCount()
+
         if last_visible_row + self._extra_rows >= total_loaded:
             self._load_next_page()
 
@@ -295,6 +297,11 @@ class PaginationMixin:
 
         self._loading_in_progress = False
         self._load_thread = None
+
+        # После загрузки первой страницы проверяем, нужно ли догрузить ещё
+        if not append:
+            # from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self._maybe_load_more)
 
     def _on_page_error(self, error_msg):
         self.logger.exception(f"Ошибка загрузки страницы: {error_msg}")

@@ -53,7 +53,7 @@ class UIMixin:
     Миксин для построения пользовательского интерфейса страницы списка.
 
     Создаёт:
-        - Верхнюю панель с кнопками и выпадающими списками (`_create_top_panel`).
+        - Верхнюю панель с кнопками и выпадающими списками (`_setup_top_panel`).
         - Таблицу (`FilterTableView`) с поддержкой фильтрации и сортировки (`_create_table`).
         - Панель активных фильтров (`FilterBar`) (`_create_filter_bar`).
         - Делегаты для столбцов (`_setup_delegates`).
@@ -65,7 +65,7 @@ class UIMixin:
           `save_all_changes()`, `reload_data()`, `get_current_selected_dto()`, `set_global_search(text)`.
         - Должен иметь сигналы `add_requested`, `edit_requested`, `delete_requested`, `action_requested`.
 
-    Атрибуты, создаваемые миксином:
+    Атрибуты, создаваемые миксином (при условии, что их имена присутствуют в `self._show_controls`):
         edit_mode_btn (QPushButton): Кнопка переключения режима редактирования.
         action_combo (QComboBox): Выпадающий список действий (обычный режим).
         inline_action_combo (QComboBox): Выпадающий список inline-действий (режим редактирования).
@@ -73,6 +73,9 @@ class UIMixin:
         search_edit (QLineEdit): Поле глобального поиска.
         table_view (FilterTableView): Таблица.
         filter_bar (FilterBar): Панель активных фильтров.
+
+        **Важно:** Если соответствующий элемент не запрошен через `show_controls`, соответствующий
+        атрибут может отсутствовать. Перед доступом к нему следует проверять `hasattr`.
     """
 
     def setup_ui(self):
@@ -81,7 +84,7 @@ class UIMixin:
 
         Выполняет:
             1. Создаёт основной вертикальный layout (self.main_layout).
-            2. Вызывает `_create_top_panel()` – создаёт верхнюю панель.
+            2. Вызывает `_setup_top_panel()` – создаёт верхнюю панель.
             3. Вызывает `_create_table()` – создаёт таблицу.
             4. Добавляет таблицу в main_layout.
             5. Вызывает `_create_filter_bar()` – создаёт фильтр-бар.
@@ -97,7 +100,9 @@ class UIMixin:
 
         self.main_layout = QVBoxLayout(self)
 
-        self._create_top_panel()
+        # self._create_top_panel()  # ← старый метод, создающий все элементы безусловно
+        self._setup_top_panel()  # ← условное создание элементов
+
         self._create_table()
         self.main_layout.addWidget(self.table_view)
         self._create_filter_bar()
@@ -109,90 +114,77 @@ class UIMixin:
 
         self._setup_delegates()
 
-    def _create_top_panel(self):
+    def _setup_top_panel(self):
         """
         Создаёт верхнюю панель с элементами управления.
 
-        Создаёт:
-            - Кнопку переключения режима редактирования (self.edit_mode_btn).
-            - Выпадающий список действий в обычном режиме (self.action_combo).
-            - Выпадающий список inline-действий в режиме редактирования (self.inline_action_combo).
-            - Кнопку сохранения изменений (self.save_changes_btn).
-            - Кнопку дополнительного действия (self.action_btn) – если задан `action_button_text`.
-            - Поле поиска (self.search_edit).
+        **Условное создание элементов:**
+            Элементы отображаются только если их имена присутствуют в списке `self._show_controls`.
+            Допустимые имена:
+                'edit_mode_btn'       – кнопка переключения режима редактирования,
+                'action_combo'        – выпадающий список действий в обычном режиме,
+                'inline_action_combo' – выпадающий список inline-действий в режиме редактирования,
+                'save_btn'            – кнопка сохранения изменений,
+                'cancel_parent_btn'   – кнопка отмены правок строки,
+                'action_btn'          – дополнительная кнопка действия,
+                'search'              – поле глобального поиска.
 
-        Подключает сигналы:
-            - self.edit_mode_btn.toggled -> self.toggle_edit_mode
-            - self.action_combo.currentIndexChanged -> self._on_action_selected
-            - self.inline_action_combo.currentIndexChanged -> self._on_inline_action_selected
-            - self.save_changes_btn.clicked -> self.save_all_changes
-            - self.action_btn.clicked (если есть) -> self._on_action_clicked
-            - self.search_edit.textChanged -> self.set_global_search
+        Если `self._show_controls` не задан или пуст, панель будет содержать только растяжку
+        (то есть фактически не будет создана).
 
-        Требования (атрибуты класса-наследника):
-            - self.action_button_text (str, optional) – текст дополнительной кнопки.
-            - self.edit_mode (bool) – текущее состояние режима редактирования.
-            - self.toggle_edit_mode(enable) – метод переключения режима.
-            - self.save_all_changes() – метод сохранения.
-            - self.set_global_search(text) – метод установки глобального фильтра.
+        **Примечание:** Этот метод заменил старый `_create_top_panel`, который создавал все элементы
+        безусловно. Старый метод оставлен закомментированным для обратной совместимости.
         """
 
-        # тригеры в def _update_ui_for_edit_mode
-
+        show = set(getattr(self, '_show_controls', []))
+        if show == set():
+            return
+        
         top_layout = QHBoxLayout()
 
-        # Кнопка переключения режима редактирования
-        self.edit_mode_btn = QPushButton("Режим редактирования")
-        self.edit_mode_btn.setCheckable(True)
-        self.edit_mode_btn.toggled.connect(self.toggle_edit_mode)
-        top_layout.addWidget(self.edit_mode_btn)
+        # ---- Кнопка переключения режима редактирования ----
+        if 'edit_mode_btn' in show:
+            self.edit_mode_btn = QPushButton("Режим редактирования")
+            self.edit_mode_btn.setCheckable(True)
+            self.edit_mode_btn.toggled.connect(self._on_edit_mode_toggled)
+            top_layout.addWidget(self.edit_mode_btn)
 
-        # Выпадающий список действий (обычный режим)
-        self.action_combo = QComboBox()
-        self.action_combo.addItems(
-            [
-                "▼ Действия с записями", 
-                "Добавить", 
-                "Редактировать", 
-                "Удалить", 
-                "Обновить",
-            ]
-        )
-        self.action_combo.model().item(0).setEnabled(False)
-        self.action_combo.setCurrentIndex(0)
-        self.action_combo.currentIndexChanged.connect(self._on_action_selected)
-        top_layout.addWidget(self.action_combo)
+        # ---- Выпадающий список действий (обычный режим) ----
+        if 'action_combo' in show:
+            self.action_combo = QComboBox()
+            self.action_combo.addItems(["▼ Действия с записями", "Добавить", "Редактировать", "Удалить", "Обновить"])
+            self.action_combo.model().item(0).setEnabled(False)
+            self.action_combo.setCurrentIndex(0)
+            self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+            top_layout.addWidget(self.action_combo)
 
-        # Выпадающий список inline-действий (режим редактирования)
-        self.inline_action_combo = QComboBox()
-        self.inline_action_combo.addItems(
-            [
-                "▼ Действия со строками", 
-                "Добавить строку", 
-                "Удалить строку", 
-                "Отменить изменения",
-            ]
-        )
-        self.inline_action_combo.model().item(0).setEnabled(False)
-        self.inline_action_combo.setCurrentIndex(0)
-        self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
-        self.inline_action_combo.setVisible(False)
-        top_layout.addWidget(self.inline_action_combo)
+        # ---- Выпадающий список inline-действий (режим редактирования) ----
+        if 'inline_action_combo' in show:
+            self.inline_action_combo = QComboBox()
+            self.inline_action_combo.addItems(["▼ Действия со строками", "Добавить строку", "Удалить строку", "Отменить изменения"])
+            self.inline_action_combo.model().item(0).setEnabled(False)
+            self.inline_action_combo.setCurrentIndex(0)
+            self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
+            self.inline_action_combo.setVisible(False)
+            top_layout.addWidget(self.inline_action_combo)
 
-        # Кнопка сохранения
-        self.save_changes_btn = QPushButton("Сохранить изменения")
-        self.save_changes_btn.setEnabled(False)
-        self.save_changes_btn.setVisible(False)
-        self.save_changes_btn.clicked.connect(self.save_all_changes)
-        top_layout.addWidget(self.save_changes_btn)
+        # ---- Кнопка сохранения ----
+        if 'save_btn' in show:
+            self.save_changes_btn = QPushButton("Сохранить изменения")
+            self.save_changes_btn.setEnabled(False)
+            self.save_changes_btn.setVisible(False)
+            self.save_changes_btn.clicked.connect(self.save_all_changes)
+            top_layout.addWidget(self.save_changes_btn)
 
-        self.cancel_parent_btn = QPushButton("Отменить правки строки")
-        self.cancel_parent_btn.setVisible(False)
-        self.cancel_parent_btn.clicked.connect(self.cancel_parent_changes_only)
-        top_layout.addWidget(self.cancel_parent_btn)
+        # ---- Кнопка отмены правок строки ----
+        if 'cancel_parent_btn' in show:
+            self.cancel_parent_btn = QPushButton("Отменить правки строки")
+            self.cancel_parent_btn.setVisible(False)
+            self.cancel_parent_btn.clicked.connect(self.cancel_parent_changes_only)
+            top_layout.addWidget(self.cancel_parent_btn)
 
-        # Кнопка дополнительного действия
-        if getattr(self, 'action_button_text', None):
+        # ---- Дополнительная кнопка действия ----
+        if 'action_btn' in show and getattr(self, 'action_button_text', None):
             self.action_btn = QPushButton(self.action_button_text)
             self.action_btn.clicked.connect(self._on_action_clicked)
             self.action_btn.setEnabled(False)
@@ -200,13 +192,116 @@ class UIMixin:
 
         top_layout.addStretch()
 
-        # Поле поиска
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Поиск...")
-        self.search_edit.textChanged.connect(self.set_global_search)
-        top_layout.addWidget(self.search_edit)
+        # ---- Поле поиска ----
+        if 'search' in show:
+            self.search_edit = QLineEdit()
+            self.search_edit.setPlaceholderText("Поиск...")
+            self.search_edit.textChanged.connect(self.set_global_search)
+            top_layout.addWidget(self.search_edit)
 
         self.main_layout.addLayout(top_layout)
+
+    # def _create_top_panel(self):
+    #     """
+    #     Создаёт верхнюю панель с элементами управления.
+
+    #     (Устаревший метод) Ранее создавал все элементы верхней панели безусловно.
+    #     Теперь заменён на `_setup_top_panel`, который учитывает `self._show_controls`.
+
+    #     Создаёт:
+    #         - Кнопку переключения режима редактирования (self.edit_mode_btn).
+    #         - Выпадающий список действий в обычном режиме (self.action_combo).
+    #         - Выпадающий список inline-действий в режиме редактирования (self.inline_action_combo).
+    #         - Кнопку сохранения изменений (self.save_changes_btn).
+    #         - Кнопку дополнительного действия (self.action_btn) – если задан `action_button_text`.
+    #         - Поле поиска (self.search_edit).
+
+    #     Подключает сигналы:
+    #         - self.edit_mode_btn.toggled -> self.toggle_edit_mode
+    #         - self.action_combo.currentIndexChanged -> self._on_action_selected
+    #         - self.inline_action_combo.currentIndexChanged -> self._on_inline_action_selected
+    #         - self.save_changes_btn.clicked -> self.save_all_changes
+    #         - self.action_btn.clicked (если есть) -> self._on_action_clicked
+    #         - self.search_edit.textChanged -> self.set_global_search
+
+    #     Требования (атрибуты класса-наследника):
+    #         - self.action_button_text (str, optional) – текст дополнительной кнопки.
+    #         - self.edit_mode (bool) – текущее состояние режима редактирования.
+    #         - self.toggle_edit_mode(enable) – метод переключения режима.
+    #         - self.save_all_changes() – метод сохранения.
+    #         - self.set_global_search(text) – метод установки глобального фильтра.
+    #     """
+
+    #     # тригеры в def _update_ui_for_edit_mode
+
+    #     top_layout = QHBoxLayout()
+
+    #     # Кнопка переключения режима редактирования
+    #     self.edit_mode_btn = QPushButton("Режим редактирования")
+    #     self.edit_mode_btn.setCheckable(True)
+    #     self.edit_mode_btn.toggled.connect(self.toggle_edit_mode)
+    #     top_layout.addWidget(self.edit_mode_btn)
+
+    #     # Выпадающий список действий (обычный режим)
+    #     self.action_combo = QComboBox()
+    #     self.action_combo.addItems(
+    #         [
+    #             "▼ Действия с записями", 
+    #             "Добавить", 
+    #             "Редактировать", 
+    #             "Удалить", 
+    #             "Обновить",
+    #         ]
+    #     )
+    #     self.action_combo.model().item(0).setEnabled(False)
+    #     self.action_combo.setCurrentIndex(0)
+    #     self.action_combo.currentIndexChanged.connect(self._on_action_selected)
+    #     top_layout.addWidget(self.action_combo)
+
+    #     # Выпадающий список inline-действий (режим редактирования)
+    #     self.inline_action_combo = QComboBox()
+    #     self.inline_action_combo.addItems(
+    #         [
+    #             "▼ Действия со строками", 
+    #             "Добавить строку", 
+    #             "Удалить строку", 
+    #             "Отменить изменения",
+    #         ]
+    #     )
+    #     self.inline_action_combo.model().item(0).setEnabled(False)
+    #     self.inline_action_combo.setCurrentIndex(0)
+    #     self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)
+    #     self.inline_action_combo.setVisible(False)
+    #     top_layout.addWidget(self.inline_action_combo)
+
+    #     # Кнопка сохранения
+    #     self.save_changes_btn = QPushButton("Сохранить изменения")
+    #     self.save_changes_btn.setEnabled(False)
+    #     self.save_changes_btn.setVisible(False)
+    #     self.save_changes_btn.clicked.connect(self.save_all_changes)
+    #     top_layout.addWidget(self.save_changes_btn)
+
+    #     self.cancel_parent_btn = QPushButton("Отменить правки строки")
+    #     self.cancel_parent_btn.setVisible(False)
+    #     self.cancel_parent_btn.clicked.connect(self.cancel_parent_changes_only)
+    #     top_layout.addWidget(self.cancel_parent_btn)
+
+    #     # Кнопка дополнительного действия
+    #     if getattr(self, 'action_button_text', None):
+    #         self.action_btn = QPushButton(self.action_button_text)
+    #         self.action_btn.clicked.connect(self._on_action_clicked)
+    #         self.action_btn.setEnabled(False)
+    #         top_layout.addWidget(self.action_btn)
+
+    #     top_layout.addStretch()
+
+    #     # Поле поиска
+    #     self.search_edit = QLineEdit()
+    #     self.search_edit.setPlaceholderText("Поиск...")
+    #     self.search_edit.textChanged.connect(self.set_global_search)
+    #     top_layout.addWidget(self.search_edit)
+
+    #     self.main_layout.addLayout(top_layout)
 
     def _create_table(self):
         """
@@ -393,7 +488,7 @@ class UIMixin:
             dto = self.get_current_selected_dto()
             if dto:
                 self.action_requested.emit(dto)
-
+    
     def _update_ui_for_edit_mode(self, edit_mode: bool):
         """
         Обновляет видимость элементов UI в зависимости от режима редактирования.
@@ -416,12 +511,19 @@ class UIMixin:
 
         # описание в def _create_top_panel
         
-        self.action_combo.setVisible(not edit_mode)
-        self.inline_action_combo.setVisible(edit_mode)
-        self.save_changes_btn.setVisible(edit_mode)
-        self.cancel_parent_btn.setVisible(edit_mode) 
+        if hasattr(self, 'action_combo') and self.action_combo:
+            self.action_combo.setVisible(not edit_mode)
 
-        self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)
+        if hasattr(self, 'inline_action_combo') and self.inline_action_combo:
+            self.inline_action_combo.setVisible(edit_mode)
+
+        if hasattr(self, 'save_changes_btn') and self.save_changes_btn:
+            self.save_changes_btn.setVisible(edit_mode)
+
+        if hasattr(self, 'cancel_parent_btn') and self.cancel_parent_btn:
+            self.cancel_parent_btn.setVisible(edit_mode) 
 
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setEnabled(not edit_mode)
+
+        self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)

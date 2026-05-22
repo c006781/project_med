@@ -414,7 +414,7 @@ class PaginationMixin:
         if total != self.source_model.total_count():
             self.source_model.set_total_count(total)
 
-        self._load_thread_close()
+        self._load_thread_clear()
 
         # После загрузки первой страницы проверяем, нужно ли догрузить ещё
         if not append:

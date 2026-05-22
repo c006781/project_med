@@ -1365,14 +1365,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return self.visible_column_count()
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def _column_appears_for_index(
         self, 
         value_col: Union[int, str, ColumnType], 
@@ -1677,14 +1677,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return flags
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def headerData(
         self, 
         section: int, 

@@ -67,10 +67,13 @@ class BasePage(QWidget):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def on_enter(self):
+    def on_enter(self, extra_data=None):
         """
         Вызывается при переходе на страницу.
         Можно переопределить в наследниках для обновления данных.
+
+        :param extra_data: Дополнительные данные, переданные при переходе.
+        :type extra_data: Any
         """
         pass
 

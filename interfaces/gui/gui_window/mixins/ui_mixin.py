@@ -36,11 +36,13 @@
       для установки делегатов в зависимости от типов столбцов.
 """
 
+from app.utils.logger.logger import AppLogger
+
 from interfaces.gui.gui_window.widgets.filter_column import FilterBar
 from interfaces.gui.gui_window.widgets.filter_table_view import FilterTableView
 
 from PySide6.QtWidgets import (
-    QHBoxLayout, QVBoxLayout, 
+    QAbstractItemView, QHBoxLayout, QVBoxLayout, 
     QPushButton, QLineEdit, 
     QComboBox,
 )
@@ -78,6 +80,14 @@ class UIMixin:
         атрибут может отсутствовать. Перед доступом к нему следует проверять `hasattr`.
     """
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setup_ui(self):
         """
         Главный метод построения интерфейса.
@@ -114,6 +124,14 @@ class UIMixin:
 
         self._setup_delegates()
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_top_panel(self):
         """
         Создаёт верхнюю панель с элементами управления.
@@ -304,6 +322,14 @@ class UIMixin:
 
     #     self.main_layout.addLayout(top_layout)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _create_table(self):
         """
         Создаёт таблицу (FilterTableView) и настраивает её базовые свойства.
@@ -330,7 +356,8 @@ class UIMixin:
         self.table_view.setSortingEnabled(True)
         self.table_view.setSelectionBehavior(self.table_view.SelectionBehavior.SelectRows)
         self.table_view.setSelectionMode(self.table_view.SelectionMode.SingleSelection)
-        self.table_view.setEditTriggers(self.table_view.NoEditTriggers)
+        # self.table_view.setEditTriggers(self.table_view.NoEditTriggers)
+        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         # # Подключаем сигнал сортировки, если метод-обработчик определён в классе-наследнике
@@ -339,6 +366,14 @@ class UIMixin:
         #     header = self.table_view.horizontalHeader()
         #     header.sortIndicatorChanged.connect(self._on_sort_indicator_changed)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _create_filter_bar(self):
         """
         Создаёт панель активных фильтров (FilterBar).
@@ -358,6 +393,14 @@ class UIMixin:
         self.filter_bar = FilterBar(self)
         self.filter_bar.setVisible(False)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_delegates(self):
         """
         Устанавливает делегаты для столбцов таблицы.
@@ -378,6 +421,14 @@ class UIMixin:
         # Будет реализовано позже, аналогично DynamicListPage._setup_delegates
         pass
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_action_selected(self, index):
         """
         Обработчик выбора действия в обычном режиме (self.action_combo).
@@ -422,6 +473,14 @@ class UIMixin:
 
         self.action_combo.setCurrentIndex(0)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_inline_action_selected(self, index):
         """
         Обработчик выбора действия в режиме редактирования (self.inline_action_combo).
@@ -456,6 +515,14 @@ class UIMixin:
 
         self.inline_action_combo.setCurrentIndex(0)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_action_clicked(self):
         """
         Обработчик нажатия дополнительной кнопки (self.action_btn).
@@ -471,6 +538,14 @@ class UIMixin:
         if dto:
             self.action_requested.emit(dto)
 
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_row_double_clicked(self, index):
         """
         Обработчик двойного клика по строке таблицы.
@@ -490,6 +565,14 @@ class UIMixin:
             if dto:
                 self.action_requested.emit(dto)
     
+    @AppLogger.get_instance(
+        name='UIMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_ui_for_edit_mode(self, edit_mode: bool):
         """
         Обновляет видимость элементов UI в зависимости от режима редактирования.
@@ -527,4 +610,5 @@ class UIMixin:
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setEnabled(not edit_mode)
 
-        self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)
+        # self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)
+        self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers)

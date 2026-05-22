@@ -4,6 +4,7 @@
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Type
 
+from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
 
 
@@ -48,6 +49,14 @@ class TableColumn:
         source_attr (Optional[str]): Имя атрибута в ORM для подгрузки связанных данных.
     """
 
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         system_name: str,
@@ -112,10 +121,19 @@ class TableColumn:
         """
         # Сортировка по новому порядку
         columns.sort(key=lambda col: new_order_map.get(col.system_name, col.order))
+        
         # Обновляем order у каждого столбца в соответствии с новыми индексами
         for idx, col in enumerate(columns):
             col.order = idx
 
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_visible(self, columns: List['TableColumn'], visible: bool) -> None:
         """
         Изменяет видимость этого столбца.
@@ -123,16 +141,27 @@ class TableColumn:
         """
         self.visible = visible
 
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_order(self, columns: List['TableColumn'], new_order: int) -> None:
         """
         Изменяет порядок этого столбца, сдвигая остальные.
         """
         if new_order == self.order:
             return
+        
         # Удаляем текущий столбец из списка
         columns.remove(self)
+
         # Вставляем на новую позицию
         columns.insert(new_order, self)
+
         # Обновляем order у всех столбцов
         for idx, col in enumerate(columns):
             col.order = idx

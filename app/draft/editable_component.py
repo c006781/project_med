@@ -96,6 +96,11 @@ from app.draft.draft_registry import DraftRegistry
 
 from PySide6.QtCore import QObject, Signal
 
+from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
+
+# class QABCMeta(type(QObject), ABCMeta):
+#     """Метакласс, объединяющий метакласс QObject и ABCMeta."""
+#     pass
 
 class IEditableComponent(ABC):
     """
@@ -231,7 +236,7 @@ class IEditableComponent(ABC):
         pass
 
 
-class EditableComponentMixin(QObject, IEditableComponent):
+class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
     """
     Базовый миксин для виджетов, реализующих IEditableComponent.
 

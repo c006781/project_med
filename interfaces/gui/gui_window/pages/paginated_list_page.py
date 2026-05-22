@@ -195,6 +195,7 @@ from app.utils.logger import AppLogger
 
 from app.draft.draft_registry import DraftRegistry
 
+from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
 from interfaces.gui.gui_window.mixins.draft_tree_mixin import DraftTreeMixin
 from interfaces.gui.gui_window.mixins.pagination_mixin import PaginationMixin
 from interfaces.gui.gui_window.mixins.selection_mixin import SelectionMixin
@@ -235,6 +236,7 @@ class PaginatedListPage(
     UIMixin,
     ControllerMixin,
     DraftTreeMixin,  
+    metaclass=QABCMeta
 ):
     """
     **Для наследников:**
@@ -415,6 +417,14 @@ class PaginatedListPage(
     # def _saving_in_progress(self, value: bool):
     #     self.__saving_in_progress = value  # флаг блокировки
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         service,
@@ -553,6 +563,7 @@ class PaginatedListPage(
         # self.edit_mode = False
 
         self._build_columns()
+        self._create_table()
         self._create_model()
         self.setup_ui()                              # UIMixin прочитает self._show_controls
         self.setup_pagination(service, page_size=50, extra_rows=5)
@@ -593,13 +604,29 @@ class PaginatedListPage(
         # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(checked)
-
+    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_ui_for_edit_mode(self, edit_mode: bool):
         super()._update_ui_for_edit_mode(edit_mode)
         
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(edit_mode)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_edit_mode(self, enable: bool) -> None:
         """
         Включает или выключает режим редактирования.
@@ -610,6 +637,14 @@ class PaginatedListPage(
         if hasattr(self, 'toggle_edit_mode'):
             self.toggle_edit_mode(enable)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_global_search(self, text: str) -> None:
         """
         Устанавливает глобальный текстовый фильтр (вызывается из внешнего виджета поиска).
@@ -619,10 +654,26 @@ class PaginatedListPage(
         """
         super().set_global_search(text)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None: 
         """Устанавливает мульти-сортировку по списку (индекс столбца, порядок)."""
         super().set_multi_sorting(specs)  # вызывает метод миксина FilterMixin
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def save_children_only(
         self, 
         parent_id: int, 
@@ -690,6 +741,14 @@ class PaginatedListPage(
 
         return False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_page_drafts_prefixes(self) -> None:
         """
         Удаляет все черновики, связанные с текущим типом сущности (страницей) (self._entity_type).         
@@ -707,6 +766,14 @@ class PaginatedListPage(
             # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
             self._draft_registry.discard_by_prefix(prefix)  
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def discard_page_drafts(self) -> None:
         """
         Удаляет все черновики, связанные с текущим типом сущности (страницей) (self._entity_type).
@@ -730,6 +797,14 @@ class PaginatedListPage(
         self.source_model.clear_row_colors()
         self._update_save_button_state()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def discard_children_only(self, parent_id: int) -> None:
         """
         Отменяет (удаляет) все дочерние черновики для указанной родительской сущности,
@@ -762,6 +837,14 @@ class PaginatedListPage(
         self._update_row_color_by_id(parent_id)
         self._update_save_button_state()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_parent_id_for_new_row(self, dto: Any) -> Optional[int]:
         """
         Возвращает ID родительской сущности для новой строки.
@@ -771,6 +854,14 @@ class PaginatedListPage(
 
         return None
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_child_ids(self, parent_id: int) -> List[int]:
         """
         Возвращает список ID дочерних сущностей для указанного родителя.
@@ -792,6 +883,14 @@ class PaginatedListPage(
         # Наследники должны переопределить этот метод, если у них есть дочерние сущности.
         return []
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _delete_children(self, parent_id: int) -> None:
         """
         Рекурсивно помечает на удаление всех потомков указанной сущности.
@@ -826,6 +925,14 @@ class PaginatedListPage(
             # Рекурсивно удаляем детей детей
             self._delete_children(child_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_row_modified_from_model(self, row: int):
         """
         Обработчик прямого редактирования ячейки в таблице.
@@ -841,6 +948,14 @@ class PaginatedListPage(
 
             self.mark_own_change(dto.id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_model_layout_changed(self):
         """
         Перекрашивает все загруженные строки после изменения layout модели.
@@ -857,6 +972,14 @@ class PaginatedListPage(
     # Переопределение абстрактных методов DraftTreeMixin
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_parent_id(self, child_id: int) -> Optional[int]:
         """
         Для текущей страницы (например, список приёмов) у приёма нет родителя.
@@ -866,6 +989,14 @@ class PaginatedListPage(
         """
         return None
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_children_ids(self, parent_id: int) -> Set[int]:
         """
         Возвращает множество ID дочерних сущностей, имеющих ТОТ ЖЕ ТИП (self._entity_type).
@@ -881,6 +1012,14 @@ class PaginatedListPage(
     # Обработка сигналов реестра
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_entity_status_changed(self, entity_id: int, has_changes: bool):
         """
         При изменении статуса сущности обновляем UI (цвет строки, кнопку сохранения).
@@ -891,6 +1030,14 @@ class PaginatedListPage(
 
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_draft_registry_changed(self, key: str, has_draft: bool):
         """
         При изменении реестра проверяем, не изменился ли статус какой‑либо сущности,
@@ -928,6 +1075,14 @@ class PaginatedListPage(
     # Обработка изменения черновиков
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_draft_modified_changed(self, has_draft: bool):
         """Обработчик изменения черновиков в поддереве (сигнал от DraftTreeMixin)."""
         if not self.selected_dto:
@@ -940,6 +1095,14 @@ class PaginatedListPage(
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
         
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _has_any_changes(self, entity_id: int) -> bool:
         """
         Проверяет, есть ли у сущности какие-либо несохранённые изменения
@@ -1005,6 +1168,14 @@ class PaginatedListPage(
     # Переопределение методов сохранения (работа с реестром)
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_id_own_in_real_id(
         self,
         temp_id,
@@ -1027,6 +1198,14 @@ class PaginatedListPage(
         # на основе статуса сущности. При изменении статуса (через entity_status_changed)
         # будет вызвана перекраска с новым цветом.
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _transferring_child_drafts(
         self,
         temp_id,
@@ -1051,6 +1230,14 @@ class PaginatedListPage(
                 self._draft_registry.discard(child_key)
                 self.logger.debug(f"Перенесён дочерний черновик {child_key} -> {new_child_key}")
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_parent_counter(
         self,
         entity_id: Optional[int],
@@ -1099,6 +1286,14 @@ class PaginatedListPage(
         return False
 
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _recursive_save_new_row(
         self, 
         temp_id: int, 
@@ -1148,6 +1343,14 @@ class PaginatedListPage(
                     # Рекурсивно сохраняем потомка, передавая реальный ID текущей строки
                     self._save_new_row_recursive(child_temp_id, created_id, session=session)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _balance_parent_counter(
         self, 
         temp_id: int, 
@@ -1187,6 +1390,14 @@ class PaginatedListPage(
 
             self._draft_registry.discard(inc_key)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_new_row_recursive(
         self, 
         temp_id: int, 
@@ -1333,6 +1544,14 @@ class PaginatedListPage(
 
         return created
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_new_rows(self, session: Optional[Session] = None) -> Dict[int, Any]:
         """
         Сохраняет все новые строки, рекурсивно обрабатывая иерархию.
@@ -1582,6 +1801,14 @@ class PaginatedListPage(
         #
         # return saved_map
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _filtered_ids_no_deleted(self, entity_ids: List[int]):
         """
         Фильтрует список ID, исключая сущности, помеченные на удаление (__deleted__).
@@ -1605,6 +1832,14 @@ class PaginatedListPage(
 
         return filtered_ids, skipped_ids
     
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def save_rows_with_children(self, entity_ids: List[int]) -> bool:
         """
         Сохраняет основные поля и дочерние черновики для указанных ID.
@@ -1679,6 +1914,14 @@ class PaginatedListPage(
         finally:
             self._saving_in_progress = False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_child_components_for_parents(
         self, 
         parent_ids: Set[int], 
@@ -1711,6 +1954,14 @@ class PaginatedListPage(
                     session=session
                 )
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_modified_rows(self, session: Optional[Session] = None) -> None:
         """
         Сохраняет изменения существующих строк (только те, у которых есть статус 'own' или 'both').
@@ -1819,6 +2070,14 @@ class PaginatedListPage(
     #     self._draft_registry.delete_entity_status(self._entity_type, entity_id)
     #     self._draft_registry.discard(f"__counter__:{temp}")
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_selected_dto(self, entity_id, new_dto = None) -> None:
         """
         Сбрасывает текущий выбранный DTO, если он соответствует указанному ID.
@@ -1902,6 +2161,14 @@ class PaginatedListPage(
     #         # # Удаляем из БД
     #         # self.service.delete(entity_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_deleted_rows(
         self, 
         session: Optional[Session] = None
@@ -1945,6 +2212,14 @@ class PaginatedListPage(
             # Если удаляемая строка была выбрана – сбрасываем выделение
             self._clear_selected_dto(entity_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _delete_entity_and_children(
         self, 
         entity_id: int, 
@@ -2013,6 +2288,14 @@ class PaginatedListPage(
         # Уменьшить счётчик родителя удаляемой сущности (компенсируем увеличение при пометке к примеру в _delete_selected_rows)
         self._update_parent_child_counter(entity_id, -1)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_child_changes(
         self, 
         new_map,
@@ -2112,6 +2395,14 @@ class PaginatedListPage(
                 )
                 # self._draft_registry.discard(key) # Причина удаления: может стереть легитимные черновики, если какой-то компонент ещё не успел их применить (например, из-за ошибки в порядке вызовов). Лучше только логировать, но не удалять.
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _discard_all_changes(self) -> None:
         """
         Полностью отменяет все несохранённые изменения для текущего типа сущности.
@@ -2175,8 +2466,14 @@ class PaginatedListPage(
 
         self.logger.debug(f"Глобальная отмена изменений для типа {self._entity_type}")
 
-
-
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_all_changes_impl_reload_clear_entity_registry(self) -> bool:
         # Сохраняем всех изменений внутри единой транзакции.
         self._save_all_changes_impl_session()
@@ -2187,6 +2484,14 @@ class PaginatedListPage(
         # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
         self._clear_entity_registry()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_all_changes_impl_session(self) -> bool:
         """
         Выполняет основную логику сохранения всех изменений внутри единой транзакции.
@@ -2289,7 +2594,14 @@ class PaginatedListPage(
                 # Сохраняем удалённые строки
                 self._save_deleted_rows(session=session)
 
-
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_all_changes_impl(self) -> bool:
         """
         Основной метод сохранения всех изменений (вызывается из `EditModeMixin.save_all_changes`).
@@ -2333,6 +2645,14 @@ class PaginatedListPage(
         finally:
             self._saving_in_progress = False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _source_model_update_row(self, row: int, updated: Any) -> None:
         """
         Обновляет строку в модели таблицы и синхронизирует сохранённую копию исходных данных.
@@ -2383,6 +2703,14 @@ class PaginatedListPage(
 
         self.original_data[row] = updated
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_modified_rows_for_ids(
         self, 
         entity_ids: Set[int], 
@@ -2453,12 +2781,28 @@ class PaginatedListPage(
             # #   Если статус изменился, обновляет реестр и кэш, испускает сигналы, вызывает _propagate_status_up
             # self.clear_own_change(entity_id)  # снимаем флаг 'own' 
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def reload_with_filters(self, filters_tree):
         """Перезагружает данные с новыми фильтрами и обновляет состояние кнопки сохранения."""
     
         super().reload_with_filters(filters_tree)   # вызывает _load_first_page() в миксине
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_child_components_for_parent(
         self, 
         parent_id: int,
@@ -2547,6 +2891,14 @@ class PaginatedListPage(
                     # Явный вызов _load_drafts_for_children() не требуется.
                     # Обратите внимание: мы не обновляем статус родителя вручную, так как mark_child_change уже вызвал пересчёт статуса.
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_parents_with_child_drafts(self) -> Set[int]:
         """
         Возвращает множество ID родительских сущностей, у которых есть дочерние черновики.
@@ -2601,6 +2953,14 @@ class PaginatedListPage(
     #
     #     # self._update_save_button_state() #  тут неадо, так как работаем только с дочерними, а не с нынешней
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_entity_registry(self):
         """
         Очищает реестр от всех черновиков, статусов, счётчиков, удалённых и новых записей
@@ -2626,6 +2986,14 @@ class PaginatedListPage(
     # Вспомогательные методы для цвета строки
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_row_color(self, dto: Any) -> QColor:
         """Определяет цвет строки на основе статуса сущности."""
 
@@ -2649,11 +3017,27 @@ class PaginatedListPage(
         
         return QColor(255, 255, 255)      # белый
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _source_model_set_row_color(self, row: int, color: QColor):
         dto = self.source_model.get_item_at_row(row)
         if dto:
             self.source_model.set_row_color(dto.id, color)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_row_color(self, row: int):
         """
         Обновляет цвет строки в таблице на основе статуса сущности.
@@ -2680,6 +3064,14 @@ class PaginatedListPage(
     # Методы для работы с выделением и кнопками
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _has_unsaved_changes(self) -> bool:
         """Проверяет наличие любых несохранённых изменений в реестре."""
 
@@ -2712,6 +3104,14 @@ class PaginatedListPage(
         
         # return False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_save_button_state(self):
         """
         Обновляет состояние кнопки сохранения.
@@ -2724,6 +3124,14 @@ class PaginatedListPage(
     # Обработка изменения выделения строки
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_selection_changed_for_draft(self, selected, deselected):
         """
         Обработчик изменения выделения в таблице.
@@ -2740,23 +3148,55 @@ class PaginatedListPage(
             if row >= 0:
                 self._update_row_color(row)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_drafts(self):
         """Очищает черновики (заглушка, переопределяется в наследниках)."""
         
         if hasattr(self, '_draft_registry'):
             self._draft_registry.clear()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_child_service(self, child_name: str = None):
         """Возвращает сервис для дочернего компонента (переопределяется в наследниках)."""
 
         return None
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_draft_system(self):
         """Создаёт дочерние компоненты, реализующие IEditableComponent."""
 
         # Пример: фото-виджет (будет создан в AppointmentListPage)
         pass
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def on_leave(self):
         """Сохраняет текущее состояние (фильтры, сортировку, прокрутку)."""
         self._saved_state = {
@@ -2770,6 +3210,14 @@ class PaginatedListPage(
         }
         super().on_leave()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _restore_scroll_and_selection(self):
         """Восстанавливает позицию прокрутки и выделенную строку."""
         scroll_pos = self._saved_state.get('scroll_pos', 0)
@@ -2782,10 +3230,26 @@ class PaginatedListPage(
         # Обновляем ключ черновика для выбранной строки
         self._update_draft_key_for_selected() # Без этого дочерние виджеты не будут обновляться после возврата
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def has_active_fuzzy_filter(self) -> bool:
         """Возвращает True, если в текущих фильтрах есть оператор 'fuzzy'."""
         return self._has_fuzzy_filter()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def on_enter(self, extra_data=None):
         """
         Вызывается при переходе на страницу.
@@ -2887,6 +3351,14 @@ class PaginatedListPage(
     #     # 2. Сохраняем строки таблицы (родительский метод)
     #     return super()._save_all_changes_impl()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_draft_key_for_selected(self):
         """
         Обновляет ключ черновика текущего компонента на основе ID выбранной строки.
@@ -2938,6 +3410,14 @@ class PaginatedListPage(
             # что все дочерние компоненты уже используют subscribe_to_registry.
             # self._load_drafts_for_children()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _load_drafts_for_children(self):
         """
         Загружает черновики в дочерние компоненты.
@@ -2999,6 +3479,14 @@ class PaginatedListPage(
     #     # # Затем основные поля
     #     # return super()._save_changes(if_question) # непонятно нужно ли...
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _build_columns(self):
         """
         Создаёт список объектов TableColumn на основе field_configs и dto_class.
@@ -3017,11 +3505,14 @@ class PaginatedListPage(
         for field_name, config in self.field_configs.items():
             if field_name in self.exclude_columns:
                 continue
+
             if config.get('hidden', False):
                 continue
+
             col = TableColumn(
                 system_name=field_name,
                 title=config.get('title', field_name.replace('_', ' ').title()),
+                field_name=field_name,
                 data_type=self.dto_class.model_fields[field_name].annotation,
                 editable=config.get('editable', False),
                 order=config.get('order', 0),
@@ -3032,6 +3523,14 @@ class PaginatedListPage(
             self.columns.append(col)
         self.columns.sort(key=lambda c: c.order)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _create_model(self):
         """
         Создаёт экземпляр PaginatedTableModel, устанавливает его в table_view
@@ -3047,6 +3546,29 @@ class PaginatedListPage(
 
         self.source_model.layoutChanged.connect(self._on_model_layout_changed)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_table(self):
+        """Создаёт таблицу, если она ещё не создана."""
+        if hasattr(self, 'table_view') and self.table_view is not None:
+            return
+        
+        super()._create_table()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _setup_delegates(self) -> None:
         """
       
@@ -3145,12 +3667,27 @@ class PaginatedListPage(
                 delegate = StringDelegate(self.table_view, column_masks=column_masks)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def reload_data(self) -> None:
         """Перезагружает данные текущей страницы с учётом активных фильтров."""
 
         self.reload_with_filters(self._current_filters)
 
-
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _register_new_row_parent_balance(
         self,
         dto: Any,
@@ -3184,7 +3721,14 @@ class PaginatedListPage(
     
         return entity_id
 
-        
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _add_inline_row(self):
         """
         Добавляет новую пустую строку в конец таблицы (режим редактирования).
@@ -3336,6 +3880,14 @@ class PaginatedListPage(
 
     #     super()._update_parent_child_counter(entity_id, delta)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _cancel_draft_new_row(self,  entity_id: int):
         """
         Рекурсивно отменяет создание новой строки и всех её потомков (новых строк).
@@ -3394,6 +3946,14 @@ class PaginatedListPage(
         #             if self._draft_registry.has(f"__new__:{self._entity_type}:{child_id}"):
         #                 self._cancel_new_row(child_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clean_entity_registry_by_id(self, prefix: str, entity_id: int):
         """
         Удаляет из реестра все ключи, связанные с указанной сущностью (новой или удалённой).
@@ -3457,6 +4017,14 @@ class PaginatedListPage(
         # Удаляем служебный ключ балансировки счётчиков, созданный при добавлении новой строки
         self._draft_registry.discard(f"__parent_counter_inc__:{prefix_temp}")
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _cancel_new_row(self, entity_id: int):
         """
         Полностью отменяет создание новой строки и всех её потомков (новых строк).
@@ -3529,6 +4097,14 @@ class PaginatedListPage(
         #         self.mark_child_change(parent_id, -1)
         self._update_parent_counter(parent_id, -1)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _delete_selected_rows(self):
         """
         Помечает выбранные строки на удаление или снимает пометку, если строка уже была помечена.
@@ -3584,6 +4160,14 @@ class PaginatedListPage(
 
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_row_color_by_id(self, entity_id):
         """
         Обновляет цвет строки для сущности по её ID.
@@ -3598,6 +4182,14 @@ class PaginatedListPage(
             # Просто перекрашиваем строку; статус уже обновлён через реестр
             self._update_row_color(row)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _unmark_deleted_row(self, entity_id: int) -> None:
         """
         Снимает пометку на удаление с существующей строки.
@@ -3629,6 +4221,14 @@ class PaginatedListPage(
         # Перекрашиваем строку (цвет будет определён по текущему статусу, без удаления)
         self._update_row_color_by_id(entity_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _cancel_selected_rows_changes(self):
         """
         Отменяет изменения для выбранных строк.
@@ -3750,6 +4350,14 @@ class PaginatedListPage(
 
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
     
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def cancel_parent_changes_only(self) -> None:
         """
         Отменяет только собственные изменения (основные поля) текущей выбранной строки,
@@ -3813,6 +4421,14 @@ class PaginatedListPage(
         # Обновляем состояние кнопки сохранения (может остаться активной, если есть дочерние)
         self._update_save_button_state()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def save_changes_for_entity(self, entity_type: str) -> bool:
         """
         Сохраняет изменения ТОЛЬКО для указанного типа сущности,

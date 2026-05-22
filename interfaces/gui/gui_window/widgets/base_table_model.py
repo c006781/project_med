@@ -20,6 +20,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
+from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
 from interfaces.gui.gui_window.widgets.table_column import TableColumn
 
 from PySide6.QtCore import QAbstractTableModel, Signal, QModelIndex, Qt
@@ -27,7 +28,7 @@ from PySide6.QtGui import QColor
 
 
 
-class BaseTableModel(QAbstractTableModel, ABC): 
+class BaseTableModel(QAbstractTableModel, ABC, metaclass=QABCMeta): 
     """
     Абстрактный базовый класс для табличных моделей.
 

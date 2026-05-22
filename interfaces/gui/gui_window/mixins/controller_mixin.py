@@ -5,6 +5,8 @@
 
 from typing import Set
 
+from app.utils.logger.logger import AppLogger
+
 from interfaces.gui.gui_window.controllers.list_controller import IDynamicListController
 
 
@@ -13,16 +15,40 @@ class ControllerMixin(IDynamicListController):
     Реализует методы IDynamicListController, делегируя другим миксинам.
     """ 
 
+    @AppLogger.get_instance(
+        name='ControllerMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_row(self) -> None:
         if not self.is_edit_mode():
             return
         self._add_inline_row()
 
+    @AppLogger.get_instance(
+        name='ControllerMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def delete_selected_rows(self) -> None:
         if not self.is_edit_mode():
             return
         self._delete_selected_rows()
 
+    @AppLogger.get_instance(
+        name='ControllerMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def cancel_selected_rows_changes(self) -> None:
         if not self.is_edit_mode():
             return

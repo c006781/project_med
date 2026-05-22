@@ -214,6 +214,14 @@ class DraftTreeMixin:
     #     # self._logger = None
     #     pass
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setup_draft_tree(self, registry: DraftRegistry, component_id: str) -> None:
         """
         Инициализирует дерево черновиков для нового ключа компонента.
@@ -310,6 +318,14 @@ class DraftTreeMixin:
     #
     #         self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_draft_child(self, child: IHierarchicalEditableComponent) -> None:
         """
         Добавляет дочерний компонент и передаёт ему callback для уведомления родителя.
@@ -373,6 +389,14 @@ class DraftTreeMixin:
 
             self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def remove_draft_child(self, child: IHierarchicalEditableComponent) -> None:
         """Удаляет дочерний компонент."""
 
@@ -387,19 +411,51 @@ class DraftTreeMixin:
 
             self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_registry_changed(self, key: str, has_draft: bool) -> None:
         """Обработчик изменения черновика в реестре для текущего компонента."""
         if key == self._draft_component_id:
             self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_child_changed(self) -> None:
         """Вызывается при изменении состояния дочернего компонента."""
         self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_child_modified_changed(self, modified: bool) -> None:
         """Вызывается при изменении флага modified у дочернего компонента."""
         self._update_modified_state()
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_modified_state(self) -> None:
         """
         Пересчитывает, есть ли изменения в поддереве (собственные + дочерние).
@@ -420,6 +476,14 @@ class DraftTreeMixin:
             self._draft_modified = modified
             self.draft_modified_changed.emit(modified)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def apply_subtree(self, applier: Callable[[str, Dict[str, Any]], None]) -> None:
         """
         Применяет все черновики текущего поддерева (рекурсивно по префиксу).
@@ -428,11 +492,27 @@ class DraftTreeMixin:
         prefix = self._draft_component_id
         self._draft_registry.apply_subtree(prefix, applier)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def discard_subtree(self) -> None:
         """Отменяет все черновики текущего поддерева."""
         prefix = self._draft_component_id
         self._draft_registry.discard_subtree(prefix)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_child_drafts(self) -> None:
         """Очищает черновики всех дочерних компонентов (без применения)."""
 
@@ -444,6 +524,14 @@ class DraftTreeMixin:
     # Абстрактные методы (должны быть переопределены в наследнике)
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_parent_id(self, child_id: int) -> Optional[int]:
         """
         Возвращает ID родительской сущности для дочерней.
@@ -451,6 +539,14 @@ class DraftTreeMixin:
         """
         return None
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_children_ids(self, parent_id: int) -> Set[int]:
         """
         Возвращает множество ID дочерних сущностей для родителя.
@@ -462,6 +558,14 @@ class DraftTreeMixin:
     # Обновление статуса сущности с распространением вверх
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_own_change(self, entity_id: int, has_own_change: bool) -> None:
         """
         Устанавливает или снимает флаг собственного изменения для сущности,
@@ -521,6 +625,14 @@ class DraftTreeMixin:
         # Распространяем изменение вверх
         self._propagate_status_up(entity_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_child_change(self, parent_id: int, delta: int) -> None:
         """
         Вызывается при изменении количества потомков с не‑None статусом.
@@ -599,6 +711,14 @@ class DraftTreeMixin:
         # Пересчитываем статус родителя (с учётом его собственных изменений)
         self._recompute_parent_status(parent_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _recompute_parent_status(self, parent_id: int) -> None:
         """Пересчитывает статус родителя на основе его собственных изменений и счётчика детей."""
         own_status = self._draft_registry.get_entity_status(
@@ -623,6 +743,14 @@ class DraftTreeMixin:
         # Распространяем дальше вверх
         self._propagate_status_up(parent_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _propagate_status_up(self, entity_id: int) -> None:
         """
         Рекурсивно обновляет статусы всех предков (вверх по дереву).
@@ -641,6 +769,14 @@ class DraftTreeMixin:
 
         self._recompute_parent_status(parent_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _propagate_status_down(self, entity_id: int) -> None:
         """
         Рекурсивно сбрасывает статусы всех потомков (вниз по дереву).
@@ -652,14 +788,30 @@ class DraftTreeMixin:
             self.entity_status_changed.emit(child_id, False)
             self._propagate_status_down(child_id)
 
-        # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # Вспомогательные методы (не требуют переопределения)
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_cached_status(self, entity_id: int) -> Optional[str]:
         """Возвращает статус из кэша."""
         return self._status_cache.get(entity_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _set_cached_status(self, entity_id: int, status: Optional[str]) -> None:
         """Устанавливает статус в кэше."""
         if status is None:
@@ -667,6 +819,14 @@ class DraftTreeMixin:
         else:
             self._status_cache[entity_id] = status
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _compute_new_status(
         self, entity_id: int, has_own_change: bool
     ) -> Optional[str]:
@@ -691,6 +851,14 @@ class DraftTreeMixin:
     # Публичные методы для внешнего использования
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def mark_own_change(self, entity_id: int) -> None:
         """
         Помечает сущность как имеющую собственные изменения (статус `'own'` или `'both'`).
@@ -708,6 +876,14 @@ class DraftTreeMixin:
 
         self._update_own_change(entity_id, True)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_own_change(self, entity_id: int) -> None:
         """
         Снимает флаг собственных изменений (например, после сохранения).
@@ -720,6 +896,14 @@ class DraftTreeMixin:
         """
         self._update_own_change(entity_id, False)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def mark_child_change(self, parent_id: int, delta: int) -> None:
         """
         Уведомляет о появлении/исчезновении активного черновика у потомка родителя.
@@ -740,6 +924,14 @@ class DraftTreeMixin:
 
         self._update_child_change(parent_id, delta)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def discard_entity_subtree(self, entity_id: int) -> None:
         """
         Полностью отменяет все изменения для сущности и её потомков.
@@ -796,6 +988,14 @@ class DraftTreeMixin:
 
     ################
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_entity_drafts(self, entity_id: int) -> None:
         """
         Удаляет **только собственные черновики** для данной сущности, оставляя дочерние черновики нетронутыми.
@@ -882,6 +1082,14 @@ class DraftTreeMixin:
         if old_status != new_status:
             self._propagate_status_up(entity_id)
 
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _update_parent_child_counter(self, entity_id: int, delta: int) -> None:
         """
         Уведомляет родителя сущности entity_id об изменении количества активных потомков.

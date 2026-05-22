@@ -33,6 +33,14 @@ class _ResizeFilter(QObject):
     Используется для того, чтобы при ресайзе окна перепроверить необходимость подгрузки данных.
     """
     
+    @AppLogger.get_instance(
+        name='_ResizeFilter',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, parent_widget, callback_obj):
 
         super().__init__(parent_widget)
@@ -41,6 +49,14 @@ class _ResizeFilter(QObject):
         self._resize_timer.setSingleShot(True)
         self._resize_timer.timeout.connect(callback_obj._on_resize_timeout)
 
+    # @AppLogger.get_instance(
+    #     name='_ResizeFilter',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Resize and obj == self.parent():
             self._resize_timer.start(150)
@@ -85,6 +101,14 @@ class PaginationMixin:
         ...         self.reload_with_filters(None)
     """
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def reload_with_order_by(self, order_by: List[str]) -> None:
         """
         
@@ -103,6 +127,14 @@ class PaginationMixin:
         self._current_order_by = order_by
         self._load_first_page()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setup_pagination(
         self,
         service,
@@ -123,7 +155,15 @@ class PaginationMixin:
             - Устанавливает фильтр изменения размера родительского виджета.
         """
         self._setup_pagination(service, page_size, extra_rows)
-        
+      
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )  
     def _setup_pagination(
         self,
         service,
@@ -148,12 +188,11 @@ class PaginationMixin:
         self._page_size = page_size
         self._extra_rows = extra_rows
 
-        self._loading_in_progress = False
         self._current_offset = 0
         self._current_filters = None
         self._current_order_by = None
-
-        self._load_thread = None
+        
+        self._load_thread_clear()
 
         # Подключаем сигналы таблицы
         vscroll = self.table_view.verticalScrollBar()
@@ -184,14 +223,38 @@ class PaginationMixin:
     #         self._resize_timer.start(150)
     #     return super().eventFilter(obj, event)
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_resize_timeout(self):
         """Вызывается после изменения размера окна – пересчитывает и при необходимости подгружает."""
         self._maybe_load_more()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_vertical_scroll(self, value):
         """Обработчик скролла – проверяет, нужно ли подгрузить следующую страницу."""
         self._maybe_load_more()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _maybe_load_more(self):
         """"
         Проверяет, нужно ли подгрузить следующую страницу (вызывается при скролле и ресайзе).
@@ -211,6 +274,14 @@ class PaginationMixin:
         if last_visible_row + self._extra_rows >= total_loaded:
             self._load_next_page()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_last_visible_row(self) -> int:
         """
         Возвращает индекс последней видимой строки в модели (учитывая прокси-модель,
@@ -223,15 +294,31 @@ class PaginationMixin:
         
         return max(self.source_model.rowCount() - 1, 0)
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _load_first_page(self) -> None:
         """Сбрасывает модель и загружает первую страницу."""
         if self._loading_in_progress:
             return
-        self._loading_in_progress = True
+        # self._loading_in_progress = True
         self.source_model.clear()
         self._current_offset = 0
         self._load_page(offset=0, limit=self._page_size, append=False)
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _load_next_page(self) -> None:
         """Загружает следующую страницу и добавляет в модель."""
         if self._loading_in_progress:
@@ -239,9 +326,17 @@ class PaginationMixin:
         offset = len(self.source_model.get_all_data())
         if offset >= self.source_model.total_count():
             return
-        self._loading_in_progress = True
+        # self._loading_in_progress = True
         self._load_page(offset=offset, limit=self._page_size, append=True)
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _load_page(self, offset: int, limit: int, append: bool) -> None:
         """
         Загружает страницу данных в отдельном потоке QThread (LoadPageThread).
@@ -258,12 +353,20 @@ class PaginationMixin:
         """
 
         if self._loading_in_progress:
+
+            self.logger.debug(f"self._loading_in_progress = {self._loading_in_progress}")
             return
+        
         if self._load_thread and self._load_thread.isRunning():
+            self.logger.debug(
+                f"self._load_thread > {not self._loading_in_progress is None} "
+                f"self._load_thread.isRunning() = {self._load_thread.isRunning()} "
+            )
             return
         
         self._loading_in_progress = True
 
+        self.logger.debug(f"Creating load thread for offset={offset}, limit={limit}")
         self._load_thread = LoadPageThread(
             self._pagination_service, offset, limit,
             self._current_filters, self._current_order_by
@@ -272,8 +375,18 @@ class PaginationMixin:
             lambda page, total: self._on_page_loaded(page, total, append)
         )
         self._load_thread.error.connect(self._on_page_error)
+        self.logger.debug("Starting load thread")
         self._load_thread.start()
+        self.logger.debug("Load thread started")
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_page_loaded(self, page, total, append):
         """
         Обработчик успешной загрузки страницы.
@@ -291,39 +404,77 @@ class PaginationMixin:
             **сразу после применения фильтра.** Это обеспечивает заполнение видимой области таблицы
             без необходимости скролла.ниц.
         """
+        self.logger.debug(f"Страница загружена: append={append}, rows={len(page)}, total={total}")
 
         if not append:
             self.source_model.clear()
+
         self.source_model.append_page(page)
+
         if total != self.source_model.total_count():
             self.source_model.set_total_count(total)
 
-        self._loading_in_progress = False
-        self._load_thread = None
+        self._load_thread_close()
 
         # После загрузки первой страницы проверяем, нужно ли догрузить ещё
         if not append:
             # from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self._maybe_load_more)
 
-    def _on_page_error(self, error_msg):
-        self.logger.exception(f"Ошибка загрузки страницы: {error_msg}")
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_thread_clear(self):
+
         self._loading_in_progress = False
         self._load_thread = None
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_page_error(self, error_msg):
+        self.logger.exception(f"Ошибка загрузки страницы: {error_msg}")
+        self._load_thread_clear()
+
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def stop_loading(self):
         """
         Останавливает текущую загрузку (если поток активен) и сбрасывает флаг `_loading_in_progress`.
 
         Используется при уходе со страницы или перед перезагрузкой с новыми параметрами.
         """
-        
-        if self._load_thread and self._load_thread.isRunning():
-            self._load_thread.quit()
-            self._load_thread.wait(500)
-            self._load_thread = None
-        self._loading_in_progress = False
+        self._cancel_loading()
+        # if self._load_thread and self._load_thread.isRunning():
+        #     self._load_thread.quit()
+        #     self._load_thread.wait(500)
+        #     self._load_thread = None
+        # self._loading_in_progress = False
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def reload_with_filters(self, filters_tree: Union[Dict, List, None]) -> None:
         """
         Перезагружает данные с новыми фильтрами (сбрасывает пагинацию).
@@ -343,6 +494,14 @@ class PaginationMixin:
         self._current_filters = filters_tree
         self._load_first_page()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _cancel_loading(self):
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.quit()
@@ -350,6 +509,14 @@ class PaginationMixin:
             self._load_thread = None
         self._loading_in_progress = False
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _reload_with_order_by(self, order_by: List[str]) -> None:
         """
         Перезагружает данные с новой сортировкой.
@@ -357,6 +524,14 @@ class PaginationMixin:
         self._current_order_by = order_by
         self._load_first_page()
 
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def cancel_loading(self):
         if self._load_thread and self._load_thread.isRunning():
             self._load_thread.terminate()   # или requestInterruption, но лучше использовать флаг

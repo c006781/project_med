@@ -92,6 +92,28 @@ class LoadPageThread(QThread):
     finished = Signal(list, int)   # (page_data, total_count)
     error = Signal(str)
 
+    @property
+    def logger(self) -> AppLogger:
+        if not hasattr(self, '_logger'):
+            self._logger = AppLogger.get_instance(
+                name='gui.PaginatedTableModel',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
+    @AppLogger.get_instance(
+        name='LoadPageThread',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(self, service, offset, limit, filters, order_by):
         super().__init__()
         self.service = service
@@ -100,7 +122,16 @@ class LoadPageThread(QThread):
         self.filters = filters
         self.order_by = order_by
 
+    @AppLogger.get_instance(
+        name='LoadPageThread',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def run(self):
+        self.logger.debug(f"LoadPageThread START: offset={self.offset}, limit={self.limit}")
         try:
             page, total = self.service.get_page_filtered(
                 offset=self.offset,
@@ -108,8 +139,11 @@ class LoadPageThread(QThread):
                 filters=self.filters,
                 order_by=self.order_by,
             )
+
+            self.logger.debug(f"LoadPageThread got {len(page)} items, total={total}")
             self.finished.emit(page, total)
         except Exception as e:
+            self.logger.exception(f"LoadPageThread error: {e}")
             self.error.emit(str(e))
 
 
@@ -205,7 +239,14 @@ class PaginatedTableModel(BaseTableModel):
     def _sort_specs(self, value: List):
         self.__sort_specs = value
 
-
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         columns: List[TableColumn],
@@ -253,6 +294,14 @@ class PaginatedTableModel(BaseTableModel):
 
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_columns(self) -> List[TableColumn]:
         """
         Возвращает список всех столбцов модели (включая скрытые).
@@ -262,6 +311,14 @@ class PaginatedTableModel(BaseTableModel):
         """
         return self._columns[:]  # возвращаем копию, чтобы защитить внутренний список
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_system_column(
         self,
         system_name: str,
@@ -320,6 +377,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return True
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_checkbox_column(self, position: int = 0, visible: bool = False) -> bool:
         """Добавляет столбец чекбоксов."""
         return self.add_system_column(
@@ -331,6 +396,14 @@ class PaginatedTableModel(BaseTableModel):
             width=30,
         )
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_button_column(
         self,
         system_name: str,
@@ -351,6 +424,14 @@ class PaginatedTableModel(BaseTableModel):
             width=80,
         )
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_sort_specs(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
         """
         Устанавливает спецификации сортировки (столбец, направление) и применяет сортировку.
@@ -371,6 +452,14 @@ class PaginatedTableModel(BaseTableModel):
         self._sort_specs = specs.copy()
         self._apply_sort()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_multi_sorting(self, specs):
         parent = self.parent()
 
@@ -380,6 +469,14 @@ class PaginatedTableModel(BaseTableModel):
         if parent and hasattr(parent, 'set_multi_sorting'):
             parent.set_multi_sorting(specs)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _apply_sort(self) -> None:
         """
         Применяет текущие спецификации сортировки к загруженным данным.
@@ -437,6 +534,14 @@ class PaginatedTableModel(BaseTableModel):
         self._data.sort(key=sort_key, reverse=False)  # reverse не нужен, так как знак учтён в ключе
         self.layoutChanged.emit()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_checkbox_state(self, row: int) -> bool:
         """
         Возвращает состояние чекбокса для строки (с учётом видимости столбца).
@@ -460,6 +565,14 @@ class PaginatedTableModel(BaseTableModel):
     # Инициализация и проверка столбцов
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _ensure_checkbox_column(self) -> None:
         """Убеждается, что в списке столбцов есть чекбокс-столбец (создаёт, если нет)."""
 
@@ -479,6 +592,14 @@ class PaginatedTableModel(BaseTableModel):
     # Работа со столбцами (публичные методы)
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_column_at_visible_index(self, visible_index: int) -> Optional[TableColumn]:
         """
         Возвращает объект TableColumn по индексу видимого столбца.
@@ -504,18 +625,41 @@ class PaginatedTableModel(BaseTableModel):
         target_col = self._column_appears_for_index(visible_index)
 
         return target_col
-    
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def column_count(self) -> int:
         """Возвращает общее количество столбцов (включая скрытые)."""
 
         return len(self._columns)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def visible_column_count(self) -> int:
         """Возвращает количество видимых столбцов."""
 
         return sum(1 for col in self._columns if col.visible)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_column_index(self, system_name: str) -> int:
         """
         Возвращает индекс столбца по системному имени (в модели, с учётом скрытых).
@@ -533,6 +677,14 @@ class PaginatedTableModel(BaseTableModel):
             
         return -1
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_visible_column_index(self, system_name: str) -> int:
         """
         Возвращает индекс видимого столбца по системному имени.
@@ -561,6 +713,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return -1 if target_col is None else target_col
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_column_by_system_name(self, system_name: str) -> Optional[TableColumn]:
         """
         Возвращает объект столбца по системному имени.
@@ -583,7 +743,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return target_col
 
-
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_column_visible(self, system_name: str, visible: bool) -> None:
         """
         Изменяет видимость столбца.
@@ -607,6 +774,14 @@ class PaginatedTableModel(BaseTableModel):
         # но данные остаются на месте (в отличие от beginResetModel).
         self.layoutChanged.emit()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_field_name_at_visible_column(self, visible_index: int) -> Optional[str]:
         """
         По индексу видимого столбца возвращает имя поля DTO (для DATA-столбцов) или None.
@@ -642,6 +817,14 @@ class PaginatedTableModel(BaseTableModel):
     # Реализация абстрактных методов BaseTableModel
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_item_at_row(self, row: int) -> Optional[Any]:
         """
         Возвращает DTO для указанной строки.
@@ -658,6 +841,14 @@ class PaginatedTableModel(BaseTableModel):
         
         return None
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_all_data(self) -> List[Any]:
         """
         Возвращает копию списка всех загруженных DTO.
@@ -668,6 +859,14 @@ class PaginatedTableModel(BaseTableModel):
         
         return self._data[:]
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def update_row(self, row: int, new_dto: Any) -> None:
         """
         Заменяет DTO в указанной строке на новый.
@@ -692,6 +891,14 @@ class PaginatedTableModel(BaseTableModel):
         # self.dataChanged.emit(top_left, bottom_right, [Qt.DisplayRole, Qt.EditRole])
         self._redrawing_lines(row, [Qt.DisplayRole, Qt.EditRole])
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def add_row(self, dto: Any) -> int:
         """
         Добавляет новую строку в конец модели.
@@ -720,6 +927,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return row
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def remove_row(self, row: int) -> Optional[Any]:
         """
         Удаляет строку из модели.
@@ -771,6 +986,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return removed
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear(self) -> None:
         """
         Полностью очищает модель: удаляет все данные, сбрасывает чекбоксы и цвета.
@@ -788,6 +1011,14 @@ class PaginatedTableModel(BaseTableModel):
         self._sort_specs = []
         self.endResetModel()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_checkbox_column_visible(self, visible: bool) -> None:
         """
         Устанавливает флаг видимости чекбокс-столбца в модели.
@@ -806,6 +1037,14 @@ class PaginatedTableModel(BaseTableModel):
         col.visible = visible
         self.layoutChanged.emit()   # перестроит всю модель (но данные останутся)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_checkbox_state(self, row: int, checked: bool) -> None:
         """
         Устанавливает состояние чекбокса для строки (только если столбец видим).
@@ -846,6 +1085,14 @@ class PaginatedTableModel(BaseTableModel):
     #         bottom_right = self.index(row, self.columnCount() - 1)
     #         self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_row_color(self, entity_id: int, color: QColor) -> None:
         """
         Устанавливает цвет фона для строки по ID сущности.
@@ -872,6 +1119,14 @@ class PaginatedTableModel(BaseTableModel):
                 self._redrawing_lines(row)
                 break
     
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_row_color(self, entity_id: int) -> None:
         """
         Удаляет цвет для указанной сущности и обновляет строку.
@@ -894,6 +1149,14 @@ class PaginatedTableModel(BaseTableModel):
                 self._redrawing_lines(row)
                 break
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_row_colors(self) -> None:
         """
         Сбрасывает все установленные цвета строк.
@@ -920,6 +1183,14 @@ class PaginatedTableModel(BaseTableModel):
         # if self.rowCount() > 0:
         #     self._redrawing_lines()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _redrawing_lines(
             self, 
             row: Optional[int] = None, 
@@ -954,6 +1225,14 @@ class PaginatedTableModel(BaseTableModel):
     # Пагинация
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def can_fetch_more(self) -> bool:
         """
         Определяет, можно ли загрузить ещё страницы (есть ли незагруженные записи).
@@ -964,6 +1243,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return self._total_count > 0 and len(self._data) < self._total_count
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def append_page(self, data: List[Any]) -> None:
         """
         Добавляет очередную страницу данных в конец модели.
@@ -992,6 +1279,14 @@ class PaginatedTableModel(BaseTableModel):
         if self._sort_specs:
             self._apply_sort()
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_total_count(self, total: int) -> None:
         """
         Устанавливает общее количество записей в БД (с учётом фильтров).
@@ -1005,6 +1300,14 @@ class PaginatedTableModel(BaseTableModel):
 
         self._total_count = total
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def total_count(self) -> int:
         """
         Возвращает текущее общее количество записей в БД (с учётом фильтров).
@@ -1020,6 +1323,14 @@ class PaginatedTableModel(BaseTableModel):
     # Методы QAbstractTableModel
     # ----------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """
         Возвращает количество строк в модели.
@@ -1033,6 +1344,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return len(self._data)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """
         Возвращает количество видимых столбцов.
@@ -1046,7 +1365,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return self.visible_column_count()
 
-
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _column_appears_for_index(
         self, 
         value_col: Union[int, str, ColumnType], 
@@ -1095,6 +1421,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return None
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_line_color_DTO(
         self, 
         role: int, 
@@ -1144,6 +1478,14 @@ class PaginatedTableModel(BaseTableModel):
         if role == Qt.UserRole:
             return value
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
         """
         Возвращает данные для ячейки в зависимости от роли.
@@ -1188,6 +1530,14 @@ class PaginatedTableModel(BaseTableModel):
         # Цвет строки из DTO
         return self._get_line_color_DTO(role, row, target_col)
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
         """
         Устанавливает новое значение в ячейку (для редактирования).
@@ -1271,6 +1621,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return True
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         """
         Возвращает флаги для ячейки (редактируемость, выбираемость, чекбоксы).
@@ -1319,6 +1677,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return flags
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def headerData(
         self, 
         section: int, 
@@ -1358,6 +1724,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return None if target_col is None else target_col.title
 
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
         """Сортировка по одному столбцу (сохраняется обратная совместимость)."""
         self.set_sort_specs([(column, order)])

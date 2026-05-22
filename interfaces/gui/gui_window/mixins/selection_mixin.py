@@ -32,6 +32,8 @@ from typing import (
     Optional, Any,
 )
 
+from app.utils.logger.logger import AppLogger
+
 
 class SelectionMixin:
     """
@@ -95,7 +97,14 @@ class SelectionMixin:
     # Публичные методы
     # ------------------------------------------------------------------
 
-
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_selected_entity_ids(self) -> Set[int]:
         """"
         Возвращает множество ID сущностей, выбранных в таблице.
@@ -112,6 +121,14 @@ class SelectionMixin:
 
         return selected.union(checkbox)
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def is_selection_empty(self) -> bool:
         """
         Проверяет, есть ли выбранные строки.
@@ -122,6 +139,14 @@ class SelectionMixin:
 
         return len(self.get_selected_entity_ids()) == 0
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def get_current_selected_dto(self) -> Optional[Any]:
         """
         Возвращает DTO текущей выделенной строки.
@@ -159,6 +184,14 @@ class SelectionMixin:
     # Защищённые методы (вспомогательные)
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def  _map_to_source_index(self, proxy_index):
         """
         Преобразует индекс из прокси-модели в индекс исходной модели.
@@ -193,6 +226,14 @@ class SelectionMixin:
 
         return source_index
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def select_by_id(self, entity_id: int) -> bool:
         """
         Выделяет строку с указанным ID сущности.
@@ -212,6 +253,14 @@ class SelectionMixin:
         
         return False
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_selection(self):
         """Снимает всё выделение (обычное выделение и чекбоксы)."""
         self.table_view.clearSelection()
@@ -221,6 +270,14 @@ class SelectionMixin:
     # Методы для сохранения/восстановления строки (используются декораторами)
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _store_current_row(self) -> int:
         """
         Запоминает текущую строку (индекс в прокси-модели) и возвращает его.
@@ -236,6 +293,14 @@ class SelectionMixin:
 
         return row
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _restore_current_row(self, row: int = None):
         """
         Восстанавливает сохранённую строку.
@@ -259,12 +324,28 @@ class SelectionMixin:
 
         self._saved_row = -1
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _select_first_row(self):
         """Выбирает первую строку в таблице, если она существует."""
         
         if self.source_model.rowCount() > 0:
             self._set_current_row(0)
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _set_current_row(self, row: int):
         """
         Устанавливает текущую строку в таблице (прокручивает к ней).
@@ -278,6 +359,14 @@ class SelectionMixin:
             self.table_view.setCurrentIndex(index)
             self.table_view.scrollTo(index)
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _find_row_by_id(self, entity_id: int) -> int:
         """
         Ищет строку в исходной модели по ID сущности.
@@ -308,7 +397,14 @@ class SelectionMixin:
     # Методы для получения выбранных строк/ID
     # ------------------------------------------------------------------
 
-
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_selected_ids_from_view(self) -> Set[int]:
         """
         Возвращает множество ID, выделенных обычным выделением (клик + Shift/Ctrl).
@@ -338,6 +434,14 @@ class SelectionMixin:
         #             ids.add(dto.id)
         # return ids
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_selected_rows_indices(self) -> List[int]:
         """
         Возвращает список индексов строк (в исходной модели), выделенных в таблице.
@@ -360,6 +464,14 @@ class SelectionMixin:
                 
         return rows
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_selected_dtos(self) -> List[Any]:
         """
         Возвращает список DTO, соответствующих выделенным строкам (обычное выделение).
@@ -376,6 +488,14 @@ class SelectionMixin:
 
         return dtos
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_selected_checkbox_ids(self) -> Set[int]:
         """
         Возвращает множество ID сущностей, у которых установлены чекбоксы.
@@ -402,6 +522,14 @@ class SelectionMixin:
 
         return ids
 
+    @AppLogger.get_instance(
+        name='SelectionMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_checkboxes(self):
         """
         Снимает все чекбоксы в таблице (если модель поддерживает set_checkbox_state).

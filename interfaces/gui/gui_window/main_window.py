@@ -46,6 +46,7 @@ from interfaces.gui.gui_window.controllers.page_manager import PageManager
 from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
+from interfaces.gui.gui_window.pages.patient_list_page import PatientListPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
@@ -88,15 +89,20 @@ class PagesCreationMixin:
             - self.patient_edit_page (DynamicEditPage)
         """
         # Страница со списком пациентов
-        self.patient_list_page = DynamicListPage(
-            service=get_patient_service(),
-            loader_func=self.load_patients,          # функция загрузки данных
-            dto_class=PatientDTO,
-            field_configs=PATIENT_CONFIG,
-            page_title="Пациенты",
-            add_action_text="Добавить пациента",
-            action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
-            # save_directly=True,   
+        # self.patient_list_page = DynamicListPage(
+        #     service=get_patient_service(),
+        #     loader_func=self.load_patients,          # функция загрузки данных
+        #     dto_class=PatientDTO,
+        #     field_configs=PATIENT_CONFIG,
+        #     page_title="Пациенты",
+        #     add_action_text="Добавить пациента",
+        #     action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
+        #     # save_directly=True,   
+        # )
+
+        self.patient_list_page = PatientListPage(
+            parent=self,
+            shared_registry=None   # можно оставить None, будет создан локальный реестр
         )
 
         # Страница редактирования пациента

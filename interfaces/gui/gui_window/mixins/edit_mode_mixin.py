@@ -206,6 +206,14 @@ class EditModeMixin(ABC):
     # Публичные методы управления режимом
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def toggle_edit_mode(self, enable: bool) -> None:
         """
         Включает или выключает режим редактирования.
@@ -256,10 +264,26 @@ class EditModeMixin(ABC):
             
         self._set_edit_mode(enable)
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def is_edit_mode(self) -> bool:
         """Возвращает True, если режим редактирования включён."""
         return getattr(self, 'edit_mode', False)
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def save_all_changes(self) -> bool:
         """
         Публичный метод для сохранения всех изменений (вызывается из UI).
@@ -316,6 +340,14 @@ class EditModeMixin(ABC):
     #
     #         return False
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def cancel_all_changes(self) -> None:
         """
         Отменяет все изменения и перезагружает данные.
@@ -348,6 +380,14 @@ class EditModeMixin(ABC):
     #     self._clear_drafts()
     #     self.source_model.clear_row_colors()
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _set_edit_mode(self, enable: bool)-> None:
         """
         Устанавливает флаг режима и обновляет UI.
@@ -369,6 +409,14 @@ class EditModeMixin(ABC):
     #     self.source_model.set_checkbox_column_visible(enable)
     #     self._update_ui_for_edit_mode(enable)
 
+    @AppLogger.get_instance(
+        name='EditModeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _exit_edit_mode(self)-> None:
         """Выходит из режима редактирования (без диалога)."""
         if self.edit_mode:

@@ -40,10 +40,13 @@
 
 from typing import (
     # Dict, 
-    Any, Dict, List, Optional, Tuple,
+    Any, Dict, List, Optional, Tuple, Union, get_args, get_origin,
 )
 
+from app.utils.logger.logger import AppLogger
+
 from app.dependencies import get_note_service
+
 from interfaces.gui.gui_window.widgets.table_column import ColumnType
 from interfaces.gui.gui_window.utils.filter_converter import convert_ui_filters_to_sql
 
@@ -51,9 +54,8 @@ from PySide6.QtCore import (
     Qt,
 )
 
-
-class FilterMixin:
-    """
+class FilterMixin:  
+    """  
     Миксин для серверной фильтрации и сортировки в страницах списка.
 
     **Предназначение:**
@@ -120,7 +122,14 @@ class FilterMixin:
     def _column_filters(self, value: Dict[int, Dict[str, Any]]):
         self.__column_filters = value
 
-
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_sorting(self, column: int, order: Qt.SortOrder) -> None:
         """
         Устанавливает сортировку по указанному столбцу.
@@ -153,12 +162,21 @@ class FilterMixin:
         self._current_order_by = order_by
         self.reload_with_order_by(order_by)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None:
         """
         Устанавливает многоколоночную сортировку.
         
         :param specs: список кортежей (видимый_индекс_столбца, порядок)
         """
+
         if not specs:
             return
         
@@ -183,6 +201,14 @@ class FilterMixin:
             self._current_order_by = order_by
             self.reload_with_order_by(order_by)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_sort_indicator_changed(self, logical_index: int, order: Qt.SortOrder) -> None:
         """
         Обработчик сигнала сортировки от заголовка таблицы.
@@ -190,6 +216,14 @@ class FilterMixin:
         """
         self.set_sorting(logical_index, order)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def setup_filtering(self, filter_bar, table_view):
         """Подключает фильтр-бар и заголовок таблицы."""
         self.filter_bar = filter_bar
@@ -214,6 +248,57 @@ class FilterMixin:
             if hasattr(filter_bar, 'filter_condition_removed'):
                 filter_bar.filter_condition_removed.connect(self._on_filter_condition_removed)
 
+            # Новый сигнал для очистки глобального поиска
+            if hasattr(filter_bar, 'clear_global_search'):
+                filter_bar.clear_global_search.connect(self._clear_global_search)
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_global_in_block(self):
+        """
+        Очищает глобальный поиск (сбрасывает текст и перезагружает данные).
+
+        Отключает сигналы поля поиска (self.search_edit), чтобы при программной
+        очистке не вызвать лишнюю перезагрузку страницы.
+        """
+        
+        self._global_search_text = ""
+
+        # Также очищаем поле ввода, если оно есть
+        if hasattr(self, 'search_edit') and self.search_edit:
+            self.search_edit.blockSignals(True)
+            self.search_edit.clear()
+            self.search_edit.blockSignals(False)
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _clear_global_search(self):
+        """Очищает глобальный поиск (сбрасывает текст и перезагружает данные)."""
+
+        self._clear_global_in_block()
+
+        self._apply_filters_and_refresh()
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _has_fuzzy_filter(self) -> bool:
         """
         Проверяет, есть ли в текущем дереве фильтров оператор 'fuzzy'.
@@ -244,6 +329,14 @@ class FilterMixin:
 
         return check(self._current_filters)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_column_filter_requested(self, column: int, logic: str, conditions: list):
 
         if not self._get_column_name_by_visible_index(column):
@@ -253,8 +346,8 @@ class FilterMixin:
             self._column_filters[column] = {'logic': logic, 'conditions': conditions}
         else:
             self._column_filters.pop(column, None)
-        self._rebuild_filters_tree()   # перестроить дерево и перезагрузить данные
-        self._refresh_filter_bar()      # обновить отображение чипов
+            
+        self._apply_filters_and_refresh()   
 
         # """
         # Обработчик сигнала фильтрации от заголовка таблицы.
@@ -290,8 +383,34 @@ class FilterMixin:
         # self.reload_with_filters(self._current_filters)
 
         # self._update_filter_bar()
+    
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )    
+    def _get_real_type(self, field_type):
+        origin = get_origin(field_type)
+        if origin is Union:
+            args = get_args(field_type)
+            non_none = [arg for arg in args if arg is not type(None)]
 
+            if non_none:
+                return non_none[0]
+            
+        return field_type
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _rebuild_filters_tree(self):
         """
         Собирает дерево фильтров из `self._column_filters` и `self._global_search_text`,
@@ -300,8 +419,13 @@ class FilterMixin:
         **Порядок объединения:**
             - Узлы от разных столбцов объединяются через `AND`.
             - Узел глобального поиска (если есть) добавляется как отдельное `OR`-условие
-            (поиск по всем строковым DATA-столбцам).
+                (поиск по всем строковым DATA-столбцам).
             - Если есть несколько узлов, они помещаются в корневой `{'and': [...]}`.
+
+        **Какие поля включаются в глобальный поиск:**
+            - Невиртуальные строковые поля (например, `last_name`, `phone`).
+            - Виртуальные поля-заметки (поля, у которых в field_configs есть ключ `is_note`).
+            - Системные столбцы и числовые/дата-поля исключаются.
 
         После обновления `self._current_filters` вызывает `reload_with_filters`,
         что приводит к загрузке первой страницы отфильтрованных данных.
@@ -328,30 +452,61 @@ class FilterMixin:
         if self._global_search_text:
             text_filters = []
             # Проходим по всем DATA-столбцам строкового типа
-            if hasattr(self.source_model, '_columns'):
-                for col in self.source_model._columns:
-                    if col.column_type == ColumnType.DATA and col.data_type == str:
-                        text_filters.append({
-                            'column': col.field_name,
-                            'operator': 'ilike',
-                            'value': self._global_search_text
-                        })
-            if text_filters:
-                nodes.append({'or': text_filters})
-
+            # if hasattr(self.source_model, '_columns'):
+            #     for col in self.source_model._columns:
+            if hasattr(self.source_model, 'get_columns'):
+                for col in self.source_model.get_columns():
+                    # if col.column_type == ColumnType.DATA and col.data_type == str:
+                    real_type = self._get_real_type(col.data_type)
+                    if real_type == str:
+                        config = self.field_configs.get(col.field_name, {})
+                        # Включаем невиртуальные поля ИЛИ виртуальные поля-заметки
+                        if (
+                            not config.get('virtual', False)
+                        ) or (
+                            config.get('is_note')
+                        ):
+                            text_filters.append({
+                                'column': col.field_name,
+                                'operator': 'ilike',
+                                'value': self._global_search_text
+                            })
+                if text_filters:
+                    nodes.append({'or': text_filters})
 
         if not nodes:
-            self._current_filters = None
-            self.reload_with_filters(None)
+            temp = None
 
         elif len(nodes) == 1:
-            self._current_filters = nodes[0]
-            self.reload_with_filters(nodes[0])
+            temp = nodes[0]
 
         else:
-            self._current_filters = {'and': nodes}
-            self.reload_with_filters({'and': nodes})
+            temp = {'and': nodes}
+        
+        self._current_filters = temp
+        self.reload_with_filters(temp)    
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_filters_and_refresh(self):
+        # Перестраиваем дерево фильтров и обновляем панель
+        self._rebuild_filters_tree()   # перестроить дерево и перезагрузить данные
+        self._refresh_filter_bar()      # обновить отображение чипов
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _refresh_filter_bar(self):
         """
         Обновляет панель активных фильтров (`FilterBar`) на основе `self._column_filters`.
@@ -360,7 +515,9 @@ class FilterMixin:
         и вызывает `self.filter_bar.update_filters(column_filters, column_titles)`.
         Если фильтров нет, панель скрывается.
 
-        **Важно:** Глобальный поиск не отображается в FilterBar (у него нет чипов).
+        **Важно:** Глобальный поиск (`self._global_search_text`) не отображается в FilterBar
+        (у него нет чипов), так как он представляет собой отдельное условие, не привязанное
+        к конкретному столбцу.
         """
             
         if not hasattr(self, 'filter_bar'):
@@ -375,24 +532,37 @@ class FilterMixin:
         for col in self._column_filters.keys():
             title = self.table_view.model().headerData(col, Qt.Horizontal, Qt.DisplayRole)
             column_titles[col] = title if title else f"Столбец {col}"
-        self.filter_bar.update_filters(self._column_filters, column_titles)
-        self.filter_bar.setVisible(True)
 
+        # self.filter_bar.update_filters(self._column_filters, column_titles)
+        # # self.filter_bar.setVisible(True) # убрал. есть в filter_bar.update_filters
+
+        self.filter_bar.update_filters(
+            self._column_filters,
+            column_titles,
+            global_search_text=self._global_search_text
+        )
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_column_filter(self, column: int):
         """Очищает фильтр для указанного столбца."""
 
         if column in self._column_filters:
             del self._column_filters[column]
 
-        self._rebuild_filters_tree()
-        self._refresh_filter_bar()
+        self._apply_filters_and_refresh()
 
         # if not self._column_filters:
         #     return
             
         # self._column_filters.clear()
-        # self._rebuild_filters_tree()
-        # self._refresh_filter_bar()
+        # self._apply_filters_and_refresh()
         
         # if not self._current_filters:
         #     return
@@ -432,15 +602,22 @@ class FilterMixin:
         # else:
         #     self._current_filters = new_filters
 
-
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _clear_all_filters(self):
         """Очищает все фильтры."""
         if self._column_filters:
             self._column_filters.clear()
 
-        self._global_search_text = ""
-        self._rebuild_filters_tree()
-        self._refresh_filter_bar()
+        # self._global_search_text = ""
+        self._clear_global_in_block()
+        self._apply_filters_and_refresh()
 
         # if not self._current_filters:
         #     return
@@ -449,6 +626,14 @@ class FilterMixin:
         # self.reload_with_filters(self._current_filters)
         # self._update_filter_bar()
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_global_search(self, text: str):
         """
         Устанавливает глобальный текстовый фильтр (поиск по всем текстовым полям).
@@ -461,8 +646,7 @@ class FilterMixin:
         """
         
         self._global_search_text = text
-        self._rebuild_filters_tree()
-        self._refresh_filter_bar()
+        self._apply_filters_and_refresh()
 
         # if not text:
         #     self._current_filters = None
@@ -502,15 +686,64 @@ class FilterMixin:
         # # self._update_filter_bar()
         # self._refresh_filter_bar()
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_filter_removed(self, column: int):
         self._clear_column_filter(column)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_filter_condition_removed(self, column: int, condition_index: int) -> None:
         """Обработчик удаления конкретного условия из фильтра (при множественных условиях)."""
 
-        # Пока просто очищаем весь фильтр столбца
-        self._clear_column_filter(column)
+        # # Пока просто очищаем весь фильтр столбца
+        # self._clear_column_filter(column)
 
+        if column not in self._column_filters:
+            return
+        
+        filter_def = self._column_filters[column]
+        conditions = filter_def.get('conditions', [])
+
+        if 0 <= condition_index < len(conditions):
+
+            # Удаляем условие по индексу
+            del conditions[condition_index]
+
+            # Если условий не осталось – удаляем весь фильтр столбца
+            if not conditions:
+                del self._column_filters[column]
+
+            else:
+                # Обновляем словарь фильтра (логика не меняется)
+                self._column_filters[column] = {
+                    'logic': filter_def['logic'],
+                    'conditions': conditions
+                }
+
+            # Перестраиваем дерево фильтров и обновляем панель
+            self._apply_filters_and_refresh()
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_unique_values_for_column(self, visible_column: int) -> List[str]:
         col_name = self._get_column_name_by_visible_index(visible_column)
         if not col_name:
@@ -528,6 +761,14 @@ class FilterMixin:
         # Обычное поле – запрос к БД через сервис
         return self.service.get_unique_values(col_name)
 
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_column_name_by_visible_index(self, visible_index: int) -> Optional[str]:
         """Возвращает имя поля DTO для видимого столбца."""
 

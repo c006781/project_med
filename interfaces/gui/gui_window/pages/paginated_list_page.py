@@ -175,7 +175,7 @@
     ...     page_title="Пациенты",
     ...     add_action_text="Добавить пациента",
     ...     entity_type="patient",
-    ...     show_controls=['search', 'edit_mode_btn', 'save_btn']
+    ...     show_controls=['edit_mode_btn', 'action_combo', 'inline_action_combo', 'save_btn', 'search']
     ... )
     >>> 
     >>> # Программное включение режима редактирования
@@ -221,7 +221,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 
 from sqlalchemy.orm import Session
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal, Slot
 # from PySide6.QtWidgets import QMessageBox
 from PySide6.QtGui import QColor
 
@@ -539,6 +539,8 @@ class PaginatedListPage(
 
         self._saved_state = {
             'filters': None,
+            'column_filters': None,
+            'global_search_text': '',
             'order_by': None,
             # 'multi_sort_specs': None,# убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
             'scroll_pos': 0,
@@ -582,6 +584,21 @@ class PaginatedListPage(
             selection_model.selectionChanged.connect(self._on_selection_changed_for_draft)
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
+
+    @Slot(bool)
+    def _on_edit_mode_toggled(self, checked: bool):
+        """Обработчик переключения режима редактирования (вызывается из кнопки)."""
+        self.set_edit_mode(checked)
+
+        # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
+        if hasattr(self, 'source_model'):
+            self.source_model.set_checkbox_column_visible(checked)
+
+    def _update_ui_for_edit_mode(self, edit_mode: bool):
+        super()._update_ui_for_edit_mode(edit_mode)
+        
+        if hasattr(self, 'source_model'):
+            self.source_model.set_checkbox_column_visible(edit_mode)
 
     def set_edit_mode(self, enable: bool) -> None:
         """
@@ -1280,7 +1297,19 @@ class PaginatedListPage(
             # Удаление ключа здесь привело бы к завышению счётчика родителя.
             # Очистка ключа происходит только при успешном сохранении (в _balance_parent_counter)
             # или при отмене строки (в _cancel_new_row).
+
+            # ВАЖНО: При ошибке сохранения ключ __parent_counter_inc__ не удаляется,
+            # потому что строка остаётся в реестре (__new__). При повторной попытке
+            # сохранения _balance_parent_counter найдёт ключ и корректно уменьшит счётчик.
+            # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
             raise
+
+        # Найти строку в модели по временному ID и заменить DTO
+        row = self._find_row_by_id(temp_id)
+        if row >= 0:
+            self._source_model_update_row(row, created)
+        else:
+            self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
         
         self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
 
@@ -2732,6 +2761,8 @@ class PaginatedListPage(
         """Сохраняет текущее состояние (фильтры, сортировку, прокрутку)."""
         self._saved_state = {
             'filters': self._current_filters,
+            'column_filters': self._column_filters.copy(),
+            'global_search_text': self._global_search_text,
             'order_by': self._current_order_by,
             # 'multi_sort_specs': self._current_order_by,  # можно хранить то же, что и order_by # убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
             'scroll_pos': self.table_view.verticalScrollBar().value(),
@@ -2793,6 +2824,8 @@ class PaginatedListPage(
         if reset:            
             self._saved_state = {  # значения по умолчанию
                 'filters': None,
+                'column_filters': None,
+                'global_search_text': '',
                 'order_by': None,
                 # 'multi_sort_specs': None, # убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
                 'scroll_pos': 0,
@@ -2801,21 +2834,33 @@ class PaginatedListPage(
 
 
         # Восстанавливаем фильтры и сортировку из сохранённого состояния
-        if not reset and self._saved_state.get('filters') is not None:
-            self._current_filters = self._saved_state['filters']
-            self._current_order_by = self._saved_state['order_by']
+        saved_filters = self._saved_state.get('filters')
+        if not reset and (saved_filters is not None):
+
+            self._current_filters = saved_filters
+
+            self._column_filters = self._saved_state.get('column_filters', {}).copy()
+            self._global_search_text = self._saved_state.get('global_search_text', "")
+            self._current_order_by = self._saved_state.get('order_by')
+
+            # Обновляем панель фильтров (чипы)
+            self._refresh_filter_bar()
 
             # Вызываем super().on_enter перед загрузкой данных, 
             # чтобы BasePage мог выполнить свою логику (если появится в будущем)
-            super().on_enter(extra_data)
+            super().on_enter(extra_data)  # вызовет загрузку без фильтров
 
             # Перезагружаем данные с сохранёнными фильтрами/сортировкой
             self.reload_with_filters(self._current_filters)
         else:
-            # Обычный вход (например, с patient_id) – сбрасываем фильтры
+            # Нет сохранённых фильтров – сбрасываем всё
             self._current_filters = None
             self._current_order_by = None
-            super().on_enter(extra_data)  # вызовет загрузку без фильтров
+            self._column_filters = {}
+            self._global_search_text = ""
+            self._refresh_filter_bar()
+            super().on_enter(extra_data)
+            self.reload_with_filters(None)
 
         # После загрузки данных восстанавливаем прокрутку и выделение
         QTimer.singleShot(100, self._restore_scroll_and_selection)
@@ -3409,7 +3454,7 @@ class PaginatedListPage(
         # Удаляем статус сущности из реестра (ключ __status__)
         self._draft_registry.delete_entity_status(self._entity_type, entity_id)
 
-        # Удаляем служебный ключ, созданный при добавлении новой строки
+        # Удаляем служебный ключ балансировки счётчиков, созданный при добавлении новой строки
         self._draft_registry.discard(f"__parent_counter_inc__:{prefix_temp}")
 
     def _cancel_new_row(self, entity_id: int):

@@ -67,7 +67,9 @@ import time as time_module
 
 from contextlib import contextmanager
 
-from sqlalchemy import func, inspect, or_
+from sqlalchemy import (
+    func, or_, #inspect
+)
 
 
 # from app.dependencies import get_appointment_service
@@ -213,7 +215,10 @@ from app.exceptions import (
 #         pass #  raise # e # pass
 
 # try:
-from app.utils.filtering.filtering import _build_filter_condition, apply_filters, apply_post_filters
+from app.utils.filtering.filtering import (
+    # _build_filter_condition, 
+    apply_filters, apply_post_filters
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -425,6 +430,43 @@ class BaseService(
 
         # Подписываемся на изменения конфигурации
         AppConfigManager.add_change_listener(self._on_config_changed)
+    
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_note_field_mappings_dict(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Возвращает словарь для быстрого доступа к информации о полях-заметках.
+
+        Используется в фильтрации для построения подзапросов EXISTS.
+        Структура словаря:
+            {
+                'reason_text': {
+                    'foreign_key': 'reason_id',     # имя колонки внешнего ключа в модели
+                    'note_model': AppointmentNote,  # класс модели заметки
+                    'text_column': 'text'           # имя колонки с текстом заметки
+                },
+                ...
+            }
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Словарь, где ключ – имя поля DTO (например, 'reason_text'),
+                                    значение – метаданные для построения подзапроса.
+        """
+            
+        # from app.database.database_shema.clinic import AppointmentNote
+
+        mappings = {}
+        for mapping in self._get_note_field_mappings():
+            dto_field = mapping['dto_field']
+            mappings[dto_field] = {
+                'foreign_key': mapping['orm_id_field'],
+                'note_model': AppointmentNote,
+                'text_column': 'text'   # поле в AppointmentNote, содержащее текст
+            }
+        return mappings
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -440,18 +482,35 @@ class BaseService(
         """
         Применяет список фильтров к запросу и возвращает кортеж (query, post_filters).
 
+        Этот метод оборачивает вызов внешней функции `apply_filters` из модуля filtering,
+        передавая ей предварительно сформированный словарь `note_mappings` (для поддержки
+        поиска по полям-заметкам).
+
         Args:
             query (Query): Исходный запрос SQLAlchemy.
-            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
-            fuzzy_threshold (int): Порог для нечёткого поиска.
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров  (каждый словарь с ключами column, operator, value).
+            fuzzy_threshold (int): Порог схожести для нечёткого поиска..
 
         Returns:
             Tuple[Query, List[Tuple]]: Модифицированный запрос и список пост-фильтров.
         """
+        
         if not filters:
             return query, []
+        
+        # # from app.utils.filtering.filtering import apply_filters
+        # return apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+        note_mappings = self._get_note_field_mappings_dict()
         # from app.utils.filtering.filtering import apply_filters
-        return apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+        return apply_filters(
+            query,
+            self._model_class,
+            filters,
+            fuzzy_threshold,
+            note_mappings=note_mappings
+        )
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -507,15 +566,24 @@ class BaseService(
         Returns:
             int: Количество записей, удовлетворяющих фильтрам.
         """
+        
         with self._session_scope(session) as sess:
             query = sess.query(self._model_class)
-            if filters:
-                # from app.utils.filtering.filtering import _build_filter_condition
-                condition = _build_filter_condition(filters, self._model_class)
-                if condition is not True:
-                    query = query.filter(condition)
+            # if filters:
+            #     # from app.utils.filtering.filtering import _build_filter_condition
+            #     condition = _build_filter_condition(filters, self._model_class)
+            #     if condition is not True:
+            #         query = query.filter(condition)
                     
-            return query.count()
+            # return query.count()
+
+            query = sess.query(self._model_class)
+
+            # Применяем фильтры (включая заметки), игнорируем пост-фильтры (fuzzy), так как они не влияют на количество
+            filtered_query, _ = self._apply_filters_to_query(query, filters)
+
+            return filtered_query.count()
+        
         # with self._session_scope(session) as sess:
         #     # repo = self._get_repo(sess)
         #     # return repo.count(filters=filters)
@@ -3549,9 +3617,21 @@ class NoteService(
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_unique_note_texts(self, session: Optional[Session] = None) -> List[str]:
+        """
+        Возвращает все уникальные тексты заметок из таблицы AppointmentNote.
+
+        Примечание: 
+            Для виртуальных полей-заметок (reason_text, procedure_text и т.д.)
+            этот метод возвращает все существующие тексты, а не только относящиеся
+            к конкретному полю. Это допустимо для автодополнения, так как
+            пользователь может использовать любой текст, а сервис при сохранении
+            либо создаст новую заметку, либо найдёт существующую по точному
+            совпадению текста (см. get_or_create_note).
+        """
         with self._session_scope(session) as sess:
             # Получаем все уникальные тексты заметок
             distinct_texts = sess.query(self._model_class.text).distinct().all()
+            
             return [t[0] for t in distinct_texts if t[0]]
 
 class AppointmentService(

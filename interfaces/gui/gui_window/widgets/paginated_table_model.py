@@ -253,6 +253,15 @@ class PaginatedTableModel(BaseTableModel):
 
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
 
+    def get_columns(self) -> List[TableColumn]:
+        """
+        Возвращает список всех столбцов модели (включая скрытые).
+
+        Returns:
+            List[TableColumn]: Копия списка _columns.
+        """
+        return self._columns[:]  # возвращаем копию, чтобы защитить внутренний список
+
     def add_system_column(
         self,
         system_name: str,

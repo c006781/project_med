@@ -20,8 +20,11 @@
 from abc import ABC, abstractmethod
 from typing import Any, List, Optional
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Signal, Qt
+from interfaces.gui.gui_window.widgets.table_column import TableColumn
+
+from PySide6.QtCore import QAbstractTableModel, Signal, QModelIndex, Qt
 from PySide6.QtGui import QColor
+
 
 
 class BaseTableModel(QAbstractTableModel, ABC): 
@@ -55,6 +58,15 @@ class BaseTableModel(QAbstractTableModel, ABC):
 
     row_modified = Signal(int)
 
+    @abstractmethod
+    def get_columns(self) -> List['TableColumn']:
+        """
+        Возвращает список всех столбцов модели (включая скрытые).
+
+        Returns:
+            List[TableColumn]: Список объектов TableColumn.
+        """
+        pass
 
     # ----------------------------------------------------------------------
     # Пагинация (для моделей, поддерживающих ленивую загрузку)
@@ -198,12 +210,12 @@ class BaseTableModel(QAbstractTableModel, ABC):
     # ----------------------------------------------------------------------
 
     @abstractmethod
-    def set_row_color(self, row: int, color: QColor) -> None:
+    def set_row_color(self, entity_id: int, color: QColor) -> None:
         """
         Устанавливает цвет фона для строки.
 
         Args:
-            row: Индекс строки.
+            entity_id: ID сущности (из DTO). Может быть отрицательным для новых строк.
             color: Цвет фона.
         """
         pass

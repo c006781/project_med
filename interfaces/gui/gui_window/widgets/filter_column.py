@@ -432,7 +432,47 @@ class FilterColumnDialog(QDialog):
         return None
 
 class FilterBar(QFrame):
-    """Строка активных фильтров с чипами."""
+    """
+    Панель активных фильтров, отображающая установленные фильтры в виде "чипов".
+
+    Каждый чип представляет собой кнопку с текстом, описывающим условие фильтра
+    (столбец, оператор, значение). При клике на чип испускается сигнал, который
+    позволяет удалить соответствующий фильтр или отредактировать его.
+
+    **Поддерживаемые типы чипов:**
+        - Чипы для фильтров по столбцам (отображают условие, столбец и значение).
+        - Чип для глобального поиска (отображает текст поиска и позволяет его сбросить).
+
+    **Внешний вид:**
+        - Панель располагается над таблицей и изначально скрыта.
+        - Чипы имеют скруглённые углы, серый фон и крестик для удаления.
+        - При наведении фон меняется на более тёмный.
+
+    **Сигналы:**
+        - `filter_removed(column: int)` – испускается при удалении фильтра для столбца.
+        - `all_filters_cleared()` – испускается при нажатии кнопки «Очистить все».
+        - `filter_edit_requested(column: int)` – испускается при двойном клике по чипу
+          (предлагает отредактировать фильтр).
+        - `filter_condition_removed(column: int, condition_index: int)` – испускается
+          при удалении отдельного условия из составного фильтра (если столбец имеет
+          несколько условий).
+        - `clear_global_search()` – испускается при клике на чип глобального поиска,
+          чтобы сбросить текст поиска.
+
+    **Методы:**
+        - `update_filters(filters, column_titles, global_search_text)`
+        - `_create_chip(column, condition, column_title, cond_idx, total_conds, logic)`
+        - `_create_global_search_chip(text)`
+
+    **Пример использования в FilterMixin:**
+        >>> self.filter_bar.update_filters(
+        ...     self._column_filters,
+        ...     column_titles,
+        ...     global_search_text=self._global_search_text
+        ... )
+        >>> self.filter_bar.setVisible(True)
+    """
+
 
     _OPERATOR_NAMES = { # Сопоставление операторов с человеко-читаемыми названиями
         "eq": "=",
@@ -450,11 +490,11 @@ class FilterBar(QFrame):
         # "fuzzy": "похоже на"
     }
 
-    filter_condition_removed = Signal(int, int)  # column, condition_index
-
     filter_removed = Signal(int)          # column index
     all_filters_cleared = Signal()
     filter_edit_requested = Signal(int)   # column index
+    filter_condition_removed = Signal(int, int)  # column, condition_index
+    clear_global_search = Signal()   # сигнал для сброса глобального поиска
 
     @AppLogger.get_instance(
         name='FilterBar',
@@ -465,6 +505,17 @@ class FilterBar(QFrame):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def __init__(self, parent=None):
+        """
+        Инициализирует панель фильтров.
+
+        Создаёт горизонтальный layout, QScrollArea для прокрутки чипов,
+        контейнер `chips_widget` с горизонтальным layout и кнопку «Очистить все».
+        По умолчанию панель скрыта.
+
+        Args:
+            parent (QWidget, optional): Родительский виджет. По умолчанию None.
+        """
+
         super().__init__(parent)
         self.logger = AppLogger.get_instance(
             name='gui.FilterBar',
@@ -491,7 +542,7 @@ class FilterBar(QFrame):
         self.chips_layout = QHBoxLayout(self.chips_widget)
         self.chips_layout.setContentsMargins(0, 0, 0, 0)
         self.chips_layout.setSpacing(5)
-        self.chips_layout.addStretch()
+        self.chips_layout.addStretch() # растяжка справа, чтобы чипы были слева
 
         self.scroll.setWidget(self.chips_widget)
         layout.addWidget(self.scroll)
@@ -513,16 +564,43 @@ class FilterBar(QFrame):
     def update_filters(
         self, 
         filters: Dict[int, Dict[str, Any]], 
-        column_titles: Dict[int, str]
-    ):
+        column_titles: Dict[int, str],
+        global_search_text: str = "",
+    ) -> None:
+        """
+        Обновляет отображение чипов на основе переданных фильтров и текста глобального поиска.
+
+        Сначала очищает все существующие чипы, затем:
+            - Если указан `global_search_text`, добавляет чип глобального поиска.
+            - Для каждого столбца из `filters` создаёт один или несколько чипов
+              (по одному на каждое условие в `conditions`).
+            - Если фильтров нет и текст поиска пуст, панель скрывается.
+
+        Args:
+            filters (Dict[int, Dict[str, Any]]): Словарь фильтров по столбцам.
+                Ключ – видимый индекс столбца, значение – словарь с ключами:
+                - `logic` (str): 'AND' или 'OR' – логика объединения условий внутри столбца.
+                - `conditions` (List[Dict]): список условий, каждое с ключами
+                  'operator', 'value', 'value2' (для between).
+            column_titles (Dict[int, str]): Словарь {видимый_индекс: заголовок_столбца}
+                для отображения в чипах.
+            global_search_text (str): Текст глобального поиска (если не пуст, добавляется чип).
+        """
+
         # Очищаем все чипы
         while self.chips_layout.count() > 1:
             item = self.chips_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        if not filters:
-            self.setVisible(False)
-            return
+
+        # if not filters:
+        #     self.setVisible(False)
+        #     return
+        
+        # Добавляем чип глобального поиска, если есть текст
+        if global_search_text:
+            global_chip = self._create_global_search_chip(global_search_text)
+            self.chips_layout.insertWidget(self.chips_layout.count() - 1, global_chip)
 
         # Для каждого столбца создаём отдельный чип для каждого условия
         for col, filter_def in filters.items():
@@ -532,7 +610,8 @@ class FilterBar(QFrame):
             for idx, cond in enumerate(conditions):
                 chip = self._create_chip(col, cond, col_title, idx, len(conditions), logic)
                 self.chips_layout.insertWidget(self.chips_layout.count() - 1, chip)
-        self.setVisible(True)
+
+        self.setVisible(bool(filters or global_search_text))
 
     @AppLogger.get_instance(
         name='FilterBar',
@@ -542,24 +621,100 @@ class FilterBar(QFrame):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _create_chip(self, column: int, condition: dict, column_title: str, cond_idx: int, total_conds: int, logic: str) -> QPushButton:
+    def _create_global_search_chip(self, text: str) -> QPushButton:
+        """
+        Создаёт чип для глобального поиска.
+
+        Текст чипа: `"✖ Поиск: {text}"`. При клике на чип испускается сигнал
+        `clear_global_search()`, который должен сбросить глобальный поиск в странице.
+
+        Args:
+            text (str): Текст глобального поиска.
+
+        Returns:
+            QPushButton: Кнопка-чип глобального поиска.
+        """
+
+        chip = QPushButton(f"✖ Поиск: {text}")
+        chip.setFlat(True)
+        chip.setStyleSheet(
+            """
+            QPushButton {
+                background-color: #e0e0e0;
+                border-radius: 12px;
+                padding: 2px 8px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #d0d0d0;
+            }
+            """
+        )
+        chip.setCursor(Qt.PointingHandCursor)
+        # При клике испускаем сигнал для сброса глобального поиска
+        chip.clicked.connect(self.clear_global_search.emit)
+        return chip
+
+    @AppLogger.get_instance(
+        name='FilterBar',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _create_chip(
+        self, 
+        column: int, 
+        condition: dict, 
+        column_title: str, 
+        cond_idx: int, 
+        total_conds: int, 
+        logic: str
+    ) -> QPushButton:
+        """
+        Создаёт чип для одного условия фильтра.
+
+        Текст чипа формируется как `"{столбец} {оператор} {значение}"`.
+        Если в столбце несколько условий, добавляется префикс `[AND]` или `[OR]`.
+        При клике на чип испускается сигнал `filter_condition_removed(column, cond_idx)`.
+        При двойном клике – сигнал `filter_edit_requested(column)`.
+
+        Args:
+            column (int): Видимый индекс столбца.
+            condition (Dict[str, Any]): Словарь условия с ключами 'operator', 'value', 'value2'.
+            column_title (str): Заголовок столбца для отображения.
+            cond_idx (int): Индекс условия в списке conditions (0-based).
+            total_conds (int): Общее количество условий для этого столбца.
+            logic (str): 'AND' или 'OR' – логика объединения.
+
+        Returns:
+            QPushButton: Настроенная кнопка-чип.
+        """
+
         op = condition.get('operator')
         value = condition.get('value')
         value2 = condition.get('value2')
         op_text = self._OPERATOR_NAMES.get(op, op)
+
         if op == "between":
             text = f"{column_title} {op_text} {value} и {value2}"
+
         elif op == "in":
             if isinstance(value, list) and len(value) > 2:
                 text = f"{column_title} {op_text} {len(value)} значений"
             else:
                 text = f"{column_title} {op_text} {value}"
+
         elif op in ("is_null", "is_not_null"):
             text = f"{column_title} {op_text}"
+
         else:
             text = f"{column_title} {op_text} {value}"
+
         if total_conds > 1:
             text = f"[{logic}] {text}"
+
         chip = QPushButton(f"✖ {text}")
         chip.setFlat(True)
         chip.setStyleSheet(

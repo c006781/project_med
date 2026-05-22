@@ -566,7 +566,7 @@ class AppointmentNote(Base):
     )
     
     __table_args__ = (
-        Index('ix_appointment_note_text', 'text'), 
+        Index('ix_appointment_note_text', 'text'),  
         {
             'comment': 'Таблица заметок приёмов', 
             'sqlite_autoincrement': True,

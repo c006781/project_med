@@ -295,7 +295,9 @@ class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
 
     @property
     def logger(self) -> AppLogger:
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.EditableComponentMixin',
                 enable_file_logging = 'user',
@@ -309,17 +311,21 @@ class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
 
     @property
     def _registry_subscribed(self) -> bool:
-        if not hasattr(self, '__registry_subscribed'):
-            self.__registry_subscribed = False
+        try:
+            return self.__registry_subscribed
+        except AttributeError as e:
+            self.__registry_subscribed: bool = False
         return self.__registry_subscribed
 
     @_registry_subscribed.setter
-    def _registry_subscribed(self, value):
+    def _registry_subscribed(self, value: bool):
         self.__registry_subscribed = value
 
     @property
     def _registry(self) -> Optional[DraftRegistry]:
-        if not hasattr(self, '__registry'):
+        try:
+            return self.__registry
+        except AttributeError as e:
             self.__registry = None
         return self.__registry
 
@@ -329,7 +335,9 @@ class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
 
     @property
     def _children(self) -> List[IEditableComponent]:
-        if not hasattr(self, '__children'):
+        try:
+            return self.__children
+        except AttributeError as e:
             self.__children = []
         return self.__children
 
@@ -339,8 +347,10 @@ class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
 
     @property
     def _has_child_changes(self) -> bool:
-        if not hasattr(self, '__has_child_changes'):
-            self.__has_child_changes = False
+        try:
+            return self.__has_child_changes
+        except AttributeError as e:
+            self.__has_child_changes: bool = False
         return self.__has_child_changes
 
     @_has_child_changes.setter
@@ -349,7 +359,9 @@ class EditableComponentMixin(QObject, IEditableComponent, metaclass=QABCMeta):
 
     @property
     def _draft_change_notifier(self):
-        if not hasattr(self, '__draft_change_notifier'):
+        try:
+            return self.__draft_change_notifier
+        except AttributeError as e:
             self.__draft_change_notifier = None
         return self.__draft_change_notifier
 

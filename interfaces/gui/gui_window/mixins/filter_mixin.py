@@ -103,8 +103,10 @@ class FilterMixin:
 
     @property
     def _global_search_text(self) -> str:
-        if not hasattr(self, '__global_search_text'):
-            self.__global_search_text = ""
+        try:
+            return self.__global_search_text
+        except AttributeError as e:
+            self.__global_search_text:str = ""
         return self.__global_search_text
 
     @_global_search_text.setter
@@ -114,7 +116,10 @@ class FilterMixin:
     @property
     def _column_filters(self) -> Dict[int, Dict[str, Any]]:
         """Словарь фильтров для каждого столбца: {видимый_индекс: {'logic': 'AND'/'OR', 'conditions': [...]}}."""
-        if not hasattr(self, '__column_filters'):
+
+        try:
+            return self.__column_filters
+        except AttributeError as e:
             self.__column_filters = {}
         return self.__column_filters
 

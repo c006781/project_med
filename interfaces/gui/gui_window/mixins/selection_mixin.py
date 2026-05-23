@@ -74,8 +74,10 @@ class SelectionMixin:
     @property
     def _saved_row(self) -> int:
         """Возвращает сохранённый индекс строки (используется в _store_current_row)."""
-        if not hasattr(self, '__saved_row'):
-            self.__saved_row = -1 # сохранённый индекс строки?
+        try:
+            return self.__saved_row
+        except AttributeError as e:
+            self.__saved_row:int = -1 # сохранённый индекс строки?
         return self.__saved_row
 
     @_saved_row.setter
@@ -85,7 +87,9 @@ class SelectionMixin:
     @property
     def selected_dto(self):
         """Возвращает DTO текущей выделенной строки (кэшированное значение)."""
-        if not hasattr(self, '_selected_dto'):
+        try:
+            return self._selected_dto
+        except AttributeError as e:
             self._selected_dto = None
         return self._selected_dto
 

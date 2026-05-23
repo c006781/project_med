@@ -198,6 +198,58 @@ class BaseAppLogger:
 
     _watchdog_started = False
     _watchdog_started_lock = threading.Lock()
+    #
+    # @property
+    # def list_stop_loger(self) -> List[str]:
+    #     if not hasattr(BaseAppLogger, '_list_stop_loger'):
+    #         BaseAppLogger._list_stop_loger:List[str] = []
+    #     return BaseAppLogger._list_stop_loger
+    #
+    # @list_stop_loger.setter
+    # def list_stop_loger(self, value: List[str]):
+    #     BaseAppLogger._list_stop_loger = value
+
+
+    _show_call_depth_global = False
+
+    # Вместо свойства list_stop_loger используем обычный классовый атрибут
+    _disabled_loggers: List[str] = []
+
+    @classmethod
+    def on_show_call_depth_global(cls):
+        cls._show_call_depth_global = True
+
+    @classmethod
+    def off_show_call_depth_global(cls):
+        cls._show_call_depth_global = False
+
+
+    @classmethod
+    def status_show_call_depth_global(cls):
+        return cls._show_call_depth_global
+
+
+    @classmethod
+    def add_disabled_logger(cls, name: str):
+        """Добавляет имя логгера в список отключённых."""
+        if name not in cls._disabled_loggers:
+            cls._disabled_loggers.append(name)
+
+    @classmethod
+    def remove_disabled_logger(cls, name: str):
+        """Удаляет имя из списка отключённых."""
+        if name in cls._disabled_loggers:
+            cls._disabled_loggers.remove(name)
+
+    @classmethod
+    def clear_disabled_loggers(cls):
+        """Очищает список отключённых логгеров."""
+        cls._disabled_loggers.clear()
+
+    @classmethod
+    def is_disabled(cls, name: str) -> bool:
+        """Проверяет, отключён ли логгер с указанным именем."""
+        return name in cls._disabled_loggers
 
     @classmethod
     def disable_exact(cls, name: str):
@@ -435,8 +487,9 @@ class BaseAppLogger:
         config: Optional[Union[str,Dict[str, Any]]] = None,
         enable_file_logging: Union[str,bool] = False,
         use_name_in_filename: Union[str,bool] = False, # 
-        show_call_depth: bool = False,
-        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения 
+        # show_call_depth: bool = False,
+        show_call_depth: bool = True,
+        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения
     ): 
         """
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
@@ -3578,7 +3631,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.debug(
@@ -3599,7 +3652,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.info(
@@ -3662,7 +3715,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.critical(
@@ -3685,7 +3738,7 @@ class BaseAppLogger:
         exc_info - флаг, указывающий, нужно ли добавлять информацию об ошибке
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return message
     
         self.logger.error(
@@ -3705,8 +3758,10 @@ class BaseAppLogger:
         description: str = "", 
         level: int = logging.DEBUG,
         log_args: Optional[bool] = None,
+        # log_args: Optional[bool] = True,
         log_return: bool = False,
-        show_depth: bool = False, 
+        show_depth: bool = False,
+        # show_depth: bool = True,
     ) -> Callable:
         """
         Декоратор для логирования времени выполнения функции или метода.
@@ -3777,7 +3832,7 @@ class BaseAppLogger:
                 desc_part = f"{description} " if description else ""
 
                 # Определяем, нужно ли показывать глубину
-                _show_depth = show_depth
+                _show_depth = show_depth#  or type(logger_instance).status_show_call_depth_global()
 
                 # Определяем, нужно ли логировать аргументы
                 effective_log_args = log_args
@@ -3805,7 +3860,8 @@ class BaseAppLogger:
                     args_part = format_args(args, kwargs)
                     start_msg = f"{desc_part}[Начало]{args_part}"
 
-                    if _show_depth:
+                    # Определяем, нужно ли показывать глубину
+                    if _show_depth:# or type(logger_instance).status_show_call_depth_global():
                         depth = logger_instance._get_current_depth()
                         formatted = logger_instance._format_message(caller_info, start_msg, depth)
                     else:
@@ -3833,7 +3889,7 @@ class BaseAppLogger:
                         #     ret_str = ret_str[:197] + "..."
                         end_msg += f" -> {ret_str}"
 
-                    if _show_depth:
+                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                         depth = logger_instance._get_current_depth()
                         formatted = logger_instance._format_message(caller_info, end_msg, depth)
                     else:
@@ -3848,10 +3904,12 @@ class BaseAppLogger:
                 # Создаём синхронную обёртку
                 @wraps(func)
                 def sync_wrapper(*args, **kwargs):
-                    
+
                     if (
                         (not logger_instance.logger.isEnabledFor(level))
                         or (not logger_instance._enabled)
+                    ) or (
+                        type(logger_instance).is_disabled(logger_instance.name)
                     ):
                         # return func(*args, **kwargs)
                         # Вызываем функцию
@@ -3866,7 +3924,7 @@ class BaseAppLogger:
                         return result
 
 
-                    if _show_depth:
+                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                         logger_instance._increase_depth()
                     try:
 
@@ -3896,7 +3954,7 @@ class BaseAppLogger:
                         return result
                     
                     finally:
-                        if _show_depth:
+                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                             logger_instance._decrease_depth()
 
                 # Создаём асинхронную обёртку
@@ -3906,6 +3964,8 @@ class BaseAppLogger:
                     if (
                         (not logger_instance.logger.isEnabledFor(level))
                         or (not logger_instance._enabled)
+                    ) or (
+                        type(logger_instance).is_disabled(logger_instance.name)
                     ):
                         # return func(*args, **kwargs)
                         # Вызываем функцию
@@ -3921,7 +3981,7 @@ class BaseAppLogger:
                     # if not logger_instance._enabled:
                     #     return await func(*args, **kwargs)
                     
-                    if _show_depth:
+                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                         logger_instance._increase_depth()
 
                     try:
@@ -3946,7 +4006,7 @@ class BaseAppLogger:
                         return result
                     
                     finally:
-                        if _show_depth:
+                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                             logger_instance._decrease_depth()
                 
                 return async_wrapper if is_async else sync_wrapper

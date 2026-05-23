@@ -110,7 +110,9 @@ class DraftTreeMixin:
 
     @property
     def logger(self) -> AppLogger:
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.DraftTreeMixin',
                 enable_file_logging = 'user',
@@ -124,7 +126,9 @@ class DraftTreeMixin:
 
     @property
     def _status_cache(self) -> Dict[int, Optional[str]]:
-        if not hasattr(self, '__status_cache'):
+        try:
+            return self.__status_cache
+        except AttributeError as e:
             self.__status_cache = {}
         return self.__status_cache
 
@@ -134,7 +138,9 @@ class DraftTreeMixin:
 
     @property
     def _parent_cache(self) -> Dict[int, int]:
-        if not hasattr(self, '__parent_cache'):
+        try:
+            return self.__parent_cache
+        except AttributeError as e:
             self.__parent_cache = {}
         return self.__parent_cache
 
@@ -144,7 +150,9 @@ class DraftTreeMixin:
 
     @property
     def _children_cache(self) -> Dict[int, Set[int]]:
-        if not hasattr(self, '__children_cache'):
+        try:
+            return self.__children_cache
+        except AttributeError as e:
             self.__children_cache = {}
         return self.__children_cache
 
@@ -154,7 +162,9 @@ class DraftTreeMixin:
 
     @property
     def _children_components(self) -> list:
-        if not hasattr(self, '__children_components'):
+        try:
+            return self.__children_components
+        except AttributeError as e:
             self.__children_components = []
         return self.__children_components
 
@@ -164,7 +174,9 @@ class DraftTreeMixin:
 
     @property
     def _draft_modified(self):
-        if not hasattr(self, '__draft_modified'):
+        try:
+            return self.__draft_modified
+        except AttributeError as e:
             self.__draft_modified = False
         return self.__draft_modified
 

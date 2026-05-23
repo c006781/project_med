@@ -82,7 +82,9 @@ class EditModeMixin(ABC):
     def logger(self) -> AppLogger:
         """Логгер для записи событий (ленивая инициализация)."""
 
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.EditModeMixin',
                 enable_file_logging = 'user',
@@ -93,7 +95,6 @@ class EditModeMixin(ABC):
     @logger.setter
     def logger(self, value):
         self._logger = value
-
 
     @property 
     def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
@@ -107,7 +108,9 @@ class EditModeMixin(ABC):
             True, если сохранение уже выполняется в другом вызове.
         """
 
-        if not hasattr(self, '__saving_in_progress'):
+        try:
+            return self.__saving_in_progress
+        except AttributeError as e:
             self.__saving_in_progress = False  # флаг блокировки
 
         return self.__saving_in_progress
@@ -124,7 +127,9 @@ class EditModeMixin(ABC):
         Должен быть переопределён в наследнике.
         """
 
-        if not hasattr(self, '_edit_mode'):
+        try:
+            return self._edit_mode
+        except AttributeError as e:
             self._edit_mode = False
         return self._edit_mode
 

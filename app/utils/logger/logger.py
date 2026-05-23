@@ -228,6 +228,7 @@ if not AppLogger.thec_create('system'):
         # enable_file_logging = True,
         use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
         # share_file_with='system',
+        show_call_depth=True,
     )
     # 0==0
 

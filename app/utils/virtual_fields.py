@@ -38,7 +38,7 @@ def compute_virtual_fields(
     """
     result = data.copy() # копируем исходный словарь
     logger =  AppLogger.get_instance(
-        name='api',
+        name='api.virtual_fields.py',
         enable_file_logging = 'user',
         use_name_in_filename = False,
     )
@@ -121,7 +121,7 @@ def enrich_dto_with_computed_fields(
     # )
 
     logger =  AppLogger.get_instance(
-        name='api',
+        name='api.virtual_fields.py',
         enable_file_logging = 'user',
         use_name_in_filename = False,
     )

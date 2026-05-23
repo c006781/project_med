@@ -1,0 +1,2 @@
+APP_CONFIG_PATH='config.msgpack'
+GITHUB_TOKEN=''

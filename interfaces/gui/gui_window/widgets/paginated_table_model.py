@@ -94,7 +94,9 @@ class LoadPageThread(QThread):
 
     @property
     def logger(self) -> AppLogger:
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.PaginatedTableModel',
                 enable_file_logging = 'user',
@@ -176,13 +178,15 @@ class PaginatedTableModel(BaseTableModel):
 
     @property
     def logger(self) -> AppLogger:
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.PaginatedTableModel',
                 enable_file_logging = 'user',
                 use_name_in_filename = False, # 'system'
             )
-        return self._logger
+            return self._logger
 
     @logger.setter
     def logger(self, value):
@@ -190,27 +194,61 @@ class PaginatedTableModel(BaseTableModel):
 
     @property
     def _data(self) -> List[Any]:
-        if not hasattr(self, '__data'):
+        # self.logger.debug(
+        #     f"not hasattr(self, '__data') = {not hasattr(self, '__data')} "
+        # )
+        try:
+            return self.__data
+        except AttributeError as e:
+
+            # if not hasattr(self, '__data'):
+            self.logger.debug(
+                f"new self.__data "
+            )
             self.__data: List[Any] = [] # загруженные DTO
         return self.__data
 
     @_data.setter
     def _data(self, value: List[Any]):
+        # self.logger.debug(
+        #     f"update self.__data "
+        #     f"self.__data is None = {getattr(self,'__data',None)} "
+        #     f"len(getattr(self,'__data', [])) = {len(getattr(self,'__data', []))} "
+        #     f"len(value) = {len(value)} "
+        # )
         self.__data = value
 
     @property
     def _total_count(self) -> int:
-        if not hasattr(self, '__total_count'):
-            self.__total_count: int = 0 # общее количество (устанавливается извне)
+        # self.logger.debug(
+        #     f"not hasattr(self, '__total_count') = {not hasattr(self, '__total_count')} "
+        # )
+        try:
+            return self.__total_count
+        except AttributeError as e:
+            self.logger.debug(
+                f"new self.__total_count "
+            )
+            self.__total_count: int = 0  # общее количество (устанавливается извне)
         return self.__total_count
 
     @_total_count.setter
     def _total_count(self, value: int):
+        # self.logger.debug(
+        #     f"update self.__total_count "
+        #     f"self.__total_count = {getattr(self,'__total_count',None)} "
+        #     f"value = {value} "
+        # )
         self.__total_count = value
 
     @property
     def _checkbox_states(self) -> Dict[int, bool]:
-        if not hasattr(self, '__checkbox_states'):
+        try:
+            return self.__checkbox_states
+        except AttributeError as e:
+            self.logger.debug(
+                f"new self.__checkbox_states "
+            )
             self.__checkbox_states: Dict[int, bool] = {}    # строка -> состояние
         return self.__checkbox_states
 
@@ -220,7 +258,12 @@ class PaginatedTableModel(BaseTableModel):
 
     @property
     def _row_colors(self) -> Dict[int, QColor]:
-        if not hasattr(self, '__row_colors'):
+        try:
+            return self.__row_colors
+            self.logger.debug(
+                f"new self.__row_colors "
+            )
+        except AttributeError as e:
             self.__row_colors: Dict[int, QColor] = {}       # строка -> цвет
         return self.__row_colors
 
@@ -228,10 +271,14 @@ class PaginatedTableModel(BaseTableModel):
     def _row_colors(self, value: Dict[int, QColor]):
         self.__row_colors = value
 
-
     @property
     def _sort_specs(self) -> List:
-        if not hasattr(self, '__sort_specs'):
+        try:
+            return self.__sort_specs
+        except AttributeError as e:
+            self.logger.debug(
+                f"new self.__sort_specs "
+            )
             self.__sort_specs: List = []  # список (column_index, order)
         return self.__sort_specs
 
@@ -261,6 +308,7 @@ class PaginatedTableModel(BaseTableModel):
             parent: Родительский QObject.
             get_unique_values_func: Функция для получения уникальных значений для автодополнения (принимает индекс видимого столбца).
         """
+
         super().__init__(parent)
 
         # self.logger = AppLogger.get_instance(
@@ -360,6 +408,10 @@ class PaginatedTableModel(BaseTableModel):
             width=width,
         )
         # Вставка с обновлением индексов
+
+        self.logger.debug(
+            f"position is None  = {position is None} "
+        )
         if position is None:
             position = len(self._columns)
 
@@ -368,6 +420,9 @@ class PaginatedTableModel(BaseTableModel):
 
         # Обновляем order у всех столбцов после позиции
         for i in range(position + 1, len(self._columns)):
+            self.logger.debug(
+                f"i  = {i} "
+            )
             self._columns[i].order = i
 
         self.endInsertColumns()
@@ -466,6 +521,9 @@ class PaginatedTableModel(BaseTableModel):
         while parent and not hasattr(parent, 'set_multi_sorting'):
             parent = parent.parent()
 
+        self.logger.debug(
+            f"parent is None  = {parent is None} "
+        )
         if parent and hasattr(parent, 'set_multi_sorting'):
             parent.set_multi_sorting(specs)
 
@@ -485,6 +543,9 @@ class PaginatedTableModel(BaseTableModel):
         цвета строк **не сбрасываются**, так как они привязаны к ID сущности.
         Метод `clear_row_colors()` больше не вызывается.
         """
+        self.logger.debug(
+            f"not self._sort_specs  = {not self._sort_specs} "
+        )
         if not self._sort_specs:
             return
         
@@ -497,6 +558,10 @@ class PaginatedTableModel(BaseTableModel):
         def sort_key(obj):
             key_values = []
             for col_idx, order in self._sort_specs:
+                self.logger.debug(
+                    f"col_idx  = {col_idx} "
+                    f"order is None  = {order is None} "
+                )
 
 
                 # # Находим столбец по видимому индексу
@@ -513,6 +578,10 @@ class PaginatedTableModel(BaseTableModel):
                 target_col = self._column_appears_for_index(col_idx)
 
 
+                self.logger.debug(
+                    f"target_col is None  = {target_col is None} "
+                    f"target_col.column_type != ColumnType.DATA  = {target_col.column_type != ColumnType.DATA} "
+                )
                 if target_col is None or target_col.column_type != ColumnType.DATA:
                     # Если столбец не DATA, пропускаем (сортировка по нему невозможна)
                     key_values.append((None,))
@@ -523,6 +592,9 @@ class PaginatedTableModel(BaseTableModel):
 
                 # Для корректного сравнения None помещаем в конец или начало
                 # (для возрастания – None идут последними, для убывания – первыми)
+                self.logger.debug(
+                    f"order == Qt.AscendingOrder  = {order == Qt.AscendingOrder} "
+                )
                 if order == Qt.AscendingOrder:
                     key_values.append((value is not None, value))
                 else:
@@ -555,8 +627,11 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             True, если чекбокс установлен и столбец видим, иначе False.
         """
-
-        if not self.get_column_by_system_name(self._checkbox_column_system_name).visible: # проверить нужность
+        tt = not self.get_column_by_system_name(self._checkbox_column_system_name).visible  # проверить нужность
+        self.logger.debug(
+            f"not self.get_column_by_system_name(self._checkbox_column_system_name).visible  = {tt} "
+        )
+        if tt: # проверить нужность
             return False
         
         return self._checkbox_states.get(row, False)
@@ -577,6 +652,10 @@ class PaginatedTableModel(BaseTableModel):
         """Убеждается, что в списке столбцов есть чекбокс-столбец (создаёт, если нет)."""
 
         for col in self._columns:
+            self.logger.debug(
+                f"col  = {col} "
+                f"col.system_name == self._checkbox_column_system_name  = {col.system_name == self._checkbox_column_system_name} "
+            )
             if col.system_name == self._checkbox_column_system_name:
                 return
             
@@ -586,6 +665,9 @@ class PaginatedTableModel(BaseTableModel):
 
         # Обновляем order у всех
         for idx, col in enumerate(self._columns):
+            self.logger.debug(
+                f"idx  = {idx} "
+            )
             col.order = idx
 
     # ----------------------------------------------------------------------
@@ -672,6 +754,10 @@ class PaginatedTableModel(BaseTableModel):
         """
 
         for idx, col in enumerate(self._columns):
+            self.logger.debug(
+                f"idx  = {idx} "
+                f"col.system_name == system_name  = {col.system_name == system_name} "
+            )
             if col.system_name == system_name:
                 return idx
             
@@ -711,6 +797,9 @@ class PaginatedTableModel(BaseTableModel):
         # Находим номер видимого столбеца по системному имени
         target_col = self._column_appears_for_index(system_name, if_return_visible_idx=True)
 
+        self.logger.debug(
+            f"target_col is None  = {target_col is None} "
+        )
         return -1 if target_col is None else target_col
 
     @AppLogger.get_instance(
@@ -766,6 +855,10 @@ class PaginatedTableModel(BaseTableModel):
         """
 
         col = self.get_column_by_system_name(system_name)
+        self.logger.debug(
+            f"col is None  = {col is None} "
+            f"col is None or col.visible == visible  = {col is None or col.visible == visible} "
+        )
         if col is None or col.visible == visible:
             return
         
@@ -806,9 +899,15 @@ class PaginatedTableModel(BaseTableModel):
 
         # Находим видимый столбец по системному имени
         target_col = self._column_appears_for_index(visible_index)
+        self.logger.debug(
+            f"target_col is None  = {target_col is None} "
+        )
         if target_col is None:
             return None
-        
+
+        self.logger.debug(
+            f"target_col.column_type == ColumnType.DATA  = {target_col.column_type == ColumnType.DATA} "
+        )
         target_col = target_col.field_name if target_col.column_type == ColumnType.DATA else None
 
         return target_col
@@ -835,8 +934,12 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             DTO или None, если строка не существует.
         """
-
-        if 0 <= row < len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row  = {row} "
+            f"len(self._data)  = {_len_data} "
+        )
+        if 0 <= row < _len_data:
             return self._data[row]
         
         return None
@@ -880,8 +983,12 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             None
         """
-
-        if row < 0 or row >= len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row  = {row} "
+            f"len(self._data)  = {_len_data} "
+        )
+        if row < 0 or row >= _len_data:
             self.logger.warning(f"update_row: неверный индекс {row}")
             return
         
@@ -918,6 +1025,10 @@ class PaginatedTableModel(BaseTableModel):
         self.row_modified.emit(row)
 
         # Если есть активные спецификации сортировки, применяем их
+
+        self.logger.debug(
+            f"self._sort_specs is None  = {self._sort_specs is None} "
+        )
         if self._sort_specs:
             self._apply_sort()
             # После сортировки исходный индекс row может измениться, но цвет строки будет восстановлен через layoutChanged
@@ -945,8 +1056,12 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             Удалённый DTO или None, если строка не существовала.
         """
-        
-        if row < 0 or row >= len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row  = {row} "
+            f"len(self._data)  = {_len_data} "
+        )
+        if row < 0 or row >= _len_data:
             return None
 
         # Получаем DTO и ID до удаления
@@ -959,6 +1074,11 @@ class PaginatedTableModel(BaseTableModel):
         # Сдвигаем чекбоксы (они привязаны к индексам строк)
         new_states = {}
         for r, state in self._checkbox_states.items():
+
+            self.logger.debug(
+                f"row  = {row} "
+                f"r = {r} "
+            )
             if r > row:
                 new_states[r - 1] = state
             elif r < row:
@@ -968,6 +1088,9 @@ class PaginatedTableModel(BaseTableModel):
 
 
         # Удаляем цвет для этого ID (если он был)
+        self.logger.debug(
+            f"entity_id is not None  = {entity_id is not None} "
+        )
         if entity_id is not None:
             self.clear_row_color(entity_id)
 
@@ -1031,6 +1154,9 @@ class PaginatedTableModel(BaseTableModel):
         """
         
         col = self.get_column_by_system_name(self._checkbox_column_system_name)
+        self.logger.debug(
+            f"col is None  = {col is None} "
+        )
         if col is None or col.visible == visible:
             return
         
@@ -1056,14 +1182,23 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             None
         """
-
-        if not self.get_column_by_system_name(self._checkbox_column_system_name).visible:
+        tt = not self.get_column_by_system_name(self._checkbox_column_system_name).visible
+        self.logger.debug(
+            f"not self.get_column_by_system_name(self._checkbox_column_system_name).visible  = {tt} "
+        )
+        if tt:
             return
-        
-        if row < 0 or row >= len(self._data):
+
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row = {row} "
+            f"len(self._data) = {_len_data} "
+        )
+        if row < 0 or row >= _len_data:
             return
         
         self._checkbox_states[row] = checked
+
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [Qt.CheckStateRole])
 
@@ -1107,6 +1242,10 @@ class PaginatedTableModel(BaseTableModel):
             Этот способ позволяет сохранять цвета после сортировки (в отличие от привязки к индексу).
         """
 
+        self.logger.debug(
+            f"entity_id is None = {entity_id is None} "
+            f"color is None = {color is None} "
+        )
         if (entity_id is None) or (color is None):
             return
             
@@ -1115,6 +1254,11 @@ class PaginatedTableModel(BaseTableModel):
 
         # Обновляем все строки, где DTO имеет этот ID (обычно одна строка)
         for row, dto in enumerate(self._data):
+
+            self.logger.debug(
+                f"row = {row} "
+                f"getattr(dto, 'id', None) = {getattr(dto, 'id', None)} "
+            )
             if getattr(dto, 'id', None) == entity_id:
                 self._redrawing_lines(row)
                 break
@@ -1134,7 +1278,11 @@ class PaginatedTableModel(BaseTableModel):
         Args:
             entity_id: ID сущности, цвет которой нужно удалить.
         """
-        
+
+        self.logger.debug(
+            f"entity_id = {entity_id} "
+            f"entity_id not in self._row_colors = {entity_id not in self._row_colors} "
+        )
         if entity_id not in self._row_colors:
             return
 
@@ -1142,6 +1290,10 @@ class PaginatedTableModel(BaseTableModel):
 
         # Находим строку с этим ID и перерисовываем
         for row, dto in enumerate(self._data):
+            self.logger.debug(
+                f"row = {row} "
+                f"getattr(dto, 'id', None) = {getattr(dto, 'id', None)} "
+            )
             if getattr(dto, 'id', None) == entity_id:
                 # top_left = self.index(row, 0)
                 # bottom_right = self.index(row, self.columnCount() - 1)
@@ -1164,12 +1316,19 @@ class PaginatedTableModel(BaseTableModel):
         Очищает словарь _row_colors и испускает сигнал dataChanged для всех строк,
         чтобы представление перерисовало их с новым фоном (без цвета).
         """
+        self.logger.debug(
+            f"not self._row_colors = {not self._row_colors} "
+        )
         if not self._row_colors:
             return
 
         self._row_colors.clear()
 
-        if self.rowCount() > 0:
+        rowCount = self.rowCount()
+        self.logger.debug(
+            f"self.rowCount() = {rowCount} "
+        )
+        if rowCount > 0:
             # top_left = self.index(0, 0)
             # bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)
             # self.dataChanged.emit(top_left, bottom_right, [Qt.BackgroundRole])
@@ -1192,10 +1351,10 @@ class PaginatedTableModel(BaseTableModel):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _redrawing_lines(
-            self, 
-            row: Optional[int] = None, 
-            roles: Optional[List[Qt.ItemDataRole]] = None 
-        ) -> None:
+        self,
+        row: Optional[int] = None,
+        roles: Optional[List[Qt.ItemDataRole]] = None
+    ) -> None:
         """
         Перерисовывает строку по индексу.
 
@@ -1208,9 +1367,15 @@ class PaginatedTableModel(BaseTableModel):
             None
         """
 
+        self.logger.debug(
+            f"roles is None = {roles is None} "
+        )
         if roles is None:
             roles = [Qt.BackgroundRole]
 
+        self.logger.debug(
+            f"row is not None = {row is not None} "
+        )
         top_left = self.index(
             row if row is not None else 0
             , 0
@@ -1262,20 +1427,43 @@ class PaginatedTableModel(BaseTableModel):
             None
         """
 
+        # self.logger.debug(
+        #     f"not data = {not data} "
+        # )
         if not data:
             return
         
         start = len(self._data)
+        self.logger.debug(
+            f"len(data) = {len(data)} "
+            f"len(self._data) = {start} "
+        )
         self.beginInsertRows(QModelIndex(), start, start + len(data) - 1)
         self._data.extend(data)
 
-        for idx in range(start, len(self._data)):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"start = {start} "
+            f"len(self._data) = {_len_data} "
+        )
+        for idx in range(start, _len_data):
+            self.logger.debug(
+                f"idx = {idx} "
+                f"idx not in self._checkbox_states = {idx not in self._checkbox_states} "
+            )
             if idx not in self._checkbox_states:
                 self._checkbox_states[idx] = False
 
         self.endInsertRows()
 
+        self.logger.debug(
+            f"append_page: rows added, new rowCount = {len(self._data)} "
+        )
+        # Принудительное уведомление представления (добавлено)
         # Если есть активные спецификации сортировки, применяем их
+        self.logger.debug(
+            f"self._sort_specs is None = {self._sort_specs is None} "
+        )
         if self._sort_specs:
             self._apply_sort()
 
@@ -1341,8 +1529,11 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             Количество загруженных строк.
         """
-
-        return len(self._data)
+        cnt = len(self._data)
+        self.logger.debug(
+            f"len(self._data) = {cnt}"
+        )
+        return cnt
 
     @AppLogger.get_instance(
         name='PaginatedTableModel',
@@ -1376,9 +1567,9 @@ class PaginatedTableModel(BaseTableModel):
     def _column_appears_for_index(
         self, 
         value_col: Union[int, str, ColumnType], 
-        is_visible:bool = True,
-        if_return_visible_idx:bool = False
-    )-> Optional[Union[int, TableColumn]]:
+        is_visible: bool = True,
+        if_return_visible_idx: bool = False
+    ) -> Optional[Union[int, TableColumn]]:
         """
         Возвращает первый столбец, у которого совпадает:
             - порядковый индекс (visible_idx) если value_col int
@@ -1404,6 +1595,10 @@ class PaginatedTableModel(BaseTableModel):
         thec_value = None
 
         # Находим объект TableColumn по видимому индексу
+
+        self.logger.debug(
+            f"len(self._columns) = {len(self._columns)} "
+        )
         for col in self._columns:
             thec_visible = getattr(col, 'visible', False)
             if thec_visible or (not is_visible):
@@ -1435,25 +1630,75 @@ class PaginatedTableModel(BaseTableModel):
         row: int, 
         target_col
     ) -> Any:
+        """
+        Возвращает данные для ячейки таблицы в зависимости от роли, используя DTO из строки.
 
+        Метод предназначен для использования внутри `data()` и учитывает:
+            - Цвет фона строки (привязан к ID сущности, а не к индексу).
+            - Отображаемое значение (DisplayRole) с форматированием дат и времени.
+            - Редактируемое значение (EditRole) – исходный объект.
+            - Выравнивание текста (TextAlignmentRole) – числа вправо, остальное влево.
+            - Пользовательские данные для сортировки (UserRole).
+
+        Args:
+            role (int): Роль данных из Qt (например, Qt.DisplayRole, Qt.BackgroundRole и т.д.).
+            row (int): Индекс строки в модели (source model).
+            target_col (TableColumn): Объект столбца, для которого запрашиваются данные.
+                Содержит информацию о типе столбца, имени поля, типе данных и т.д.
+
+        Returns:
+            Any: Значение в зависимости от роли:
+                - Qt.BackgroundRole → QColor цвет фона строки (или None, если цвет не задан).
+                - Qt.DisplayRole → отформатированная строка (даты в ISO, время в HH:MM, иначе str).
+                - Qt.EditRole → исходное значение из DTO (может быть None).
+                - Qt.TextAlignmentRole → Qt.AlignmentFlag (правый для чисел, иначе левый).
+                - Qt.UserRole → исходное значение (для сортировки).
+                - В остальных случаях → None.
+
+        Примечания:
+            - Цвет строки определяется по ID сущности из DTO (атрибут `id`).
+              Если ID отсутствует или цвет не задан, возвращается None.
+            - Для системных столбцов (например, чекбокс) этот метод не вызывается –
+              они обрабатываются отдельно в `data()`.
+
+        Пример:
+            >>> # Внутри data():
+            >>> if role == Qt.BackgroundRole:
+            ...     return self._get_line_color_DTO(role, row, target_col)
+            >>> # получим цвет фона строки
+        """
         # # Цвет строки
         # if role == Qt.BackgroundRole:
         #     return self._row_colors.get(row)
 
         # Цвет строки (по ID сущности)
+
+        self.logger.debug(
+            f"role == Qt.BackgroundRole = {role == Qt.BackgroundRole} "
+        )
         if role == Qt.BackgroundRole:
             dto = self._data[row]
             entity_id = getattr(dto, 'id', None)
+            self.logger.debug(
+                f"entity_id is not None = {entity_id is not None} "
+            )
             if entity_id is not None:
                 return self._row_colors.get(entity_id)
             return None
 
         # Получаем значение из DTO
+        self.logger.debug(
+            f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
+            f"target_col.field_name is None = {target_col.field_name is None} "
+        )
         if target_col.column_type == ColumnType.DATA and target_col.field_name:
             value = getattr(self._data[row], target_col.field_name, None)
         else:
             value = None  # для других системных столбцов (кнопок и т.д.) данные не хранятся
 
+        self.logger.debug(
+            f"role == Qt.DisplayRole = {role == Qt.DisplayRole} "
+        )
         if role == Qt.DisplayRole:
             if value is None:
                 return ""
@@ -1466,15 +1711,24 @@ class PaginatedTableModel(BaseTableModel):
             
             return str(value)
 
+        self.logger.debug(
+            f"role == Qt.EditRole = {role == Qt.EditRole} "
+        )
         if role == Qt.EditRole:
             return value
 
+        self.logger.debug(
+            f"role == Qt.TextAlignmentRole = {role == Qt.TextAlignmentRole} "
+        )
         if role == Qt.TextAlignmentRole:
             if target_col.data_type in (int, float):
                 return Qt.AlignRight | Qt.AlignVCenter
             
             return Qt.AlignLeft | Qt.AlignVCenter
 
+        self.logger.debug(
+            f"role == Qt.UserRole = {role == Qt.UserRole} "
+        )
         if role == Qt.UserRole:
             return value
 
@@ -1506,22 +1760,41 @@ class PaginatedTableModel(BaseTableModel):
             Значение в зависимости от роли или None.
         """
 
-        if not index.isValid():
+        isValid = not index.isValid()
+        self.logger.debug(
+            f"not index.isValid() = {isValid} "
+        )
+        if isValid:
             return None
 
         row = index.row()
         visible_col = index.column()
-        if row >= len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row = {row} "
+            f"len(self._data) = {_len_data} "
+        )
+        if row >= _len_data:
             return None
 
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(visible_col)
 
+        self.logger.debug(
+            f"target_col is None = {target_col is None} "
+        )
         if target_col is None:
             return None
 
         # Чекбокс-столбец (системный)
+        self.logger.debug(
+            f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
+        )
         if target_col.system_name == self._checkbox_column_system_name:
+
+            self.logger.debug(
+                f"role == Qt.CheckStateRole = {role == Qt.CheckStateRole} "
+            )
             if role == Qt.CheckStateRole:
                 return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
             
@@ -1550,13 +1823,21 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             True, если значение было установлено, иначе False.
         """
-
-        if not index.isValid():
+        isValid = not index.isValid()
+        self.logger.debug(
+            f"not index.isValid() = {isValid} "
+        )
+        if isValid:
             return False
 
         row = index.row()
         visible_col = index.column()
-        if row >= len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row = {row} "
+            f"len(self._data) = {_len_data} "
+        )
+        if row >= _len_data:
             return False
 
         # # Находим столбец по видимому индексу
@@ -1573,14 +1854,27 @@ class PaginatedTableModel(BaseTableModel):
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(visible_col)
 
+        self.logger.debug(
+            f"target_col is None = {target_col is None} "
+        )
         if target_col is None:
             return False
 
         # Чекбокс
+        self.logger.debug(
+            f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
+        )
         if target_col.system_name == self._checkbox_column_system_name:
+            self.logger.debug(
+                f"role == Qt.CheckStateRole = {role == Qt.CheckStateRole} "
+            )
             if role == Qt.CheckStateRole:
                 checked = (value == Qt.Checked.value)
                 old = self._checkbox_states.get(row, False)
+                self.logger.debug(
+                    f"old = {old} "
+                    f"checked = {checked} "
+                )
                 if old != checked:
                     self._checkbox_states[row] = checked
                     self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.CheckStateRole])
@@ -1589,19 +1883,33 @@ class PaginatedTableModel(BaseTableModel):
             
             return False
 
+        self.logger.debug(
+            f"role != Qt.EditRole = {role != Qt.EditRole} "
+        )
         if role != Qt.EditRole:
             return False
 
+        self.logger.debug(
+            f"target_col.column_type != ColumnType.DATA = {target_col.column_type != ColumnType.DATA} "
+            f"not target_col.editable = {not target_col.editable} "
+        )
         if target_col.column_type != ColumnType.DATA or not target_col.editable:
             return False
 
         # Обновляем значение в DTO
         item = self._data[row]
         old_value = getattr(item, target_col.field_name, None)
+        self.logger.debug(
+            f"old_value == value = {old_value == value} "
+        )
         if old_value == value:
             return True
 
         # Преобразование типа (если нужно)
+        self.logger.debug(
+            f"target_col.data_type is None = {target_col.data_type is None} "
+            f"value is not None = {value is not None} "
+        )
         if target_col.data_type and value is not None:
             try:
                 if target_col.data_type == int:
@@ -1642,12 +1950,20 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             Комбинация флагов Qt.ItemFlag.
         """
-
-        if not index.isValid():
+        isValid = not index.isValid()
+        self.logger.debug(
+            f"not index.isValid() = {isValid} "
+        )
+        if isValid:
             return Qt.NoItemFlags
 
         row = index.row()
-        if row >= len(self._data):
+        _len_data = len(self._data)
+        self.logger.debug(
+            f"row = {row} "
+            f"len(self._data) = {_len_data} "
+        )
+        if row >= _len_data:
             return Qt.NoItemFlags
 
         visible_col = index.column()
@@ -1665,13 +1981,23 @@ class PaginatedTableModel(BaseTableModel):
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(visible_col)
 
+        self.logger.debug(
+            f"target_col is None = {target_col is None} "
+        )
         if target_col is None:
             return Qt.NoItemFlags
 
+        self.logger.debug(
+            f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
+        )
         if target_col.system_name == self._checkbox_column_system_name:
             return Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
         flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
+        self.logger.debug(
+            f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
+            f"target_col.editable = {target_col.editable} "
+        )
         if target_col.column_type == ColumnType.DATA and target_col.editable:
             flags |= Qt.ItemIsEditable
 
@@ -1703,9 +2029,15 @@ class PaginatedTableModel(BaseTableModel):
             Заголовок столбца или None.
         """
 
+        self.logger.debug(
+            f"orientation != Qt.Horizontal = {orientation != Qt.Horizontal} "
+        )
         if orientation != Qt.Horizontal:
             return None
-        
+
+        self.logger.debug(
+            f"role != Qt.DisplayRole = {role != Qt.DisplayRole} "
+        )
         if role != Qt.DisplayRole:
             return None
 
@@ -1722,6 +2054,9 @@ class PaginatedTableModel(BaseTableModel):
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(section)
 
+        self.logger.debug(
+            f"target_col is None = {target_col is None} "
+        )
         return None if target_col is None else target_col.title
 
     @AppLogger.get_instance(

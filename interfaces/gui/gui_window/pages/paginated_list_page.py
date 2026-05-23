@@ -313,7 +313,9 @@ class PaginatedListPage(
 
     @property
     def logger(self) -> AppLogger:
-        if not hasattr(self, '_logger'):
+        try:
+            return self._logger
+        except AttributeError as e:
             self._logger = AppLogger.get_instance(
                 name='gui.PaginatedListPage',
                 enable_file_logging = 'user',
@@ -328,7 +330,9 @@ class PaginatedListPage(
 
     @property
     def edit_mode(self) -> bool:
-        if not hasattr(self, '_edit_mode'):
+        try:
+            return self._edit_mode
+        except AttributeError as e:
             self._edit_mode: bool = False
         return self._edit_mode
 
@@ -338,7 +342,9 @@ class PaginatedListPage(
 
     @property
     def _draft_component_id(self) -> Optional[str]:
-        if not hasattr(self, '__draft_component_id'):
+        try:
+            return self.__draft_component_id
+        except AttributeError as e:
             self.__draft_component_id = None  # Установка ключа для текущего компонента (будет установлен позже, при выборе строки)
         return self.__draft_component_id
 
@@ -348,7 +354,9 @@ class PaginatedListPage(
 
     @property
     def _next_temp_id(self) -> int:
-        if not hasattr(self, '__next_temp_id'):
+        try:
+            return self.__next_temp_id
+        except AttributeError as e:
             self.__next_temp_id = -1
         return self.__next_temp_id
 
@@ -356,10 +364,11 @@ class PaginatedListPage(
     def _next_temp_id(self, value: int):
         self.__next_temp_id = value
 
-    
     @property
     def _current_filters(self):
-        if not hasattr(self, '__current_filters'):
+        try:
+            return self.__current_filters
+        except AttributeError as e:
             self.__current_filters = None
         return self.__current_filters
 
@@ -370,7 +379,9 @@ class PaginatedListPage(
 
     @property
     def _current_order_by(self):
-        if not hasattr(self, '__current_order_by'):
+        try:
+            return self.__current_order_by
+        except AttributeError as e:
             self.__current_order_by = None
         return self.__current_order_by
 
@@ -380,7 +391,9 @@ class PaginatedListPage(
 
     @property
     def original_data(self) -> Dict[int, Any]:
-        if not hasattr(self, '__original_data'):
+        try:
+            return self.AttributeError
+        except AttributeError as e:
             self.__original_data = {}
         return self.__original_data
 
@@ -390,7 +403,9 @@ class PaginatedListPage(
 
     @property
     def _context_params(self) -> Dict:
-        if not hasattr(self, '__context_params'):
+        try:
+            return self.__context_params
+        except AttributeError as e:
             self.__context_params = {}
         return self.__context_params
 
@@ -562,14 +577,27 @@ class PaginatedListPage(
         # DataChangeMixin.__init__(self)
         # self.edit_mode = False
 
+        # self._build_columns()
+        # # self._create_table()  # создаёт FilterTableView
+        # # self._create_model()  # создаёт PaginatedTableModel и устанавливает в таблицу
+        # self.setup_ui()                              # UIMixin прочитает self._show_controls
+        # self.setup_pagination(service, page_size=50, extra_rows=5)
+        # self.setup_filtering(self.filter_bar, self.table_view)
+
         self._build_columns()
-        self._create_table()
-        self._create_model()
-        self.setup_ui()                              # UIMixin прочитает self._show_controls
+
+        # # 1. Создаём модель ПЕРЕД вызовом setup_ui
+        # self._create_model()  # создаёт self.source_model (PaginatedTableModel)
+
+        # 2. Теперь вызываем setup_ui, который создаст таблицу и настроит её
+        self.setup_ui()
+
+        # 3. Пагинация и фильтрация
         self.setup_pagination(service, page_size=50, extra_rows=5)
         self.setup_filtering(self.filter_bar, self.table_view)
 
-         # Инициализация реестра черновиков (глобальный, если передан, иначе локальный)
+        # 4. Реестр черновиков и остальное
+        # Инициализация реестра черновиков (глобальный, если передан, иначе локальный)
         if shared_registry is not None: # Если передан shared_registry, используем его (глобальный реестр всего приложения).
             self._draft_registry = shared_registry
             self.logger.debug(f"Используется общий реестр черновиков для страницы {entity_type}")
@@ -596,6 +624,38 @@ class PaginatedListPage(
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    # def _setup_table(self):
+    #     """
+    #     Переопределяем метод UIMixin._setup_table, чтобы:
+    #     - не создавать новую таблицу (она уже создана в __init__)
+    #     - не создавать DynamicTableModel (используем PaginatedTableModel)
+    #     - настроить заголовок и фильтрацию для существующей таблицы
+    #     """
+    #     # Если таблица ещё не создана (например, при наследовании без вызова super().__init__), создаём
+    #     if not hasattr(self, 'table_view') or self.table_view is None:
+    #         super()._setup_table()
+    #         return
+    #
+    #     # Настройка заголовка таблицы
+    #     header = self.table_view.horizontalHeader()
+    #     self._setup_header_settings_table(header)
+    #     self._setup_header_visible_table(header)
+    #
+    #     # Устанавливаем функцию получения уникальных значений для заголовка
+    #     if hasattr(header, 'set_get_unique_values_func'):
+    #         header.set_get_unique_values_func(self.get_unique_values_for_column)
+    #
+    #     # Подключаем сигналы фильтрации (они будут преобразовываться в серверные фильтры)
+    #     if hasattr(header, 'filter_requested'):
+    #         header.filter_requested.connect(self.on_filter_requested)
+    #         header.filter_clear_requested.connect(self.on_filter_clear)
+
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """Обработчик переключения режима редактирования (вызывается из кнопки)."""
@@ -610,9 +670,7 @@ class PaginatedListPage(
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
     def _update_ui_for_edit_mode(self, edit_mode: bool):
         super()._update_ui_for_edit_mode(edit_mode)
         
@@ -3556,6 +3614,12 @@ class PaginatedListPage(
     )
     def _create_table(self):
         """Создаёт таблицу, если она ещё не создана."""
+
+        self.logger.debug(
+           f"hasattr(self, 'table_view') = {hasattr(self, 'table_view')} "
+           f"hasattr(self, 'table_view') and self.table_view is not None = {hasattr(self, 'table_view') and self.table_view is not None} "
+        )
+
         if hasattr(self, 'table_view') and self.table_view is not None:
             return
         
@@ -3610,9 +3674,17 @@ class PaginatedListPage(
 
         # Проходим по всем видимым столбцам
         for visible_idx in range(self.source_model.columnCount()):
+
+            self.logger.debug(
+                f"visible_idx = {visible_idx}"
+            )
             # Находим объект TableColumn по видимому индексу
             col = self.source_model.get_column_at_visible_index(visible_idx)
 
+            self.logger.debug(
+                f"col is None = {col is None} "
+                f"col.column_type != ColumnType.DATA = {col.column_type != ColumnType.DATA}"
+            )
             if col is None or col.column_type != ColumnType.DATA:
                 continue
 
@@ -3622,6 +3694,10 @@ class PaginatedListPage(
 
             # 1) Выпадающий список (choices)
             choices = config.get('choices')
+
+            self.logger.debug(
+                f"choices is None = {choices is None}"
+            )
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
@@ -3629,6 +3705,9 @@ class PaginatedListPage(
 
             # 2) Многострочный текст (textarea)
             widget_type = config.get('widget_type')
+            self.logger.debug(
+                f"widget_type = {widget_type}"
+            )
             if widget_type == 'textarea':
                 delegate = TextPopupDelegate(
                     self.table_view,
@@ -3639,6 +3718,10 @@ class PaginatedListPage(
                 continue
 
             # 3) Автодополнение для строк
+            self.logger.debug(
+                f"col.data_type == str = {col.data_type == str} "
+                f"config.get('autocomplete', False) = {config.get('autocomplete', False)} "
+            )
             if col.data_type == str and config.get('autocomplete', False):
                 delegate = CompleterStringDelegate(
                     self.table_view,
@@ -3650,7 +3733,15 @@ class PaginatedListPage(
 
             # 4) Стандартные делегаты по типу
             delegate_class = type_delegate_map.get(col.data_type)  # может быть проблема с типизацией!
+
+            self.logger.debug(
+                f"delegate_class is None > {delegate_class is None} "
+            )
             if delegate_class:
+
+                self.logger.debug(
+                    f"delegate_class in (DatePickerDelegate, TimePickerDelegate) = {delegate_class in (DatePickerDelegate, TimePickerDelegate)} "
+                )
                 if delegate_class in (DatePickerDelegate, TimePickerDelegate):
                     delegate = delegate_class(self.table_view, config=config)
 
@@ -3661,6 +3752,10 @@ class PaginatedListPage(
                 continue
 
             # 5) Обычные строки с маской ввода
+
+            self.logger.debug(
+                f"col.data_type == str = {col.data_type == str}"
+            )
             if col.data_type == str:
                 mask = config.get('input_mask')
                 column_masks = {model_col: mask} if mask else None
@@ -3712,6 +3807,11 @@ class PaginatedListPage(
 
         # Если родитель существовал (ID > 0) и счётчик был увеличен,
         # сохраняем факт увеличения для последующего уменьшения при сохранении
+
+        self.logger.debug(
+            f"was_incremented = {was_incremented} "
+            f"entity_id = {entity_id} "
+        )
         if was_incremented and (entity_id is not None) and entity_id > 0:
             # Ключ теперь entity_type для изоляции при глобальном реестре
             self._draft_registry.set(
@@ -3769,6 +3869,7 @@ class PaginatedListPage(
 
         defaults = {}
         for col in self.columns:
+
             if col.column_type != ColumnType.DATA:
                 continue
 
@@ -3836,6 +3937,10 @@ class PaginatedListPage(
 
         # После возможной сортировки нужно найти актуальную строку по temp_id
         actual_row = self._find_row_by_id(temp_id)
+
+        self.logger.debug(
+            f"actual_row = {actual_row} "
+        )
         if actual_row >= 0:
             self._update_row_color(actual_row)  # Перекрашиваем строку
         else:
@@ -3919,16 +4024,33 @@ class PaginatedListPage(
         prefix_new = f"__new__:{self._entity_type}:"
 
         for key in list(self._draft_registry.get_keys_by_prefix(prefix_new)):
+
+            self.logger.debug(
+                f"key = {key} "
+            )
+
             child_id = int(key.split(':')[-1])
 
             # Пропускаем самого себя, чтобы избежать бесконечной рекурсии
+            self.logger.debug(
+                f"child_id = {child_id} "
+                f"entity_id = {entity_id} "
+            )
             if child_id == entity_id:
                 continue
 
             child_data = self._draft_registry.get(key)
-            if child_data and "dto" in child_data:
+            self.logger.debug(
+                f"child_data is None = {child_data is None} "
+                f"'dto' in child_data = {'dto' in child_data} "
+            )
+            if child_data and 'dto' in child_data:
                 child_dto = child_data["dto"]
                 child_parent_id = self._get_parent_id_for_new_row(child_dto)
+                self.logger.debug(
+                    f"child_parent_id = {child_parent_id} "
+                    f"entity_id = {entity_id} "
+                )
                 if child_parent_id == entity_id:
                     self._cancel_new_row(child_id)
 
@@ -4081,6 +4203,9 @@ class PaginatedListPage(
         self._clear_selected_dto(entity_id)
 
         # Удаляем строку из модели
+        self.logger.debug(
+            f"row = {row} "
+        )
         if row >= 0:
             self.source_model.remove_row(row)
 
@@ -4126,6 +4251,9 @@ class PaginatedListPage(
         ids_to_delete = self.get_selected_entity_ids()
 
         for entity_id in ids_to_delete:
+            self.logger.debug(
+                f"entity_id = {entity_id} "
+            )
             if entity_id < 0:
                 # Новая строка – просто удаляем её (как при отмене)
                 self._cancel_new_row(entity_id)
@@ -4140,9 +4268,12 @@ class PaginatedListPage(
             else:
                 # Существующая строка – помечаем на удаление
                 temp = f"__deleted__:{self._entity_type}:{entity_id}"
-                if self._draft_registry.has( # проверка если строка уже была помечена на удаление
-                    temp
-                ):
+                tt = self._draft_registry.has(temp)  # проверка если строка уже была помечена на удаление
+                self.logger.debug(
+                    f"self._draft_registry.has(temp) = {tt} "
+                )
+                if tt: # проверка если строка уже была помечена на удаление
+
                     # Строка уже помечена на удаление – снимаем пометку
                     self._unmark_deleted_row(entity_id)
 
@@ -4178,6 +4309,9 @@ class PaginatedListPage(
 
         # Перекрашиваем строку, соответствующую этой сущности
         row = self._find_row_by_id(entity_id)
+        self.logger.debug(
+            f"row = {row} "
+        )
         if row >= 0:
             # Просто перекрашиваем строку; статус уже обновлён через реестр
             self._update_row_color(row)
@@ -4271,11 +4405,20 @@ class PaginatedListPage(
 
         ids_to_cancel = self.get_selected_entity_ids()
         for entity_id in ids_to_cancel:
+            self.logger.debug(
+                f"entity_id = {entity_id} "
+            )
             row = self._find_row_by_id(entity_id)
+            self.logger.debug(
+                f"row = {row} "
+            )
             if row < 0:
                 continue
 
             dto = self.source_model.get_item_at_row(row)
+            self.logger.debug(
+                f"dto is None = {dto is None} "
+            )
             if dto and dto.id is not None and dto.id < 0:
                 self._cancel_new_row(entity_id)
 
@@ -4314,6 +4457,9 @@ class PaginatedListPage(
 
                 # Определяем, были ли у строки собственные изменения
                 status = self._draft_registry.get_entity_status(self._entity_type, entity_id)
+                self.logger.debug(
+                    f"status  = {status} "
+                )
                 if status in ('own', 'both'):
                     # Были собственные изменения – отменяем всё поддерево (уменьшит счётчик дедушки)
                     self.discard_entity_subtree(entity_id)
@@ -4399,11 +4545,17 @@ class PaginatedListPage(
             - Наследники (например, `AppointmentListPage`) могут переопределить этот метод,
             добавив обновление правой панели, если необходимо.
         """
+        self.logger.debug(
+            f"not self.selected_dto  = {not self.selected_dto} "
+        )
         if not self.selected_dto:
             self.logger.debug("cancel_parent_changes_only: нет выбранной строки")
             return
 
         entity_id = self.selected_dto.id
+        self.logger.debug(
+            f"entity_id  = {entity_id} "
+        )
         if entity_id is None or entity_id < 0:
             self.logger.debug(f"cancel_parent_changes_only: строка с id={entity_id} не является существующей, пропуск")
             return
@@ -4415,6 +4567,9 @@ class PaginatedListPage(
 
         # Обновляем цвет строки (если строка есть в таблице)
         row = self._find_row_by_id(entity_id)
+        self.logger.debug(
+            f"row  = {row} "
+        )
         if row >= 0:
             self._update_row_color(row)
 
@@ -4443,6 +4598,9 @@ class PaginatedListPage(
             True при успешном сохранении, иначе False
         """
 
+        self.logger.debug(
+            f"self._saving_in_progress  = {self._saving_in_progress} "
+        )
         if self._saving_in_progress:
             self.logger.warning("Сохранение уже выполняется, повторный вызов игнорирован")
             return False

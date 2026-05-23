@@ -101,6 +101,23 @@ class PaginationMixin:
         ...         self.reload_with_filters(None)
     """
 
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except:
+            self._logger = AppLogger.get_instance(
+                name='gui.PaginationMixin',
+                # share_file_with = 'system',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
     @AppLogger.get_instance(
         name='PaginationMixin',
         # share_file_with = 'system',
@@ -196,22 +213,30 @@ class PaginationMixin:
 
         # Подключаем сигналы таблицы
         vscroll = self.table_view.verticalScrollBar()
+
+        self.logger.debug(
+            f"vscroll is None = {vscroll is None} "
+        )
         if vscroll:
             vscroll.valueChanged.connect(self._on_vertical_scroll)
 
         # Устанавливаем фильтр изменения размера
         parent = self.table_view.parent()
+        self.logger.debug(
+            f"parent is None = {parent is None} "
+            f"not hasattr(self, '_resize_filter') = {not hasattr(self, '_resize_filter')} "
+        )
         if parent and not hasattr(self, '_resize_filter'):
             self._resize_filter = _ResizeFilter(parent, self)
             parent.installEventFilter(self._resize_filter)
 
-        if not hasattr(self, 'logger'):
-            self.logger = AppLogger.get_instance(
-                name='gui.PaginationMixin',
-                # share_file_with = 'system',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system'
-            )
+        # if not hasattr(self, 'logger'):
+        #     self.logger = AppLogger.get_instance(
+        #         name='gui.PaginationMixin',
+        #         # share_file_with = 'system',
+        #         enable_file_logging = 'user',
+        #         use_name_in_filename = False, # 'system'
+        #     )
         
         self.logger.debug(
             f"Пагинация инициализирована: page_size={page_size}, extra_rows={extra_rows}"
@@ -261,16 +286,27 @@ class PaginationMixin:
         если да – запускает загрузку.
         """
 
+        self.logger.debug(
+            f"self._loading_in_progress = {self._loading_in_progress} "
+        )
         if self._loading_in_progress:
             return
-        
-        if not self.source_model.can_fetch_more():
+        tt = not self.source_model.can_fetch_more()
+        self.logger.debug(
+            f"not self.source_model.can_fetch_more() = {tt} "
+        )
+        if tt:
             return
 
         # Определяем последнюю видимую строку
         last_visible_row = self._get_last_visible_row()
         total_loaded = self.source_model.rowCount()
 
+        self.logger.debug(
+            f"last_visible_row = {last_visible_row} "
+            f"last_visible_row + self._extra_rows = {last_visible_row + self._extra_rows} "
+            f"total_loaded = {total_loaded} "
+        )
         if last_visible_row + self._extra_rows >= total_loaded:
             self._load_next_page()
 
@@ -289,6 +325,9 @@ class PaginationMixin:
         """
         viewport = self.table_view.viewport()
         last_index = self.table_view.indexAt(viewport.rect().bottomLeft())
+        self.logger.debug(
+            f"last_index.isValid() = {last_index.isValid()} "
+        )
         if last_index.isValid():
             return last_index.row()
         
@@ -304,6 +343,9 @@ class PaginationMixin:
     )
     def _load_first_page(self) -> None:
         """Сбрасывает модель и загружает первую страницу."""
+        self.logger.debug(
+            f"self._loading_in_progress = {self._loading_in_progress} "
+        )
         if self._loading_in_progress:
             return
         # self._loading_in_progress = True
@@ -321,11 +363,21 @@ class PaginationMixin:
     )
     def _load_next_page(self) -> None:
         """Загружает следующую страницу и добавляет в модель."""
+        self.logger.debug(
+            f"self._loading_in_progress = {self._loading_in_progress} "
+        )
         if self._loading_in_progress:
             return
+
         offset = len(self.source_model.get_all_data())
-        if offset >= self.source_model.total_count():
+        tt = self.source_model.total_count()
+        self.logger.debug(
+            f"offset = {offset} "
+            f"self.source_model.total_count() = {tt} "
+        )
+        if offset >= tt:
             return
+
         # self._loading_in_progress = True
         self._load_page(offset=offset, limit=self._page_size, append=True)
 
@@ -352,16 +404,18 @@ class PaginationMixin:
             Устанавливает флаг _loading_in_progress = True до завершения потока.
         """
 
+        self.logger.debug(
+            f"self._loading_in_progress = {self._loading_in_progress} "
+        )
         if self._loading_in_progress:
-
             self.logger.debug(f"self._loading_in_progress = {self._loading_in_progress}")
             return
-        
-        if self._load_thread and self._load_thread.isRunning():
-            self.logger.debug(
-                f"self._load_thread > {not self._loading_in_progress is None} "
-                f"self._load_thread.isRunning() = {self._load_thread.isRunning()} "
-            )
+
+        tt = self._thec_load_thread_isRunning()
+        self.logger.debug(
+            f"self._thec_load_thread_isRunning = {tt} "
+        )
+        if tt:
             return
         
         self._loading_in_progress = True
@@ -406,17 +460,28 @@ class PaginationMixin:
         """
         self.logger.debug(f"Страница загружена: append={append}, rows={len(page)}, total={total}")
 
+        self.logger.debug(
+            f"not append = {not append} "
+        )
         if not append:
             self.source_model.clear()
 
         self.source_model.append_page(page)
 
-        if total != self.source_model.total_count():
+        tt = self.source_model.total_count()
+        self.logger.debug(
+            f"total = {total} "
+            f"self.source_model.total_count() = {tt} "
+        )
+        if total != tt:
             self.source_model.set_total_count(total)
 
         self._load_thread_clear()
 
         # После загрузки первой страницы проверяем, нужно ли догрузить ещё
+        self.logger.debug(
+            f"not append = {not append} "
+        )
         if not append:
             # from PySide6.QtCore import QTimer
             QTimer.singleShot(0, self._maybe_load_more)
@@ -430,7 +495,6 @@ class PaginationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _load_thread_clear(self):
-
         self._loading_in_progress = False
         self._load_thread = None
 
@@ -503,10 +567,15 @@ class PaginationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _cancel_loading(self):
-        if self._load_thread and self._load_thread.isRunning():
+        tt = self._thec_load_thread_isRunning()
+        self.logger.debug(
+            f"self._thec_load_thread_isRunning = {tt} "
+        )
+        if tt:
             self._load_thread.quit()
             self._load_thread.wait(500)
             self._load_thread = None
+
         self._loading_in_progress = False
 
     @AppLogger.get_instance(
@@ -532,9 +601,36 @@ class PaginationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _thec_load_thread_isRunning(self):
+        self.logger.debug(
+            f"self._load_thread is None = {self._load_thread is None} "
+        )
+        if self._load_thread is not None:
+            tt = self._load_thread.isRunning()
+            self.logger.debug(
+                f"self._load_thread is None = {self._load_thread is None} "
+                f"self._load_thread.isRunning() = {tt} "
+            )
+            if tt:
+                return True
+
+        return False
+    @AppLogger.get_instance(
+        name='PaginationMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def cancel_loading(self):
-        if self._load_thread and self._load_thread.isRunning():
+        tt = self._thec_load_thread_isRunning()
+        self.logger.debug(
+            f"self._thec_load_thread_isRunning = {tt} "
+        )
+        if tt:
             self._load_thread.terminate()   # или requestInterruption, но лучше использовать флаг
             self._load_thread.wait()
             self._load_thread = None
+
         self._loading_in_progress = False

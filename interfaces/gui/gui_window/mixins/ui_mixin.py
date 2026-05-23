@@ -116,6 +116,8 @@ class UIMixin:
         self._create_table()
         self.main_layout.addWidget(self.table_view)
         self._create_filter_bar()
+
+        self._create_model()  # создаёт self.source_model (PaginatedTableModel)
         
         # Вставляем фильтр-бар перед таблицей
         idx = self.main_layout.indexOf(self.table_view)

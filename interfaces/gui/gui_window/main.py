@@ -4,6 +4,7 @@
 Точка входа в графическое приложение.
 Запускает главное окно, инициализирует необходимые компоненты.
 """
+import os
 import sys
 # import os
 
@@ -17,7 +18,51 @@ from app.utils.logger.logger import AppLogger
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 
+def disable_loggers_for_dev_mode():
+    """Применяет настройки отключения логгеров в режиме разработки."""
+    # if os.getenv('DEV_MODE', '').lower() not in ('1', 'true', 'yes'):
+    #     return
 
+    # Список имён логгеров, которые нужно полностью отключить
+    disabled = [
+        # 'system',
+        #         # 'user',
+        #         # 'dependencies.py',
+        #         # 'virtual_fields.py',
+        #         # 'compute_fields.py',
+        #         # 'filter_converter.py',
+        # 'api',
+
+        "virtual_fields.py",
+        "compute_virtual_fields",
+        "enrich_dto_with_computed_fields",
+        "PhotoUploaderWidget",
+        "DynamicEditForm",
+        "DynamicEditPage",
+        "FilterBar",
+        "FilterColumnDialog",
+        "TextPopupDelegate",
+        "CompleterStringDelegate",
+        "DateEditWidget",
+        "WidgetFactory",
+        "SettingsPage",
+        "UpdateChecker",
+        "api.virtual_fields.py",
+        "AppUpdater",
+        "AsyncImageLoader",
+        "PhotoDelegate",
+
+        # "gui.PaginatedTableModel",
+        # ... добавьте свои
+    ]
+    for name in disabled:
+        AppLogger.add_disabled_logger(name)
+
+    # # Дополнительно можно отключить консоль для групп (но не файл)
+    # AppLogger.disable_group_console('gui.PaginatedTableModel.')
+    # AppLogger.disable_group_console('gui.PaginationMixin.')
+
+    # AppLogger.on_show_call_depth_global()
 
 @AppLogger.get_instance(
     name = 'main.py',
@@ -29,6 +74,8 @@ from PySide6.QtCore import Qt
 )
 def main():
     """Главная функция запуска GUI."""
+    disable_loggers_for_dev_mode()
+
     # Настройка High DPI (должна быть до создания QApplication)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)

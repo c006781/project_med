@@ -1959,8 +1959,8 @@ class BaseService(
     )
     def get_dtos(
         self, 
-        item_s:Union[List, Any]  # список объектов или один объект
-    )-> Union[List, Any] : 
+        item_s: Union[List, Any]  # список объектов или один объект
+    ) -> Union[List, Any]:
         """
         Возвращает список DTO из списка объектов или один DTO из объекта.
         Если получен список объектов, то для каждого объекта пытается создать DTO.

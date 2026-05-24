@@ -613,4 +613,6 @@ class UIMixin:
             self.action_btn.setEnabled(not edit_mode)
 
         # self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)
-        self.table_view.setEditTriggers(QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers)
+        self.table_view.setEditTriggers(
+            QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers
+        )

@@ -38,7 +38,10 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_date_picker_widget(editable: bool, config: Dict[str, Any] = None) -> QWidget:
+    def create_date_picker_widget(
+        editable: bool,
+        config: Dict[str, Any] = None
+    ) -> QWidget:
         """
         Создаёт виджет для ввода даты с маской и кнопкой календаря.
         Используется как в таблице, так и в форме редактирования.
@@ -116,7 +119,11 @@ class WidgetFactory:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_text_widget(widget_type: str, editable: bool, config: Dict[str, Any] = None) -> QWidget:
+    def create_text_widget(
+        widget_type: str,
+        editable: bool,
+        config: Dict[str, Any] = None
+    ) -> QWidget:
         """
         Создаёт текстовый виджет: QLineEdit (обычное поле) или QTextEdit (многострочное).
 

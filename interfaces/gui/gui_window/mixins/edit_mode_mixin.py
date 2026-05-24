@@ -303,16 +303,16 @@ class EditModeMixin(ABC):
             True, если сохранение прошло успешно, иначе False.
         """
 
-        if self._saving_in_progress:
-            self.logger.warning("save_all_changes уже выполняется, повторный вызов игнорирован")
-            return False
-        
-        self._saving_in_progress = True
-        try:
-            return self._save_all_changes_impl()
-        
-        finally:
-            self._saving_in_progress = False
+        # if self._saving_in_progress: # убрал, так как внутри _save_all_changes_impl уже есть. Следовательно не похволяло сохранить...
+        #     self.logger.warning("save_all_changes уже выполняется, повторный вызов игнорирован")
+        #     return False
+        #
+        # self._saving_in_progress = True
+        # try:
+        return self._save_all_changes_impl()
+        #
+        # finally:
+        #     self._saving_in_progress = False
 
     # def _save_all_changes_impl(self) -> bool:
     #     """Сохраняет все изменения в БД. Возвращает True при успехе."""
@@ -401,6 +401,7 @@ class EditModeMixin(ABC):
             enable: True – включить режим редактирования, False – выключить.
         """
 
+        self.logger.debug(f"_set_edit_mode: enable={enable}")
         self.edit_mode = enable
 
         if hasattr(self, 'source_model'):

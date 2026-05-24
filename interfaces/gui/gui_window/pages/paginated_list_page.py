@@ -769,6 +769,9 @@ class PaginatedListPage(
             True, если сохранение прошло успешно, False при ошибке.
         """
 
+        self.logger.debug(
+            f"self._saving_in_progress  = {self._saving_in_progress} "
+        )
         if self._saving_in_progress:
             self.logger.warning("save_children_only уже выполняется, повторный вызов игнорирован")
             return False
@@ -997,6 +1000,8 @@ class PaginatedListPage(
         Игнорирует изменения строк, помеченных на удаление.
         """
 
+        self.logger.debug(f"_on_row_modified_from_model: row={row}")
+
         dto = self.source_model.get_item_at_row(row)
         if dto and dto.id is not None and dto.id >= 0:
             # Проверяем, не помечена ли строка на удаление
@@ -1004,7 +1009,10 @@ class PaginatedListPage(
                 self.logger.debug(f"Редактирование удалённой строки {dto.id} игнорировано")
                 return
 
+            self.logger.debug(f"Вызов mark_own_change для id={dto.id}")
             self.mark_own_change(dto.id)
+        else:
+            self.logger.debug(f"dto={dto}, id={dto.id if dto else None} – пропуск")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1921,6 +1929,9 @@ class PaginatedListPage(
             True, если сохранение прошло успешно, иначе False.
         """
 
+        self.logger.debug(
+            f"self._saving_in_progress  = {self._saving_in_progress} "
+        )
         # Причина проверки: предотвращаем повторный вход при параллельных вызовах
         if self._saving_in_progress:
             self.logger.warning("Сохранение уже выполняется, повторный вызов игнорирован")
@@ -2679,6 +2690,9 @@ class PaginatedListPage(
             True, если сохранение прошло успешно, иначе False.
         """
 
+        self.logger.debug(
+            f"self._saving_in_progress  = {self._saving_in_progress} "
+        )
         if self._saving_in_progress: # флаг блокировки
             self.logger.warning("Сохранение уже выполняется, повторный вызов игнорирован")
             return False
@@ -3132,17 +3146,26 @@ class PaginatedListPage(
     )
     def _has_unsaved_changes(self) -> bool:
         """Проверяет наличие любых несохранённых изменений в реестре."""
+        status_prefix = f"__status__:{self._entity_type}:"
+        for key in self._draft_registry.get_keys_by_prefix(status_prefix):
+            status_data = self._draft_registry.get(key)
+            if status_data and status_data.get('status') is not None:
+                self.logger.debug(f"_has_unsaved_changes: найден статус {status_data.get('status')} по ключу {key}")
+                return True
 
         # Есть ли черновики для текущего типа?
         if self._draft_registry.has_prefix(f"{self._entity_type}:"):
+            self.logger.debug(f"_has_unsaved_changes: есть черновики с префиксом {self._entity_type}:")
             return True
         
         # Есть ли удалённые?
         if self._draft_registry.has_prefix(f"__deleted__:{self._entity_type}:"):
+            self.logger.debug("_has_unsaved_changes: есть удалённые записи")
             return True
         
         # Есть ли новые?
         if self._draft_registry.has_prefix(f"__new__:{self._entity_type}:"):
+            self.logger.debug("_has_unsaved_changes: есть новые записи")
             return True
         
         return False
@@ -3176,7 +3199,11 @@ class PaginatedListPage(
         """
 
         if hasattr(self, 'save_changes_btn') and self.save_changes_btn:
-            self.save_changes_btn.setEnabled(self._has_unsaved_changes())
+            # self.save_changes_btn.setEnabled(self._has_unsaved_changes())
+
+            has_changes = self._has_unsaved_changes()
+            self.logger.debug(f"_update_save_button_state: has_changes={has_changes}")
+            self.save_changes_btn.setEnabled(has_changes)
 
     # ------------------------------------------------------------------
     # Обработка изменения выделения строки
@@ -3665,6 +3692,7 @@ class PaginatedListPage(
         # from interfaces.gui.gui_window.widgets.table_column import ColumnType
         # import datetime
 
+        self.logger.debug("=== _setup_delegates START ===")
         type_delegate_map = {
             datetime.date: DatePickerDelegate,
             datetime.time: TimePickerDelegate,
@@ -3701,6 +3729,7 @@ class PaginatedListPage(
             if choices:
                 delegate = ComboBoxDelegate(self.table_view, choices)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.logger.debug(f"  -> ComboBoxDelegate для {field_name}")
                 continue
 
             # 2) Многострочный текст (textarea)
@@ -3709,12 +3738,14 @@ class PaginatedListPage(
                 f"widget_type = {widget_type}"
             )
             if widget_type == 'textarea':
+                self.logger.debug(f"Создаём TextPopupDelegate для {field_name}, readonly={not self.edit_mode}")
                 delegate = TextPopupDelegate(
                     self.table_view,
-                    readonly=not self.edit_mode,
-                    get_completion_list=lambda col=visible_idx: self._get_unique_values_for_column(col)
+                    readonly = not self.edit_mode,
+                    get_completion_list = lambda col=visible_idx: self._get_unique_values_for_column(col)
                 )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.logger.debug(f"  -> TextPopupDelegate для {field_name}")
                 continue
 
             # 3) Автодополнение для строк
@@ -3729,6 +3760,7 @@ class PaginatedListPage(
                     column=visible_idx
                 )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.logger.debug(f"  -> CompleterStringDelegate для {field_name}")
                 continue
 
             # 4) Стандартные делегаты по типу
@@ -3749,6 +3781,7 @@ class PaginatedListPage(
                     delegate = delegate_class(self.table_view)
 
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.logger.debug(f"  -> {delegate_class.__name__} для {field_name}")
                 continue
 
             # 5) Обычные строки с маской ввода
@@ -3761,6 +3794,8 @@ class PaginatedListPage(
                 column_masks = {model_col: mask} if mask else None
                 delegate = StringDelegate(self.table_view, column_masks=column_masks)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
+                self.logger.debug(f"  -> StringDelegate с маской {mask} для {field_name}")
+        self.logger.debug("=== _setup_delegates END ===")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

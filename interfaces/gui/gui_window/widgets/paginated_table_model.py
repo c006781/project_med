@@ -260,10 +260,10 @@ class PaginatedTableModel(BaseTableModel):
     def _row_colors(self) -> Dict[int, QColor]:
         try:
             return self.__row_colors
+        except AttributeError as e:
             self.logger.debug(
                 f"new self.__row_colors "
             )
-        except AttributeError as e:
             self.__row_colors: Dict[int, QColor] = {}       # строка -> цвет
         return self.__row_colors
 
@@ -341,6 +341,31 @@ class PaginatedTableModel(BaseTableModel):
         self._ensure_checkbox_column()
 
         self.logger.debug(f"PaginatedTableModel инициализирована с {len(self._columns)} столбцами")
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def clear_own_change(self, entity_id: int) -> None:
+        self.logger.debug(
+            f"clear_own_change: entity_id={entity_id}, текущий статус={self._get_cached_status(entity_id)}")
+        self._update_own_change(entity_id, False)
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def mark_own_change(self, entity_id: int) -> None:
+        self.logger.debug(
+            f"mark_own_change: entity_id={entity_id}, текущий статус={self._get_cached_status(entity_id)}")
+        self._update_own_change(entity_id, True)
 
     @AppLogger.get_instance(
         name='PaginatedTableModel',
@@ -721,14 +746,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return len(self._columns)
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def visible_column_count(self) -> int:
         """Возвращает количество видимых столбцов."""
 
@@ -1248,7 +1273,6 @@ class PaginatedTableModel(BaseTableModel):
         )
         if (entity_id is None) or (color is None):
             return
-            
 
         self._row_colors[entity_id] = color
 
@@ -1511,14 +1535,14 @@ class PaginatedTableModel(BaseTableModel):
     # Методы QAbstractTableModel
     # ----------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """
         Возвращает количество строк в модели.
@@ -1530,19 +1554,19 @@ class PaginatedTableModel(BaseTableModel):
             Количество загруженных строк.
         """
         cnt = len(self._data)
-        self.logger.debug(
-            f"len(self._data) = {cnt}"
-        )
+        # self.logger.debug(
+        #     f"len(self._data) = {cnt}"
+        # )
         return cnt
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
         """
         Возвращает количество видимых столбцов.
@@ -1596,9 +1620,9 @@ class PaginatedTableModel(BaseTableModel):
 
         # Находим объект TableColumn по видимому индексу
 
-        self.logger.debug(
-            f"len(self._columns) = {len(self._columns)} "
-        )
+        # self.logger.debug(
+        #     f"len(self._columns) = {len(self._columns)} "
+        # )
         for col in self._columns:
             thec_visible = getattr(col, 'visible', False)
             if thec_visible or (not is_visible):
@@ -1616,14 +1640,14 @@ class PaginatedTableModel(BaseTableModel):
 
         return None
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def _get_line_color_DTO(
         self, 
         role: int, 
@@ -1673,32 +1697,32 @@ class PaginatedTableModel(BaseTableModel):
 
         # Цвет строки (по ID сущности)
 
-        self.logger.debug(
-            f"role == Qt.BackgroundRole = {role == Qt.BackgroundRole} "
-        )
+        # self.logger.debug(
+        #     f"role == Qt.BackgroundRole = {role == Qt.BackgroundRole} "
+        # )
         if role == Qt.BackgroundRole:
             dto = self._data[row]
             entity_id = getattr(dto, 'id', None)
-            self.logger.debug(
-                f"entity_id is not None = {entity_id is not None} "
-            )
+            # self.logger.debug(
+            #     f"entity_id is not None = {entity_id is not None} "
+            # )
             if entity_id is not None:
                 return self._row_colors.get(entity_id)
             return None
 
         # Получаем значение из DTO
-        self.logger.debug(
-            f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
-            f"target_col.field_name is None = {target_col.field_name is None} "
-        )
+        # self.logger.debug(
+        #     f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
+        #     f"target_col.field_name is None = {target_col.field_name is None} "
+        # )
         if target_col.column_type == ColumnType.DATA and target_col.field_name:
             value = getattr(self._data[row], target_col.field_name, None)
         else:
             value = None  # для других системных столбцов (кнопок и т.д.) данные не хранятся
 
-        self.logger.debug(
-            f"role == Qt.DisplayRole = {role == Qt.DisplayRole} "
-        )
+        # self.logger.debug(
+        #     f"role == Qt.DisplayRole = {role == Qt.DisplayRole} "
+        # )
         if role == Qt.DisplayRole:
             if value is None:
                 return ""
@@ -1711,35 +1735,35 @@ class PaginatedTableModel(BaseTableModel):
             
             return str(value)
 
-        self.logger.debug(
-            f"role == Qt.EditRole = {role == Qt.EditRole} "
-        )
+        # self.logger.debug(
+        #     f"role == Qt.EditRole = {role == Qt.EditRole} "
+        # )
         if role == Qt.EditRole:
             return value
 
-        self.logger.debug(
-            f"role == Qt.TextAlignmentRole = {role == Qt.TextAlignmentRole} "
-        )
+        # self.logger.debug(
+        #     f"role == Qt.TextAlignmentRole = {role == Qt.TextAlignmentRole} "
+        # )
         if role == Qt.TextAlignmentRole:
             if target_col.data_type in (int, float):
                 return Qt.AlignRight | Qt.AlignVCenter
             
             return Qt.AlignLeft | Qt.AlignVCenter
 
-        self.logger.debug(
-            f"role == Qt.UserRole = {role == Qt.UserRole} "
-        )
+        # self.logger.debug(
+        #     f"role == Qt.UserRole = {role == Qt.UserRole} "
+        # )
         if role == Qt.UserRole:
             return value
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
         """
         Возвращает данные для ячейки в зависимости от роли.
@@ -1761,40 +1785,40 @@ class PaginatedTableModel(BaseTableModel):
         """
 
         isValid = not index.isValid()
-        self.logger.debug(
-            f"not index.isValid() = {isValid} "
-        )
+        # self.logger.debug(
+        #     f"not index.isValid() = {isValid} "
+        # )
         if isValid:
             return None
 
         row = index.row()
         visible_col = index.column()
         _len_data = len(self._data)
-        self.logger.debug(
-            f"row = {row} "
-            f"len(self._data) = {_len_data} "
-        )
+        # self.logger.debug(
+        #     f"row = {row} "
+        #     f"len(self._data) = {_len_data} "
+        # )
         if row >= _len_data:
             return None
 
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(visible_col)
 
-        self.logger.debug(
-            f"target_col is None = {target_col is None} "
-        )
+        # self.logger.debug(
+        #     f"target_col is None = {target_col is None} "
+        # )
         if target_col is None:
             return None
 
         # Чекбокс-столбец (системный)
-        self.logger.debug(
-            f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
-        )
+        # self.logger.debug(
+        #     f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
+        # )
         if target_col.system_name == self._checkbox_column_system_name:
 
-            self.logger.debug(
-                f"role == Qt.CheckStateRole = {role == Qt.CheckStateRole} "
-            )
+            # self.logger.debug(
+            #     f"role == Qt.CheckStateRole = {role == Qt.CheckStateRole} "
+            # )
             if role == Qt.CheckStateRole:
                 return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
             
@@ -1811,7 +1835,12 @@ class PaginatedTableModel(BaseTableModel):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
+    def setData(
+        self,
+        index: QModelIndex,
+        value: Any,
+        role: int = Qt.EditRole
+    ) -> bool:
         """
         Устанавливает новое значение в ячейку (для редактирования).
 
@@ -1823,6 +1852,7 @@ class PaginatedTableModel(BaseTableModel):
         Returns:
             True, если значение было установлено, иначе False.
         """
+
         isValid = not index.isValid()
         self.logger.debug(
             f"not index.isValid() = {isValid} "
@@ -1925,18 +1955,19 @@ class PaginatedTableModel(BaseTableModel):
 
         setattr(item, target_col.field_name, value)
         self.dataChanged.emit(index, index, [role])
+        self.logger.debug(f"setData: row={row}, col={target_col.field_name}, new value={value}")
         self.row_modified.emit(row)
 
         return True
 
-    @AppLogger.get_instance(
-        name='PaginatedTableModel',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='PaginatedTableModel',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         """
         Возвращает флаги для ячейки (редактируемость, выбираемость, чекбоксы).
@@ -1951,18 +1982,18 @@ class PaginatedTableModel(BaseTableModel):
             Комбинация флагов Qt.ItemFlag.
         """
         isValid = not index.isValid()
-        self.logger.debug(
-            f"not index.isValid() = {isValid} "
-        )
+        # self.logger.debug(
+        #     f"not index.isValid() = {isValid} "
+        # )
         if isValid:
             return Qt.NoItemFlags
 
         row = index.row()
         _len_data = len(self._data)
-        self.logger.debug(
-            f"row = {row} "
-            f"len(self._data) = {_len_data} "
-        )
+        # self.logger.debug(
+        #     f"row = {row} "
+        #     f"len(self._data) = {_len_data} "
+        # )
         if row >= _len_data:
             return Qt.NoItemFlags
 
@@ -1981,23 +2012,23 @@ class PaginatedTableModel(BaseTableModel):
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(visible_col)
 
-        self.logger.debug(
-            f"target_col is None = {target_col is None} "
-        )
+        # self.logger.debug(
+        #     f"target_col is None = {target_col is None} "
+        # )
         if target_col is None:
             return Qt.NoItemFlags
 
-        self.logger.debug(
-            f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
-        )
+        # self.logger.debug(
+        #     f"target_col.system_name == self._checkbox_column_system_name = {target_col.system_name == self._checkbox_column_system_name} "
+        # )
         if target_col.system_name == self._checkbox_column_system_name:
             return Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable
 
         flags = Qt.ItemIsSelectable | Qt.ItemIsEnabled
-        self.logger.debug(
-            f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
-            f"target_col.editable = {target_col.editable} "
-        )
+        # self.logger.debug(
+        #     f"target_col.column_type == ColumnType.DATA = {target_col.column_type == ColumnType.DATA} "
+        #     f"target_col.editable = {target_col.editable} "
+        # )
         if target_col.column_type == ColumnType.DATA and target_col.editable:
             flags |= Qt.ItemIsEditable
 
@@ -2029,15 +2060,15 @@ class PaginatedTableModel(BaseTableModel):
             Заголовок столбца или None.
         """
 
-        self.logger.debug(
-            f"orientation != Qt.Horizontal = {orientation != Qt.Horizontal} "
-        )
+        # self.logger.debug(
+        #     f"orientation != Qt.Horizontal = {orientation != Qt.Horizontal} "
+        # )
         if orientation != Qt.Horizontal:
             return None
 
-        self.logger.debug(
-            f"role != Qt.DisplayRole = {role != Qt.DisplayRole} "
-        )
+        # self.logger.debug(
+        #     f"role != Qt.DisplayRole = {role != Qt.DisplayRole} "
+        # )
         if role != Qt.DisplayRole:
             return None
 
@@ -2054,9 +2085,9 @@ class PaginatedTableModel(BaseTableModel):
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(section)
 
-        self.logger.debug(
-            f"target_col is None = {target_col is None} "
-        )
+        # self.logger.debug(
+        #     f"target_col is None = {target_col is None} "
+        # )
         return None if target_col is None else target_col.title
 
     @AppLogger.get_instance(

@@ -19,13 +19,15 @@ import datetime
 from functools import wraps
 
 from app.utils.logger.logger import AppLogger
+
 from app.dto.dto_all import PatientDTO
+
+from app.dto.field_configs import PATIENT_CONFIG
 
 from app.config.config_manager.manager import (
     # AppConfigManager, 
     get_config_env
 )
-from app.dto.field_configs import PATIENT_CONFIG
 
 from app.dependencies import (
     # get_appointment_service, 

@@ -184,6 +184,7 @@
 
 import datetime
 
+import os
 from typing import (
     Any, Dict,
     Optional, Set,
@@ -191,11 +192,13 @@ from typing import (
 )
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
+from app.config.config_manager.manager import AppConfigManager
 from app.utils.logger import AppLogger
 
 from app.draft.draft_registry import DraftRegistry
 
 from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
+
 from interfaces.gui.gui_window.mixins.draft_tree_mixin import DraftTreeMixin
 from interfaces.gui.gui_window.mixins.pagination_mixin import PaginationMixin
 from interfaces.gui.gui_window.mixins.selection_mixin import SelectionMixin
@@ -207,6 +210,7 @@ from interfaces.gui.gui_window.mixins.controller_mixin import ControllerMixin
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
+from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
 from interfaces.gui.gui_window.widgets.paginated_table_model import PaginatedTableModel
 from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
 
@@ -222,9 +226,17 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 
 from sqlalchemy.orm import Session
 
-from PySide6.QtCore import QTimer, Qt, Signal, Slot
-# from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import (
+    QSize, QTimer, 
+    Qt, Signal, Slot,
+)
+
 from PySide6.QtGui import QColor
+
+from PySide6.QtWidgets import (
+    QHeaderView,
+    # QMessageBox,
+)
 
 class PaginatedListPage(
     BasePage,
@@ -593,6 +605,11 @@ class PaginatedListPage(
 
         # 2. Теперь вызываем setup_ui, который создаст таблицу и настроит её
         self.setup_ui()
+
+
+        # Настройка высоты строк для корректного отображения миниатюр
+        # from PySide6.QtWidgets import QHeaderView
+        self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
         # 3. Пагинация и фильтрация
         self.setup_pagination(service, page_size=50, extra_rows=5)
@@ -4135,7 +4152,18 @@ class PaginatedListPage(
             # Для строк с маской используем StringDelegate, без маски – тоже StringDelegate
             return StringDelegate, {}
 
-        # 8) Остальные типы – нет делегата (стандартный)
+        # 8) Отображение миниатюры изображения
+        if config.get('widget_type') == 'image_thumbnail':
+            # from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
+            # # Путь к хранилищу фото нужно получить из конфигурации
+            # from app.config.config_manager.manager import AppConfigManager
+            storage_path = AppConfigManager.get_instance().get(
+                'PHOTOS_STORAGE_PATH', 
+                os.path.join('.', 'photos')
+            )
+            return ImageThumbnailDelegate, {'storage_path': storage_path, 'target_size': QSize(80, 80)}
+
+        # 9) Остальные типы – нет делегата (стандартный)
         return None, {}
 
     @AppLogger.get_instance(

@@ -373,7 +373,6 @@ class TextEditDelegate(QStyledItemDelegate):
                     return True
         return super().eventFilter(editor, event)
 
-
 class PhotoUploaderWidget(QWidget):
     """
     Виджет для управления фотографиями приёма.

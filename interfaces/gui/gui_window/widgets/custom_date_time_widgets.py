@@ -318,7 +318,6 @@ class DateEditWidget(QWidget):
         if not text:
             return None
         
-
         # # Если текст состоит только из пробелов, дефисов и/или подчёркиваний (неполная дата)
         # if all(c in ' -_' for c in text):
         #     return None

@@ -225,8 +225,15 @@ class Database:
         try:
             # Возвращает сессию в контексте with
             yield session
+
             # Если в контексте не было ошибок, коммитит сессию
             session.commit()
+            AppLogger.get_instance(
+                name = 'api.Database',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system',
+            ).debug(f"Коммит сессии: {session}")
+
         except Exception as e:
             self.logger.exception(f"Ошибка: {e}")
             # Если была ошибка, откатывает сессию

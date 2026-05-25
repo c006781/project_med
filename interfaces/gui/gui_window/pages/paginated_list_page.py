@@ -187,7 +187,7 @@ import datetime
 from typing import (
     Any, Dict,
     Optional, Set,
-    List, Tuple,
+    List, Tuple, Union, get_args, get_origin,
 )
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
@@ -333,11 +333,13 @@ class PaginatedListPage(
         try:
             return self._edit_mode
         except AttributeError as e:
+            self.logger.debug('edit_mode: инициализация атрибута _edit_mode')
             self._edit_mode: bool = False
         return self._edit_mode
 
     @edit_mode.setter
     def edit_mode(self, value: bool):
+        self.logger.debug(f'edit_mode : {self._edit_mode} -> {value}' )
         self._edit_mode: bool = value
 
     @property
@@ -3572,6 +3574,32 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _get_real_type(self, annotation):
+
+
+
+
+        # from typing import get_origin, get_args, Union
+        origin = get_origin(annotation)
+        if origin is Union:
+            args = get_args(annotation)
+            # non_none = [arg for arg in args if arg is not type(None)]
+            # if non_none:
+            #     return non_none[0]
+            
+            for arg in args:
+                if arg is not type(None):
+                    return arg
+        return annotation
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _build_columns(self):
         """
         Создаёт список объектов TableColumn на основе field_configs и dto_class.
@@ -3598,7 +3626,9 @@ class PaginatedListPage(
                 system_name=field_name,
                 title=config.get('title', field_name.replace('_', ' ').title()),
                 field_name=field_name,
-                data_type=self.dto_class.model_fields[field_name].annotation,
+                data_type=self._get_real_type(
+                    self.dto_class.model_fields[field_name].annotation
+                ),
                 editable=config.get('editable', False),
                 order=config.get('order', 0),
                 choices=config.get('choices'),
@@ -3652,6 +3682,7 @@ class PaginatedListPage(
         
         super()._create_table()
 
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -3697,7 +3728,7 @@ class PaginatedListPage(
             datetime.date: DatePickerDelegate,
             datetime.time: TimePickerDelegate,
             bool: BoolDelegate,
-            str: StringDelegate,
+            # str: StringDelegate, обрабатываем отдельно в конце с учётом маски
         }
 
         # Проходим по всем видимым столбцам
@@ -3720,6 +3751,14 @@ class PaginatedListPage(
             config = self.field_configs.get(field_name, {})
             model_col = visible_idx  # в PaginatedTableModel видимый индекс = индекс в представлении
 
+            self.logger.debug(
+                f"Обработка столбца {field_name}: "
+                f"data_type={col.data_type}, "
+                f"editable={col.editable}, "
+                f"widget_type={config.get('widget_type')}, "
+                f"autocomplete={config.get('autocomplete')} "
+            )
+
             # 1) Выпадающий список (choices)
             choices = config.get('choices')
 
@@ -3730,6 +3769,11 @@ class PaginatedListPage(
                 delegate = ComboBoxDelegate(self.table_view, choices)
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 self.logger.debug(f"  -> ComboBoxDelegate для {field_name}")
+
+                self.logger.debug(
+                    f"Установка делегата для столбца {field_name} "
+                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+                )
                 continue
 
             # 2) Многострочный текст (textarea)
@@ -3746,6 +3790,11 @@ class PaginatedListPage(
                 )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 self.logger.debug(f"  -> TextPopupDelegate для {field_name}")
+
+                self.logger.debug(
+                    f"Установка делегата для столбца {field_name} "
+                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+                )
                 continue
 
             # 3) Автодополнение для строк
@@ -3761,6 +3810,11 @@ class PaginatedListPage(
                 )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 self.logger.debug(f"  -> CompleterStringDelegate для {field_name}")
+
+                self.logger.debug(
+                    f"Установка делегата для столбца {field_name} "
+                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+                )
                 continue
 
             # 4) Стандартные делегаты по типу
@@ -3782,6 +3836,11 @@ class PaginatedListPage(
 
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 self.logger.debug(f"  -> {delegate_class.__name__} для {field_name}")
+
+                self.logger.debug(
+                    f"Установка делегата для столбца {field_name} "
+                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+                )
                 continue
 
             # 5) Обычные строки с маской ввода
@@ -3792,9 +3851,18 @@ class PaginatedListPage(
             if col.data_type == str:
                 mask = config.get('input_mask')
                 column_masks = {model_col: mask} if mask else None
-                delegate = StringDelegate(self.table_view, column_masks=column_masks)
+                delegate = StringDelegate(
+                    self.table_view, 
+                    column_masks=column_masks
+                )
                 self.table_view.setItemDelegateForColumn(model_col, delegate)
                 self.logger.debug(f"  -> StringDelegate с маской {mask} для {field_name}")
+
+                self.logger.debug(
+                    f"Установка делегата для столбца {field_name} "
+                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+                )
+
         self.logger.debug("=== _setup_delegates END ===")
 
     @AppLogger.get_instance(

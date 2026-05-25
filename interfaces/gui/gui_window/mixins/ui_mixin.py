@@ -80,6 +80,27 @@ class UIMixin:
         атрибут может отсутствовать. Перед доступом к нему следует проверять `hasattr`.
     """
 
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='gui.UIMixin',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
     @AppLogger.get_instance(
         name='UIMixin',
         # share_file_with = 'system',
@@ -562,9 +583,19 @@ class UIMixin:
             None
         """
 
+        self.logger.debug(
+            f"_on_row_double_clicked: "
+            f"index={index} "
+            f"self.edit_mode={self.edit_mode} "
+        )
         if not self.edit_mode:
             dto = self.get_current_selected_dto()
             if dto:
+
+                self.logger.debug(
+                    f"_on_row_double_clicked: "
+                    f"dto is None={dto is None} "
+                )
                 self.action_requested.emit(dto)
     
     @AppLogger.get_instance(

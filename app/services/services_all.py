@@ -1179,6 +1179,8 @@ class BaseService(
             # Обновляем простые поля
             self._apply_simple_updates(entity, dto)
             
+
+            self.logger.debug(f"После обновления полей: last_name={entity.last_name}")
             sess.flush()
             return self.get_dto_out(entity)
 
@@ -1256,27 +1258,41 @@ class BaseService(
             - 'editable': разрешено ли редактирование (по умолчанию True)
         """
         updatable = []
+
+        # Получаем словарь полей DTO (Pydantic v2)
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             # Пропускаем ID (первичный ключ)
             if field_name == 'id':
+                self.logger.debug(f"Поле {field_name} пропущено (id)")
                 continue
 
             # Пропускаем виртуальные поля и заметки
             if config.get('virtual', False) or config.get('is_note'):
+                self.logger.debug(f"Поле {field_name} пропущено (virtual/is_note)")
                 continue
 
             # Пропускаем явно отмеченные как не updatable
             if config.get('updatable') is False:
+                self.logger.debug(f"Поле {field_name} пропущено (updatable=False)")
                 continue
 
-            # Проверяем, существует ли поле в DTO (безопасность)
-            if not hasattr(self._dto_class, field_name):
-                continue
+            # # Проверяем, существует ли поле в DTO (безопасность)
+            # if not hasattr(self._dto_class, field_name):
+            #     self.logger.debug(f"Поле {field_name} отсутствует в DTO")
+            #     continue
 
+            # Проверяем наличие поля в DTO через model_fields (не через hasattr)
+            if field_name not in dto_fields:
+                self.logger.debug(f"Поле {field_name} отсутствует в DTO (не найдено в model_fields)")
+                continue
+            
             updatable.append({
                 'name': field_name,
                 'editable': config.get('editable', True) # для UI, но в сервисе не используется
             })
+            self.logger.debug(f"Поле {field_name} добавлено в updatable")
 
         return updatable
 
@@ -1297,8 +1313,16 @@ class BaseService(
             field_name = field_info['name']
             # if field_info['editable']:
             new_value = getattr(dto, field_name, None)
+            old_value = getattr(model_obj, field_name, None)
+
             if new_value is not None:
-                setattr(model_obj, field_name, new_value)
+                # setattr(model_obj, field_name, new_value)
+                if old_value != new_value:
+                    self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    setattr(model_obj, field_name, new_value)
+                else:
+                    self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+
             else:
                 # Проверяем, является ли поле обязательным
                 config = self._field_configs.get(field_name, {})
@@ -1369,7 +1393,10 @@ class BaseService(
             - не являются заметками (is_none)
             - не являются ID самой модели (поле 'id' пропускаем)
         """
+
         kwargs = {}
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             # Пропускаем ID
             if field_name == 'id':
@@ -1385,6 +1412,11 @@ class BaseService(
 
             # if config.get('updatable') is False: # убрал, так как проблема с patient_id у APPOINTMENT
             #     continue
+
+            # Проверяем наличие поля в DTO через model_fields
+            if field_name not in dto_fields:
+                self.logger.debug(f"Поле {field_name} отсутствует в DTO, пропускаем")
+                continue
 
             # Берём значение из DTO, если оно не None
             value = getattr(dto, field_name, None)
@@ -1411,16 +1443,23 @@ class BaseService(
         Исключения: поля с is_note и virtual пропускаются (они не хранятся в БД напрямую).
         """
         missing = []
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             if not config.get('required', False):
                 continue
             # Пропускаем виртуальные поля и заметки – они не являются столбцами БД
             if config.get('virtual', False) or config.get('is_note'):
                 continue
+
+            if field_name not in dto_fields:
+                # Поле не существует в DTO – пропускаем (не должно быть, но на всякий случай)
+                continue
             
             value = getattr(dto, field_name, None)
             if value is None:
                 missing.append(field_name)
+                
             elif isinstance(value, str) and not value.strip():
                 missing.append(field_name)
         
@@ -2636,7 +2675,9 @@ class PatientService(
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
 
         self.logger.debug(
-            f"Обновление пациента id={patient_dto.id}"
+            f"Обновление пациента id={patient_dto.id} "
+            f"данные: last_name={patient_dto.last_name} "
+
         )
         return self._update_entity(patient_dto, patient_dto.id, session)
 

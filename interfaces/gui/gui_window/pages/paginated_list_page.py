@@ -187,7 +187,7 @@ import datetime
 from typing import (
     Any, Dict,
     Optional, Set,
-    List, Tuple, Union, get_args, get_origin,
+    List, Tuple, Type, Union, get_args, get_origin,
 )
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
@@ -660,7 +660,55 @@ class PaginatedListPage(
 
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
-        """Обработчик переключения режима редактирования (вызывается из кнопки)."""
+        """
+        Обработчик переключения режима редактирования (вызывается из кнопки `edit_mode_btn`).
+
+        **Назначение:**
+            Включает или выключает режим редактирования таблицы, управляет видимостью элементов
+            интерфейса, обновляет состояние чекбокс-столбца и переустанавливает делегаты.
+
+        **Алгоритм (кратко):**
+            1. Проверяет, не равен ли `checked` текущему состоянию `self.edit_mode`.
+            Если равен – ничего не делает.
+            2. **При выключении режима (`checked=False`)**:
+            - Проверяет наличие несохранённых изменений через `_has_unsaved_changes()`.
+            - Если изменения есть, показывает диалог с предложением сохранить, не сохранять
+                или отменить переключение.
+            - В зависимости от выбора пользователя:
+                * Сохранить – вызывает `save_all_changes()` (через `_save_all_changes_impl`).
+                * Не сохранять – откатывает изменения через `_discard_all_changes()`.
+                * Отмена – возвращается без переключения режима.
+            3. **При включении режима (`checked=True`)**:
+            - Если таблица пуста, автоматически добавляет новую строку (`_add_inline_row()`).
+            - Устанавливает `self.edit_mode = True`.
+            4. Обновляет UI:
+            - Вызывает `_update_ui_for_edit_mode(checked)` (показывает/скрывает кнопки,
+                комбобоксы, изменяет режим редактирования таблицы).
+            - Включает/отключает чекбокс-столбец в модели (`set_checkbox_column_visible`).
+            - Переустанавливает делегаты (`_reapply_delegates`).
+            - Обновляет `readonly` у `TextPopupDelegate`.
+            - Сбрасывает выделение (`clearSelection`).
+            - Обновляет состояние кнопки сохранения.
+            5. Выходит из метода.
+
+        **Параметры:**
+            checked (bool): Новое состояние кнопки (True – режим редактирования включён,
+                            False – выключен).
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Метод использует `preserve_selection` декоратор (не показан в сигнатуре, но подразумевается
+            в коде), который сохраняет и восстанавливает текущую выделенную строку.
+            - Переопределение этого метода в `PaginatedListPage` расширяет поведение из `UIMixin`.
+
+        **Пример:**
+            >>> # Пользователь нажимает кнопку «Режим редактирования»
+            >>> # checked = True -> включается режим, появляется чекбокс-столбец, включается редактирование ячеек
+            >>> # При повторном нажатии checked = False -> если есть изменения, предложит сохранить
+        """
+
         self.set_edit_mode(checked)
 
         # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
@@ -678,6 +726,14 @@ class PaginatedListPage(
         
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(edit_mode)
+
+        self._reapply_delegates()   # <-- добавить эту строку
+        # обновление read-only для TextPopupDelegate
+        for col in range(self.table_view.model().columnCount()):
+            delegate = self.table_view.itemDelegateForColumn(col)
+            if isinstance(delegate, TextPopupDelegate):
+                delegate.set_readonly(not edit_mode)
+
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -722,8 +778,56 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_multi_sorting(self, specs: List[Tuple[int, Qt.SortOrder]]) -> None: 
-        """Устанавливает мульти-сортировку по списку (индекс столбца, порядок)."""
+    def set_multi_sorting(
+        self, 
+        specs: List[Tuple[int, Qt.SortOrder]]
+    ) -> None: 
+        """
+        Устанавливает многоколоночную сортировку для таблицы.
+
+        **Назначение:**
+            Позволяет пользователю отсортировать данные по нескольким столбцам с указанием
+            направления сортировки для каждого. Метод вызывается из диалога мульти-сортировки
+            (`FilterHeaderView._show_multi_sort_dialog`).
+
+        **Алгоритм:**
+            1. Проверяет, есть ли активный fuzzy-фильтр (через `_has_fuzzy_filter`).
+            Если есть – сортировка отключается (метод ничего не делает или может показать
+            предупреждение). Это связано с тем, что fuzzy-фильтр применяется в памяти
+            после загрузки данных, и серверная сортировка при нём не поддерживается.
+            2. Если fuzzy-фильтра нет, преобразует спецификации в формат `order_by` для сервиса.
+            Каждый элемент `specs` – кортеж `(видимый_индекс_столбца, порядок)`.
+            Например, `specs = [(1, Qt.AscendingOrder), (2, Qt.DescendingOrder)]`.
+            Преобразование: получает имя поля для каждого видимого индекса через
+            `_get_column_name_by_visible_index`, затем формирует строку:
+            `"last_name"` для возрастания, `"-date"` для убывания.
+            3. Сохраняет полученный список в `self._current_order_by`.
+            4. Вызывает `reload_with_order_by(order_by)`, который перезагружает страницу
+            с новой сортировкой (сбрасывает пагинацию).
+
+        **Параметры:**
+            specs (List[Tuple[int, Qt.SortOrder]]): Список кортежей, где первый элемент –
+                видимый индекс столбца (0-based), второй – порядок сортировки
+                (`Qt.AscendingOrder` или `Qt.DescendingOrder`).
+
+        **Возвращает:**
+            None
+
+        **Исключения:**
+            Ничего не выбрасывает (при ошибках логирует и игнорирует).
+
+        **Пример:**
+            >>> specs = [(1, Qt.AscendingOrder), (2, Qt.DescendingOrder)]
+            >>> # Столбец 1 (например, "last_name") – по возрастанию, столбец 2 (например, "date") – по убыванию
+            >>> self.set_multi_sorting(specs)
+
+        **Примечания:**
+            - Этот метод переопределяет (или вызывает) метод `set_multi_sorting` из `FilterMixin`.
+            - Сортировка выполняется на стороне сервера (через метод `get_page_filtered` сервиса).
+            - Если fuzzy-фильтр активен, сортировка игнорируется (пункты меню сортировки
+            в заголовке таблицы отключаются, см. `FilterHeaderView`).
+        """
+
         super().set_multi_sorting(specs)  # вызывает метод миксина FilterMixin
 
     @AppLogger.get_instance(
@@ -998,8 +1102,40 @@ class PaginatedListPage(
     )
     def _on_row_modified_from_model(self, row: int):
         """
-        Обработчик прямого редактирования ячейки в таблице.
-        Игнорирует изменения строк, помеченных на удаление.
+        Обработчик сигнала `row_modified` от модели таблицы (`PaginatedTableModel`).
+
+        **Когда возникает:**
+            - При прямом редактировании ячейки в таблице (пользователь изменил значение в поле
+            и подтвердил изменение, например, нажатием Enter).
+
+        **Алгоритм:**
+            1. Получает DTO для указанной строки через `self.source_model.get_item_at_row(row)`.
+            2. Если DTO существует и его ID не `None` и не отрицательный (существующая запись):
+            - Проверяет, не помечена ли строка на удаление (наличие ключа `__deleted__`).
+                Если помечена – игнорирует изменение (логирует и выходит).
+            - Если не помечена, вызывает `self.mark_own_change(dto.id)`, который:
+                * Устанавливает статус `'own'` для сущности в реестре.
+                * Обновляет кэш и испускает сигнал `entity_status_changed`, что приводит к перекраске строки.
+            3. Если DTO не существует или ID временный (отрицательный) – ничего не делает
+            (строки с временным ID обрабатываются отдельно при создании).
+
+        **Параметры:**
+            row (int): Индекс строки в исходной модели (`source_model`).
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Сигнал `row_modified` испускается моделью после успешной установки нового значения
+            через `setData`. Не путать с сигналом изменения выделения или другими событиями.
+            - Для новых строк (ID < 0) редактирование ячейки также должно помечать строку
+            как изменённую, но в текущей реализации новые строки уже имеют статус `'own'`
+            с момента создания (в `_add_inline_row`). Поэтому дополнительная пометка не требуется.
+
+        **Пример:**
+            >>> # Пользователь дважды кликает по ячейке телефона, вводит новое значение и нажимает Enter
+            >>> # Модель вызывает setData, затем испускает row_modified(0)
+            >>> # Этот обработчик вызывает mark_own_change(id) -> строка становится жёлтой
         """
 
         self.logger.debug(f"_on_row_modified_from_model: row={row}")
@@ -1088,10 +1224,41 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_entity_status_changed(self, entity_id: int, has_changes: bool):
+    def _on_entity_status_changed(
+        self, 
+        entity_id: int, 
+        has_changes: bool
+    ):
         """
-        При изменении статуса сущности обновляем UI (цвет строки, кнопку сохранения).
+        Обработчик сигнала `entity_status_changed` из `DraftTreeMixin`.
+
+        **Сигнал возникает:**
+            - При изменении статуса любой сущности (с `None` на `'own'`, `'child'`, `'both'` или наоборот).
+            - Сигнал испускается внутри `_update_own_change` и `_recompute_parent_status`.
+
+        **Действия:**
+            1. Вызывает `_update_row_color_by_id(entity_id)` для перекраски строки,
+            соответствующей данной сущности.
+            2. Вызывает `_update_save_button_state()` для обновления активности кнопки «Сохранить».
+
+        **Параметры:**
+            entity_id (int): ID сущности, статус которой изменился.
+            has_changes (bool): True – статус не `None` (есть изменения), False – статус `None`. (ПО ФАКТУ НЕ ИСПОЛЬЗУЕТСЯ)
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Статус может быть `'own'`, `'child'`, `'both'` или `None`.
+            - Цвет строки определяется в `_get_row_color` на основе статуса (жёлтый для `'own'`/`'child'`/`'both'`, красный для удалённой, зелёный для новой, белый для неизменённой).
+            - Этот обработчик гарантирует, что UI всегда отражает актуальное состояние
+            черновиков для всех строк, даже для тех, которые не были выбраны.
+
+        **Пример:**
+            >>> # После редактирования ячейки строки с ID=1 статус меняется на 'own'
+            >>> # Сигнал вызывает _on_entity_status_changed(1, True) -> строка перекрашивается в жёлтый
         """
+            
         self._update_row_color_by_id( # Перекрашиваем строку, соответствующую этой сущности
             entity_id = entity_id ,          
         )  
@@ -1108,8 +1275,41 @@ class PaginatedListPage(
     )
     def _on_draft_registry_changed(self, key: str, has_draft: bool):
         """
-        При изменении реестра проверяем, не изменился ли статус какой‑либо сущности,
-        и обновляем UI (цвет строки, кнопку сохранения).
+        Обработчик сигнала `draft_changed` из `DraftRegistry`.
+
+        **Сигнал возникает:**
+            - При любом добавлении или удалении черновика в реестре (включая служебные ключи:
+            `__status__`, `__counter__`, `__new__`, `__deleted__`).
+
+        **Логика:**
+            1. Разбирает ключ на части (разделитель `:`).
+            2. Если ключ относится к статусу (`__status__:{entity_type}:{entity_id}`):
+            - Извлекает `entity_type` и `entity_id`.
+            - Если `entity_type` совпадает с текущим типом сущности страницы,
+                обновляет кэш статуса (`_set_cached_status`) и испускает сигнал
+                `entity_status_changed(entity_id, status is not None)`, что приводит к перекраске строки.
+            3. Если ключ относится к счётчику (`__counter__:{entity_type}:{parent_id}`) –
+            игнорируется, так как изменения счётчика уже обработаны в `_update_child_change`.
+            4. Для остальных ключей (черновики, новые строки, удалённые) – ничего не делает,
+            так как они не требуют немедленного обновления UI.
+
+        **Параметры:**
+            key (str): Ключ черновика, который изменился.
+            has_draft (bool): True – черновик добавлен, False – удалён.
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Основная цель этого обработчика – синхронизировать кэш статусов в миксине
+            с реестром и уведомить UI о необходимости перекраски строки.
+            - Статусы сущностей (`__status__`) обновляются в реестре через вызовы
+            `set_entity_status` (например, в `_update_own_change`), и здесь мы просто отражаем
+            эти изменения в локальном кэше.
+
+        **Пример:**
+            >>> # После вызова mark_own_change(1) в реестре появится ключ __status__:patient:1
+            >>> # Сигнал draft_changed вызовет этот обработчик, который обновит кэш и цвет строки
         """
 
         parts = key.split(':')
@@ -1152,7 +1352,39 @@ class PaginatedListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _on_draft_modified_changed(self, has_draft: bool):
-        """Обработчик изменения черновиков в поддереве (сигнал от DraftTreeMixin)."""
+        """
+        Обработчик сигнала `draft_modified_changed` из `DraftTreeMixin`.
+
+        **Сигнал возникает:**
+            - Когда изменяется флаг `_draft_modified` (наличие изменений в поддереве черновиков,
+            начиная с текущего компонента). Например, когда дочерний виджет (фото) добавляет
+            или удаляет черновик, или когда меняется статус сущности.
+
+        **Действия:**
+            1. Если нет выбранной строки (`self.selected_dto`), ничего не делает.
+            2. Вызывает `_update_row_color_by_id(entity_id)` для перекраски строки,
+            соответствующей текущей выбранной сущности. Цвет строки зависит от нового статуса.
+            3. Вызывает `_update_save_button_state()` для обновления активности кнопки «Сохранить».
+
+        **Параметры:**
+            has_draft (bool): True – появились черновики (изменения есть), False – все черновики удалены.
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Статус сущности уже обновлён в реестре (через `entity_status_changed`),
+            поэтому здесь не требуется дополнительно пересчитывать статус.
+            - Этот обработчик обеспечивает синхронизацию UI (цвет строки и кнопка «Сохранить»)
+            с изменениями в дочерних компонентах.
+
+        **Пример сценария:**
+            >>> # Пользователь добавил фото к выбранному приёму
+            >>> # PhotoUploaderWidget испускает photosChanged -> вызывается _save_current_draft
+            >>> # Далее DraftTreeMixin обновляет _draft_modified и испускает сигнал
+            >>> self._on_draft_modified_changed(True)  # перекрасит строку в жёлтый
+        """
+
         if not self.selected_dto:
             return
 
@@ -1249,6 +1481,43 @@ class PaginatedListPage(
         temp_id,
         id,
     ):
+        """
+        Переносит статус `'own'` (наличие собственных изменений) с временного ID на реальный ID.
+
+        **Назначение:**
+            Когда создаётся новая строка (временный ID), она сразу помечается как имеющая
+            собственные изменения (статус `'own'`). После сохранения строки в БД она получает
+            реальный ID. Чтобы сохранить информацию о том, что строка была изменена пользователем,
+            необходимо перенести статус `'own'` с временного ID на реальный. Этот метод
+            выполняет перенос статуса и очищает запись о временном ID.
+
+        **Алгоритм:**
+            1. Получает старый статус для временного ID из кэша (`_get_cached_status(temp_id)`).
+            2. Если статус существовал:
+            - Сохраняет его для реального ID в кэше и реестре (через `set_entity_status`).
+            - Удаляет статус для временного ID из реестра и кэша.
+            3. **Не изменяет счётчик родителя** – это делается отдельно в `_save_new_row_recursive`
+            через вызов `_balance_parent_counter`.
+
+        **Параметры:**
+            temp_id (int): Временный (отрицательный) ID новой строки.
+            real_id (int): Реальный (положительный) ID, присвоенный строке после сохранения.
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> self._update_id_own_in_real_id(-1, 123)
+            # Если у строки с ID=-1 был статус 'own', теперь он будет у ID=123, а запись для -1 удалена.
+
+        **Важно:**
+            - Метод **не вызывает** `mark_child_change` для родителя, потому что увеличение
+            счётчика родителя уже произошло при создании строки (`_add_inline_row`), а уменьшение
+            будет выполнено после сохранения через `_balance_parent_counter`.
+            - Цвет строки пересчитывается автоматически через сигнал `entity_status_changed`,
+            который испускается при изменении статуса.
+        """
+        
         # Переносим статус 'own' (если был) с временного ID на реальный
         old_status = self._get_cached_status(temp_id)
         if old_status:
@@ -1280,9 +1549,43 @@ class PaginatedListPage(
         id,
     ):
         """
-        Переносит все дочерние черновики с префикса, содержащего временный ID,
-        на префикс с реальным ID. Без этого фото, добавленные до сохранения
-        родителя, были бы потеряны.
+        Переносит все дочерние черновики с префикса, содержащего временный ID, на префикс с реальным ID.
+
+        **Назначение:**
+            При создании новой строки (например, нового пациента или приёма) ей присваивается
+            временный отрицательный ID. Пользователь может добавить дочерние черновики
+            (например, фото к приёму) **до** сохранения родительской строки. В этом случае
+            дочерние черновики хранятся в реестре под ключами, содержащими временный ID родителя
+            (например, `"appointment:-1:photos"`). После сохранения родитель получает реальный
+            положительный ID из БД. Данный метод переносит все дочерние черновики с префикса
+            `{entity_type}:{temp_id}:` на новый префикс `{entity_type}:{real_id}:`,
+            чтобы они были привязаны к реальному ID родителя.
+
+        **Алгоритм:**
+            1. Формирует старый префикс: `f"{self._entity_type}:{temp_id}:"`.
+            2. Формирует новый префикс: `f"{self._entity_type}:{real_id}:"`.
+            3. Проходит по всем ключам реестра, начинающимся со старого префикса.
+            4. Для каждого такого ключа извлекает данные, создаёт новый ключ заменой префикса
+            и сохраняет данные под новым ключом.
+            5. Удаляет старый ключ.
+
+        **Параметры:**
+            temp_id (int): Временный (отрицательный) ID родительской строки.
+            real_id (int): Реальный (положительный) ID, присвоенный строке после сохранения в БД.
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> # После сохранения новой строки с temp_id=-1 и реальным ID=123
+            >>> self._transferring_child_drafts(-1, 123)
+            # Все черновики с префиксом "appointment:-1:" будут перенесены на "appointment:123:"
+
+        **Важно:**
+            - Метод должен вызываться **после** успешного сохранения родительской строки,
+            но **до** рекурсивного сохранения потомков (если они есть).
+            - Без этого вызова дочерние черновики будут потеряны, так как останутся привязаны
+            к несуществующему временному ID.
         """
 
         # Переносим ВСЕ дочерние черновики (фото, заметки и т.д.)
@@ -2546,6 +2849,43 @@ class PaginatedListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _save_all_changes_impl_reload_clear_entity_registry(self) -> bool:
+        """
+        Выполняет сохранение всех изменений в рамках единой транзакции, затем перезагружает данные и очищает реестр.
+
+        **Алгоритм:**
+            1. Вызывает `_save_all_changes_impl_session()` для выполнения операций сохранения
+            (новые строки, дочерние черновики, изменённые строки, удалённые строки) внутри
+            одной сессии БД. При возникновении ошибки транзакция откатывается.
+            2. После успешного сохранения вызывает `reload_data()` для перезагрузки данных
+            из БД в модель таблицы.
+            3. Очищает реестр черновиков от всех служебных ключей (статусы, счётчики, черновики)
+            для текущего типа сущности через `_clear_entity_registry()`.
+
+        **Важно:**
+            - Этот метод является **вспомогательным** и вызывается внутри `_save_all_changes_impl`.
+            - Он не управляет флагом `_saving_in_progress` – это делает вызывающий код.
+            - После вызова метода все черновики для текущей страницы удаляются, а данные
+            в таблице соответствуют состоянию БД.
+
+        **Исключения:**
+            Любое исключение, возникшее в `_save_all_changes_impl_session()`, пробрасывается выше.
+
+        **Пример использования (внутри `_save_all_changes_impl`):**
+            >>> try:
+            ...     self._save_all_changes_impl_reload_clear_entity_registry()
+            ...     self._exit_edit_mode()
+            ...     return True
+            ... except Exception as e:
+            ...     self.logger.exception(f"Ошибка: {e}")
+            ...     return False
+
+        **Примечания:**
+            - Разделение на `_save_all_changes_impl_session` и этот метод позволяет
+            вызывать сохранение без перезагрузки данных (например, для дочерних черновиков).
+            - Очистка реестра после перезагрузки данных гарантирует, что реестр не содержит
+            устаревших ключей, которые могли бы повлиять на следующие операции.
+        """
+
         # Сохраняем всех изменений внутри единой транзакции.
         self._save_all_changes_impl_session()
 
@@ -3592,6 +3932,46 @@ class PaginatedListPage(
                     return arg
         return annotation
 
+    def _reapply_delegates(self):
+        """
+        Переустанавливает все делегаты для столбцов таблицы.
+
+        **Назначение:**
+            Вызывается при изменении видимости столбцов (например, после включения/выключения
+            чекбокс-столбца), а также при инициализации страницы. Поскольку делегаты привязаны
+            к видимым индексам столбцов, а не к системным именам, необходимо переустанавливать
+            их каждый раз, когда меняется набор видимых столбцов или их порядок.
+
+        **Алгоритм:**
+            Просто вызывает `self._setup_delegates()`, который заново проходит по всем видимым
+            столбцам, получает из `TableColumn` сохранённые `delegate_class` и `delegate_args`
+            и устанавливает делегаты для соответствующих видимых индексов.
+
+        **Параметры:**
+            None
+
+        **Возвращает:**
+            None
+
+        **Когда вызывается:**
+            - В `_update_ui_for_edit_mode` после изменения видимости чекбокс-столбца.
+            - В `__init__` после создания модели (неявно через `setup_ui`).
+            - При необходимости в других местах, где меняется состав столбцов
+            (например, после изменения настроек видимости столбцов пользователем).
+
+        **Пример:**
+            >>> # После включения режима редактирования
+            >>> self.source_model.set_checkbox_column_visible(True)
+            >>> self._reapply_delegates()  # чекбокс-столбец появился, индексы сдвинулись – делегаты переустанавливаются
+
+        **Примечания:**
+            - Метод не удаляет старые делегаты явно, `setItemDelegateForColumn` заменяет их.
+            - Для `TextPopupDelegate` дополнительно в `_update_ui_for_edit_mode` вызывается
+            `set_readonly`, чтобы синхронизировать режим редактирования.
+        """
+
+        self._setup_delegates()
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -3621,6 +4001,9 @@ class PaginatedListPage(
 
             if config.get('hidden', False):
                 continue
+            
+            # Получаем делегат для этого поля
+            delegate_class, delegate_args = self._get_delegate_for_field(field_name, config)
 
             col = TableColumn(
                 system_name=field_name,
@@ -3634,6 +4017,8 @@ class PaginatedListPage(
                 choices=config.get('choices'),
                 autocomplete=config.get('autocomplete', False),
                 input_mask=config.get('input_mask'),
+                delegate_class=delegate_class,
+                delegate_args=delegate_args,
             )
             self.columns.append(col)
         self.columns.sort(key=lambda c: c.order)
@@ -3691,179 +4076,339 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_delegates(self) -> None:
+    def _get_delegate_for_field(
+        self, 
+        field_name: str, 
+        config: Dict[str, Any]
+    ) -> Tuple[Optional[Type], Dict[str, Any]]:
         """
-      
-        Устанавливает делегаты для столбцов таблицы на основе field_configs и типа данных.
-        Адаптировано для PaginatedTableModel.
-
-        **Порядок выбора делегата:**
-            1. Если есть choices – ComboBoxDelegate.
-            2. Если widget_type == 'textarea' – TextPopupDelegate (с автодополнением).
-            3. Если autocomplete=True и тип str – CompleterStringDelegate.
-            4. Для datetime.date – DatePickerDelegate.
-            5. Для datetime.time – TimePickerDelegate.
-            6. Для bool – BoolDelegate.
-            7. Для str с маской ввода – StringDelegate с mask.
-            8. Иначе – StringDelegate.
-
-        Примечание: Прокси-модель не используется, поэтому видимый индекс столбца напрямую
-        соответствует индексу в модели.
+        Определяет класс делегата и его аргументы для поля.
+        Возвращает (delegate_class, delegate_args).
         """
-        
+
         # from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
-        #     CompleterStringDelegate,
-        #     DatePickerDelegate,
-        #     StringDelegate,
-        #     TextPopupDelegate,
-        #     TimePickerDelegate,
-        #     BoolDelegate,
-        #     ComboBoxDelegate,
+        #     CompleterStringDelegate, DatePickerDelegate, TimePickerDelegate,
+        #     TextPopupDelegate, BoolDelegate, ComboBoxDelegate, StringDelegate
         # )
-        # from interfaces.gui.gui_window.widgets.table_column import ColumnType
         # import datetime
 
-        self.logger.debug("=== _setup_delegates START ===")
-        type_delegate_map = {
-            datetime.date: DatePickerDelegate,
-            datetime.time: TimePickerDelegate,
-            bool: BoolDelegate,
-            # str: StringDelegate, обрабатываем отдельно в конце с учётом маски
-        }
+        # 1) Выпадающий список
+        choices = config.get('choices')
+        if choices:
+            return ComboBoxDelegate, {'choices': choices}
 
-        # Проходим по всем видимым столбцам
+        # 2) Многострочный текст
+        if config.get('widget_type') == 'textarea':
+            return TextPopupDelegate, {'readonly': not self.edit_mode}
+
+        # 3) Автодополнение для строк
+        real_type = self._get_real_type(self.dto_class.model_fields[field_name].annotation)
+        if real_type == str and config.get('autocomplete', False):
+            return CompleterStringDelegate, {'column': None}  # column будет передан при установке
+
+        # 4) Дата
+        if real_type == datetime.date:
+            return DatePickerDelegate, {'config': config}
+
+        # 5) Время
+        if real_type == datetime.time:
+            return TimePickerDelegate, {'config': config}
+
+        # 6) Булево
+        if real_type == bool:
+            return BoolDelegate, {}
+
+        # 7) Строка (обычная или с маской)
+        if real_type == str:
+            # Для строк с маской используем StringDelegate, без маски – тоже StringDelegate
+            return StringDelegate, {}
+
+        # 8) Остальные типы – нет делегата (стандартный)
+        return None, {}
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _setup_delegates(self) -> None:
+        """
+        Устанавливает делегаты для столбцов таблицы на основе сохранённых в TableColumn.
+
+        **Принцип работы:**
+            - В `_build_columns` для каждого столбца (`TableColumn`) определяется
+            класс делегата (`delegate_class`) и его аргументы (`delegate_args`)
+            с учётом типа поля, конфигурации (`field_configs`) и виджетов.
+            - Данный метод проходит по всем **видимым** столбцам модели,
+            получает объект `TableColumn` и, если у него задан `delegate_class`,
+            создаёт экземпляр делегата с предварительно сохранёнными аргументами
+            и устанавливает его для соответствующего столбца в `table_view`.
+            - Если `delegate_class` равен `None`, для столбца используется
+            стандартный делегат (редактирование по умолчанию).
+
+        **Поддерживаемые делегаты и их настройка:**
+            - `ComboBoxDelegate` – для полей с `choices`.
+            - `TextPopupDelegate` – для многострочного текста (`widget_type='textarea'`).
+            - `CompleterStringDelegate` – для строк с `autocomplete=True`.
+            - `DatePickerDelegate` – для полей типа `datetime.date`.
+            - `TimePickerDelegate` – для полей типа `datetime.time`.
+            - `BoolDelegate` – для полей типа `bool`.
+            - `StringDelegate` – для обычных строк (с возможной маской ввода).
+
+        **Особые случаи (дополнительная настройка при создании делегата):**
+            - Для `CompleterStringDelegate` в аргументы добавляются `column` (видимый индекс)
+            и `get_unique_values_func` (функция получения уникальных значений для автодополнения).
+            - Для `StringDelegate`, если у столбца задан `input_mask`, создаётся
+            словарь `column_masks` (маска для данного столбца), который передаётся
+            в делегат. Это позволяет применять маску ввода (например, для телефона).
+
+        **Переустановка делегатов:**
+            - Метод вызывается в `_update_ui_for_edit_mode` после изменения видимости
+            чекбокс-столбца, а также при инициализации страницы.
+            - Поскольку делегаты привязаны к видимым индексам, а не к системным именам,
+            переустановка необходима, чтобы делегаты оказались на правильных местах
+            после добавления/удаления системных столбцов (например, чекбокса).
+
+        **Требования к классу-наследнику:**
+            - Должен иметь метод `_get_unique_values_for_column(visible_index) -> List[str]`
+            (реализован в `FilterMixin`), который возвращает уникальные значения
+            для указанного видимого столбца (используется в `CompleterStringDelegate`).
+
+        **Пример использования (внутри класса):**
+            >>> # После изменения модели или видимости столбцов
+            >>> self._reapply_delegates()   # вызывает _setup_delegates
+
+        **Примечание:**
+            - Метод не удаляет существующие делегаты перед установкой новых,
+            а просто перезаписывает их. Это корректно, так как `setItemDelegateForColumn`
+            заменяет предыдущий делегат.
+            - Для отладки в лог выводятся сообщения о создании каждого делегата.
+        """
+
+        # self.logger.debug("=== _setup_delegates START ===")
+
+        # Проходим по всем видимым столбцам таблицы
         for visible_idx in range(self.source_model.columnCount()):
-
-            self.logger.debug(
-                f"visible_idx = {visible_idx}"
-            )
-            # Находим объект TableColumn по видимому индексу
+            # Получаем объект TableColumn по видимому индексу
             col = self.source_model.get_column_at_visible_index(visible_idx)
-
-            self.logger.debug(
-                f"col is None = {col is None} "
-                f"col.column_type != ColumnType.DATA = {col.column_type != ColumnType.DATA}"
-            )
             if col is None or col.column_type != ColumnType.DATA:
                 continue
 
-            field_name = col.field_name
-            config = self.field_configs.get(field_name, {})
-            model_col = visible_idx  # в PaginatedTableModel видимый индекс = индекс в представлении
-
-            self.logger.debug(
-                f"Обработка столбца {field_name}: "
-                f"data_type={col.data_type}, "
-                f"editable={col.editable}, "
-                f"widget_type={config.get('widget_type')}, "
-                f"autocomplete={config.get('autocomplete')} "
-            )
-
-            # 1) Выпадающий список (choices)
-            choices = config.get('choices')
-
-            self.logger.debug(
-                f"choices is None = {choices is None}"
-            )
-            if choices:
-                delegate = ComboBoxDelegate(self.table_view, choices)
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
-                self.logger.debug(f"  -> ComboBoxDelegate для {field_name}")
-
-                self.logger.debug(
-                    f"Установка делегата для столбца {field_name} "
-                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
-                )
+            # Если для столбца не задан класс делегата – используем стандартный
+            if col.delegate_class is None:
+                self.logger.debug(f"  -> стандартный делегат для {col.field_name}")
                 continue
 
-            # 2) Многострочный текст (textarea)
-            widget_type = config.get('widget_type')
-            self.logger.debug(
-                f"widget_type = {widget_type}"
-            )
-            if widget_type == 'textarea':
-                self.logger.debug(f"Создаём TextPopupDelegate для {field_name}, readonly={not self.edit_mode}")
-                delegate = TextPopupDelegate(
-                    self.table_view,
-                    readonly = not self.edit_mode,
-                    get_completion_list = lambda col=visible_idx: self._get_unique_values_for_column(col)
-                )
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
-                self.logger.debug(f"  -> TextPopupDelegate для {field_name}")
+            # Копируем аргументы делегата, чтобы не изменять оригинал в TableColumn
+            args = col.delegate_args.copy()
 
-                self.logger.debug(
-                    f"Установка делегата для столбца {field_name} "
-                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
-                )
-                continue
+            # --- Дополнительная настройка для конкретных типов делегатов ---
+            if col.delegate_class.__name__ == 'CompleterStringDelegate':
+                # Для автодополнения передаём видимый индекс столбца и функцию получения уникальных значений
+                args['column'] = visible_idx
+                args['get_unique_values_func'] = self._get_unique_values_for_column
 
-            # 3) Автодополнение для строк
-            self.logger.debug(
-                f"col.data_type == str = {col.data_type == str} "
-                f"config.get('autocomplete', False) = {config.get('autocomplete', False)} "
-            )
-            if col.data_type == str and config.get('autocomplete', False):
-                delegate = CompleterStringDelegate(
-                    self.table_view,
-                    get_unique_values_func=self._get_unique_values_for_column,
-                    column=visible_idx
-                )
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
-                self.logger.debug(f"  -> CompleterStringDelegate для {field_name}")
+            elif col.delegate_class == StringDelegate and col.input_mask:
+                # Для строк с маской создаём словарь column_masks (маска для этого столбца)
+                args['column_masks'] = {visible_idx: col.input_mask}
 
-                self.logger.debug(
-                    f"Установка делегата для столбца {field_name} "
-                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
-                )
-                continue
+            # Для DatePickerDelegate и TimePickerDelegate аргументы (config) уже переданы из _get_delegate_for_field
 
-            # 4) Стандартные делегаты по типу
-            delegate_class = type_delegate_map.get(col.data_type)  # может быть проблема с типизацией!
+            # Создаём экземпляр делегата
+            delegate = col.delegate_class(self.table_view, **args)
+            # Устанавливаем делегат для видимого столбца
+            self.table_view.setItemDelegateForColumn(visible_idx, delegate)
 
             self.logger.debug(
-                f"delegate_class is None > {delegate_class is None} "
+                f"  -> {col.delegate_class.__name__} для {col.field_name} "
+                f"(видимый индекс {visible_idx})"
             )
-            if delegate_class:
 
-                self.logger.debug(
-                    f"delegate_class in (DatePickerDelegate, TimePickerDelegate) = {delegate_class in (DatePickerDelegate, TimePickerDelegate)} "
-                )
-                if delegate_class in (DatePickerDelegate, TimePickerDelegate):
-                    delegate = delegate_class(self.table_view, config=config)
+        # self.logger.debug("=== _setup_delegates END ===")
 
-                else:
-                    delegate = delegate_class(self.table_view)
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _setup_delegates(self) -> None:
+    #     """
+      
+    #     Устанавливает делегаты для столбцов таблицы на основе field_configs и типа данных.
+    #     Адаптировано для PaginatedTableModel.
 
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
-                self.logger.debug(f"  -> {delegate_class.__name__} для {field_name}")
+    #     **Порядок выбора делегата:**
+    #         1. Если есть choices – ComboBoxDelegate.
+    #         2. Если widget_type == 'textarea' – TextPopupDelegate (с автодополнением).
+    #         3. Если autocomplete=True и тип str – CompleterStringDelegate.
+    #         4. Для datetime.date – DatePickerDelegate.
+    #         5. Для datetime.time – TimePickerDelegate.
+    #         6. Для bool – BoolDelegate.
+    #         7. Для str с маской ввода – StringDelegate с mask.
+    #         8. Иначе – StringDelegate.
 
-                self.logger.debug(
-                    f"Установка делегата для столбца {field_name} "
-                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
-                )
-                continue
+    #     Примечание: Прокси-модель не используется, поэтому видимый индекс столбца напрямую
+    #     соответствует индексу в модели.
+    #     """
+        
+    #     # from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
+    #     #     CompleterStringDelegate,
+    #     #     DatePickerDelegate,
+    #     #     StringDelegate,
+    #     #     TextPopupDelegate,
+    #     #     TimePickerDelegate,
+    #     #     BoolDelegate,
+    #     #     ComboBoxDelegate,
+    #     # )
+    #     # from interfaces.gui.gui_window.widgets.table_column import ColumnType
+    #     # import datetime
 
-            # 5) Обычные строки с маской ввода
+    #     self.logger.debug("=== _setup_delegates START ===")
+    #     type_delegate_map = {
+    #         datetime.date: DatePickerDelegate,
+    #         datetime.time: TimePickerDelegate,
+    #         bool: BoolDelegate,
+    #         # str: StringDelegate, обрабатываем отдельно в конце с учётом маски
+    #     }
 
-            self.logger.debug(
-                f"col.data_type == str = {col.data_type == str}"
-            )
-            if col.data_type == str:
-                mask = config.get('input_mask')
-                column_masks = {model_col: mask} if mask else None
-                delegate = StringDelegate(
-                    self.table_view, 
-                    column_masks=column_masks
-                )
-                self.table_view.setItemDelegateForColumn(model_col, delegate)
-                self.logger.debug(f"  -> StringDelegate с маской {mask} для {field_name}")
+    #     # Проходим по всем видимым столбцам
+    #     for visible_idx in range(self.source_model.columnCount()):
 
-                self.logger.debug(
-                    f"Установка делегата для столбца {field_name} "
-                    f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
-                )
+    #         self.logger.debug(
+    #             f"visible_idx = {visible_idx}"
+    #         )
+    #         # Находим объект TableColumn по видимому индексу
+    #         col = self.source_model.get_column_at_visible_index(visible_idx)
 
-        self.logger.debug("=== _setup_delegates END ===")
+    #         self.logger.debug(
+    #             f"col is None = {col is None} "
+    #             f"col.column_type != ColumnType.DATA = {col.column_type != ColumnType.DATA}"
+    #         )
+    #         if col is None or col.column_type != ColumnType.DATA:
+    #             continue
+
+    #         field_name = col.field_name
+    #         config = self.field_configs.get(field_name, {})
+    #         model_col = visible_idx  # в PaginatedTableModel видимый индекс = индекс в представлении
+
+    #         self.logger.debug(
+    #             f"Обработка столбца {field_name}: "
+    #             f"data_type={col.data_type}, "
+    #             f"editable={col.editable}, "
+    #             f"widget_type={config.get('widget_type')}, "
+    #             f"autocomplete={config.get('autocomplete')} "
+    #         )
+
+    #         # 1) Выпадающий список (choices)
+    #         choices = config.get('choices')
+
+    #         self.logger.debug(
+    #             f"choices is None = {choices is None}"
+    #         )
+    #         if choices:
+    #             delegate = ComboBoxDelegate(self.table_view, choices)
+    #             self.table_view.setItemDelegateForColumn(model_col, delegate)
+    #             self.logger.debug(f"  -> ComboBoxDelegate для {field_name}")
+
+    #             self.logger.debug(
+    #                 f"Установка делегата для столбца {field_name} "
+    #                 f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+    #             )
+    #             continue
+
+    #         # 2) Многострочный текст (textarea)
+    #         widget_type = config.get('widget_type')
+    #         self.logger.debug(
+    #             f"widget_type = {widget_type}"
+    #         )
+    #         if widget_type == 'textarea':
+    #             self.logger.debug(f"Создаём TextPopupDelegate для {field_name}, readonly={not self.edit_mode}")
+    #             delegate = TextPopupDelegate(
+    #                 self.table_view,
+    #                 readonly = not self.edit_mode,
+    #                 get_completion_list = lambda col=visible_idx: self._get_unique_values_for_column(col)
+    #             )
+    #             self.table_view.setItemDelegateForColumn(model_col, delegate)
+    #             self.logger.debug(f"  -> TextPopupDelegate для {field_name}")
+
+    #             self.logger.debug(
+    #                 f"Установка делегата для столбца {field_name} "
+    #                 f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+    #             )
+    #             continue
+
+    #         # 3) Автодополнение для строк
+    #         self.logger.debug(
+    #             f"col.data_type == str = {col.data_type == str} "
+    #             f"config.get('autocomplete', False) = {config.get('autocomplete', False)} "
+    #         )
+    #         if col.data_type == str and config.get('autocomplete', False):
+    #             delegate = CompleterStringDelegate(
+    #                 self.table_view,
+    #                 get_unique_values_func=self._get_unique_values_for_column,
+    #                 column=visible_idx
+    #             )
+    #             self.table_view.setItemDelegateForColumn(model_col, delegate)
+    #             self.logger.debug(f"  -> CompleterStringDelegate для {field_name}")
+
+    #             self.logger.debug(
+    #                 f"Установка делегата для столбца {field_name} "
+    #                 f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+    #             )
+    #             continue
+
+    #         # 4) Стандартные делегаты по типу
+    #         delegate_class = type_delegate_map.get(col.data_type)  # может быть проблема с типизацией!
+
+    #         self.logger.debug(
+    #             f"delegate_class is None > {delegate_class is None} "
+    #         )
+    #         if delegate_class:
+
+    #             self.logger.debug(
+    #                 f"delegate_class in (DatePickerDelegate, TimePickerDelegate) = {delegate_class in (DatePickerDelegate, TimePickerDelegate)} "
+    #             )
+    #             if delegate_class in (DatePickerDelegate, TimePickerDelegate):
+    #                 delegate = delegate_class(self.table_view, config=config)
+
+    #             else:
+    #                 delegate = delegate_class(self.table_view)
+
+    #             self.table_view.setItemDelegateForColumn(model_col, delegate)
+    #             self.logger.debug(f"  -> {delegate_class.__name__} для {field_name}")
+
+    #             self.logger.debug(
+    #                 f"Установка делегата для столбца {field_name} "
+    #                 f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+    #             )
+    #             continue
+
+    #         # 5) Обычные строки с маской ввода
+
+    #         self.logger.debug(
+    #             f"col.data_type == str = {col.data_type == str}"
+    #         )
+    #         if col.data_type == str:
+    #             mask = config.get('input_mask')
+    #             column_masks = {model_col: mask} if mask else None
+    #             delegate = StringDelegate(
+    #                 self.table_view, 
+    #                 column_masks=column_masks
+    #             )
+    #             self.table_view.setItemDelegateForColumn(model_col, delegate)
+    #             self.logger.debug(f"  -> StringDelegate с маской {mask} для {field_name}")
+
+    #             self.logger.debug(
+    #                 f"Установка делегата для столбца {field_name} "
+    #                 f"(data_type={col.data_type}) -> {delegate.__class__.__name__}"
+    #             )
+
+    #     self.logger.debug("=== _setup_delegates END ===")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

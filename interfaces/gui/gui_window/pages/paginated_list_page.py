@@ -658,6 +658,18 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
+
+    def _set_edit_mode(self, enable: bool) -> None:
+        """
+        Устанавливает режим редактирования и синхронизирует состояние кнопки.
+        """
+        super()._set_edit_mode(enable)
+        # Синхронизируем состояние кнопки, если она существует
+        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
+            self.edit_mode_btn.blockSignals(True)
+            self.edit_mode_btn.setChecked(enable)
+            self.edit_mode_btn.blockSignals(False)
+
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """

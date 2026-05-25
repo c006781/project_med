@@ -1725,6 +1725,10 @@ class PaginatedTableModel(BaseTableModel):
         # )
         if role == Qt.DisplayRole:
             if value is None:
+                # return ""
+                # Для столбцов с типом datetime.date возвращаем маску
+                if target_col and target_col.data_type == datetime.date:
+                    return "    -  -  "
                 return ""
             
             if isinstance(value, datetime.date):

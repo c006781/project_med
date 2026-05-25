@@ -1996,12 +1996,20 @@ class BaseService(
                         'PHOTOS_STORAGE_PATH',
                         os.path.join('.', 'photos')
                     )
-                    
+
                 full_path = os.path.join(storage_path, rel_path)
                 if os.path.exists(full_path):
                     try:
                         os.remove(full_path)
                         self.logger.info(f"Удалён файл фото: {full_path}")
+                        # Проверяем, не стала ли родительская папка пустой
+                        parent_dir = os.path.dirname(full_path)
+                        if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                            try:
+                                os.rmdir(parent_dir)
+                                self.logger.info(f"Удалена пустая папка: {parent_dir}")
+                            except OSError as e:
+                                self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
                     except OSError as e:
                         self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
                 else:

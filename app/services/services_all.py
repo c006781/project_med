@@ -1956,7 +1956,16 @@ class BaseService(
         :param session: сессия для работы с БД (необязательна)
         :raises: self._not_found_exception, если запись не найдена
         :return: None
+
+        **Важно:** Если у сущности есть поля с widget_type='image_thumbnail' (фото, хранящиеся
+        как строковые пути в БД, а не как отдельные записи в таблице photos), то физические
+        файлы на диске НЕ УДАЛЯЮТСЯ автоматически при вызове этого метода.
+        Для удаления таких файлов необходимо обрабатывать их отдельно на уровне GUI
+        (например, в PaginatedListPage._delete_entity_and_children) или в переопределённом
+        методе delete соответствующего сервиса.
         """
+
+
         self.logger.debug(f"Удаление {self._model_class.__name__} с id={entity_id}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
@@ -1965,6 +1974,41 @@ class BaseService(
             if item is None:
                 raise self._not_found_exception(entity_id)
             
+            # --- Удаление файлов для полей с фото (widget_type='image_thumbnail') ---
+            storage_path = None
+            for field_name, config in self._field_configs.items():
+                if config.get('widget_type') != 'image_thumbnail':
+                    continue
+                
+                # Получаем значение поля (относительный путь к файлу)
+                rel_path = getattr(item, field_name, None)
+                if not rel_path or not isinstance(rel_path, str):
+                    continue
+
+                # Если путь абсолютный - пропускаем (такие файлы ещё не скопированы в хранилище)
+                if os.path.isabs(rel_path):
+                    self.logger.debug(f"Поле {field_name} содержит абсолютный путь {rel_path}, пропуск удаления")
+                    continue
+
+                # Получаем базовый путь к хранилищу (лениво)
+                if storage_path is None:
+                    storage_path = AppConfigManager.get_instance().get(
+                        'PHOTOS_STORAGE_PATH',
+                        os.path.join('.', 'photos')
+                    )
+                    
+                full_path = os.path.join(storage_path, rel_path)
+                if os.path.exists(full_path):
+                    try:
+                        os.remove(full_path)
+                        self.logger.info(f"Удалён файл фото: {full_path}")
+                    except OSError as e:
+                        self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
+                else:
+                    self.logger.debug(f"Файл {full_path} не существует, пропуск")
+            # --- Конец блока удаления файлов ---
+
+
             repo.delete(item)
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
 

@@ -193,6 +193,7 @@ from typing import (
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
 from app.config.config_manager.manager import AppConfigManager
+from app.dependencies import get_photo_service
 from app.utils.logger import AppLogger
 
 from app.draft.draft_registry import DraftRegistry
@@ -427,6 +428,14 @@ class PaginatedListPage(
     def _context_params(self, value: Dict) -> None:
         self.__context_params = value
     
+    @property
+    def _photo_service(self):
+        if not hasattr(self, '__photo_service'):
+            # from app.dependencies import get_photo_service
+            self.__photo_service = get_photo_service()
+        return self.__photo_service
+
+
     # @property 
     # def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
     #     """
@@ -751,17 +760,57 @@ class PaginatedListPage(
         use_name_in_filename = False, # 'system'
     ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
     def _update_ui_for_edit_mode(self, edit_mode: bool):
+        """
+        Обновляет элементы пользовательского интерфейса при переключении режима редактирования.
+
+        **Действия:**
+            - Скрывает/показывает выпадающие списки действий (action_combo, inline_action_combo).
+            - Показывает/скрывает кнопку сохранения (save_changes_btn).
+            - Показывает/скрывает кнопку отмены правок строки (cancel_parent_btn).
+            - Включает/отключает дополнительную кнопку действия (action_btn).
+            - Устанавливает режим редактирования таблицы (DoubleClicked / NoEditTriggers).
+            - Обновляет видимость чекбокс-столбца в модели.
+            - Переустанавливает делегаты (через _reapply_delegates).
+            - Обновляет read-only режим для TextPopupDelegate и ImageThumbnailDelegate.
+
+        Args:
+            edit_mode (bool): True – режим редактирования включён, False – выключен.
+
+        Примечания:
+            - Этот метод вызывается из `EditModeMixin._set_edit_mode()`.
+            - В наследниках (например, в AppointmentListPage) может быть переопределён
+            для дополнительной кастомизации, но обязательно должен вызывать super().
+        """
+
+        # Вызываем родительский метод (UIMixin), чтобы обновить базовые элементы
         super()._update_ui_for_edit_mode(edit_mode)
         
+        # --- Работа с чекбокс-столбцом ---
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(edit_mode)
 
-        self._reapply_delegates()   # <-- добавить эту строку
-        # обновление read-only для TextPopupDelegate
+        # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
+        self._reapply_delegates()  
+        
+        # --- Обновление read-only для TextPopupDыelegate (если есть) ---
         for col in range(self.table_view.model().columnCount()):
             delegate = self.table_view.itemDelegateForColumn(col)
             if isinstance(delegate, TextPopupDelegate):
                 delegate.set_readonly(not edit_mode)
+
+        # --- Обновление read-only для ImageThumbnailDelegate (фото) ---
+        # (делегат фото создаётся в _setup_delegates, но его нужно настроить после переустановки)
+        if hasattr(self, 'table_view') and self.table_view:
+            for col in range(self.table_view.model().columnCount()):
+                delegate = self.table_view.itemDelegateForColumn(col)
+                if delegate and hasattr(delegate, 'set_readonly'):
+                    # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
+                    delegate.set_readonly(not edit_mode)
+
+        # --- Дополнительная синхронизация кнопки "Сохранить" ---
+        self._update_save_button_state()
+
+        self.logger.debug(f"Режим редактирования: {'включён' if edit_mode else 'выключен'}, UI обновлён")
 
 
     @AppLogger.get_instance(
@@ -1914,6 +1963,12 @@ class PaginatedListPage(
             # сохранения _balance_parent_counter найдёт ключ и корректно уменьшит счётчик.
             # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
             raise
+
+        # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
+        created = self._process_photo_fields_for_new_row(created, created.id, session)
+
+        # ★★★★★ обновляем запись в БД, чтобы сохранить относительный путь ★★★★★
+        created = self.service.update(created, session=session)
 
         # Найти строку в модели по временному ID и заменить DTO
         row = self._find_row_by_id(temp_id)
@@ -4170,6 +4225,78 @@ class PaginatedListPage(
         name='PaginatedListPage',
         enable_file_logging='system',
         use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _process_photo_fields_for_new_row(self, dto: Any, new_id: int, session: Session = None) -> Any:
+        """
+        Для новой строки (созданной из временного ID) обрабатывает поля с фото:
+        - если путь абсолютный и родитель теперь имеет реальный ID,
+        копирует файл в хранилище и обновляет DTO.
+        """
+        # if self._photo_service is None:
+        #     self._photo_service = get_photo_service()
+
+        storage_path = self._get_photo_storage_path()
+        updated = False
+
+        for field_name, config in self.field_configs.items():
+            if config.get('widget_type') != 'image_thumbnail':
+                continue
+
+            abs_path = getattr(dto, field_name, None)
+            if not abs_path or not isinstance(abs_path, str):
+                continue
+
+            # Если путь уже относительный – пропускаем
+            if not os.path.isabs(abs_path):
+                continue
+
+            if not os.path.exists(abs_path):
+                self.logger.warning(f"Файл {abs_path} не существует, пропускаем")
+                continue
+
+            # Копируем файл в хранилище
+            parent_folder = os.path.join(storage_path, f"app_{new_id}")
+            os.makedirs(parent_folder, exist_ok=True)
+
+            import uuid
+            ext = os.path.splitext(abs_path)[1]
+            unique_name = f"{uuid.uuid4().hex}{ext}"
+            dest_path = os.path.join(parent_folder, unique_name)
+
+            import shutil
+            shutil.copy2(abs_path, dest_path)
+
+            rel_path = os.path.relpath(dest_path, storage_path)
+            setattr(dto, field_name, rel_path)
+            updated = True
+
+            # Также обновляем DTO в реестре черновиков (если нужно) – но строка уже сохранена,
+            # поэтому обновляем только в модели. Модель обновится позже, но можно сразу.
+            # Для единообразия обновим DTO в памяти.
+
+        if updated:
+            # Обновляем модель (строку) – она уже заменена на created, но created содержит старый путь.
+            # Нужно обновить поле в созданном DTO.
+            pass
+
+        return dto
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_photo_storage_path(self) -> str:
+        """Возвращает путь к хранилищу фотографий из конфигурации."""
+        config = AppConfigManager.get_instance()
+        return config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -4179,14 +4306,14 @@ class PaginatedListPage(
 
         **Принцип работы:**
             - В `_build_columns` для каждого столбца (`TableColumn`) определяется
-            класс делегата (`delegate_class`) и его аргументы (`delegate_args`)
-            с учётом типа поля, конфигурации (`field_configs`) и виджетов.
+                класс делегата (`delegate_class`) и его аргументы (`delegate_args`)
+                с учётом типа поля, конфигурации (`field_configs`) и виджетов.
             - Данный метод проходит по всем **видимым** столбцам модели,
-            получает объект `TableColumn` и, если у него задан `delegate_class`,
-            создаёт экземпляр делегата с предварительно сохранёнными аргументами
-            и устанавливает его для соответствующего столбца в `table_view`.
+                получает объект `TableColumn` и, если у него задан `delegate_class`,
+                создаёт экземпляр делегата с предварительно сохранёнными аргументами
+                и устанавливает его для соответствующего столбца в `table_view`.
             - Если `delegate_class` равен `None`, для столбца используется
-            стандартный делегат (редактирование по умолчанию).
+                стандартный делегат (редактирование по умолчанию).
 
         **Поддерживаемые делегаты и их настройка:**
             - `ComboBoxDelegate` – для полей с `choices`.
@@ -4196,25 +4323,30 @@ class PaginatedListPage(
             - `TimePickerDelegate` – для полей типа `datetime.time`.
             - `BoolDelegate` – для полей типа `bool`.
             - `StringDelegate` – для обычных строк (с возможной маской ввода).
+            - `ImageThumbnailDelegate` – для полей с `widget_type='image_thumbnail'` (фото).
+
 
         **Особые случаи (дополнительная настройка при создании делегата):**
             - Для `CompleterStringDelegate` в аргументы добавляются `column` (видимый индекс)
-            и `get_unique_values_func` (функция получения уникальных значений для автодополнения).
+                и `get_unique_values_func` (функция получения уникальных значений для автодополнения).
             - Для `StringDelegate`, если у столбца задан `input_mask`, создаётся
-            словарь `column_masks` (маска для данного столбца), который передаётся
-            в делегат. Это позволяет применять маску ввода (например, для телефона).
+                словарь `column_masks` (маска для данного столбца), который передаётся
+                в делегат. Это позволяет применять маску ввода (например, для телефона).
+            - Для `ImageThumbnailDelegate` передаются `storage_path` (путь к хранилищу),
+                `target_size` (размер миниатюры), `allowed_extensions` (спок разрешённых
+                расширений) и `description_field` (имя поля описания, если есть).
 
         **Переустановка делегатов:**
             - Метод вызывается в `_update_ui_for_edit_mode` после изменения видимости
-            чекбокс-столбца, а также при инициализации страницы.
+                чекбокс-столбца, а также при инициализации страницы.
             - Поскольку делегаты привязаны к видимым индексам, а не к системным именам,
-            переустановка необходима, чтобы делегаты оказались на правильных местах
-            после добавления/удаления системных столбцов (например, чекбокса).
+                переустановка необходима, чтобы делегаты оказались на правильных местах
+                после добавления/удаления системных столбцов (например, чекбокса).
 
         **Требования к классу-наследнику:**
             - Должен иметь метод `_get_unique_values_for_column(visible_index) -> List[str]`
-            (реализован в `FilterMixin`), который возвращает уникальные значения
-            для указанного видимого столбца (используется в `CompleterStringDelegate`).
+                (реализован в `FilterMixin`), который возвращает уникальные значения
+                для указанного видимого столбца (используется в `CompleterStringDelegate`).
 
         **Пример использования (внутри класса):**
             >>> # После изменения модели или видимости столбцов
@@ -4222,8 +4354,8 @@ class PaginatedListPage(
 
         **Примечание:**
             - Метод не удаляет существующие делегаты перед установкой новых,
-            а просто перезаписывает их. Это корректно, так как `setItemDelegateForColumn`
-            заменяет предыдущий делегат.
+                а просто перезаписывает их. Это корректно, так как `setItemDelegateForColumn`
+                заменяет предыдущий делегат.
             - Для отладки в лог выводятся сообщения о создании каждого делегата.
         """
 
@@ -4256,8 +4388,32 @@ class PaginatedListPage(
 
             # Для DatePickerDelegate и TimePickerDelegate аргументы (config) уже переданы из _get_delegate_for_field
 
+            # --- ДЛЯ ФОТО (новый блок) ---
+            elif col.delegate_class.__name__ == 'ImageThumbnailDelegate':
+
+                # Получаем путь к хранилищу из конфигурации
+                storage_path = self._get_photo_storage_path()
+                args['storage_path'] = storage_path
+
+                # target_size может быть передан из field_configs, иначе значение по умолчанию
+                if 'target_size' not in args:
+                    args['target_size'] = QSize(80, 80)
+
+                # Дополнительные параметры из field_configs
+                config = self.field_configs.get(col.field_name, {})
+                if 'allowed_extensions' in config:
+                    args['allowed_extensions'] = config['allowed_extensions']
+
+                if 'description_field' in config:
+                    args['description_field'] = config['description_field']
+
+                # Устанавливаем режим readonly в зависимости от edit_mode
+                # (сам делегат получит этот параметр при создании)
+                # Но readonly нужно будет обновлять при смене режима – см. _update_ui_for_edit_mode
+
             # Создаём экземпляр делегата
             delegate = col.delegate_class(self.table_view, **args)
+
             # Устанавливаем делегат для видимого столбца
             self.table_view.setItemDelegateForColumn(visible_idx, delegate)
 

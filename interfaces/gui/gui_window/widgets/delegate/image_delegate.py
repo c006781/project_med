@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
-from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
+# from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
 from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
 
 
@@ -109,23 +109,44 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     _pending: Dict[str, bool] = {}           # флаги, чтобы не дублировать загрузку
 
     def __init__(
-        self, 
-        parent=None, 
+        self,
+        parent,
+        page: 'PaginatedListPage' ,
+        # page: Optional['PaginatedListPage'] ,
         storage_path: str = "", 
         target_size: QSize = QSize(80, 80),
         allowed_extensions: List[str] = None,
         description_field: str = None,
-        page: Optional['PaginatedListPage'] = None ,
     ):
         """
-        Инициализирует делегат.
+        Инициализирует делегат для отображения миниатюр фото в таблице.
 
         Args:
-            parent: Родительский виджет (обычно QTableView).
-            storage_path: Базовый путь к хранилищу фотографий.
-            target_size: Желаемый размер миниатюры (ширина, высота).
-            allowed_extensions: Список разрешённых расширений (по умолчанию стандартные).
-            description_field: Имя поля в модели, содержащего описание (если есть).
+            parent (QWidget, optional): Родительский виджет (обычно QTableView).
+                Не может быть None.
+            page (PaginatedListPage): Обязательная ссылка на экземпляр страницы списка,
+                которая предоставляет методы работы с черновиками (_get_temp_dir, _ensure_temp_dir)
+                и доступ к реестру. Не может быть None.
+            storage_path (str, optional): Базовый путь к хранилищу фотографий.
+                По умолчанию пустая строка.
+            target_size (QSize, optional): Желаемый размер миниатюры (ширина, высота).
+                По умолчанию QSize(80, 80).
+            allowed_extensions (List[str], optional): Список разрешённых расширений файлов.
+                Если None, используются стандартные: .jpg, .jpeg, .png, .gif, .bmp, .tiff.
+            description_field (str, optional): Имя поля в DTO, содержащего описание фото.
+                Если указано, делегат будет искать это поле при редактировании.
+                По умолчанию None.
+
+        Примечания:
+            - Параметр `page` является обязательным и должен быть передан первым
+              (позиционно или через ключевое слово `page=...`).
+            - Родительский виджет `parent` передаётся отдельно через именованный аргумент,
+              чтобы избежать путаницы с `page`.
+            - После инициализации делегат получает доступ к методам страницы
+              `_get_temp_dir` и `_ensure_temp_dir`, что позволяет работать
+              с временными папками черновиков.
+            - Циклическая зависимость устранена за счёт использования строковой
+              аннотации типа 'PaginatedListPage' и отсутствия прямого импорта.
         """
 
         super().__init__(parent)

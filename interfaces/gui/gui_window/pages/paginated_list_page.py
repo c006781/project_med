@@ -762,26 +762,45 @@ class PaginatedListPage(
         self._cleanup_temp_dir(entity_id)
         super().clear_entity_drafts(entity_id)
 
-    def _move_files_from_temp_to_storage(self, entity_id: int, dto: Any) -> Any:
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _move_files_from_temp_to_storage(
+        self,
+        new_id: int,
+        dto: Any,
+        old_id: Optional[int] = None
+    ) -> Any:
         """
-        Переносит файлы из временной папки сущности в основное хранилище.
-        Возвращает обновлённый DTO (с заменёнными путями).
+        Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
+        в основное хранилище в папку `app_{new_id}`. Обновляет пути в DTO на относительные.
+
+        Аргументы:
+            new_id (int): Реальный ID сущности после сохранения (целевая папка).
+            dto (Any): DTO сущности, содержащий поля с путями к фото.
+            old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
+                                    Если не указан, используется new_id (для уже сохранённых строк).
+
+        Возвращает:
+            Any: Обновлённый DTO (те же поля, но с изменёнными путями).
+
+        Исключения:
+            RuntimeError: Если хотя бы один файл не удалось перенести – транзакция откатывается.
         """
-
-        # Переносим файлы из временной папки в основное хранилище
-
-        temp_dir = self._get_temp_dir(entity_id)
+        # Определяем, по какому ID искать временную папку
+        temp_id = old_id if old_id is not None else new_id
+        temp_dir = self._get_temp_dir(temp_id)
         if not temp_dir or not os.path.exists(temp_dir):
+            # Временной папки нет – нечего переносить
             return dto
 
         storage_path = self._get_photo_storage_path()
-        parent_folder = os.path.join(storage_path, f"app_{entity_id}")
+        parent_folder = os.path.join(storage_path, f"app_{new_id}")
         os.makedirs(parent_folder, exist_ok=True)
 
-
         any_success = False
-        # any_failure = False
-
         error_messages = []
 
         for field_name, config in self.field_configs.items():
@@ -799,16 +818,8 @@ class PaginatedListPage(
             src = os.path.join(temp_dir, current_value)
             dst = os.path.join(parent_folder, current_value)
 
-            # try:
-            #     shutil.move(src, dst)
-            #     rel_path = os.path.relpath(dst, storage_path)
-            #     setattr(dto, field_name, rel_path)
-            #     self.logger.debug(f"Перенесён файл {current_value} -> {rel_path} для поля {field_name}")
-            # except Exception as e:
-            #     self.logger.warning(f"Ошибка переноса файла {current_value}: {e}")
-
             try:
-                # Сначала копируем, затем удаляем исходный
+                # Копируем, затем удаляем исходный
                 shutil.copy2(src, dst)
                 os.remove(src)
                 rel_path = os.path.relpath(dst, storage_path)
@@ -817,41 +828,118 @@ class PaginatedListPage(
                 any_success = True
             except Exception as e:
                 self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
-                any_failure = True
                 error_messages.append(str(e))
                 # Не обновляем DTO, файл остаётся во временной папке
 
-        # Если хотя бы один файл успешно перенесён, обновляем DTO в БД (вызывающий код сделает update)
-        # Если были ошибки, не удаляем временную папку – оставляем для повторной попытки
-        if any_failure:
+        if error_messages:
             err_text = f"Не удалось перенести файлы из временной папки: {', '.join(error_messages)}"
             self.logger.error(err_text)
-
-            # # Все файлы перенесены успешно – удаляем временную папку
-            # self._cleanup_temp_dir(entity_id)  # удаляем временную папку (она не должна оставаться)
-
             raise RuntimeError(err_text)
- 
-        # Все файлы перенесены успешно – удаляем временную папку
-        self._cleanup_temp_dir(entity_id)
-        # Проверяем, не стала ли родительская папка пустой (если были только что перенесённые файлы – она не пуста,
-        # но если она была создана только для этих файлов и больше ничего нет – удалять не нужно, оставляем)
 
-        # После переноса всех файлов проверяем, не стала ли родительская папка пустой
-        if os.path.exists(parent_folder) and not os.listdir(parent_folder):
-            try:
-                os.rmdir(parent_folder)
-                self.logger.debug(f"Удалена пустая папка {parent_folder}")
-            except OSError as e:
-                self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
-                
-        # Если не было ни одного переноса (any_success == False and any_failure == False) – удаляем временную папку?
-        # Такое может быть, если _is_file_in_temp_dir не сработало, но папка существует – просто чистим
-        if not any_success and not any_failure:
-        # Удаляем временную папку после переноса
-            self._cleanup_temp_dir(entity_id)  
+
+        # Удаляем временную папку после успешного переноса
+        self._cleanup_temp_dir(temp_id)
+        if any_success:
+            # Проверяем, не стала ли родительская папка пустой (если была создана только для этих файлов)
+            if os.path.exists(parent_folder) and not os.listdir(parent_folder):
+                try:
+                    os.rmdir(parent_folder)
+                    self.logger.debug(f"Удалена пустая папка {parent_folder}")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
 
         return dto
+
+    # def _move_files_from_temp_to_storage(self, entity_id: int, dto: Any) -> Any:
+    #     """
+    #     Переносит файлы из временной папки сущности в основное хранилище.
+    #     Возвращает обновлённый DTO (с заменёнными путями).
+    #     """
+    #
+    #     # Переносим файлы из временной папки в основное хранилище
+    #
+    #     temp_dir = self._get_temp_dir(entity_id)
+    #     if not temp_dir or not os.path.exists(temp_dir):
+    #         return dto
+    #
+    #     storage_path = self._get_photo_storage_path()
+    #     parent_folder = os.path.join(storage_path, f"app_{entity_id}")
+    #     os.makedirs(parent_folder, exist_ok=True)
+    #
+    #
+    #     any_success = False
+    #     # any_failure = False
+    #
+    #     error_messages = []
+    #
+    #     for field_name, config in self.field_configs.items():
+    #         if config.get('widget_type') != 'image_thumbnail':
+    #             continue
+    #
+    #         current_value = getattr(dto, field_name, None)
+    #         if not current_value or not isinstance(current_value, str):
+    #             continue
+    #
+    #         # Проверяем, является ли значение именем файла во временной папке
+    #         if not self._is_file_in_temp_dir(temp_dir, current_value):
+    #             continue
+    #
+    #         src = os.path.join(temp_dir, current_value)
+    #         dst = os.path.join(parent_folder, current_value)
+    #
+    #         # try:
+    #         #     shutil.move(src, dst)
+    #         #     rel_path = os.path.relpath(dst, storage_path)
+    #         #     setattr(dto, field_name, rel_path)
+    #         #     self.logger.debug(f"Перенесён файл {current_value} -> {rel_path} для поля {field_name}")
+    #         # except Exception as e:
+    #         #     self.logger.warning(f"Ошибка переноса файла {current_value}: {e}")
+    #
+    #         try:
+    #             # Сначала копируем, затем удаляем исходный
+    #             shutil.copy2(src, dst)
+    #             os.remove(src)
+    #             rel_path = os.path.relpath(dst, storage_path)
+    #             setattr(dto, field_name, rel_path)
+    #             self.logger.debug(f"Перенесён файл {current_value} -> {rel_path} для поля {field_name}")
+    #             any_success = True
+    #         except Exception as e:
+    #             self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
+    #             any_failure = True
+    #             error_messages.append(str(e))
+    #             # Не обновляем DTO, файл остаётся во временной папке
+    #
+    #     # Если хотя бы один файл успешно перенесён, обновляем DTO в БД (вызывающий код сделает update)
+    #     # Если были ошибки, не удаляем временную папку – оставляем для повторной попытки
+    #     if any_failure:
+    #         err_text = f"Не удалось перенести файлы из временной папки: {', '.join(error_messages)}"
+    #         self.logger.error(err_text)
+    #
+    #         # # Все файлы перенесены успешно – удаляем временную папку
+    #         # self._cleanup_temp_dir(entity_id)  # удаляем временную папку (она не должна оставаться)
+    #
+    #         raise RuntimeError(err_text)
+    #
+    #     # Все файлы перенесены успешно – удаляем временную папку
+    #     self._cleanup_temp_dir(entity_id)
+    #     # Проверяем, не стала ли родительская папка пустой (если были только что перенесённые файлы – она не пуста,
+    #     # но если она была создана только для этих файлов и больше ничего нет – удалять не нужно, оставляем)
+    #
+    #     # После переноса всех файлов проверяем, не стала ли родительская папка пустой
+    #     if os.path.exists(parent_folder) and not os.listdir(parent_folder):
+    #         try:
+    #             os.rmdir(parent_folder)
+    #             self.logger.debug(f"Удалена пустая папка {parent_folder}")
+    #         except OSError as e:
+    #             self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
+    #
+    #     # Если не было ни одного переноса (any_success == False and any_failure == False) – удаляем временную папку?
+    #     # Такое может быть, если _is_file_in_temp_dir не сработало, но папка существует – просто чистим
+    #     if not any_success and not any_failure:
+    #     # Удаляем временную папку после переноса
+    #         self._cleanup_temp_dir(entity_id)
+    #
+    #     return dto
 
     def _get_allowed_extensions_for_photo(self, field_name: str = None) -> List[str]:
         """
@@ -2281,7 +2369,8 @@ class PaginatedListPage(
             raise
 
         # Переносим файлы из временной папки в основное хранилище
-        created = self._move_files_from_temp_to_storage(temp_id, created)
+        # created = self._move_files_from_temp_to_storage(temp_id, created)
+        created = self._move_files_from_temp_to_storage(created.id, created, old_id=temp_id)
 
         # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
         temp_dir = self._get_temp_dir(temp_id)
@@ -4590,10 +4679,11 @@ class PaginatedListPage(
             )
 
             args = {
+                'page': self,
                 'storage_path': storage_path,
                 'target_size': QSize(80, 80),
                 'allowed_extensions': self._get_allowed_extensions_for_photo(field_name),
-                'description_field': config.get('description_field')
+                'description_field': config.get('description_field'),
             }
 
             return ImageThumbnailDelegate, args
@@ -4778,6 +4868,8 @@ class PaginatedListPage(
                 if 'description_field' in config:
                     args['description_field'] = config['description_field']
 
+                args['page'] = self # <-- передаём страницу
+
                 # Устанавливаем режим readonly в зависимости от edit_mode
                 # (сам делегат получит этот параметр при создании)
                 # Но readonly нужно будет обновлять при смене режима – см. _update_ui_for_edit_mode
@@ -4786,7 +4878,6 @@ class PaginatedListPage(
                 delegate = col.delegate_class(
                     self.table_view, 
                     **args,
-                    page=self, # <-- передаём страницу
                 )
 
                  # set_registry больше не нужен, но оставляем для обратной совместимости (необязательно)

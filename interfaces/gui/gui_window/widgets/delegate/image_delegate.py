@@ -2,7 +2,8 @@
 import os
 from typing import (
     Dict,
-    List, 
+    List,
+    Optional, 
     # Optional,
 )
 
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
+from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
 from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
 
 
@@ -112,7 +114,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         storage_path: str = "", 
         target_size: QSize = QSize(80, 80),
         allowed_extensions: List[str] = None,
-        description_field: str = None
+        description_field: str = None,
+        page: Optional['PaginatedListPage'] = None ,
     ):
         """
         Инициализирует делегат.
@@ -130,16 +133,39 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         self.storage_path = storage_path
         self.target_size = target_size
 
-        self._readonly = True
         self._allowed_extensions = allowed_extensions or ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
         self._description_field = description_field
+        
+        self._page = page  # <-- сохраняем ссылку на страницу
+
+        self._readonly = True
         self._hovered_row = -1
         self._hovered_col = -1
         self._button_rect = None
 
+        # self._registry = None      # DraftRegistry
+        # self._entity_type = None   # тип сущности (например, 'appointment')
+
         # Устанавливаем фильтр событий на таблицу для отслеживания Leave
         if parent:
             parent.installEventFilter(self)
+
+    # def set_registry(self, registry, entity_type: str):
+    #     """
+    #     Устанавливает реестр черновиков и тип сущности для поиска временных папок.
+    #     Должен быть вызван после создания делегата (например, в _setup_delegates).
+    #     (оставлен для обратной совместимости, но теперь не используется)
+    #     """
+    #     self._registry = registry
+    #     self._entity_type = entity_type
+    #     # Если есть page, приоритет у page, но можно оставить
+    #     if self._page is None:
+    #         self.logger.warning("ImageThumbnailDelegate: нет ссылки на страницу, работа с временными папками невозможна")
+    #         return
+        
+    #     if self._page:
+    #         self._registry = self._page._draft_registry
+    #         self._entity_type = self._page._entity_type
 
     def set_readonly(self, readonly: bool) -> None:
         """
@@ -166,6 +192,19 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     def set_storage_path(self, path: str):
         self.storage_path = path
 
+    def _get_entity_id_at_row(self, row: int) -> Optional[int]:
+        """Возвращает ID сущности для указанной строки (из модели)."""
+        parent = self.parent()
+        if parent is None:
+            return None
+        
+        model = parent.model()
+        if model is None:
+            return None
+        
+        dto = model.get_item_at_row(row) if hasattr(model, 'get_item_at_row') else None
+        return getattr(dto, 'id', None) if dto else None
+
     def paint(
         self, 
         painter: QPainter, 
@@ -182,7 +221,10 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             self._draw_placeholder(painter, option, "Нет фото")
             return
 
-        full_path = os.path.join(self.storage_path, file_path) if self.storage_path else file_path
+        # Получаем entity_id для строки (нужен для поиска во временной папке)
+        entity_id = self._get_entity_id_at_row(index.row())
+        full_path = self._get_full_path(file_path, entity_id)
+
         if not os.path.exists(full_path):
             self._draw_placeholder(painter, option, "Файл не найден")
             return
@@ -191,17 +233,42 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         if full_path in self._cache:
             pixmap = self._cache[full_path]
             self._draw_pixmap(painter, option, pixmap)
-        else:
-            # Если ещё не загружали – запускаем загрузку
-            if full_path not in self._pending:
-                self._pending[full_path] = True
-                loader = AsyncImageLoader(self, index.row(), full_path, self.target_size)
-                QThreadPool.globalInstance().start(loader)
-            self._draw_placeholder(painter, option, "Загрузка...")
+            return
+
+        # Если ещё не загружали – запускаем загрузку
+        if full_path not in self._pending:
+            self._pending[full_path] = True
+            loader = AsyncImageLoader(self, index.row(), full_path, self.target_size)
+            QThreadPool.globalInstance().start(loader)
+
+        self._draw_placeholder(painter, option, "Загрузка...")
+
+        # full_path = os.path.join(self.storage_path, file_path) if self.storage_path else file_path
+        # if not os.path.exists(full_path):
+        #     self._draw_placeholder(painter, option, "Файл не найден")
+        #     return
+
+        # # Проверяем кэш
+        # if full_path in self._cache:
+        #     pixmap = self._cache[full_path]
+        #     self._draw_pixmap(painter, option, pixmap)
+        # else:
+        #     # Если ещё не загружали – запускаем загрузку
+        #     if full_path not in self._pending:
+        #         self._pending[full_path] = True
+        #         loader = AsyncImageLoader(self, index.row(), full_path, self.target_size)
+        #         QThreadPool.globalInstance().start(loader)
+        #     self._draw_placeholder(painter, option, "Загрузка...")
 
 
         # Рисуем кнопку, если ячейка под курсором и режим редактирования
-        if not self._readonly and self._hovered_row == index.row() and self._hovered_col == index.column():
+        if (
+            not self._readonly
+        ) and (
+            self._hovered_row == index.row()
+        ) and (
+            self._hovered_col == index.column()
+        ):
             btn_rect = self._get_button_rect(option.rect)
             btn_opt = QStyleOptionButton()
             btn_opt.rect = btn_rect
@@ -244,6 +311,10 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         painter.fillRect(option.rect, QColor(240, 240, 240))
         painter.drawText(option.rect, Qt.AlignCenter, text)
 
+    # ------------------------------------------------------------------
+    # Асинхронная загрузка
+    # ------------------------------------------------------------------
+
     @Slot(int, QPixmap, str)
     def _on_thumbnail_loaded(
         self, 
@@ -264,9 +335,11 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         parent = self.parent()
         if parent is None:
             return
+        
         model = parent.model()
         if model is None:
             return
+        
         idx = model.index(row, 0)
         if idx.isValid():
             parent.update(idx)
@@ -277,7 +350,9 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         # if self.parent() and hasattr(self.parent(), 'viewport'):
         #     self.parent().viewport().update()
 
-
+    # ------------------------------------------------------------------
+    # Обработка событий
+    # ------------------------------------------------------------------
 
     def eventFilter(self, obj, event):
         """Перехватывает событие Leave на таблице, чтобы сбросить hover."""
@@ -289,6 +364,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 idx = self.parent().model().index(old_row, old_col)
                 if idx.isValid():
                     self.parent().update(idx)
+
             return False
         return super().eventFilter(obj, event)
 
@@ -337,6 +413,42 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     def sizeHint(self, option, index):
         return QSize(self.target_size.width(), self.target_size.height() + 10)
     
+    def _get_full_path(self, rel_path: str, entity_id: int) -> str:
+        """
+        Возвращает полный путь к файлу.
+        Сначала проверяет наличие во временной папке черновика (если entity_id известен).
+        Если файл не найден во временной папке, возвращает путь в основном хранилище.
+        """
+        # Проверяем временную папку черновика
+        # if self._registry and entity_id is not None and self._entity_type:
+        if self._page and entity_id is not None:
+            # Получаем существующую временную папку (если есть)
+            temp_dir = self._page._get_temp_dir(entity_id)
+            if temp_dir:
+                candidate = os.path.join(temp_dir, rel_path)
+                if os.path.exists(candidate):
+                    return candidate
+                
+        elif self._registry is None:
+            self.logger.warning("ImageThumbnailDelegate: реестр не установлен, невозможно проверить временную папку")
+
+        # Основное хранилище
+        return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
+    
+        # """Возвращает полный путь к файлу, сначала проверяя временную папку."""
+        # if self._registry and entity_id is not None and self._entity_type:
+        #     temp_key = f"__temp_dir__:{self._entity_type}:{entity_id}"
+        #     temp_dir = self._registry.get(temp_key)
+        #     if temp_dir:
+        #         candidate = os.path.join(temp_dir, rel_path)
+        #         if os.path.exists(candidate):
+        #             return candidate
+        # return os.path.join(self.storage_path, rel_path)
+
+    # ------------------------------------------------------------------
+    # Диалог редактирования
+    # ------------------------------------------------------------------
+
     def _open_edit_dialog(self, model, index):
         """
         Открывает диалог редактирования фото.
@@ -344,11 +456,12 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         """
         # Ленивый импорт, чтобы избежать циклических зависимостей
         # from interfaces.gui.gui_window.widgets.photo_edit_dialog import PhotoEditDialog
-
+    
         # Получаем относительный путь из модели
         rel_path = model.data(index, Qt.UserRole)
         if rel_path is None:
             rel_path = model.data(index, Qt.DisplayRole)
+
         if not rel_path or not isinstance(rel_path, str):
             rel_path = ""
 
@@ -359,6 +472,11 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         # Получаем описание, если указано поле
         description = ""
         if self._description_field:
+
+            # ВНИМАНИЕ: предполагается, что модель имеет метод get_column_at_visible_index,
+            # который возвращает TableColumn по видимому индексу. Это верно для PaginatedTableModel,
+            # но может не работать с другими моделями.
+
             # Ищем индекс столбца описания (по имени поля)
             for col in range(model.columnCount()):
                 col_obj = getattr(model, 'get_column_at_visible_index', None)
@@ -368,10 +486,46 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                         desc_index = model.index(index.row(), col)
                         description = model.data(desc_index, Qt.DisplayRole) or ""
                         break
-
+        
         # Получаем ID родителя из DTO
         dto = model.get_item_at_row(index.row()) if hasattr(model, 'get_item_at_row') else None
         parent_id = getattr(dto, 'id', None) if dto else None
+
+        # Получаем временную папку из реестра (если есть)
+        # temp_dir = None
+        # if self._registry and parent_id is not None and self._entity_type:
+        #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
+        #     temp_dir = self._registry.get(temp_key)
+
+
+        if self._page is None:
+            self.logger.error("ImageThumbnailDelegate: нет ссылки на страницу, невозможно создать временную папку")
+            return
+        
+        temp_dir = None
+        # if self._registry and parent_id is not None and self._entity_type:
+        #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
+        #     temp_dir = self._registry.get(temp_key)
+        if self._page and parent_id is not None:
+            # Получаем существующую временную папку (если есть)
+            temp_dir = self._page._get_temp_dir(parent_id)
+            # Если временной папки нет, но строка существующая (id > 0) – создаём через страницу
+            if self._page is None:
+                self.logger.warning("ImageThumbnailDelegate: нет ссылки на страницу, работа с временными папками невозможна")
+                return
+            
+            if temp_dir is None and parent_id > 0 and self._page:
+                temp_dir = self._page._ensure_temp_dir(parent_id)
+
+            # # Если временной папки нет, но строка существующая (id > 0) – создаём
+            # if temp_dir is None and parent_id > 0:
+            #     # Находим родительскую страницу (таблица -> ... -> PaginatedListPage)
+            #     parent_widget = self.parent()
+            #     while parent_widget:
+            #         if hasattr(parent_widget, '_ensure_temp_dir'):
+            #             temp_dir = parent_widget._ensure_temp_dir(parent_id)
+            #             break
+            #         parent_widget = parent_widget.parent()
 
         dialog = PhotoEditDialog(
             parent=self.parent(),
@@ -380,7 +534,9 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             allowed_extensions=self._allowed_extensions,
             readonly=self._readonly,
             parent_id=parent_id,
-            storage_path=self.storage_path
+            storage_path=self.storage_path,
+            mode='single',
+            temp_dir=temp_dir,
         )
         if dialog.exec() == QDialog.Accepted:
             new_path, new_description = dialog.get_result()

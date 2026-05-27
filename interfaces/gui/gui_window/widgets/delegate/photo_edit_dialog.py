@@ -223,67 +223,86 @@ class PhotoEditDialog(QDialog):
     )
     def _copy_file_to_storage(self, source_path: str) -> str:
         """
-        Копирует файл в хранилище или временную папку в зависимости от наличия temp_dir.
-
-        Если задан `self._temp_dir` – копирует во временную папку, возвращает просто имя файла.
-        Иначе копирует в основное хранилище (в подпапку `app_{parent_id}`) и возвращает
-        относительный путь относительно `self._storage_path`.
-
-        Args:
-            source_path (str): Абсолютный путь к исходному файлу.
-
-        Returns:
-            str: Имя файла (если копировали во временную папку) или относительный путь.
-        
-        Raises:
-            RuntimeError: Если для новой строки (parent_id <= 0) не передана временная папка,
-                или для существующей строки не задан storage_path.
+        Копирует файл во временную папку черновика.
+        Всегда предполагает, что временная папка (self._temp_dir) передана.
+        Возвращает просто имя файла (без пути).
         """
-        if self._parent_id is None or self._parent_id <= 0:
-            if not self._temp_dir:
-                raise RuntimeError(
-                    "Для новой строки (parent_id <= 0) должна быть передана временная папка (temp_dir)."
-                )
-            
-            # Временная папка черновика
-            os.makedirs(self._temp_dir, exist_ok=True)
-            ext = os.path.splitext(source_path)[1]
-
-            unique_name = f"{uuid.uuid4().hex}{ext}"
-            dest_path = os.path.join(self._temp_dir, unique_name)
-
-            shutil.copy2(source_path, dest_path)
-
-            # Возвращаем просто имя файла (относительно temp_dir)
-            return unique_name
+        if not self._temp_dir:
+            raise RuntimeError(
+                "Для копирования файла необходима временная папка (temp_dir). "
+                "Убедитесь, что диалог получил temp_dir из делегата."
+            )
         
-        # Существующая строка (parent_id > 0) – копируем в основное хранилище
-        if not self._storage_path:
-            raise RuntimeError("Не задан путь к хранилищу фото (storage_path).")
-        
-        # Прямое копирование в основное хранилище (для уже сохранённых строк)
-        if not self._storage_path or self._parent_id is None or self._parent_id <= 0:
-            # Для новых строк или без родителя не копируем – вернём абсолютный путь
-            return source_path
-
-        # Создаём подпапку для родителя
-        parent_folder = os.path.join(self._storage_path, f"app_{self._parent_id}")
-        os.makedirs(parent_folder, exist_ok=True)
-
-        # import uuid
-        # Генерируем уникальное имя файла
+        os.makedirs(self._temp_dir, exist_ok=True)
         ext = os.path.splitext(source_path)[1]
         unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(parent_folder, unique_name)
-
-        # import shutil
-        # Копируем файл
+        dest_path = os.path.join(self._temp_dir, unique_name)
         shutil.copy2(source_path, dest_path)
 
-        # Возвращаем относительный путь
-        rel_path = os.path.relpath(dest_path, self._storage_path)
+        return unique_name
+    
+        # """
+        # Копирует файл в хранилище или временную папку в зависимости от наличия temp_dir.
 
-        return rel_path
+        # Если задан `self._temp_dir` – копирует во временную папку, возвращает просто имя файла.
+        # Иначе копирует в основное хранилище (в подпапку `app_{parent_id}`) и возвращает
+        # относительный путь относительно `self._storage_path`.
+
+        # Args:
+        #     source_path (str): Абсолютный путь к исходному файлу.
+
+        # Returns:
+        #     str: Имя файла (если копировали во временную папку) или относительный путь.
+        
+        # Raises:
+        #     RuntimeError: Если для новой строки (parent_id <= 0) не передана временная папка,
+        #         или для существующей строки не задан storage_path.
+        # """
+        # if self._parent_id is None or self._parent_id <= 0:
+        #     if not self._temp_dir:
+        #         raise RuntimeError(
+        #             "Для новой строки (parent_id <= 0) должна быть передана временная папка (temp_dir)."
+        #         )
+            
+        #     # Временная папка черновика
+        #     os.makedirs(self._temp_dir, exist_ok=True)
+        #     ext = os.path.splitext(source_path)[1]
+
+        #     unique_name = f"{uuid.uuid4().hex}{ext}"
+        #     dest_path = os.path.join(self._temp_dir, unique_name)
+
+        #     shutil.copy2(source_path, dest_path)
+
+        #     # Возвращаем просто имя файла (относительно temp_dir)
+        #     return unique_name
+        
+        # # Существующая строка (parent_id > 0) – копируем в основное хранилище
+        # if not self._storage_path:
+        #     raise RuntimeError("Не задан путь к хранилищу фото (storage_path).")
+        
+        # # Прямое копирование в основное хранилище (для уже сохранённых строк)
+        # if not self._storage_path or self._parent_id is None or self._parent_id <= 0:
+        #     # Для новых строк или без родителя не копируем – вернём абсолютный путь
+        #     return source_path
+
+        # # Создаём подпапку для родителя
+        # parent_folder = os.path.join(self._storage_path, f"app_{self._parent_id}")
+        # os.makedirs(parent_folder, exist_ok=True)
+
+        # # import uuid
+        # # Генерируем уникальное имя файла
+        # ext = os.path.splitext(source_path)[1]
+        # unique_name = f"{uuid.uuid4().hex}{ext}"
+        # dest_path = os.path.join(parent_folder, unique_name)
+
+        # # import shutil
+        # # Копируем файл
+        # shutil.copy2(source_path, dest_path)
+
+        # # Возвращаем относительный путь
+        # rel_path = os.path.relpath(dest_path, self._storage_path)
+
+        # return rel_path
 
     @AppLogger.get_instance(
         name='PhotoEditDialog',

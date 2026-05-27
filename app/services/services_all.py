@@ -430,7 +430,70 @@ class BaseService(
 
         # Подписываемся на изменения конфигурации
         AppConfigManager.add_change_listener(self._on_config_changed)
-    
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _del_file(
+        self,
+        file_path: str,
+        session: Optional[Session] = None,
+        if_delete_parent_dir: bool = False
+    ):
+        """
+        удаление файла или на прямую (session = None) или после commit  (session != None)
+
+        if_delete_parent_dir - удалять ли родительскую папку?
+        """
+        rezult = None
+
+        if (session is not None) and hasattr(session, '_pending_deletions'):
+            session._pending_deletions.append(
+                {
+                    'path': file_path,
+                    'remove_parent': if_delete_parent_dir,
+                }
+            )
+            self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+
+            return rezult
+
+
+        if os.path.exists(file_path):
+            # Fallback – удаляем немедленно, но с предупреждением
+            self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+            try:
+                os.remove(file_path)
+                self.logger.debug(f"Удалён отложенный файл: {file_path}")
+
+            except OSError as e:
+                self.logger.warning(f"Не удалось удалить {file_path}: {e}")
+                rezult = e
+                # raise PhotoFileError(file_path, "удаление", str(e))
+        else:
+            self.logger.debug(f"Файл {file_path} не существует")
+
+        if not if_delete_parent_dir:
+            return rezult
+
+        try:
+            # Проверяем, не стала ли родительская папка пустой
+            parent_dir = os.path.dirname(file_path)
+            if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                try:
+                    os.rmdir(parent_dir)
+                    self.logger.info(f"Удалена пустая папка: {parent_dir}")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+        except OSError as e:
+            self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
+            rezult = e
+
+        return rezult
+
     @AppLogger.get_instance(
         name='BaseService',
         enable_file_logging='system',
@@ -1172,15 +1235,20 @@ class BaseService(
             note_repo = AppointmentNoteRepository(sess)
             
             # Обновляем заметки
-            new_note_ids = self._apply_note_updates(dto, sess, note_repo, model_obj=entity)
+            new_note_ids = self._apply_note_updates(
+                dto,
+                sess,
+                note_repo,
+                model_obj=entity
+            )
             for orm_field, value in new_note_ids.items():
                 setattr(entity, orm_field, value)
             
             # Обновляем простые поля
-            self._apply_simple_updates(entity, dto)
-            
+            self._apply_simple_updates(entity, dto, session = sess)
 
             self.logger.debug(f"После обновления полей: last_name={entity.last_name}")
+
             sess.flush()
             return self.get_dto_out(entity)
 
@@ -1301,7 +1369,12 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _apply_simple_updates(self, model_obj: ModelType, dto: DTOType) -> None:
+    def _apply_simple_updates(
+        self,
+        model_obj: ModelType,
+        dto: DTOType,
+        session: Optional[Session] = None
+    ) -> None:
         """
         Обновляет простые поля модели из DTO согласно field_configs.
 
@@ -1324,6 +1397,8 @@ class BaseService(
         **Параметры:**
             model_obj (ModelType): ORM-объект (уже загружен из БД, с текущими значениями).
             dto (DTOType): DTO, содержащий новые значения полей.
+            session  (Optional[Session]): Сессия SQLAlchemy, необходимая для доступа
+                к списку отложенных удалений. Должна быть передана из вызывающего метода.
 
         **Возвращает:**
             None
@@ -1340,7 +1415,7 @@ class BaseService(
 
         **Пример:**
             >>> # Внутри _update_entity
-            >>> self._apply_simple_updates(entity, dto)
+            >>> self._apply_simple_updates(entity, dto, session)
             >>> # Теперь entity.last_name обновлён, и если photo_path изменился,
             >>> # старый файл удалён с диска.
         """        
@@ -1357,44 +1432,54 @@ class BaseService(
 
             config = self._field_configs.get(field_name, {})
             
-            # # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
-            # if config.get('widget_type') == 'image_thumbnail': # убранно изза проблем при откате изменений БД при обибке
+            # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
+            if config.get('widget_type') == 'image_thumbnail':
                 
-            #     storage_path = AppConfigManager.get_instance().get(
-            #         'PHOTOS_STORAGE_PATH',
-            #         os.path.join('.', 'photos')
-            #     )
+                storage_path = AppConfigManager.get_instance().get(
+                    'PHOTOS_STORAGE_PATH',
+                    os.path.join('.', 'photos')
+                )
                 
-            #     # 1. Проверка существования нового файла (если путь относительный)
-            #     if (
-            #         new_value is not None
-            #     ) and (
-            #         not os.path.isabs(new_value)
-            #     ):
-            #         full_new_path = os.path.join(storage_path, new_value)
-            #         if not os.path.exists(full_new_path):
-            #             self.logger.warning(
-            #                 f"Новый файл для поля {field_name} не существует: {full_new_path}. "
-            #                 "Обновление поля будет выполнено, но файл отсутствует."
-            #             )
+                # 1. Проверка существования нового файла (если путь относительный)
+                if (
+                    new_value is not None
+                ) and (
+                    not os.path.isabs(new_value)
+                ):
+                    full_new_path = os.path.join(storage_path, new_value)
+                    if not os.path.exists(full_new_path):
+                        self.logger.warning(
+                            f"Новый файл для поля {field_name} не существует: {full_new_path}. "
+                            "Обновление поля будет выполнено, но файл отсутствует."
+                        )
                 
-            #     # Если значение изменилось, старое не пустое и не абсолютный путь (значит файл уже в хранилище)
-            #     if (
-            #         old_value != new_value
-            #     ) and (
-            #         old_value is not None
-            #     ) and (
-            #         not os.path.isabs(old_value)
-            #     ):
-            #         full_path = os.path.join(storage_path, old_value)
-            #         if os.path.exists(full_path):
-            #             try:
-            #                 os.remove(full_path)
-            #                 self.logger.debug(f"Удалён старый файл фото при обновлении: {full_path}")
-            #             except OSError as e:
-            #                 self.logger.warning(f"Не удалось удалить старый файл {full_path}: {e}")
-            #         else:
-            #             self.logger.debug(f"Старый файл {full_path} не существует, пропуск удаления")
+                # Если значение изменилось, старое не пустое и не абсолютный путь (значит файл уже в хранилище)
+                if (
+                    old_value != new_value
+                ) and (
+                    old_value is not None
+                ) and (
+                    not os.path.isabs(old_value)
+                ):
+                    full_old_path = os.path.join(storage_path, old_value)
+                    # Удаляем файл
+                    self._del_file(full_old_path, session = session)
+
+                    # if os.path.exists(full_old_path):
+                    #     if (session is not None) and hasattr(session, '_pending_deletions'):
+                    #         session._pending_deletions.append(full_old_path)
+                    #         self.logger.debug(f"Добавлен файл в отложенное удаление: {full_old_path}")
+                    #     else:
+                    #         # fallback – удаляем сразу, но с предупреждением
+                    #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+                    #
+                    #         try:
+                    #             os.remove(full_old_path)
+                    #             self.logger.debug(f"Удалён старый файл: {full_old_path}")
+                    #         except OSError as e:
+                    #             self.logger.warning(f"Не удалось удалить {full_old_path}: {e}")
+                    # else:
+                    #     self.logger.debug(f"Старый файл {full_old_path} не существует, пропуск удаления")
 
             if new_value is not None:
                 # setattr(model_obj, field_name, new_value)
@@ -2055,7 +2140,7 @@ class BaseService(
             if item is None:
                 raise self._not_found_exception(entity_id)
             
-            # --- Удаление файлов для полей с фото (widget_type='image_thumbnail') ---
+            # Удаление файлов для полей с фото (widget_type='image_thumbnail')
             storage_path = None
             for field_name, config in self._field_configs.items():
                 if config.get('widget_type') != 'image_thumbnail':
@@ -2066,7 +2151,7 @@ class BaseService(
                 if not rel_path or not isinstance(rel_path, str):
                     continue
 
-                # Если путь абсолютный - пропускаем (такие файлы ещё не скопированы в хранилище)
+                # Если путь абсолютный - пропускаем (такие файлы ещё не скопированы в хранилище) # требуеется проверить на нужность!!!
                 if os.path.isabs(rel_path):
                     self.logger.debug(f"Поле {field_name} содержит абсолютный путь {rel_path}, пропуск удаления")
                     continue
@@ -2079,24 +2164,35 @@ class BaseService(
                     )
 
                 full_path = os.path.join(storage_path, rel_path)
-                if os.path.exists(full_path):
-                    try:
-                        os.remove(full_path)
-                        self.logger.info(f"Удалён файл фото: {full_path}")
-                        # Проверяем, не стала ли родительская папка пустой
-                        parent_dir = os.path.dirname(full_path)
-                        if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-                            try:
-                                os.rmdir(parent_dir)
-                                self.logger.info(f"Удалена пустая папка: {parent_dir}")
-                            except OSError as e:
-                                self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
-                    except OSError as e:
-                        self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
-                else:
-                    self.logger.debug(f"Файл {full_path} не существует, пропуск")
-            # --- Конец блока удаления файлов ---
 
+                # Удаляем файл
+                self._del_file(
+                    full_path,
+                    session = sess,
+                    if_delete_parent_dir = True,
+                )
+
+                # if os.path.exists(full_path):
+                #     # Добавляем в список отложенного удаления сессии
+                #     if hasattr(sess, '_pending_deletions'):
+                #         sess._pending_deletions.append(full_path)
+                #         self.logger.debug(f"Добавлен файл в отложенное удаление: {full_path}")
+                #     else:
+                #         try:
+                #             os.remove(full_path)
+                #             self.logger.info(f"Удалён файл фото: {full_path}")
+                #             # Проверяем, не стала ли родительская папка пустой
+                #             parent_dir = os.path.dirname(full_path)
+                #             if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                #                 try:
+                #                     os.rmdir(parent_dir)
+                #                     self.logger.info(f"Удалена пустая папка: {parent_dir}")
+                #                 except OSError as e:
+                #                     self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+                #         except OSError as e:
+                #             self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
+                # else:
+                #     self.logger.debug(f"Файл {full_path} не существует, пропуск")
 
             repo.delete(item)
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
@@ -5578,7 +5674,7 @@ class PhotoService(
             )
 
             return dtos
-    
+
     @AppLogger.get_instance(
         name = 'PhotoService',
         # share_file_with = 'system',
@@ -5607,23 +5703,32 @@ class PhotoService(
             photo = repo.get_by_id(photo_id)
             if photo is None:
                 raise PhotoNotFoundError(photo_id)
-            
-           
-            # Удаляем файл
-            file_path = os.path.join(self._storage_path, photo.file_path)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except OSError as e:
-                    raise PhotoFileError(file_path, "удаление", str(e))
 
+            file_path = os.path.join(self._storage_path, photo.file_path)
+            # Удаляем файл
+            err_text = self._del_file(file_path, session = sess)
+            if err_text is not None:
+                raise PhotoFileError(file_path, "удаление", str(err_text))
+
+            # if os.path.exists(file_path):
+            #     if (sess is not None) and hasattr(sess, '_pending_deletions'):
+            #         sess._pending_deletions.append(file_path)
+            #         self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+            #     else:
+            #         # Fallback – удаляем немедленно, но с предупреждением
+            #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+            #
+            #         try:
+            #             os.remove(file_path)
+            #         except OSError as e:
+            #             raise PhotoFileError(file_path, "удаление", str(e))
             # # Удаляем запись через базовый метод
             # self._delete_entity(photo_id, sess)
 
             # # удаляем запись
             # repo.delete(photo)
 
-             # После удаления файла вызываем базовый метод для удаления записи
+            # После удаления файла вызываем базовый метод для удаления записи
             # Важно: передаём ту же сессию, чтобы операция была атомарной
             self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
  

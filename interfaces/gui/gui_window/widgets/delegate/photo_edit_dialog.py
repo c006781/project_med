@@ -175,6 +175,30 @@ class PhotoEditDialog(QDialog):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def reject(self) -> None:
+        """
+        Переопределяем reject для очистки временного файла при отмене.
+        Если был создан временный файл (self._new_path) и существует временная папка,
+        удаляем файл перед закрытием диалога.
+        """
+        if self._new_path and self._temp_dir:
+            full_path = os.path.join(self._temp_dir, self._new_path)
+            if os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                    self.logger.debug(f"Удалён временный файл {full_path} при отмене")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
+        super().reject()
+
+    @AppLogger.get_instance(
+        name='PhotoEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_full_path(self, rel_path: str) -> Optional[str]:
         """
         Возвращает полный путь к файлу, сначала проверяя временную папку.
@@ -665,6 +689,16 @@ class PhotoEditDialog(QDialog):
                 f"Недопустимый формат файла.\nРазрешены: {', '.join(self._allowed_extensions)}"
             )
             return
+
+        # Удаляем предыдущий временный файл, если он был
+        if self._new_path and self._temp_dir:
+            old_full = os.path.join(self._temp_dir, self._new_path)
+            if os.path.exists(old_full):
+                try:
+                    os.remove(old_full)
+                    self.logger.debug(f"Удалён предыдущий временный файл {old_full} при выборе нового")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить предыдущий файл {old_full}: {e}")
 
         # Загружаем preview
         pixmap = QPixmap(file_path)

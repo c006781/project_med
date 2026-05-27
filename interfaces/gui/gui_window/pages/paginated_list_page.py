@@ -1636,7 +1636,13 @@ class PaginatedListPage(
 
         # Сначала собираем ключи временных папок, чтобы потом удалить папки
         temp_keys = list(self._draft_registry.get_keys_by_prefix(temp_dir_prefix))
+        temp_items = []
+        for key in temp_keys:
+            temp_dir = self._draft_registry.get(key)
+            if temp_dir:
+                temp_items.append((key, temp_dir))
 
+        # Теперь удаляем все ключи (включая служебные)
         for prefix in [
             f"{self._entity_type}:",
             f"__status__:{self._entity_type}:",
@@ -1651,12 +1657,12 @@ class PaginatedListPage(
             self._draft_registry.discard_by_prefix(prefix)  
 
         # Удаляем физические папки
-        for key in temp_keys:
-            temp_dir = self._draft_registry.get(key)
-            if temp_dir and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            # ключ уже удалён discard_by_prefix, но на всякий случай
-            self._draft_registry.discard(key)
+        for key, temp_dir in temp_items:
+            if os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    self.logger.warning(f"Не удалось удалить временную папку {temp_dir}: {e}")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

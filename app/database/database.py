@@ -11,6 +11,7 @@
     ...     patients = session.query(Patient).all()
     >>> db.close()
 """
+import os
 
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -99,7 +100,7 @@ from app.database.database_shema.temp_data_bd import populate_test_data
 
 # Сторонние библиотеки
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
 
@@ -124,6 +125,28 @@ class Database:
         >>> db.close()
     """
 
+
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='api.Database',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
     @AppLogger.get_instance(
         name = 'Database',
         # share_file_with = 'system',
@@ -146,25 +169,59 @@ class Database:
         """
 
         self.engine = create_engine(
-            db_url, 
-            echo=False, 
+            db_url,
+            echo=False,
             future=True,
             connect_args={"check_same_thread": False},
         )
 
-        self.logger = AppLogger.get_instance(
-            name = 'backend.Database',
-            # share_file_with = 'user',
-            enable_file_logging = 'user',
-            use_name_in_filename = False, # 'user',
+        Session = sessionmaker(
+            bind=self.engine,
+            future=True
+        )
+        self.Session = scoped_session(
+            Session
         )
 
-        self.Session = scoped_session( 
-            sessionmaker(
-                bind=self.engine, 
-                future=True
-            )
-        )
+        # Регистрируем обработчик отложенного удаления файлов (один раз для всех сессий)
+        # @event.listens_for(self.Session, "after_commit")
+        @event.listens_for(Session, "after_commit")
+        def delete_pending_files(session, *args):
+            items = getattr(session, '_pending_deletions', [])
+            for item in items:
+                # Поддержка старого формата (строка) и нового (словарь)
+                if isinstance(item, str):
+                    path = item  # указатель на файл
+                    remove_parent = False # нужно ли удалять род папку
+                else:
+                    path = item.get('path')
+                    remove_parent = item.get('remove_parent', False)
+
+                try:
+                    if path and os.path.exists(path):
+                        os.remove(path)
+                        self.logger.debug(f"Удалён отложенный файл: {path}")
+
+                except Exception as e:
+                    self.logger.warning(f"Не удалось удалить {path}: {e}")
+
+                if not remove_parent:
+                    continue
+
+                try:
+                    # Удаляем родительскую папку, если она стала пустой
+                    parent_dir = os.path.dirname(path)
+                    if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                        try:
+                            os.rmdir(parent_dir)
+                            self.logger.debug(f"Удалена пустая папка: {parent_dir}")
+                        except OSError as e:
+                            self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+                except Exception as e:
+                    self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
+
+            session._pending_deletions.clear()
+
         # Автоматическое создание таблиц (если их нет)
         Base.metadata.create_all(self.engine)
 
@@ -222,20 +279,22 @@ class Database:
             Любое исключение, возникшее внутри блока, пробрасывается после отката.
         """
         session = self.get_session()
+
+        # Создаём список для отложенных удалений, привязанный к сессии
+        session._pending_deletions = []
+
         try:
             # Возвращает сессию в контексте with
             yield session
 
             # Если в контексте не было ошибок, коммитит сессию
             session.commit()
-            AppLogger.get_instance(
-                name = 'api.Database',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
-            ).debug(f"Коммит сессии: {session}")
+            self.logger.debug(f"Коммит сессии: {session}")
 
         except Exception as e:
             self.logger.exception(f"Ошибка: {e}")
+            # При откате просто очищаем список, файлы не удаляем
+            session._pending_deletions.clear()
             # Если была ошибка, откатывает сессию
             session.rollback()
             raise

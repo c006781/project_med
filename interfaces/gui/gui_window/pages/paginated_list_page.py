@@ -180,6 +180,80 @@
     >>> 
     >>> # Программное включение режима редактирования
     >>> page.set_edit_mode(True)
+
+**Поддержка фото-столбцов (widget_type='image_thumbnail'):**
+    Страница автоматически определяет поля с `widget_type='image_thumbnail'` и назначает
+    для них делегат `ImageThumbnailDelegate`. Этот делегат позволяет:
+        - отображать миниатюру изображения (асинхронная загрузка, кэширование);
+        - при двойном клике или нажатии кнопки «...» открывать диалог `PhotoEditDialog`
+            для замены/удаления фото и редактирования описания (если задано `description_field`);
+        - работать в режиме «только просмотр» (синхронизируется с `edit_mode`).
+
+    **Временные папки черновиков:**
+        Для каждой новой строки (ещё не сохранённой в БД) или для изменяемой существующей
+        строки (в режиме редактирования) создаётся уникальная временная папка в системной
+        директории (префикс `med_app_draft_`). В эту папку копируются выбранные пользователем
+        файлы (фото). При сохранении строки (в `_save_new_row_recursive` или
+        `_save_modified_rows_for_ids`) файлы переносятся из временной папки в основное
+        хранилище (подпапка `app_{id}`), а пути в DTO заменяются на относительные.
+        При отмене изменений (удалении строки, откате черновиков) временная папка
+        удаляется вместе с содержимым.
+
+    **Управление временными папками:**
+        - `_ensure_temp_dir(entity_id)` – создаёт папку, сохраняет путь в реестре
+            по ключу `__temp_dir__:{entity_type}:{entity_id}`.
+        - `_get_temp_dir(entity_id)` – возвращает путь из реестра.
+        - `_cleanup_temp_dir(entity_id)` – удаляет папку и ключ.
+        - `_move_files_from_temp_to_storage(new_id, dto, old_id=None)` – переносит все
+            файлы, находящиеся во временной папке (old_id или new_id), в основное хранилище,
+            обновляет DTO.
+        - Методы `discard_entity_subtree` и `clear_entity_drafts` переопределены для
+            автоматической очистки временной папки при отмене изменений.
+
+    **Массовое добавление фото (опционально):**
+        Страница предоставляет методы `_has_photo_column()`, `_get_allowed_extensions_for_photo()`,
+        `_add_photo_from_file(file_path, photo_field)`. Для интеграции с ActionManager
+        зарегистрируйте действие с именем `'multi_photo_add'` и привяжите к нему кнопку.
+        Пример регистрации смотрите в разделе «Добавление кнопок через ActionManager».   
+
+**Добавление кнопок через ActionManager (рекомендуемый способ):**
+    Для обеспечения гибкости и единообразия управления интерфейсом, страница не создаёт кнопки
+    напрямую, а полагается на `ActionManager`, который должен быть доступен через
+    `self.main_window.action_manager`. Кнопки верхней панели (например, «Режим редактирования»,
+    «Сохранить», «Добавить несколько фото») создаются и привязываются к действиям в методе
+    `_setup_actions()`, который следует переопределить в наследнике (например, в `PatientListPage`).
+
+    **Пример добавления кнопки массового добавления фото:**
+
+        def _setup_actions(self):
+            # Получаем action_manager из главного окна
+            am = self.main_window.action_manager
+
+            # Регистрируем действие (если ещё не зарегистрировано)
+            am.register_action(
+                name='multi_photo_add',
+                text='Добавить несколько фото',
+                callback=self._on_multi_photo_clicked,
+                parent=self,
+                temporary=True
+            )
+
+            # Создаём кнопку и привязываем её к действию
+            self.multi_photo_btn = QPushButton()
+            am.connect_button('multi_photo_add', self.multi_photo_btn)
+
+            # Добавляем кнопку в нужный layout (например, в верхнюю панель)
+            self.main_layout.addWidget(self.multi_photo_btn)
+            self.multi_photo_btn.setVisible(self.edit_mode)
+
+    **Примечания:**
+        - Действие `multi_photo_add` будет автоматически удалено при разрушении страницы
+          (благодаря `parent=self` и `temporary=True`).
+        - Кнопка наследует текст, иконку, горячую клавишу и состояние enabled/checked от действия.
+        - Для переключения видимости кнопки при смене режима редактирования используйте
+          `self.multi_photo_btn.setVisible(self.edit_mode)` в `_update_ui_for_edit_mode`.
+        - Если действие должно быть доступно из разных страниц, регистрируйте его один раз
+          в `MainWindow` с `temporary=False`.    
 """
 
 import datetime
@@ -194,10 +268,11 @@ from typing import (
 )
 import uuid
 
+from app.utils.logger import AppLogger
+
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
 from app.config.config_manager.manager import AppConfigManager
 from app.dependencies import get_photo_service
-from app.utils.logger import AppLogger
 
 from app.draft.draft_registry import DraftRegistry
 
@@ -240,9 +315,9 @@ from PySide6.QtGui import QColor
 
 from PySide6.QtWidgets import (
     QDialog,
-    QHBoxLayout,
     QHeaderView,
-    QPushButton,
+    # QHBoxLayout,
+    # QPushButton,
     # QMessageBox,
 )
 
@@ -695,7 +770,15 @@ class PaginatedListPage(
         """
         Проверяет, существует ли файл с именем value во временной папке.
         Учитывает, что value может быть просто именем файла или относительным путём.
+
+        Args:
+            temp_dir (str): Путь к временной папке.
+            value (str): Имя файла или относительный путь.
+
+        Returns:
+            bool: True, если файл существует во временной папке.
         """
+        
         if not temp_dir or not value:
             return False
         
@@ -716,13 +799,26 @@ class PaginatedListPage(
 
     def discard_entity_subtree(self, entity_id: int) -> None:
         """
-        Переопределяем метод из DraftTreeMixin, чтобы добавить очистку временной папки.
+        Переопределяет метод из DraftTreeMixin для дополнительной очистки временной папки.
+        Удаляет временную папку сущности, затем вызывает родительский метод.
+
+        Args:
+            entity_id (int): ID сущности (может быть временным отрицательным).
         """
         self._cleanup_temp_dir(entity_id)
         super().discard_entity_subtree(entity_id)
 
     def _get_temp_dir(self, entity_id: int) -> Optional[str]:
-        """Возвращает путь к временной папке для сущности, если она создана."""
+        """
+        Возвращает путь к временной папке для сущности, если она была создана.
+
+        Args:
+            entity_id (int): ID сущности (может быть временным отрицательным).
+
+        Returns:
+            Optional[str]: Путь к временной папке или None, если папка не создана.
+        """
+
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
         return self._draft_registry.get(key)
 
@@ -730,7 +826,17 @@ class PaginatedListPage(
         """
         Создаёт временную папку для сущности, если её нет, и возвращает путь.
         Папка создаётся в системной временной директории с префиксом 'med_app_draft_'.
-        ВАЖНО: Папка должна быть удалена вызовом _cleanup_temp_dir после завершения работы с черновиком.
+        Путь сохраняется в реестре по ключу `__temp_dir__:{entity_type}:{entity_id}`.
+
+        ВАЖНО: Папка должна быть удалена вызовом _cleanup_temp_dir после завершения
+        работы с черновиком (например, в discard_entity_subtree, clear_entity_drafts
+        или при успешном сохранении).
+
+        Args:
+            entity_id (int): ID сущности (может быть временным отрицательным).
+
+        Returns:
+            str: Абсолютный путь к созданной временной папке.
         """
 
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
@@ -745,7 +851,14 @@ class PaginatedListPage(
         return temp_dir
 
     def _cleanup_temp_dir(self, entity_id: int):
-        """Удаляет временную папку для сущности и ключ из реестра."""
+        """
+        Удаляет временную папку сущности и соответствующий ключ в реестре черновиков.
+        Если папка не существует, ничего не делает.
+
+        Args:
+            entity_id (int): ID сущности.
+        """
+
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
         temp_dir = self._draft_registry.get(key)
 
@@ -754,11 +867,73 @@ class PaginatedListPage(
             
         self._draft_registry.discard(key)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _delete_old_files(self, old_files: List[str]) -> None:
+        """
+        Удаляет перечисленные файлы из хранилища. Ошибки игнорируются (только лог).
+        Вызывается после успешного коммита (после service.update).
+        """
+        for full_path in old_files:
+            if os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                    self.logger.debug(f"Удалён старый файл: {full_path}")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить старый файл {full_path}: {e}")
+            else:
+                self.logger.debug(f"Старый файл {full_path} не существует, пропуск")
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _del_time_file(self, copied_files, entity_id):
+        # После успешного update удаляем временные файлы
+        for src in copied_files:
+            try:
+                if os.path.exists(src):
+                    os.remove(src)
+
+            except OSError as e:
+                self.logger.warning(f"Не удалось удалить временный файл {src}: {e}")
+
+        # Удаляем временную папку (если она пуста)
+        temp_dir = self._get_temp_dir(entity_id)
+
+        if temp_dir and os.path.exists(temp_dir):
+            try:
+                if not os.listdir(temp_dir):
+                    shutil.rmtree(
+                        temp_dir, 
+                        # ignore_errors=True
+                    )
+                    self._draft_registry.discard(f"__temp_dir__:{self._entity_type}:{entity_id}")
+                    
+                else:
+                    self.logger.debug(f"Временная папка {temp_dir} не пуста, оставляем")
+
+            except Exception as e:
+                self.logger.warning(f"Не удалось удалить временную папку {temp_dir}: {e}")
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def clear_entity_drafts(self, entity_id: int) -> None:
         """
-        Переопределяем метод из DraftTreeMixin, чтобы перед очисткой черновиков
+        Переопределяет метод из DraftTreeMixin, чтобы перед очисткой черновиков
         удалить временную папку сущности (если она существует).
+
+        Args:
+            entity_id (int): ID сущности.
         """
+        
         self._cleanup_temp_dir(entity_id)
         super().clear_entity_drafts(entity_id)
 
@@ -772,26 +947,47 @@ class PaginatedListPage(
         new_id: int,
         dto: Any,
         old_id: Optional[int] = None
-    ) -> Any:
+    ) -> Tuple[Any, List[str], List[str]]:
         """
         Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
         в основное хранилище в папку `app_{new_id}`. Обновляет пути в DTO на относительные.
 
-        Аргументы:
+        TODO: При замене фото (когда в DTO уже был относительный путь) необходимо
+        удалить старый файл в хранилище после успешного сохранения нового.
+        Это можно реализовать, возвращая дополнительно список старых путей,
+        и удалять их в _save_modified_rows_for_ids после вызова service.update.
+
+        **Алгоритм:**
+            1. Определяет временную папку: по old_id, если передан, иначе по new_id.
+            2. Если временная папка не существует – возвращает DTO без изменений.
+            3. Для каждого поля с `widget_type='image_thumbnail'` проверяет, является ли
+               текущее значение DTO именем файла, присутствующим во временной папке.
+            4. Копирует файл во `storage_path/app_{new_id}/`, удаляет исходный, заменяет
+               путь в DTO на относительный (относительно `storage_path`).
+            5. Если хотя бы один файл не удалось скопировать – накапливает ошибки и в конце
+               выбрасывает `RuntimeError`, отменяя транзакцию.
+
+        Args:
             new_id (int): Реальный ID сущности после сохранения (целевая папка).
             dto (Any): DTO сущности, содержащий поля с путями к фото.
             old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
                                     Если не указан, используется new_id (для уже сохранённых строк).
 
-        Возвращает:
+        Returns:
             Any: Обновлённый DTO (те же поля, но с изменёнными путями).
 
-        Исключения:
+        Raises:
             RuntimeError: Если хотя бы один файл не удалось перенести – транзакция откатывается.
+
+        Примечание:
+            Метод вызывается внутри `_save_new_row_recursive` и `_save_modified_rows_for_ids`
+            перед сохранением DTO в БД. Если возникает исключение, транзакция откатывается.
         """
+
         # Определяем, по какому ID искать временную папку
         temp_id = old_id if old_id is not None else new_id
         temp_dir = self._get_temp_dir(temp_id)
+
         if not temp_dir or not os.path.exists(temp_dir):
             # Временной папки нет – нечего переносить
             return dto
@@ -800,32 +996,47 @@ class PaginatedListPage(
         parent_folder = os.path.join(storage_path, f"app_{new_id}")
         os.makedirs(parent_folder, exist_ok=True)
 
-        any_success = False
+        # any_success = False
         error_messages = []
+
+        copied_files = []          # исходные файлы во временной папке (будут удалены после переноса)
+        old_files = []   # старые файлы в хранилище (будут удалены после успешного update)
 
         for field_name, config in self.field_configs.items():
             if config.get('widget_type') != 'image_thumbnail':
                 continue
+            
+            old_value = getattr(dto, field_name, None)   # сохраняем старый путь ДО изменения
+            current_value = old_value                    # текущее значение из DTO
 
-            current_value = getattr(dto, field_name, None)
             if not current_value or not isinstance(current_value, str):
                 continue
 
             # Проверяем, является ли значение именем файла во временной папке
             if not self._is_file_in_temp_dir(temp_dir, current_value):
                 continue
-
+            
             src = os.path.join(temp_dir, current_value)
             dst = os.path.join(parent_folder, current_value)
 
             try:
                 # Копируем, затем удаляем исходный
+                
                 shutil.copy2(src, dst)
-                os.remove(src)
+                copied_files.append(src)   # запоминаем исходный путь для последующего удаления
+                # os.remove(src)
                 rel_path = os.path.relpath(dst, storage_path)
                 setattr(dto, field_name, rel_path)
-                self.logger.debug(f"Перенесён файл {current_value} -> {rel_path} для поля {field_name}")
-                any_success = True
+
+                # Если старый путь был относительным (не временная папка) – помечаем на удаление
+                if old_value is not None and not os.path.isabs(old_value):
+                    old_full = os.path.join(storage_path, old_value)
+                    if os.path.exists(old_full) and old_full != dst:
+                        old_files.append(old_full)
+
+                self.logger.debug(f"файл скопирован {current_value} -> {rel_path} для поля {field_name}")
+                # any_success = True
+
             except Exception as e:
                 self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
                 error_messages.append(str(e))
@@ -838,17 +1049,17 @@ class PaginatedListPage(
 
 
         # Удаляем временную папку после успешного переноса
-        self._cleanup_temp_dir(temp_id)
-        if any_success:
-            # Проверяем, не стала ли родительская папка пустой (если была создана только для этих файлов)
-            if os.path.exists(parent_folder) and not os.listdir(parent_folder):
-                try:
-                    os.rmdir(parent_folder)
-                    self.logger.debug(f"Удалена пустая папка {parent_folder}")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
+        # self._cleanup_temp_dir(temp_id)
+        # if any_success:
+        #     # Проверяем, не стала ли родительская папка пустой (если была создана только для этих файлов)
+        #     if os.path.exists(parent_folder) and not os.listdir(parent_folder):
+        #         try:
+        #             os.rmdir(parent_folder)
+        #             self.logger.debug(f"Удалена пустая папка {parent_folder}")
+        #         except OSError as e:
+        #             self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
 
-        return dto
+        return dto, copied_files, old_files
 
     # def _move_files_from_temp_to_storage(self, entity_id: int, dto: Any) -> Any:
     #     """
@@ -941,13 +1152,29 @@ class PaginatedListPage(
     #
     #     return dto
 
-    def _get_allowed_extensions_for_photo(self, field_name: str = None) -> List[str]:
+    def _get_allowed_extensions_for_photo(
+        self, 
+        field_name: str = None,
+        default_extensions: Optional[List[str]] = None
+    ) -> List[str]:
         """
         Возвращает список разрешённых расширений для фото.
         Если передан field_name, сначала ищет в конфигурации этого поля ключ 'allowed_extensions'.
         Если не найден или field_name не указан, возвращает список по умолчанию.
+
+        Args:
+            field_name (str, optional): Имя поля (столбца) для получения специфичных расширений.
+            default_extensions (Optional[List[str]], optional): Пользовательский список расширений
+                по умолчанию. Если None, используются стандартные:
+                ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff'].
+
+        Returns:
+            List[str]: Список разрешённых расширений (например, ['.jpg', '.jpeg', '.png']).
         """
-        default_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
+
+        if not default_extensions:
+            default_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
+        
         if field_name:
             config = self.field_configs.get(field_name, {})
             extensions = config.get('allowed_extensions')
@@ -1005,11 +1232,23 @@ class PaginatedListPage(
             for file_path in file_paths:
                 self._add_photo_from_file(file_path, photo_field)
 
-    def _add_photo_from_file(self, file_path: str, photo_field: str) -> None:
+    def _add_photo_from_file(
+        self, 
+        file_path: str,
+        photo_field: str
+    ) -> None:
         """
         Создаёт новую строку с предзаполненным путём к фото.
-        Используется для массового добавления фото.
+        Используется для массового добавления фото (через диалог).
+
+        Копирует исходный файл во временную папку новой строки,
+        сохраняет в DTO только имя файла, добавляет строку в модель и помечает как новую.
+
+        Args:
+            file_path (str): Абсолютный путь к исходному файлу.
+            photo_field (str): Имя поля DTO, содержащего путь к фото.
         """
+
         try:
             # Создаём временную папку для этой новой строки
             temp_dir = self._ensure_temp_dir(self._next_temp_id)
@@ -1063,11 +1302,15 @@ class PaginatedListPage(
     def _has_photo_column(self) -> bool:
         """
         Проверяет, есть ли в текущей конфигурации столбец с типом виджета 'image_thumbnail'.
-        Возвращает True, если хотя бы один такой столбец существует.
+
+        Returns:
+            bool: True, если хотя бы один такой столбец существует.
         """
+
         for field_name, config in self.field_configs.items():
             if config.get('widget_type') == 'image_thumbnail':
                 return True
+            
         return False
 
     def _set_edit_mode(self, enable: bool) -> None:
@@ -2370,14 +2613,14 @@ class PaginatedListPage(
 
         # Переносим файлы из временной папки в основное хранилище
         # created = self._move_files_from_temp_to_storage(temp_id, created)
-        created = self._move_files_from_temp_to_storage(created.id, created, old_id=temp_id)
+        created, copied_files, old_files  = self._move_files_from_temp_to_storage(created.id, created, old_id=temp_id)
 
-        # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-        temp_dir = self._get_temp_dir(temp_id)
-        if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-            error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg)
+        # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
+        # temp_dir = self._get_temp_dir(temp_id)
+        # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
+        #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
+        #     self.logger.error(error_msg)
+        #     raise RuntimeError(error_msg)
 
         # # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
         # created = self._process_photo_fields_for_new_row(created, created.id, session)
@@ -2387,6 +2630,12 @@ class PaginatedListPage(
 
         # обновляем запись в БД, чтобы сохранить относительный путь
         created = self.service.update(created, session=session)
+
+        self._del_time_file(copied_files, temp_id)
+        self._delete_old_files(old_files) 
+
+        # Принудительно удаляем временную папку, если она осталась
+        self._cleanup_temp_dir(temp_id)
 
         # Найти строку в модели по временному ID и заменить DTO
         row = self._find_row_by_id(temp_id)
@@ -3491,8 +3740,7 @@ class PaginatedListPage(
 
         if session is None:
             with self.service._db.session_scope() as new_session:
-                self._save_all_changes_impl_session(new_session)
-            return True
+                return self._save_all_changes_impl_session(new_session)
 
         # with self.service._db.session_scope() as session:
                 
@@ -3700,14 +3948,14 @@ class PaginatedListPage(
                 continue
 
             # Переносим файлы из временной папки в основное хранилище
-            dto = self._move_files_from_temp_to_storage(entity_id, dto)
+            dto, copied_files, old_files  = self._move_files_from_temp_to_storage(entity_id, dto)
 
-            # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-            temp_dir = self._get_temp_dir(entity_id)
-            if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-                error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-                self.logger.error(error_msg)
-                raise RuntimeError(error_msg)
+            # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
+            # temp_dir = self._get_temp_dir(entity_id)
+            # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
+            #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
+            #     self.logger.error(error_msg)
+            #     raise RuntimeError(error_msg)
 
             # --------------------------------------------------------------
             # Сохраняем обновлённый DTO в БД
@@ -3722,6 +3970,21 @@ class PaginatedListPage(
 
             self._source_model_update_row(row, updated)
 
+            self._del_time_file(copied_files, entity_id)
+            self._delete_old_files(old_files)
+
+
+            # # После успешного update удаляем скопированные файлы из временной папки
+            # for src in copied_files:
+            #     try:
+            #         if os.path.exists(src):
+            #             os.remove(src)
+            #     except OSError as e:
+            #         self.logger.warning(f"Не удалось удалить временный файл {src}: {e}")
+
+            # self.clear_entity_drafts(entity_id)
+
+
             # уточнение:
             # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
             # Что делает clear_entity_drafts (DraftTreeMixin):
@@ -3731,6 +3994,7 @@ class PaginatedListPage(
             #   Если старый статус был не None, а новый стал None, вызывает _update_parent_child_counter(entity_id, -1) – уменьшает счётчик родителя на 1.
             #   Обновляет статус в реестре и кэше.
             #   Если статус изменился, вызывает _propagate_status_up(entity_id) (пересчитывает статус родителей).
+            # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
             self.clear_entity_drafts(entity_id)  # Удаляет черновики для данной сущности
 
             # ВНИМАНИЕ: Счётчик родителя уже был уменьшен при вызове clear_entity_drafts (он вызывает discard_entity_subtree, который уменьшает счётчик). Поэтому clear_own_change НЕ должна изменять счётчик – она только сбрасывает статус 'own' и пересчитывает статус родителя.
@@ -4671,8 +4935,9 @@ class PaginatedListPage(
         # 8) Отображение миниатюры изображения
         if config.get('widget_type') == 'image_thumbnail':
             # from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
-            # # Путь к хранилищу фото нужно получить из конфигурации
             # from app.config.config_manager.manager import AppConfigManager
+
+            # # Путь к хранилищу фото нужно получить из конфигурации
             storage_path = AppConfigManager.get_instance().get(
                 'PHOTOS_STORAGE_PATH', 
                 os.path.join('.', 'photos')

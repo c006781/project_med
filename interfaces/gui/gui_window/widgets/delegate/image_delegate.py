@@ -1,4 +1,41 @@
 # interfaces/gui/gui_window/widgets/delegate/image_delegate.py
+"""
+Делегат для отображения миниатюры изображения в ячейке таблицы.
+
+Поддерживает:
+    - асинхронную загрузку миниатюр (через QRunnable и кэш);
+    - открытие диалога редактирования фото по двойному клику или нажатию кнопки;
+    - режим "только просмотр" (readonly);
+    - поиск файлов во временных папках черновиков (через ссылку на `PaginatedListPage`).
+
+Атрибуты класса:
+    _cache (Dict[str, QPixmap]): Кэш загруженных миниатюр.
+    _pending (Dict[str, bool]): Флаги для предотвращения повторной загрузки.
+
+Атрибуты экземпляра:
+    logger (AppLogger): Логгер.
+    storage_path (str): Базовый путь к хранилищу фотографий.
+    target_size (QSize): Желаемый размер миниатюры.
+    _readonly (bool): Режим "только просмотр".
+    _allowed_extensions (List[str]): Разрешённые расширения файлов.
+    _description_field (Optional[str]): Имя поля в DTO, содержащего описание.
+    _page (PaginatedListPage): Ссылка на страницу-владельца (для доступа к временным папкам).
+    _hovered_row, _hovered_col (int): Индексы строки/столбца под курсором.
+    _button_rect (Optional[QRect]): Прямоугольник кнопки для последней ячейки.
+
+Args:
+    parent (QWidget): Родительский виджет (таблица).
+    page (PaginatedListPage): Обязательная ссылка на экземпляр страницы списка.
+    storage_path (str): Базовый путь к хранилищу фотографий.
+    target_size (QSize, optional): Желаемый размер миниатюры (по умолч. 80x80).
+    allowed_extensions (List[str], optional): Разрешённые расширения.
+    description_field (str, optional): Имя поля в DTO, содержащего описание.
+
+Пример:
+    >>> delegate = ImageThumbnailDelegate(table_view, page, '/path/to/photos')
+    >>> table_view.setItemDelegateForColumn(photo_column, delegate)
+"""
+
 import os
 from typing import (
     Dict,
@@ -7,12 +44,19 @@ from typing import (
     # Optional,
 )
 
-
 from app.utils.logger.logger import AppLogger
+
+# from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
+from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
+
 
 from PySide6.QtCore import (
     # QMetaObject, Q_ARG, QRect, 
-    Q_ARG, QEvent, QMetaObject, QRect, QRunnable, QSize, QThreadPool, Qt, QThread, Signal, Slot,
+    Q_ARG, QEvent, QMetaObject, QModelIndex, 
+    QRect, QRunnable, QSize, 
+    QThreadPool, Qt, Signal, 
+    Slot, 
+    # QThread, 
 )
 from PySide6.QtGui import (
     QPixmap, QPainter, 
@@ -27,15 +71,19 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
 )
 
-# from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
-from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
-
-
 class AsyncImageLoader(QRunnable):
     """Загружает миниатюру в отдельном потоке."""
 
     finished = Signal(int, QPixmap)  # row, pixmap
 
+    @AppLogger.get_instance(
+        name='AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self, 
         widget, row: int, 
@@ -58,6 +106,14 @@ class AsyncImageLoader(QRunnable):
         self.full_path = full_path
         self.target_size = target_size
 
+    @AppLogger.get_instance(
+        name='AsyncImageLoader',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def run(self):
         pixmap = QPixmap(self.full_path)
         if not pixmap.isNull():
@@ -78,16 +134,15 @@ class AsyncImageLoader(QRunnable):
             Q_ARG(str, self.full_path)
         )
 
-
 class ImageThumbnailDelegate(QStyledItemDelegate):
     """
     Делегат для отображения миниатюры изображения в ячейке таблицы.
 
     Поддерживает:
-        - асинхронную загрузку миниатюр
-        - кэширование
-        - открытие диалога редактирования фото по двойному клику или нажатию кнопки
-        - режим "только просмотр" (readonly)
+        - асинхронную загрузку миниатюр (через QRunnable и кэш);
+        - открытие диалога редактирования фото по двойному клику или нажатию кнопки;
+        - режим "только просмотр" (readonly);
+        - поиск файлов во временных папках черновиков (через ссылку на `PaginatedListPage`).
 
     Атрибуты класса:
         _cache (Dict[str, QPixmap]): Кэш загруженных миниатюр.
@@ -103,15 +158,50 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         _hovered_row (int): Строка под курсором.
         _hovered_col (int): Столбец под курсором.
         _button_rect (Optional[QRect]): Прямоугольник кнопки для последней ячейки.
+
+    Args:
+        parent (QWidget, optional): Родительский виджет (обычно QTableView).
+        page (PaginatedListPage): Обязательная ссылка на экземпляр страницы списка,
+            которая предоставляет методы работы с черновиками (_get_temp_dir, _ensure_temp_dir)
+            и доступ к реестру. Не может быть None.
+        storage_path (str, optional): Базовый путь к хранилищу фотографий.
+        target_size (QSize, optional): Желаемый размер миниатюры.
+        allowed_extensions (List[str], optional): Разрешённые расширения.
+        description_field (str, optional): Имя поля в DTO, содержащего описание.
     """
 
     _cache: Dict[str, QPixmap] = {}          # общий кэш для всех экземпляров
     _pending: Dict[str, bool] = {}           # флаги, чтобы не дублировать загрузку
 
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='gui.ImageThumbnailDelegate',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         parent,
-        page: 'PaginatedListPage' ,
+        page: 'PaginatedListPage' , # type: ignore
         # page: Optional['PaginatedListPage'] ,
         storage_path: str = "", 
         target_size: QSize = QSize(80, 80),
@@ -119,7 +209,28 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         description_field: str = None,
     ):
         """
-        Инициализирует делегат для отображения миниатюр фото в таблице.
+        Делегат для отображения миниатюры изображения в ячейке таблицы.
+
+        Поддерживает:
+            - асинхронную загрузку миниатюр (через QRunnable и кэш);
+            - открытие диалога редактирования фото по двойному клику или нажатию кнопки;
+            - режим "только просмотр" (readonly);
+            - поиск файлов во временных папках черновиков (через ссылку на `PaginatedListPage`).
+
+        Атрибуты класса:
+            _cache (Dict[str, QPixmap]): Кэш загруженных миниатюр (общий для всех экземпляров).
+            _pending (Dict[str, bool]): Флаги для предотвращения повторной загрузки.
+
+        Атрибуты экземпляра:
+            logger (AppLogger): Логгер.
+            storage_path (str): Базовый путь к хранилищу фотографий.
+            target_size (QSize): Желаемый размер миниатюры.
+            _readonly (bool): Режим "только просмотр".
+            _allowed_extensions (List[str]): Разрешённые расширения файлов.
+            _description_field (Optional[str]): Имя поля в DTO, содержащего описание.
+            _page (PaginatedListPage): Ссылка на страницу-владельца (для доступа к временным папкам).
+            _hovered_row, _hovered_col (int): Индексы строки/столбца под курсором.
+            _button_rect (Optional[QRect]): Прямоугольник кнопки для последней ячейки.
 
         Args:
             parent (QWidget, optional): Родительский виджет (обычно QTableView).
@@ -150,7 +261,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         """
 
         super().__init__(parent)
-        self.logger = AppLogger.get_instance('gui.ImageThumbnailDelegate')
+        
         self.storage_path = storage_path
         self.target_size = target_size
 
@@ -188,6 +299,14 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     #         self._registry = self._page._draft_registry
     #         self._entity_type = self._page._entity_type
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_readonly(self, readonly: bool) -> None:
         """
         Устанавливает режим "только просмотр".
@@ -197,12 +316,34 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         """
         self._readonly = readonly
 
-    def sizeHint(self, option: QStyleOptionViewItem, index):
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def sizeHint(
+        self, 
+        option : QStyleOptionViewItem, 
+        index 
+    ) -> QSize:
         """
-        Возвращает высоту строки:
-            - если в ячейке есть фото → высота миниатюры + отступ
-            - иначе → стандартная высота (через базовый метод)
+        Возвращает высоту строки для ячейки.
+
+        Если в ячейке есть фото (поле `file_path` не пустое), возвращает фиксированную высоту,
+        равную высоте миниатюры плюс отступ (10 пикселей). Если фото нет, вызывает базовый метод
+        для стандартного размера.
+
+        Args:
+            option (QStyleOptionViewItem): Параметры стиля для отображения ячейки.
+            index (QModelIndex): Индекс ячейки в модели.
+
+        Returns:
+            QSize: Рекомендуемый размер ячейки (ширина, высота).
         """
+        
         file_path = index.data(Qt.UserRole) if index.isValid() else None
         if not file_path:
             # Нет пути – используем стандартное поведение
@@ -210,11 +351,46 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         # Есть фото – фиксированная высота на основе target_size
         return QSize(self.target_size.width(), self.target_size.height() + 10)
 
-    def set_storage_path(self, path: str):
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def set_storage_path(self, path: str) -> None:
+        """
+        Устанавливает базовый путь к хранилищу фотографий.
+
+        Args:
+            path (str): Абсолютный или относительный путь к папке, где хранятся файлы фото.
+        """
+
         self.storage_path = path
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_entity_id_at_row(self, row: int) -> Optional[int]:
-        """Возвращает ID сущности для указанной строки (из модели)."""
+        """
+        Возвращает ID сущности (из DTO) для указанной строки таблицы.
+
+        Метод получает модель из родительского виджета, проверяет наличие метода `get_item_at_row`,
+        извлекает DTO и возвращает его атрибут `id`.
+
+        Args:
+            row (int): Индекс строки в модели.
+
+        Returns:
+            Optional[int]: ID сущности, если строка существует и DTO имеет атрибут `id`, иначе None.
+        """
+        
         parent = self.parent()
         if parent is None:
             return None
@@ -223,9 +399,21 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         if model is None:
             return None
         
-        dto = model.get_item_at_row(row) if hasattr(model, 'get_item_at_row') else None
+        if not hasattr(model, 'get_item_at_row'):
+            return None
+        
+        dto = model.get_item_at_row(row)
+
         return getattr(dto, 'id', None) if dto else None
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def paint(
         self, 
         painter: QPainter, 
@@ -233,7 +421,23 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         index
     ):
         """
-        Отрисовывает ячейку: миниатюру или заглушку, а также кнопку при наведении.
+        Отрисовывает ячейку таблицы с миниатюрой фото или заглушкой.
+
+        Алгоритм:
+            1. Получает относительный путь к файлу из данных ячейки (Qt.UserRole).
+            2. Если пути нет – рисует заглушку «Нет фото».
+            3. Преобразует относительный путь в абсолютный (с учётом временной папки черновика,
+            если файл находится там).
+            4. Если файл не существует – рисует заглушку «Файл не найден».
+            5. Проверяет кэш миниатюр; если есть – рисует кэшированную миниатюру.
+            6. Если миниатюра ещё не загружена – запускает асинхронную загрузку и рисует
+            заглушку «Загрузка...».
+            7. Если ячейка под курсором и включён режим редактирования, рисует кнопку «...».
+
+        Args:
+            painter (QPainter): Объект для рисования.
+            option (QStyleOptionViewItem): Параметры стиля ячейки (прямоугольник, состояние и т.д.).
+            index (QModelIndex): Индекс ячейки в модели.
         """
 
         # Получаем путь к файлу (из UserRole, т.к. DisplayRole возвращает строку)
@@ -246,7 +450,11 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         entity_id = self._get_entity_id_at_row(index.row())
         full_path = self._get_full_path(file_path, entity_id)
 
-        if not os.path.exists(full_path):
+        if (
+            full_path is None
+        ) or (
+            not os.path.exists(full_path)
+        ):
             self._draw_placeholder(painter, option, "Файл не найден")
             return
 
@@ -298,13 +506,31 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             self._button_rect = btn_rect
             QApplication.style().drawControl(QStyle.CE_PushButton, btn_opt, painter)
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _draw_pixmap(
         self, 
         painter: QPainter, 
         option: QStyleOptionViewItem, 
         pixmap: QPixmap
-    ):
-        """Рисует миниатюру, центрируя её в ячейке."""
+    ) -> None:
+        """
+        Рисует миниатюру изображения, центрируя её внутри ячейки.
+
+        Масштабирует `pixmap` до размеров ячейки с сохранением пропорций и рисует
+        отцентрированным.
+
+        Args:
+            painter (QPainter): Объект для рисования.
+            option (QStyleOptionViewItem): Параметры ячейки (прямоугольник).
+            pixmap (QPixmap): Изображение для отрисовки.
+        """
 
         rect = option.rect
         scaled = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -312,23 +538,60 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         y = rect.y() + (rect.height() - scaled.height()) // 2
         painter.drawPixmap(x, y, scaled)
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_button_rect(
         self, 
         cell_rect: QRect
     ) -> QRect:
-        """Возвращает прямоугольник кнопки в правой части ячейки."""
+        """
+        Возвращает прямоугольник кнопки «...» в правой части ячейки.
+
+        Кнопка имеет фиксированный размер 20×20 пикселей, располагается с отступом
+        2 пикселя от правого и верхнего/нижнего краёв (центрируется по вертикали).
+
+        Args:
+            cell_rect (QRect): Прямоугольник ячейки.
+
+        Returns:
+            QRect: Прямоугольник кнопки.
+        """
+
         btn_w, btn_h = 20, 20
         x = cell_rect.right() - btn_w - 2
         y = cell_rect.top() + (cell_rect.height() - btn_h) // 2
+
         return QRect(x, y, btn_w, btn_h)
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _draw_placeholder(
         self, 
         painter: QPainter, 
         option: QStyleOptionViewItem, 
         text: str
-    ):
-        """Рисует заглушку (серый фон с текстом)."""
+    ) -> None:
+        """
+        Рисует заглушку в ячейке: серый фон и текст по центру.
+
+        Args:
+            painter (QPainter): Объект для рисования.
+            option (QStyleOptionViewItem): Параметры ячейки (прямоугольник).
+            text (str): Текст для отображения (например, «Нет фото», «Загрузка...»).
+        """
+        
         painter.fillRect(option.rect, QColor(240, 240, 240))
         painter.drawText(option.rect, Qt.AlignCenter, text)
 
@@ -336,17 +599,33 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     # Асинхронная загрузка
     # ------------------------------------------------------------------
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     @Slot(int, QPixmap, str)
     def _on_thumbnail_loaded(
         self, 
         row: int, 
         pixmap: QPixmap,
         full_path: str,
-    ):
+    ) -> None:
         """
         Слот, вызываемый после асинхронной загрузки миниатюры.
-        Сохраняет pixmap в кэш и перерисовывает ячейку.
+
+        Сохраняет загруженный `pixmap` в кэш (ключ – `full_path`), удаляет флаг ожидания
+        из `_pending` и перерисовывает указанную строку таблицы.
+
+        Args:
+            row (int): Индекс строки, для которой загружалась миниатюра.
+            pixmap (QPixmap): Загруженное изображение (может быть пустым при ошибке).
+            full_path (str): Абсолютный путь к файлу, использованный как ключ кэша.
         """
+        
         if not pixmap.isNull():
             self._cache[full_path] = pixmap
             self._pending.pop(full_path, None)
@@ -375,8 +654,29 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     # Обработка событий
     # ------------------------------------------------------------------
 
-    def eventFilter(self, obj, event):
-        """Перехватывает событие Leave на таблице, чтобы сбросить hover."""
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def eventFilter(self, obj, event) -> bool:
+        """
+        Фильтр событий для отслеживания ухода курсора мыши из таблицы.
+
+        При событии `QEvent.Leave` сбрасывает состояние hover (переменные `_hovered_row`,
+        `_hovered_col`) и перерисовывает последнюю ячейку, над которой был курсор.
+
+        Args:
+            obj: Объект, на котором произошло событие (обычно таблица).
+            event (QEvent): Событие.
+
+        Returns:
+            bool: False, чтобы не блокировать дальнейшую обработку события.
+        """
+
         if obj == self.parent() and event.type() == QEvent.Leave:
             if self._hovered_row != -1:
                 old_row, old_col = self._hovered_row, self._hovered_col
@@ -389,6 +689,14 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             return False
         return super().eventFilter(obj, event)
 
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def editorEvent(
         self, 
         event, 
@@ -401,7 +709,36 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             - движение мыши (hover) – отображает кнопку
             - двойной клик – открывает диалог редактирования
             - клик по кнопке – открывает диалог редактирования
+
+        **Подробное описание:**
+            1. **MouseMove**: при движении курсора над ячейкой обновляет индексы `_hovered_row`
+            и `_hovered_col`, перерисовывает старую и новую ячейки, что приводит к отображению
+            кнопки «...» в правой части ячейки (если режим редактирования включён).
+            2. **MouseButtonDblClick**: при двойном клике левой кнопкой мыши, если режим
+            редактирования не `readonly`, открывает диалог `PhotoEditDialog` для замены/удаления
+            фото и редактирования описания.
+            3. **MouseButtonRelease**: при клике левой кнопкой мыши проверяет, попал ли курсор
+            в область отрисованной кнопки (прямоугольник `self._button_rect`). Если да –
+            открывает диалог редактирования.
+
+        Args:
+            event (QEvent): Событие мыши (может быть QMouseEvent, QHoverEvent и т.д.).
+            model (QAbstractItemModel): Модель таблицы (источник данных).
+            option (QStyleOptionViewItem): Опции отображения ячейки.
+            index (QModelIndex): Индекс ячейки, над которой произошло событие.
+
+        Returns:
+            bool: True, если событие обработано (например, открыт диалог), иначе
+                возвращает результат вызова родительского метода.
+
+        Примечания:
+            - Для корректной работы необходимо, чтобы `self.parent()` возвращал указатель
+            на таблицу (QTableView), у которой есть метод `update()` для перерисовки ячеек.
+            - Диалог редактирования открывается только если `self._readonly == False`.
+            - После закрытия диалога изменения в DTO (путь к файлу и описание) применяются
+            через вызов `model.setData()`.
         """
+                
         # Обновление hover при движении мыши
         if event.type() == QEvent.MouseMove:
             new_row, new_col = index.row(), index.column()
@@ -430,16 +767,37 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 return True
 
         return super().editorEvent(event, model, option, index)
-
-    def sizeHint(self, option, index):
-        return QSize(self.target_size.width(), self.target_size.height() + 10)
     
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _get_full_path(self, rel_path: str, entity_id: int) -> str:
         """
         Возвращает полный путь к файлу.
-        Сначала проверяет наличие во временной папке черновика (если entity_id известен).
-        Если файл не найден во временной папке, возвращает путь в основном хранилище.
+        Сначала проверяет наличие во временной папке черновика (если entity_id известен и
+        временная папка существует). Если файл не найден во временной папке,
+        возвращает путь в основном хранилище.
+
+        Args:
+            rel_path (str): Относительный путь или имя файла.
+            entity_id (int): ID сущности (может быть временным отрицательным).
+
+        Returns:
+            str: Абсолютный путь к файлу (может указывать на несуществующий файл).
         """
+
+        if not rel_path:
+            return None
+
+        # Проверка на абсолютный путь
+        if os.path.isabs(rel_path):
+            return rel_path if os.path.exists(rel_path) else None
+
         # Проверяем временную папку черновика
         # if self._registry and entity_id is not None and self._entity_type:
         if self._page and entity_id is not None:
@@ -450,8 +808,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 if os.path.exists(candidate):
                     return candidate
                 
-        elif self._registry is None:
-            self.logger.warning("ImageThumbnailDelegate: реестр не установлен, невозможно проверить временную папку")
+        # elif self._registry is None:
+        #     self.logger.warning("ImageThumbnailDelegate: реестр не установлен, невозможно проверить временную папку")
 
         # Основное хранилище
         return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
@@ -470,10 +828,79 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     # Диалог редактирования
     # ------------------------------------------------------------------
 
+
+    def _update_description_field(
+        self, 
+        model, 
+        row: int, 
+        new_description: str
+    ) -> None:
+        """
+        Обновляет поле описания фото в указанной строке модели.
+        
+        Args:
+            model: Модель таблицы (должна иметь метод get_column_at_visible_index).
+            row: Индекс строки.
+            new_description: Новое описание (может быть пустой строкой).
+        """
+
+        if not self._description_field:
+            return
+        
+        for col in range(model.columnCount()):
+            col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
+            if col_info and col_info.field_name == self._description_field:
+                desc_index = model.index(row, col)
+                model.setData(desc_index, new_description, Qt.EditRole)
+                break
+
+    @AppLogger.get_instance(
+        name='ImageThumbnailDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _open_edit_dialog(self, model, index):
         """
         Открывает диалог редактирования фото.
         Получает текущий путь и описание (если есть) из модели.
+        
+        **Алгоритм:**
+            1. Извлекает относительный путь к файлу из модели (порядок: Qt.UserRole, затем Qt.DisplayRole).
+            2. Определяет полный путь к файлу, проверяя сначала временную папку черновика
+            (через `self._page._get_temp_dir(entity_id)`), затем основное хранилище.
+            3. Если в конфигурации поля указан `description_field`, находит соответствующий столбец
+            в модели и получает текущее описание.
+            4. Получает ID родительской сущности из DTO строки (через `model.get_item_at_row`).
+            5. Создаёт диалог `PhotoEditDialog` в режиме `'single'`, передавая:
+            - текущий путь (если файл существует),
+            - описание,
+            - разрешённые расширения,
+            - режим `readonly` (синхронизируется с `self._readonly`),
+            - `parent_id`,
+            - путь к основному хранилищу,
+            - временную папку (если есть, из `self._page._get_temp_dir(parent_id)`).
+            6. При успешном закрытии диалога:
+            - Если пользователь удалил фото (`new_path is None and new_description is None`),
+                очищает поле пути (устанавливает пустую строку) и, если есть поле описания,
+                очищает его.
+            - Если выбрано новое фото, обновляет поле пути и, при необходимости, поле описания.
+
+        **Примечания:**
+            - Метод предполагает, что модель имеет метод `get_item_at_row` для получения DTO.
+            - Для поиска столбца описания используется `model.get_column_at_visible_index`,
+            если такой метод отсутствует, описание не обновляется (но это не вызывает ошибки).
+            - Диалог создаётся только для режима `'single'` (одно фото). Для массового добавления
+            используется отдельный механизм (`PaginatedListPage._on_multi_photo_clicked`).
+
+        Args:
+            model (QAbstractItemModel): Модель таблицы (обычно `PaginatedTableModel`).
+            index (QModelIndex): Индекс ячейки, для которой вызывается редактирование.
+
+        Returns:
+            None
         """
         # Ленивый импорт, чтобы избежать циклических зависимостей
         # from interfaces.gui.gui_window.widgets.photo_edit_dialog import PhotoEditDialog
@@ -503,7 +930,9 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 col_obj = getattr(model, 'get_column_at_visible_index', None)
                 if col_obj:
                     column_info = col_obj(col)
-                    if column_info and column_info.field_name == self._description_field:
+                    if column_info and (
+                        column_info.field_name == self._description_field
+                    ):
                         desc_index = model.index(index.row(), col)
                         description = model.data(desc_index, Qt.DisplayRole) or ""
                         break
@@ -518,7 +947,6 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
         #     temp_dir = self._registry.get(temp_key)
 
-
         if self._page is None:
             self.logger.error("ImageThumbnailDelegate: нет ссылки на страницу, невозможно создать временную папку")
             return
@@ -527,16 +955,36 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         # if self._registry and parent_id is not None and self._entity_type:
         #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
         #     temp_dir = self._registry.get(temp_key)
-        if self._page and parent_id is not None:
-            # Получаем существующую временную папку (если есть)
-            temp_dir = self._page._get_temp_dir(parent_id)
-            # Если временной папки нет, но строка существующая (id > 0) – создаём через страницу
-            if self._page is None:
-                self.logger.warning("ImageThumbnailDelegate: нет ссылки на страницу, работа с временными папками невозможна")
-                return
+        if self._page and (
+            parent_id is not None
+        ):  
+            # Всегда создаём временную папку для любых строк при редактировании
+            temp_dir = self._page._ensure_temp_dir(parent_id) 
+
+            # # Получаем существующую временную папку (если есть)
+            # temp_dir = self._page._get_temp_dir(parent_id)
             
-            if temp_dir is None and parent_id > 0 and self._page:
-                temp_dir = self._page._ensure_temp_dir(parent_id)
+            # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
+            # if temp_dir is None:
+            #     temp_dir = self._page._ensure_temp_dir(parent_id)
+
+            # # Гарантируем существование временной папки для существующей строки
+            # if parent_id > 0:
+            #     # Получаем существующую временную папку (если есть)
+            #     temp_dir = self._page._get_temp_dir(parent_id)
+            # else:
+            #     # Если временной папки нет, создаём её для любой строки (и новой, и существующей)  
+            #     temp_dir = self._page._ensure_temp_dir(parent_id)
+
+            # # Получаем существующую временную папку (если есть)
+            # temp_dir = self._page._get_temp_dir(parent_id)
+
+            # # # Если временной папки нет, но строка существующая (id > 0) – создаём через страницу
+            # # if temp_dir is None and parent_id > 0 and self._page:
+
+            # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
+            # if temp_dir is None:
+            #     temp_dir = self._page._ensure_temp_dir(parent_id)
 
             # # Если временной папки нет, но строка существующая (id > 0) – создаём
             # if temp_dir is None and parent_id > 0:
@@ -557,21 +1005,24 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             parent_id=parent_id,
             storage_path=self.storage_path,
             mode='single',
-            temp_dir=temp_dir,
+            temp_dir=temp_dir, # всегда передан для любых parent_id (не None)
         )
+
         if dialog.exec() == QDialog.Accepted:
             new_path, new_description = dialog.get_result()
             if new_path is None and new_description is None:
                 # Фото удалено – очищаем поле
                 model.setData(index, "", Qt.EditRole)
-                if self._description_field:
-                    # Найти индекс столбца описания и очистить
-                    for col in range(model.columnCount()):
-                        col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
-                        if col_info and col_info.field_name == self._description_field:
-                            desc_index = model.index(index.row(), col)
-                            model.setData(desc_index, "", Qt.EditRole)
-                            break
+                self._update_description_field(model, index.row(), "")
+                # if self._description_field:
+                #     # Найти индекс столбца описания и очистить
+                #     for col in range(model.columnCount()):
+                #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
+                #         if col_info and col_info.field_name == self._description_field:
+                #             desc_index = model.index(index.row(), col)
+                #             model.setData(desc_index, "", Qt.EditRole)
+                #             break
+                                
             else:
                 # Сохраняем относительный путь (копирование файла выполнит сервис)
                 # Пока сохраняем абсолютный путь – при сохранении строки сервис скопирует
@@ -580,11 +1031,13 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 # Новое фото
                 model.setData(index, new_path, Qt.EditRole)
                 if new_description is not None and new_description != description:
-                    if self._description_field:
-                        for col in range(model.columnCount()):
-                            col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
-                            if col_info and col_info.field_name == self._description_field:
-                                desc_index = model.index(index.row(), col)
-                                model.setData(desc_index, new_description, Qt.EditRole)
-                                break
+                    self._update_description_field(model, index.row(), new_description)
+                    # if self._description_field:
+                    #     for col in range(model.columnCount()):
+                    #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
+                    #         if col_info and col_info.field_name == self._description_field:
+                    #             desc_index = model.index(index.row(), col)
+                    #             model.setData(desc_index, new_description, Qt.EditRole)
+                    #             break
+
         self._button_rect = None

@@ -1,5 +1,4 @@
 # interfaces/gui/gui_window/controllers/action_manager.py
-# interfaces/gui/gui_window/controllers/action_manager.py
 """
 Модуль централизованного управления действиями (ActionManager) для всего приложения.
 
@@ -38,7 +37,6 @@
 """
 
 from typing import Dict, Optional, Callable
-
 
 from app.utils.logger.logger import AppLogger
 
@@ -93,6 +91,7 @@ class ActionManager(QObject):
         Args:
             parent (Optional[QObject]): Родительский объект (обычно MainWindow).
         """
+
         super().__init__(parent)
         self._actions: Dict[str, QAction] = {}
         self.logger = AppLogger.get_instance('gui.ActionManager')
@@ -224,6 +223,7 @@ class ActionManager(QObject):
         Returns:
             QAction: Созданное действие.
         """
+
         return self.register_action(
             name=name,
             text=text,
@@ -247,6 +247,7 @@ class ActionManager(QObject):
         Args:
             name (str): Имя действия.
         """
+
         # if name in self._actions:
             # del self._actions[name]
             # self.logger.debug(f"Действие '{name}' удалено из реестра")
@@ -276,6 +277,7 @@ class ActionManager(QObject):
         Returns:
             Optional[QAction]: Действие или None, если не найдено.
         """
+
         return self._actions.get(name)
 
     # ----------------------------------------------------------------------
@@ -295,6 +297,7 @@ class ActionManager(QObject):
             name (str): Имя действия.
             enabled (bool): True – включить, False – отключить.
         """
+
         action = self.get_action(name)
         if action:
             action.setEnabled(enabled)
@@ -312,6 +315,7 @@ class ActionManager(QObject):
             name (str): Имя действия.
             checked (bool): True – установить, False – снять.
         """
+
         action = self.get_action(name)
         if action and action.isCheckable():
             action.setChecked(checked)
@@ -331,6 +335,7 @@ class ActionManager(QObject):
         Returns:
             bool: True – действие выбрано, False – не выбрано или действие не checkable.
         """
+
         action = self.get_action(name)
         return action.isChecked() if action and action.isCheckable() else False
 
@@ -346,6 +351,7 @@ class ActionManager(QObject):
         Args:
             name (str): Имя действия.
         """
+
         action = self.get_action(name)
         if action:
             action.trigger()
@@ -383,6 +389,7 @@ class ActionManager(QObject):
             >>> am.connect_button('save', toolbar_save_button)
             >>> # обе кнопки теперь управляют действием 'save'
         """
+        
         action = self.get_action(name)
         if action and hasattr(button, 'setDefaultAction'):
             button.setDefaultAction(action)

@@ -1304,7 +1304,47 @@ class BaseService(
     def _apply_simple_updates(self, model_obj: ModelType, dto: DTOType) -> None:
         """
         Обновляет простые поля модели из DTO согласно field_configs.
-        """
+
+        **Назначение:**
+            Применяет изменения к существующему ORM-объекту, полученному из БД,
+            на основе данных из DTO. Метод вызывается внутри `_update_entity` при
+            сохранении изменений.
+
+        **Алгоритм:**
+            1. Перебирает поля, возвращённые `_get_simple_updatable_fields()`.
+            2. Для каждого поля проверяет, изменилось ли значение (сравнивая старое
+               из модели с новым из DTO).
+            3. **Специальная обработка для полей с фото (`widget_type='image_thumbnail'`):**
+               - Если значение изменилось, старый путь относительный и файл существует
+                 в основном хранилище – удаляет физический файл (логгирует успех/ошибку).
+               - Абсолютные пути (временные файлы черновиков) не удаляются.
+            4. Обновляет поле модели новым значением (или None, если поле необязательное
+               и в DTO передано None).
+
+        **Параметры:**
+            model_obj (ModelType): ORM-объект (уже загружен из БД, с текущими значениями).
+            dto (DTOType): DTO, содержащий новые значения полей.
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Метод предполагает, что все поля, попадающие в `_get_simple_updatable_fields()`,
+              являются обычными столбцами БД (не виртуальными, не `is_note`, не `updatable=False`).
+            - Для обязательных полей (`required=True`) попытка установить None вызывает
+              `ValueError` с сообщением.
+            - Удаление старого файла происходит только при изменении значения и только
+              для относительных путей. Это предотвращает случайное удаление файлов,
+              которые ещё не были скопированы в основное хранилище (например, во время
+              редактирования новой строки до сохранения).
+
+        **Пример:**
+            >>> # Внутри _update_entity
+            >>> self._apply_simple_updates(entity, dto)
+            >>> # Теперь entity.last_name обновлён, и если photo_path изменился,
+            >>> # старый файл удалён с диска.
+        """        
+
         for field_info in self._get_simple_updatable_fields():
 
             if not field_info.get('editable', True) or field_info.get('updatable') is False:
@@ -1314,6 +1354,47 @@ class BaseService(
             # if field_info['editable']:
             new_value = getattr(dto, field_name, None)
             old_value = getattr(model_obj, field_name, None)
+
+            config = self._field_configs.get(field_name, {})
+            
+            # # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
+            # if config.get('widget_type') == 'image_thumbnail': # убранно изза проблем при откате изменений БД при обибке
+                
+            #     storage_path = AppConfigManager.get_instance().get(
+            #         'PHOTOS_STORAGE_PATH',
+            #         os.path.join('.', 'photos')
+            #     )
+                
+            #     # 1. Проверка существования нового файла (если путь относительный)
+            #     if (
+            #         new_value is not None
+            #     ) and (
+            #         not os.path.isabs(new_value)
+            #     ):
+            #         full_new_path = os.path.join(storage_path, new_value)
+            #         if not os.path.exists(full_new_path):
+            #             self.logger.warning(
+            #                 f"Новый файл для поля {field_name} не существует: {full_new_path}. "
+            #                 "Обновление поля будет выполнено, но файл отсутствует."
+            #             )
+                
+            #     # Если значение изменилось, старое не пустое и не абсолютный путь (значит файл уже в хранилище)
+            #     if (
+            #         old_value != new_value
+            #     ) and (
+            #         old_value is not None
+            #     ) and (
+            #         not os.path.isabs(old_value)
+            #     ):
+            #         full_path = os.path.join(storage_path, old_value)
+            #         if os.path.exists(full_path):
+            #             try:
+            #                 os.remove(full_path)
+            #                 self.logger.debug(f"Удалён старый файл фото при обновлении: {full_path}")
+            #             except OSError as e:
+            #                 self.logger.warning(f"Не удалось удалить старый файл {full_path}: {e}")
+            #         else:
+            #             self.logger.debug(f"Старый файл {full_path} не существует, пропуск удаления")
 
             if new_value is not None:
                 # setattr(model_obj, field_name, new_value)
@@ -1325,7 +1406,7 @@ class BaseService(
 
             else:
                 # Проверяем, является ли поле обязательным
-                config = self._field_configs.get(field_name, {})
+                # config = self._field_configs.get(field_name, {})
                 if config.get('required', False):
                     # Если поле обязательно, не разрешаем устанавливать None
                     self.logger.warning(f"Попытка установить None в обязательное поле {field_name}")

@@ -86,7 +86,7 @@ class PhotoEditDialog(QDialog):
         существующей строки), либо temp_dir (при работе с черновиком новой строки).
         В противном случае копирование файла вызовет исключение.
     """
-
+    
     # ------------------------------------------------------------------
     # Ленивая инициализация атрибутов (без __init__)
     # ------------------------------------------------------------------
@@ -107,6 +107,19 @@ class PhotoEditDialog(QDialog):
     @logger.setter
     def logger(self, value):
         self._logger = value
+
+
+    def MAX_FILES(self) -> int:
+        try:
+            return self._MAX_FILES
+        except AttributeError as e:
+            self._MAX_FILES:int = 20
+
+        return self._MAX_FILES
+
+    @logger.setter
+    def MAX_FILES(self, value:int):
+        self._MAX_FILES:int = value
 
     @AppLogger.get_instance(
         name='PhotoEditDialog',
@@ -345,12 +358,15 @@ class PhotoEditDialog(QDialog):
         В режиме `readonly` кнопка вызова этого метода отключена, поэтому дополнительная
         проверка не требуется.
 
+        Ограничивает количество выбираемых файлов (не более MAX_FILES).
+
         Args:
             None
 
         Returns:
             None
         """
+
 
         files, _ = QFileDialog.getOpenFileNames(
             self, 
@@ -359,8 +375,32 @@ class PhotoEditDialog(QDialog):
             f"Изображения (*{' *'.join(self._allowed_extensions)})"
         )
 
+
+        if len(files) > self.MAX_FILES:
+            QMessageBox.warning(
+                self,
+                "Слишком много файлов",
+                f"Выбрано {len(files)} файлов, но допустимо не более {MAX_FILES}.\n"
+                "Добавлено только {self.MAX_FILES} файлов."
+            )
+            files = files[:self.MAX_FILES]
+
+
+        added = 0
         for f in files:
+            # self.list_widget.addItem(f)
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in self._allowed_extensions:
+                self.logger.warning(f"Файл {f} имеет недопустимое расширение {ext}, пропущен")
+                continue
+
             self.list_widget.addItem(f)
+            added += 1
+
+  
+        if added == 0 and files:
+            QMessageBox.warning(self, "Ошибка", "Ни один из выбранных файлов не имеет допустимого расширения.")
+
 
     @AppLogger.get_instance(
         name='PhotoEditDialog',
@@ -723,9 +763,14 @@ class PhotoEditDialog(QDialog):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _delete_photo(self):
-        """Удаляет текущее фото из хранилища (если путь относительный)."""
+        """
+        Удаляет текущее фото из временной папки или хранилища.
+        Если был выбран новый файл (self._new_path), удаляет и его.
+        """
 
         self.logger.debug(f"_delete_photo: current_path={self._current_path}")
+
+        # Удаляем старый текущий файл (если есть)
         if self._current_path and not os.path.isabs(self._current_path):
             # Сначала ищем во временной папке
             if self._temp_dir:
@@ -739,6 +784,16 @@ class PhotoEditDialog(QDialog):
                     self.logger.debug(f"Удалён файл {full_path}")
                 except OSError as e:
                     self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
+
+        # Удаляем временный файл, если был выбран новый (и он ещё не стал current_path)
+        if self._new_path and self._temp_dir:
+            full_path = os.path.join(self._temp_dir, self._new_path)
+            if os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                    self.logger.debug(f"Удалён временный файл {full_path} при удалении фото")
+                except OSError as e:
+                    self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
 
         self._current_path = None
         self._new_path = None

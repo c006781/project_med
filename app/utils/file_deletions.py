@@ -52,7 +52,7 @@ def delete_file_safely(
         
     except OSError as e:
         logger.warning(f"Не удалось удалить файл {file_path}: {e}")
-        return False, e
+        return False, str(e)
 
 
 def delete_empty_directory(
@@ -103,7 +103,7 @@ def delete_empty_directory(
         
         except OSError as e:
             logger.warning(f"Не удалось удалить {dir_path} со всем содержимым: {e}")
-            return False, e
+            return False, str(e)
         
     # удалить пустую папку
     try:
@@ -118,7 +118,7 @@ def delete_empty_directory(
         
     except OSError as e:
         logger.warning(f"Не удалось удалить папку {dir_path}: {e}")
-        return False , e
+        return False , str(e)
 
 def schedule_deletion(
     path: str,
@@ -168,7 +168,6 @@ def schedule_deletion(
             force = force,    
             logger = logger
         )
-
 
     if not hasattr(session, '_pending_deletions'):
         session._pending_deletions = []

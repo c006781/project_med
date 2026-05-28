@@ -294,6 +294,12 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         cls._cache.clear()
         cls._pending.clear()
 
+    @classmethod
+    def clear_cache(self):
+        """Очищает кэш миниатюр (вызывать при уходе со страницы)."""
+        cls._cache.clear()
+        cls._pending.clear()
+
     @AppLogger.get_instance(
         name='ImageThumbnailDelegate',
         # share_file_with = 'system',
@@ -819,7 +825,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         # if self._page and entity_id is not None:
         #     # Получаем существующую временную папку (если есть)
         #     temp_dir = self._page._get_temp_dir(entity_id)
-        page = self._page_ref() if hasattr(self, '_page_ref') else None
+         page = self._page_ref() if hasattr(self, '_page_ref') else None
         if page and entity_id is not None:
             temp_dir = page._get_temp_dir(entity_id)
             if temp_dir:

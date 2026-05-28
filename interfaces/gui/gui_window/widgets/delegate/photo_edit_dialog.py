@@ -380,7 +380,7 @@ class PhotoEditDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Слишком много файлов",
-                f"Выбрано {len(files)} файлов, но допустимо не более {MAX_FILES}.\n"
+                f"Выбрано {len(files)} файлов, но допустимо не более {self.MAX_FILES}.\n"
                 "Добавлено только {self.MAX_FILES} файлов."
             )
             files = files[:self.MAX_FILES]

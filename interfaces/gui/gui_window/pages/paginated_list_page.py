@@ -771,7 +771,45 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
+    def _del_file(
+        self,
+        file_path: Union[str, List[str]],
+        session: Optional[Session] = None,
+        if_delete_parent_dir: bool = False,
+        force: bool = False,
+    ) -> None:
+        """
+        Отложенное удаление файла(ов) через schedule_deletion.
+
+        Args:
+            file_path: Путь к файлу (str) или список путей (List[str]).
+            session: Сессия SQLAlchemy (если передана, удаление откладывается до коммита).
+            if_delete_parent_dir: Если True, после удаления файла удалить родительскую папку,
+                                если она станет пустой.
+            force: Если True и удаляется папка, удалять рекурсивно (даже непустую).
+        """
+
+        if isinstance(file_path, str):
+            schedule_deletion(
+                path=file_path,
+                session=session,
+                remove_parent_if_empty=if_delete_parent_dir,
+                force=force,
+                logger=self.logger
+            )
+
+        # elif isinstance(file_path, List[str]):
+        elif isinstance(file_path, list):
             for path in file_path:
+                self._del_file(
+                    path,
+                    session=session,
+                    if_delete_parent_dir=if_delete_parent_dir,
+                    force=force,
+                )
+        else:
+            raise TypeError(f"Invalid type for file_path: {type(file_path)}")
+
     def _is_file_in_temp_dir(self, temp_dir: str, value: str) -> bool:
         """
         Проверяет, существует ли файл с именем value во временной папке.
@@ -1051,7 +1089,9 @@ class PaginatedListPage(
                     self._del_file(
                         dest,
                         session=None, # намеренно. чтобы немедленно удалить
-                        if_delete_parent_dir=False, force=False)
+                        if_delete_parent_dir=False,
+                        force=False
+                    )
                 # Очищаем список, чтобы не пытаться удалить их повторно
                 error_messages.append(str(e))
                 # Не обновляем DTO, файл остаётся во временной папке

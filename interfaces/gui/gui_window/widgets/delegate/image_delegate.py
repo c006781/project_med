@@ -43,6 +43,9 @@ from typing import (
     Optional, 
     # Optional,
 )
+from collections import OrderedDict
+
+import weakref
 
 from app.utils.logger.logger import AppLogger
 
@@ -170,8 +173,10 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         description_field (str, optional): Имя поля в DTO, содержащего описание.
     """
 
-    _cache: Dict[str, QPixmap] = {}          # общий кэш для всех экземпляров
+    _cache: OrderedDict[str, QPixmap] = OrderedDict()          # общий кэш для всех экземпляров
     _pending: Dict[str, bool] = {}           # флаги, чтобы не дублировать загрузку
+
+    _cache_maxsize = 100   # максимальное количество хранимых миниатюр
 
     @property
     def logger(self) -> AppLogger:
@@ -268,7 +273,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         self._allowed_extensions = allowed_extensions or ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
         self._description_field = description_field
         
-        self._page = page  # <-- сохраняем ссылку на страницу
+        # self._page = page  # <-- сохраняем ссылку на страницу
+        self._page_ref = weakref.ref(page) if page is not None else None
 
         self._readonly = True
         self._hovered_row = -1
@@ -298,6 +304,12 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     #     if self._page:
     #         self._registry = self._page._draft_registry
     #         self._entity_type = self._page._entity_type
+
+    @classmethod
+    def clear_cache(self):
+        """Очищает кэш миниатюр (вызывать при уходе со страницы)."""
+        cls._cache.clear()
+        cls._pending.clear()
 
     @AppLogger.get_instance(
         name='ImageThumbnailDelegate',
@@ -620,18 +632,38 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         Сохраняет загруженный `pixmap` в кэш (ключ – `full_path`), удаляет флаг ожидания
         из `_pending` и перерисовывает указанную строку таблицы.
 
+        **Управление кэшем (LRU):**
+            - Если путь уже есть в кэше, он перемещается в конец (обновляется порядок).
+            - Если путь новый, добавляется в кэш.
+            - Если размер кэша превышает `_cache_maxsize`, удаляется самый старый элемент.
+
+
         Args:
             row (int): Индекс строки, для которой загружалась миниатюра.
             pixmap (QPixmap): Загруженное изображение (может быть пустым при ошибке).
             full_path (str): Абсолютный путь к файлу, использованный как ключ кэша.
         """
+        # Файл больше не в процессе загрузки (всегда удаляем флаг, даже если pixmap пустой)
+        self._pending.pop(full_path, None) # удаляется до проверки pixmap.isNull(), чтобы даже при ошибке загрузки повторные запросы для того же файла не блокировались
         
         if not pixmap.isNull():
-            self._cache[full_path] = pixmap
-            self._pending.pop(full_path, None)
+            # self._cache[full_path] = pixmap
+            # self._pending.pop(full_path, None)
+            
+            # Добавляем в кэш с контролем размера (LRU)
+            if full_path in self._cache:
+                # Перемещаем в конец (обновляем порядок)
+                self._cache.move_to_end(full_path)
+
+            else:
+                self._cache[full_path] = pixmap
+                # Если превышен лимит, удаляем первый (самый старый) элемент
+                if len(self._cache) > self._cache_maxsize:
+                    self._cache.popitem(last=False)
+
+            # self._pending.pop(full_path, None)
             
         # Обновляем только затронутую ячейку, если таблица ещё жива
-        
         parent = self.parent()
         if parent is None:
             return
@@ -779,6 +811,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     def _get_full_path(self, rel_path: str, entity_id: int) -> str:
         """
         Возвращает полный путь к файлу.
+
         Сначала проверяет наличие во временной папке черновика (если entity_id известен и
         временная папка существует). Если файл не найден во временной папке,
         возвращает путь в основном хранилище.
@@ -799,10 +832,13 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             return rel_path if os.path.exists(rel_path) else None
 
         # Проверяем временную папку черновика
-        # if self._registry and entity_id is not None and self._entity_type:
-        if self._page and entity_id is not None:
-            # Получаем существующую временную папку (если есть)
-            temp_dir = self._page._get_temp_dir(entity_id)
+        # # if self._registry and entity_id is not None and self._entity_type:
+        # if self._page and entity_id is not None:
+        #     # Получаем существующую временную папку (если есть)
+        #     temp_dir = self._page._get_temp_dir(entity_id)
+         page = self._page_ref() if hasattr(self, '_page_ref') else None
+        if page and entity_id is not None:
+            temp_dir = page._get_temp_dir(entity_id)
             if temp_dir:
                 candidate = os.path.join(temp_dir, rel_path)
                 if os.path.exists(candidate):
@@ -947,7 +983,13 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
         #     temp_dir = self._registry.get(temp_key)
 
-        if self._page is None:
+        # if self._page is None:
+        #     self.logger.error("ImageThumbnailDelegate: нет ссылки на страницу, невозможно создать временную папку")
+        #     return
+        
+        # Получаем временную папку через слабую ссылку на страницу
+        page = self._page_ref() if hasattr(self, '_page_ref') else None
+        if page is None:
             self.logger.error("ImageThumbnailDelegate: нет ссылки на страницу, невозможно создать временную папку")
             return
         

@@ -1525,7 +1525,10 @@ class BaseService(
                 ):
                     full_old_path = os.path.join(storage_path, old_value)
                     # Удаляем файл
-                    self._del_file(full_old_path, session = session)
+                    self._del_file(
+                        full_old_path, 
+                        session = session
+                    )
 
                     # if os.path.exists(full_old_path):
                     #     if (session is not None) and hasattr(session, '_pending_deletions'):
@@ -5821,11 +5824,14 @@ class PhotoService(
             # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
             # через _delete_entity (который не трогает файл). Это корректно и атомарно.
 
-            # Удаляем физический файл (или добавляем в отложенное удаление)
+            
             file_path = os.path.join(self._storage_path, photo.file_path)
-
-            # Удаляем файл
-            err_text = self._del_file(file_path, session = sess)
+            # Удаляем физический файл (или добавляем в отложенное удаление)
+            err_text = self._del_file(
+                file_path, 
+                session = sess,
+                if_delete_parent_dir = True,
+            )
             if err_text is not None:
                 raise PhotoFileError(file_path, "удаление", str(err_text))
 

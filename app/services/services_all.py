@@ -77,6 +77,8 @@ from sqlalchemy import (
 # from app.dependencies import _NOTE_USAGE_MODELS
 from app.utils.logger import AppLogger
 
+
+
 # Импорты модулей
 # def _add_package_name(
 #     file_module: str = None,
@@ -213,6 +215,9 @@ from app.exceptions import (
 #     except ImportError as e:
 #         AppLogger.get_instance(name='system').critical("Ошибка from exceptions import")
 #         pass #  raise # e # pass
+
+
+from app.utils.file_deletions import schedule_deletion
 
 # try:
 from app.utils.filtering.filtering import (
@@ -444,55 +449,110 @@ class BaseService(
         if_delete_parent_dir: bool = False
     ):
         """
-        удаление файла или на прямую (session = None) или после commit  (session != None)
+        Удаляет физический файл, предпочтительно отложенно (после коммита сессии).
 
-        if_delete_parent_dir - удалять ли родительскую папку?
+        **Алгоритм:**
+            1. Если передан `session` и у него есть атрибут `_pending_deletions` (устанавливается в `Database.session_scope`),
+            то файл **не удаляется сразу**, а добавляется в список отложенных удалений сессии.
+            Фактическое удаление произойдёт после успешного коммита (обработчик `after_commit`).
+            2. Если сессия не поддерживает отложенное удаление (или `session is None`), файл удаляется **немедленно**.
+            3. Если `if_delete_parent_dir = True`, после удаления файла проверяется родительская папка:
+            если она стала пустой, она также удаляется.
+
+        **Важные замечания:**
+            - Метод **не выбрасывает исключение** при ошибках удаления – только логирует их.
+            Это сделано потому, что удаление файла не должно прерывать транзакцию БД.
+            - При отложенном удалении ошибки логируются в обработчике `after_commit` (см. `Database.__init__`).
+            - **НЕ вызывайте этот метод повторно** для одного и того же файла в рамках одной транзакции.
+            Два вызова приведут к добавлению файла в `_pending_deletions` дважды, но `after_commit` удалит его один раз
+            (без ошибки). Однако это нерационально и может маскировать логические ошибки.
+            - **НЕ используйте этот метод для файлов, которые ещё не были скопированы в основное хранилище** (например,
+            для абсолютных путей во временной папке черновика). Такие файлы удаляются автоматически при очистке
+            временной папки (см. `PaginatedListPage._cleanup_temp_dir`).
+
+        **Параметры:**
+            file_path (str): Полный абсолютный путь к файлу.
+            session (Optional[Session]): Сессия SQLAlchemy, в контексте которой выполняется удаление.
+                Если передана и поддерживает отложенное удаление, файл будет удалён после коммита.
+                Если `None` или не поддерживает, удаление происходит немедленно.
+            if_delete_parent_dir (bool): Если `True`, после удаления файла (успешного) пытается удалить
+                родительскую папку, если она стала пустой. Ошибки при удалении папки логируются, но не прерывают выполнение.
+
+        **Возвращает:**
+            None
+
+        **Исключения:**
+            Никаких исключений не выбрасывает. При ошибках немедленного удаления логирует предупреждение.
+
+        **Примеры использования:**
+            >>> # Отложенное удаление в рамках транзакции
+            >>> with db.session_scope() as session:
+            ...     self._del_file("/path/to/file.jpg", session=session)
+            ...     # файл будет удалён после session.commit()
+
+            >>> # Немедленное удаление без сессии
+            >>> self._del_file("/path/to/file.jpg")
+
+            >>> # Удалить файл и, если папка опустела, удалить её
+            >>> self._del_file("/path/to/file.jpg", session=session, if_delete_parent_dir=True)
+
+        **Примечания:**
+            - Для поддержки отложенного удаления сессия должна иметь атрибут `_pending_deletions`, который создаётся
+            в `Database.session_scope`. Не используйте этот метод с сессиями, созданными вручную без этого атрибута.
+            - Если файл не существует, метод ничего не делает (только логирует отладочное сообщение).
         """
-        rezult = None
+        _ , err = schedule_deletion(
+            session = session,
+            path = file_path,
+            remove_parent_if_empty = if_delete_parent_dir,
+        )
+        return err
+    
+        # if (session is not None) and hasattr(session, '_pending_deletions'):
+        #     session._pending_deletions.append(
+        #         {
+        #             'path': file_path,
+        #             'remove_parent': if_delete_parent_dir,
+        #         }
+        #     )
+        #     self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
 
-        if (session is not None) and hasattr(session, '_pending_deletions'):
-            session._pending_deletions.append(
-                {
-                    'path': file_path,
-                    'remove_parent': if_delete_parent_dir,
-                }
-            )
-            self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+        #     return None
 
-            return rezult
+        # if os.path.exists(file_path):
+        #     # Fallback – удаляем немедленно, но с предупреждением
+        #     self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+        #     try:
+        #         os.remove(file_path)
+        #         self.logger.debug(f"Удалён отложенный файл: {file_path}")
 
+        #     except OSError as e:
+        #         self.logger.warning(f"Не удалось удалить {file_path}: {e}")
+        #         return e
+        #         # raise PhotoFileError(file_path, "удаление", str(e))
+        # else:
+        #     self.logger.debug(f"Файл {file_path} не существует")
 
-        if os.path.exists(file_path):
-            # Fallback – удаляем немедленно, но с предупреждением
-            self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
-            try:
-                os.remove(file_path)
-                self.logger.debug(f"Удалён отложенный файл: {file_path}")
+        # if not if_delete_parent_dir:
+        #     return None
+        
+        # # удаление род папки при её пустоте
+        # try:
+        #     # Проверяем, не стала ли родительская папка пустой
+        #     parent_dir = os.path.dirname(file_path)
+        #     if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+        #         try:
+        #             os.rmdir(parent_dir)
+        #             self.logger.debug(f"Удалена пустая папка: {parent_dir}")
 
-            except OSError as e:
-                self.logger.warning(f"Не удалось удалить {file_path}: {e}")
-                rezult = e
-                # raise PhotoFileError(file_path, "удаление", str(e))
-        else:
-            self.logger.debug(f"Файл {file_path} не существует")
+        #         except OSError as e:
+        #             self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
 
-        if not if_delete_parent_dir:
-            return rezult
+        # except OSError as e:
+        #     self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
+        #     return e
 
-        try:
-            # Проверяем, не стала ли родительская папка пустой
-            parent_dir = os.path.dirname(file_path)
-            if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-                try:
-                    os.rmdir(parent_dir)
-                    self.logger.info(f"Удалена пустая папка: {parent_dir}")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
-        except OSError as e:
-            self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
-            rezult = e
-
-        return rezult
+        # return None
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -1265,6 +1325,8 @@ class BaseService(
     ) -> None:
         """
         Универсальный метод удаления записи с очисткой связанных заметок.
+
+        НЕ УДАЛЯЕТ физические файлы! Удаление файлов должно происходить в delete() или в наследниках.
 
         Алгоритм:
             1. Загружает запись с подгрузкой всех связей (согласно конфигурации).
@@ -2141,6 +2203,10 @@ class BaseService(
                 raise self._not_found_exception(entity_id)
             
             # Удаление файлов для полей с фото (widget_type='image_thumbnail')
+            # ВНИМАНИЕ: Эта часть НЕ дублируется в _delete_entity, поэтому необходимо
+            # вызывать _del_file до _delete_entity. Не переносите этот блок в _delete_entity,
+            # иначе при вызове _delete_entity из других мест (например, из PhotoService.delete_photo)
+            # файлы будут удаляться повторно.
             storage_path = None
             for field_name, config in self._field_configs.items():
                 if config.get('widget_type') != 'image_thumbnail':
@@ -5689,10 +5755,53 @@ class PhotoService(
         session: Optional[Session] = None
     ) -> None:
         """
-        Удаляет фото:
-        1. Удаляет запись из БД.
-        2. После успешного удаления записи пытается удалить файл.
-        Если файл не удалился, только логирует ошибку (данные уже консистентны).
+        Удаляет фотографию: физический файл + запись в БД + связанные заметки (если есть).
+
+        **Алгоритм:**
+            1. Загружает запись `Photo` по `photo_id`.
+            2. Определяет полный путь к файлу (`storage_path + относительный путь`).
+            3. Удаляет физический файл через `self._del_file` (с поддержкой отложенного удаления).
+            4. Удаляет запись из БД и очищает заметки (через `self._delete_entity`).
+
+        **Важное предупреждение (для разработчиков!):**
+            - **НИ В КОЕМ СЛУЧАЕ НЕ ЗАМЕНЯЙТЕ ТЕКУЩУЮ РЕАЛИЗАЦИЮ НА ВЫЗОВ `self.delete(photo_id, session)`!**
+            - Причина: базовый метод `BaseService.delete` **уже содержит логику удаления файлов** для полей
+            с `widget_type='image_thumbnail'` (к которым относится `file_path`). Если вызвать `self.delete` здесь,
+            файл будет удалён **дважды**: один раз в `self._del_file` (см. код ниже) и ещё раз внутри `self.delete`.
+            Это приведёт к ошибке при попытке удалить уже несуществующий файл.
+            - Текущая реализация корректна: файл удаляется **один раз**, затем запись удаляется отдельно.
+            - **Не переносите логику удаления файлов в `_delete_entity`** – это нарушит работу всех других сервисов,
+            которые полагаются на то, что `_delete_entity` не трогает дисковые файлы.
+
+        **Параметры:**
+            photo_id (int): ID фотографии в БД.
+            session (Optional[Session]): Опциональная сессия SQLAlchemy для работы в рамках внешней транзакции.
+                Если не передана, создаётся новая сессия.
+
+        **Возвращает:**
+            None
+
+        **Исключения:**
+            PhotoNotFoundError: Если фото с указанным `photo_id` не существует.
+            PhotoFileError: Если не удалось удалить физический файл (при немедленном удалении).
+                При отложенном удалении ошибка не выбрасывается, а логируется в `after_commit`.
+
+        **Пример использования:**
+            >>> photo_service = get_photo_service()
+            >>> try:
+            ...     photo_service.delete_photo(123)
+            ...     print("Фото удалено")
+            ... except PhotoNotFoundError:
+            ...     print("Фото не найдено")
+            ... except PhotoFileError as e:
+            ...     print(f"Ошибка удаления файла: {e}")
+
+        **Примечания:**
+            - Физический файл удаляется **до** удаления записи из БД. Это предотвращает ситуацию,
+            когда запись удалена, а файл остался (из-за ошибки удаления файла транзакция откатится).
+            - Благодаря использованию `_del_file`, при наличии активной сессии с поддержкой отложенного удаления,
+            файл будет удалён только после успешного коммита, что сохраняет атомарность.
+            - Если файл уже отсутствует на диске, метод всё равно удалит запись из БД (файл не мешает).
         """
         self.logger.debug(f"Удаление фото id={photo_id}")
 
@@ -5701,10 +5810,20 @@ class PhotoService(
 
             repo = self._get_repo(sess)
             photo = repo.get_by_id(photo_id)
+
             if photo is None:
                 raise PhotoNotFoundError(photo_id)
 
+            # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
+            # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
+            # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
+            # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
+            # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
+            # через _delete_entity (который не трогает файл). Это корректно и атомарно.
+
+            # Удаляем физический файл (или добавляем в отложенное удаление)
             file_path = os.path.join(self._storage_path, photo.file_path)
+
             # Удаляем файл
             err_text = self._del_file(file_path, session = sess)
             if err_text is not None:

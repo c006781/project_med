@@ -77,6 +77,8 @@ import os
 
 from app.utils.logger.logger import AppLogger
 
+from app.utils.file_deletions import del_file_and_parent_dir
+
 # try:
 from app.database.database_shema.clinic import Base as Base
 # except ImportError as e:
@@ -123,6 +125,19 @@ class Database:
         >>> with db.session_scope() as session:
         ...     patients = session.query(Patient).all()
         >>> db.close()
+
+    **Примечание о регистрации обработчика `after_commit`**:
+        Обработчик `delete_pending_files` регистрируется при инициализации класса
+        сессии (создаваемого через `sessionmaker`) и автоматически вызывается после
+        каждого успешного коммита. Для предотвращения повторной регистрации
+        используется флаг `Session._after_commit_registered`.
+
+        При откате транзакции (rollback) список отложенных удалений
+        (`session._pending_deletions`) очищается, файлы не удаляются.
+
+        Обработчик использует захваченный в замыкании логгер (`self.logger`), что
+        безопасно, поскольку время жизни экземпляра `Database` совпадает с жизнью
+        класса сессии.
     """
 
 
@@ -179,48 +194,76 @@ class Database:
             bind=self.engine,
             future=True
         )
+
+        # Регистрируем обработчик только один раз для данного класса сессии
+        if not hasattr(Session, '_after_commit_registered'):
+
+            logger = self.logger
+
+            # Регистрируем обработчик отложенного удаления файлов (один раз для всех сессий)
+            # @event.listens_for(self.Session, "after_commit")
+
+            # Регистрация обработчика отложенного удаления файлов.
+            # Каждый экземпляр Database создаёт свой класс сессии через sessionmaker,
+            # поэтому регистрация для этого конкретного класса сессии выполняется
+            # ровно один раз. Если в будущем будет создан новый экземпляр Database
+            # (например, при перезагрузке конфигурации), он создаст новый класс
+            # сессии и новый обработчик – это корректно, так как старый экземпляр
+            # Database будет закрыт и больше не используется.
+            @event.listens_for(Session, "after_commit")
+            def delete_pending_files(session, *args):
+                if not hasattr(session, '_pending_deletions'):
+                    logger.warning("session._pending_deletions не определён")
+                    return
+
+                items_error = []
+
+                items = session._pending_deletions.copy()
+                session._pending_deletions.clear() 
+
+                for item in items:
+                    try:
+                        # Поддержка старого формата (строка) и нового (словарь)
+                        if isinstance(item, str):
+                            path = item  # указатель на файл
+                            remove_parent_if_empty = False # нужно ли удалять род папку
+                            force = False # нужно ли удалять род папку если она не пустая
+
+                        elif isinstance(item, dict):
+                            path = item.get('path')
+                            remove_parent_if_empty = item.get('remove_parent_if_empty', False)
+                            force = item.get('force', False)
+
+                        else:
+                            err_text = f"Unexpected item type: {type(item)}"
+                            logger.error(err_text)
+                            raise ValueError(err_text)
+
+                        if not path:
+                            logger.warning("Попытка запланировать удаление пустого пути, игнорируем")
+                            continue
+
+                        del_file_and_parent_dir( # физическое удаление
+                            file_path = path, 
+                            remove_parent_if_empty = remove_parent_if_empty,
+                            force = force,
+                            logger = logger
+                        )                 
+
+                    except Exception as e:
+                        logger.warning(f"Ошибка при удалении {item}: {e}")
+                        
+                        # при ошибке переходим к следующему элементу
+                        items_error.append(item)
+
+                # после цикла список должен быть пуст, но на всякий случай:
+                session._pending_deletions = items_error + session._pending_deletions 
+
+            Session._after_commit_registered = True
+
         self.Session = scoped_session(
             Session
         )
-
-        # Регистрируем обработчик отложенного удаления файлов (один раз для всех сессий)
-        # @event.listens_for(self.Session, "after_commit")
-        @event.listens_for(Session, "after_commit")
-        def delete_pending_files(session, *args):
-            items = getattr(session, '_pending_deletions', [])
-            for item in items:
-                # Поддержка старого формата (строка) и нового (словарь)
-                if isinstance(item, str):
-                    path = item  # указатель на файл
-                    remove_parent = False # нужно ли удалять род папку
-                else:
-                    path = item.get('path')
-                    remove_parent = item.get('remove_parent', False)
-
-                try:
-                    if path and os.path.exists(path):
-                        os.remove(path)
-                        self.logger.debug(f"Удалён отложенный файл: {path}")
-
-                except Exception as e:
-                    self.logger.warning(f"Не удалось удалить {path}: {e}")
-
-                if not remove_parent:
-                    continue
-
-                try:
-                    # Удаляем родительскую папку, если она стала пустой
-                    parent_dir = os.path.dirname(path)
-                    if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-                        try:
-                            os.rmdir(parent_dir)
-                            self.logger.debug(f"Удалена пустая папка: {parent_dir}")
-                        except OSError as e:
-                            self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
-                except Exception as e:
-                    self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
-
-            session._pending_deletions.clear()
 
         # Автоматическое создание таблиц (если их нет)
         Base.metadata.create_all(self.engine)
@@ -265,15 +308,18 @@ class Database:
             - Автоматический коммит при успешном завершении блока.
             - Откат (rollback) при возникновении исключения.
             - Закрытие сессии и удаление привязки к потоку в блоке `finally`.
+            - Инициализацию атрибута `session._pending_deletions` (список путей для
+              отложенного удаления файлов после коммита).
 
-        Он работает следующим образом:
-        1. Создаёт сессию.
-        2. Возвращает сессию в контексте with.
-        3. Если в контексте не было ошибок, коммитит сессию.
-        4. Если была ошибка, откатывает сессию.
-        5. Закрывает сессию и удаляет привязку к потоку.
-        
-        Это помогает безопасно работать с сессиями, не забывая коммитить или откатывать.
+        Алгоритм:
+            1. Создаёт сессию.
+            2. Гарантирует наличие атрибута `_pending_deletions` (пустой список).
+            3. Возвращает сессию в контексте `with`.
+            4. Если в контексте не было ошибок, коммитит сессию. После коммита
+               обработчик `after_commit` удаляет файлы из `_pending_deletions`.
+            5. Если была ошибка, откатывает сессию и очищает `_pending_deletions`
+               (файлы не удаляются).
+            6. Закрывает сессию и удаляет привязку к потоку.
 
         Исключения:
             Любое исключение, возникшее внутри блока, пробрасывается после отката.
@@ -281,7 +327,8 @@ class Database:
         session = self.get_session()
 
         # Создаём список для отложенных удалений, привязанный к сессии
-        session._pending_deletions = []
+        if not hasattr(session, '_pending_deletions'):
+            session._pending_deletions = []
 
         try:
             # Возвращает сессию в контексте with
@@ -289,14 +336,19 @@ class Database:
 
             # Если в контексте не было ошибок, коммитит сессию
             session.commit()
+
             self.logger.debug(f"Коммит сессии: {session}")
 
         except Exception as e:
             self.logger.exception(f"Ошибка: {e}")
+
             # При откате просто очищаем список, файлы не удаляем
-            session._pending_deletions.clear()
+            if hasattr(session, '_pending_deletions'):
+                session._pending_deletions.clear()
+
             # Если была ошибка, откатывает сессию
             session.rollback()
+
             raise
         finally:
             # Закрывает сессию и удаляет привязку к потоку

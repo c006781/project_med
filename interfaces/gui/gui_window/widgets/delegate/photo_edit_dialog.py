@@ -37,6 +37,7 @@ import shutil
 from typing import List, Optional, Tuple
 import uuid
 
+from app.utils.file_deletions import schedule_deletion
 from app.utils.logger.logger import AppLogger
 
 from PySide6.QtWidgets import (
@@ -109,6 +110,7 @@ class PhotoEditDialog(QDialog):
         self._logger = value
 
 
+    @property
     def MAX_FILES(self) -> int:
         try:
             return self._MAX_FILES
@@ -117,7 +119,7 @@ class PhotoEditDialog(QDialog):
 
         return self._MAX_FILES
 
-    @logger.setter
+    @MAX_FILES.setter
     def MAX_FILES(self, value:int):
         self._MAX_FILES:int = value
 
@@ -196,12 +198,37 @@ class PhotoEditDialog(QDialog):
         """
         if self._new_path and self._temp_dir:
             full_path = os.path.join(self._temp_dir, self._new_path)
-            if os.path.exists(full_path):
-                try:
-                    os.remove(full_path)
-                    self.logger.debug(f"Удалён временный файл {full_path} при отмене")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
+
+            schedule_deletion(
+                path=full_path,
+                session=None,
+                remove_parent_if_empty=False,
+                force=False,
+                logger=self.logger
+            )
+        
+            # if os.path.exists(full_path):
+            #     try:
+            #         os.remove(full_path)
+            #         self.logger.debug(f"Удалён временный файл {full_path} при отмене")
+            #     except OSError as e:
+            #         self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
+            
+            self._new_path = None
+            self._current_path = None   # так как удалённый файл больше не актуален
+
+        # Если диалог был открыт без изменений (не было выбрано новое фото)
+        # и временная папка существует и пуста – удаляем её
+        if self._temp_dir and not self._new_path and os.path.exists(self._temp_dir):
+            if not os.listdir(self._temp_dir):
+                schedule_deletion(
+                    path=self._temp_dir,
+                    session=None,
+                    remove_parent_if_empty=False,
+                    force=False,
+                    logger=self.logger
+                )
+
         super().reject()
 
     @AppLogger.get_instance(
@@ -733,12 +760,19 @@ class PhotoEditDialog(QDialog):
         # Удаляем предыдущий временный файл, если он был
         if self._new_path and self._temp_dir:
             old_full = os.path.join(self._temp_dir, self._new_path)
-            if os.path.exists(old_full):
-                try:
-                    os.remove(old_full)
-                    self.logger.debug(f"Удалён предыдущий временный файл {old_full} при выборе нового")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить предыдущий файл {old_full}: {e}")
+            schedule_deletion(
+                path=old_full,
+                session=None,
+                remove_parent_if_empty=False,
+                force=False,
+                logger=self.logger
+            )
+            # if os.path.exists(old_full):
+            #     try:
+            #         os.remove(old_full)
+            #         self.logger.debug(f"Удалён предыдущий временный файл {old_full} при выборе нового")
+            #     except OSError as e:
+            #         self.logger.warning(f"Не удалось удалить предыдущий файл {old_full}: {e}")
 
         # Загружаем preview
         pixmap = QPixmap(file_path)
@@ -778,22 +812,38 @@ class PhotoEditDialog(QDialog):
             else:
                 full_path = os.path.join(self._storage_path, self._current_path)
 
-            if os.path.exists(full_path):
-                try:
-                    os.remove(full_path)
-                    self.logger.debug(f"Удалён файл {full_path}")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
+            schedule_deletion(
+                path=full_path,
+                session=None,
+                remove_parent_if_empty=False,
+                force=False,
+                logger=self.logger
+            )
+
+            # if os.path.exists(full_path):
+            #     try:
+            #         os.remove(full_path)
+            #         self.logger.debug(f"Удалён файл {full_path}")
+            #     except OSError as e:
+            #         self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
 
         # Удаляем временный файл, если был выбран новый (и он ещё не стал current_path)
         if self._new_path and self._temp_dir:
             full_path = os.path.join(self._temp_dir, self._new_path)
-            if os.path.exists(full_path):
-                try:
-                    os.remove(full_path)
-                    self.logger.debug(f"Удалён временный файл {full_path} при удалении фото")
-                except OSError as e:
-                    self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
+
+            schedule_deletion(
+                path=full_path,
+                session=None,
+                remove_parent_if_empty=False,
+                force=False,
+                logger=self.logger
+            )
+            # if os.path.exists(full_path):
+            #     try:
+            #         os.remove(full_path)
+            #         self.logger.debug(f"Удалён временный файл {full_path} при удалении фото")
+            #     except OSError as e:
+            #         self.logger.warning(f"Не удалось удалить временный файл {full_path}: {e}")
 
         self._current_path = None
         self._new_path = None
@@ -874,4 +924,16 @@ class PhotoEditDialog(QDialog):
         """
             
         self._new_description = self.desc_edit.toPlainText()
+
+        # После сохранения удаляем временную папку, если она пуста
+        if self._temp_dir and os.path.exists(self._temp_dir):
+            if not os.listdir(self._temp_dir):
+                schedule_deletion(
+                    path=self._temp_dir,
+                    session=None,
+                    remove_parent_if_empty=False,
+                    force=False,
+                    logger=self.logger
+                )
+
         super().accept()

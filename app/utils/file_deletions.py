@@ -181,22 +181,19 @@ def schedule_deletion(
 
     logger.debug(f"Запланировано удаление: {path}")
 
-    return True, None
-
-    
+    return True, None 
     
 def del_file_and_parent_dir(
     file_path: str,
     remove_parent_if_empty: bool = False,
     force: bool = False,    
-    logger: Optional[AppLogger] = None,
-        
+    logger: Optional[AppLogger] = None, 
 ) -> Tuple[bool, Optional[str]]:    
     """
-    Немедленно удаляет файл и, при необходимости, родительскую папку.
+    Немедленно удаляет файл , при необходимости, родительскую папку. Или просто указанную папку
 
     Алгоритм:
-        1. Удаляет файл через `delete_file_safely`.
+        1. Удаляет файл через `delete_file_safely`. или папку через 
         2. Если удаление файла прошло успешно и `remove_parent_if_empty == True`,
            пытается удалить родительскую папку через `delete_empty_directory(force=False)`.
         3. Если удаление файла завершилось ошибкой, родительская папка НЕ удаляется,
@@ -224,15 +221,36 @@ def del_file_and_parent_dir(
             enable_file_logging = 'user',
             use_name_in_filename = False, # 'system',
         )
-
     
     if not file_path:
-        logger.warning("Попытка запланировать удаление пустого файла, игнорируем")
+        logger.warning("Попытка запланировать удаление объекта по пустому пути, игнорируем")
         return False, None    
 
-    #  удаляем немедленно, но с предупреждением
+  
+    if not os.path.exists(file_path):
+        logger.warning(f"Попытка удалить несуществующий файл / папку: {file_path}")
+        return False, None
 
-    success, error = delete_file_safely(file_path, logger=logger)
+    if_isfile = os.path.isfile(file_path) # проверяем файл ли это 
+    if_isdir= os.path.isdir(file_path) # проверяем папка ли это ли это 
+
+    if not if_isfile and not if_isdir:
+        logger.warning(f"Попытка удалить не типичный объект: {file_path}")
+        return False, None
+
+    if if_isfile:
+        #  удаляем немедленно файл, но с предупреждением
+        success, error = delete_file_safely(file_path, logger=logger)
+    elif if_isdir:
+        #  удаляем немедленно папку, но с предупреждением
+        success, error = delete_empty_directory(
+            file_path,
+            force = force,    
+            logger=logger
+        )
+    else:        
+        logger.warning(f"Попытка удалить не типичный объект: {file_path}")
+        return False, None
 
     if (
         not remove_parent_if_empty
@@ -242,16 +260,14 @@ def del_file_and_parent_dir(
         error is not None
     ):
         return success, error
-
-    # Удаляем родительскую папку, если она стала пустой
-
-    parent_dir = os.path.dirname(file_path)
-
     
+    # Удаляем родительскую папку, если она стала пустой
+    parent_dir = os.path.dirname(file_path) 
+
     if not parent_dir:
         # Файл находится в корневой директории (без родителя)
         logger.debug("Файл в корне, родительская папка не удаляется")
-        return True, None   
+        return True, None 
      
     return delete_empty_directory(
         parent_dir,

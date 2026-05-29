@@ -1524,10 +1524,12 @@ class BaseService(
                     not os.path.isabs(old_value)
                 ):
                     full_old_path = os.path.join(storage_path, old_value)
+                    
                     # Удаляем файл
                     self._del_file(
                         full_old_path, 
-                        session = session
+                        session = session, 
+                        if_delete_parent_dir=True, 
                     )
 
                     # if os.path.exists(full_old_path):
@@ -2210,6 +2212,11 @@ class BaseService(
             # вызывать _del_file до _delete_entity. Не переносите этот блок в _delete_entity,
             # иначе при вызове _delete_entity из других мест (например, из PhotoService.delete_photo)
             # файлы будут удаляться повторно.
+
+            # ВНИМАНИЕ: Этот блок удаляет физические файлы, связанные с удаляемой записью.
+            # Предполагается, что на файл нет других ссылок в БД (уникальная связь).
+            # Для сущностей, где фото может быть переиспользовано, необходимо переопределить delete
+            # и не вызывать super().delete (или удалять файлы вручную после проверки использования).
             storage_path = None
             for field_name, config in self._field_configs.items():
                 if config.get('widget_type') != 'image_thumbnail':

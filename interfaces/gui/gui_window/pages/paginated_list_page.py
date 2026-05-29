@@ -801,14 +801,16 @@ class PaginatedListPage(
         # elif isinstance(file_path, List[str]):
         elif isinstance(file_path, list):
             for path in file_path:
-                self._del_file(
+                self._del_file(  # отложенное удаление
                     path,
                     session=session,
                     if_delete_parent_dir=if_delete_parent_dir,
                     force=force,
                 )
         else:
-            raise TypeError(f"Invalid type for file_path: {type(file_path)}")
+            err_rext = f"Invalid type for file_path: {type(file_path)}"
+            self.logger.error(err_rext)
+            raise TypeError(err_rext)
 
     def _is_file_in_temp_dir(self, temp_dir: str, value: str) -> bool:
         """
@@ -990,8 +992,13 @@ class PaginatedListPage(
         self,
         new_id: int,
         dto: Any,
-        old_id: Optional[int] = None
-    ) -> Tuple[Any, List[str], List[str]]:
+        old_id: Optional[int] = None,
+        if_del_copied_dest_paths_in_err: bool = True,
+
+        session: Optional[Session] = None,
+    ) -> Tuple[
+        Any, List[str], List[str], List[str], List[str]
+    ]:
         """
         Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
         в основное хранилище в папку `app_{new_id}`. Обновляет пути в DTO на относительные.
@@ -1016,6 +1023,8 @@ class PaginatedListPage(
             dto (Any): DTO сущности, содержащий поля с путями к фото.
             old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
                                     Если не указан, используется new_id (для уже сохранённых строк).
+            session  (Optional[Session]): Сессия SQLAlchemy, необходимая для доступа
+                к списку отложенных удалений. Должна быть передана из вызывающего метода.
 
         Returns:
             Any: Обновлённый DTO (те же поля, но с изменёнными путями).
@@ -1042,6 +1051,7 @@ class PaginatedListPage(
 
         # any_success = False
         error_messages = []
+
         copied_dest_paths = []  # ЦЕЛЕВЫЕ файлы в хранилище (для отката при ошибке)
         copied_files = []          # исходные файлы во временной папке (будут удалены после переноса)
         old_files = []   # старые файлы в хранилище (будут удалены после успешного update)
@@ -1084,22 +1094,28 @@ class PaginatedListPage(
 
             except Exception as e:
                 self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
-                # ОТКАТ: удаляем уже скопированные целевые файлы
-                for dest in copied_dest_paths:
-                    self._del_file(
-                        dest,
-                        session=None, # намеренно. чтобы немедленно удалить
-                        if_delete_parent_dir=False,
-                        force=False
-                    )
+                
                 # Очищаем список, чтобы не пытаться удалить их повторно
                 error_messages.append(str(e))
                 # Не обновляем DTO, файл остаётся во временной папке
+        
+        if if_del_copied_dest_paths_in_err and len(copied_dest_paths) > 0 :
+            # ОТКАТ: удаляем уже скопированные целевые файлы
+            self._del_file( 
+                copied_dest_paths,
+                # session=None, # намеренно. чтобы немедленно удалить (принудительно)
+                session=session, 
+                if_delete_parent_dir=False,
+                force=False
+            )
+            copied_dest_paths.clear()
+
 
         if error_messages:
             err_text = f"Не удалось перенести файлы из временной папки: {', '.join(error_messages)}"
             self.logger.error(err_text)
-            raise RuntimeError(err_text)
+            if if_del_copied_dest_paths_in_err:
+                raise RuntimeError(err_text)
 
 
         # Удаляем временную папку после успешного переноса
@@ -1113,7 +1129,7 @@ class PaginatedListPage(
         #         except OSError as e:
         #             self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
 
-        return dto, copied_files, old_files
+        return dto, copied_files, old_files, copied_dest_paths, error_messages
 
     # def _move_files_from_temp_to_storage(self, entity_id: int, dto: Any) -> Any:
     #     """
@@ -2454,7 +2470,8 @@ class PaginatedListPage(
         self, 
         temp_id: int, 
         created_id: int,
-        session: Optional[Session] = None
+        session: Optional[Session] = None,
+        visited=None, 
     ):
         """
         Находит и рекурсивно сохраняет всех прямых потомков новой строки.
@@ -2482,22 +2499,41 @@ class PaginatedListPage(
         Returns:
             None
         """
+        if visited is None:
+            visited = set()
 
-        # Находим и рекурсивно сохраняем всех прямых потомков
-        for child_key in list(self._draft_registry.get_keys_by_prefix("__new__")):
-            child_data = self._draft_registry.get(child_key)
-            if child_data and hasattr(child_data["dto"], 'parent_id'):
-                child_dto = child_data["dto"]
-                if child_dto.parent_id == temp_id:
-                    child_temp_id = int(child_key.split(':')[-1])
+        if temp_id in visited:
+            self.logger.error(f"Циклическая ссылка: {temp_id} уже обработан")
+            return
+        
+        visited.add(temp_id)
+        try:
+            # Находим и рекурсивно сохраняем всех прямых потомков
+            for child_key in list(self._draft_registry.get_keys_by_prefix("__new__")):
+                child_data = self._draft_registry.get(child_key)
+                if child_data and hasattr(child_data["dto"], 'parent_id'):
+                    child_dto = child_data["dto"]
+                    if child_dto.parent_id == temp_id:
+                        child_temp_id = int(child_key.split(':')[-1])
 
-                    # Защита от зацикливания (если parent_id указывает на самого себя)
-                    if child_temp_id == temp_id:
-                        self.logger.error(f"Обнаружена циклическая ссылка: parent_id = {child_dto.parent_id} для строки {temp_id}")
-                        continue
+                        # Защита от зацикливания (если parent_id указывает на самого себя)
+                        if child_temp_id == temp_id:
+                            self.logger.error(
+                                f"Обнаружена циклическая ссылка: "
+                                f"parent_id = {child_dto.parent_id} "
+                                f"для строки {temp_id}"
+                            )
+                            continue
 
-                    # Рекурсивно сохраняем потомка, передавая реальный ID текущей строки
-                    self._save_new_row_recursive(child_temp_id, created_id, session=session)
+                        # Рекурсивно сохраняем потомка, передавая реальный ID текущей строки
+                        self._save_new_row_recursive(
+                            child_temp_id, 
+                            created_id, 
+                            session=session,
+                            isited=visited,
+                        )
+        finally:
+            visited.remove(temp_id)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2652,6 +2688,12 @@ class PaginatedListPage(
             self._draft_registry.set(key, {"dto": dto})
             self.logger.debug(f"Обновлён parent_id новой строки {temp_id} -> {real_parent_id}")
 
+        # ВНИМАНИЕ: порядок важен – сначала создаём запись в БД, чтобы получить реальный ID,
+        # затем переносим файлы из временной папки в папку с реальным ID,
+        # и обновляем DTO, чтобы в БД сохранились относительные пути. 
+        # (temp_id - может быть отрицательный. по этом нужен именно реальный created.id)
+        # Отказаться от второго вызова update невозможно без кардинальной переработки логики.  
+        
         # Сохраняем строку в БД
         try:
             created = self.service.create(dto, session=session)
@@ -2672,11 +2714,11 @@ class PaginatedListPage(
             raise
 
         # Переносим файлы из временной папки в основное хранилище
-        # created = self._move_files_from_temp_to_storage(temp_id, created)
-        updated_dto, copied_files, old_files  = self._move_files_from_temp_to_storage(
+        updated_dto, copied_files, old_files, copied_dest_paths, _  = self._move_files_from_temp_to_storage(
             created.id, 
             created, 
-            old_id=temp_id
+            old_id=temp_id, 
+            session=session, 
         )
 
         # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
@@ -2697,36 +2739,57 @@ class PaginatedListPage(
         try:
             updated_dto = self.service.update(updated_dto, session=session)
         except Exception as e:
+
+            # Логируем ошибку и пробрасываем дальше (транзакция откатится)
+            self.logger.error(f"Ошибка при переносе файлов или сохранении строки {temp_id}: {e}")
             
-             # При ошибке сохраняем удаляем только что скопированные файлы (откат)
-            for src in copied_files:
-                delete_file_safely(src, logger = self.logger)
-                # if os.path.exists(src):
-                #     try:
-                #         os.remove(src)
-                #         self.logger.debug(f"Удалён скопированный файл при ошибке: {src}")
-                #     except OSError as err:
-                #         self.logger.warning(f"Не удалось удалить {src}: {err}")
-            # Старые файлы не удаляем – они остались как были
-            # Временную папку всё равно чистим
-            self._cleanup_temp_dir(temp_id)
+             # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
+            
+            for files in [
+                # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+                copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+                # old_files,  # Удаляем старые файлы (заменяемые)
+            ]:
+                for file in files:
+                    delete_file_safely(  # удаление сразу
+                        file, 
+                        logger = self.logger
+                    )
+
+            # Не удаляем временную папку! Она остаётся для повторной попытки.
+            #    Пользователь сможет исправить ошибку и сохранить снова. 
+            # # Старые файлы не удаляем – они остались как были
+            # # Временную папку всё равно чистим
+            # # self._cleanup_temp_dir(temp_id)
+
+            # schedule_deletion(
+            #     path=temp_id,
+            #     session=session,
+            #     remove_parent_if_empty=False,
+            #     force=False,
+            #     logger=self.logger
+            # )
 
             raise
 
-        # finally:
-        # Если update успешен , удаляем скопированные файлы (они ещё не привязаны к БД)
-        #     
-        # self._del_time_file(copied_files, temp_id)
-        # self._delete_old_files(old_files) 
-
+        # Временные файлы (copied_files) и временную папку НЕ удаляем.
+        # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
+        # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
         for files in [
-            copied_files,  # Удаляем временные файлы (скопированные из временной папки) отложенно
-            old_files,  # Удаляем старые файлы (заменяемые) отложенно
+            # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+            # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+            old_files,  # Удаляем старые файлы (заменяемые)
         ]:
-            self._del_file(files, session=session)
+            self._del_file(  # отложенное удаление
+                files, 
+                session=session
+            ) 
 
-        # Принудительно удаляем временную папку, если она осталась
-        self._cleanup_temp_dir(temp_id)
+        # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
+        # (через discard_entity_subtree или clear_entity_drafts)
+        # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
+        # # Принудительно удаляем временную папку, если она осталась
+        # self._cleanup_temp_dir(temp_id)
 
         created = updated_dto   # теперь created ссылается на окончательный DTO
 
@@ -3293,22 +3356,22 @@ class PaginatedListPage(
     #     self._draft_registry.delete_entity_status(self._entity_type, entity_id)
     #     self._draft_registry.discard(f"__counter__:{temp}")
 
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _clear_selected_dto_dict(self, dict_entity_id: Dict[int, Any], new_dto = None) -> None:
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _clear_selected_dto_dict(self, dict_entity_id: Dict[int, Any], new_dto = None) -> None:
 
-        if dict_entity_id is None:
-            return
+    #     if dict_entity_id is None:
+    #         return
 
-        # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-        if self.selected_dto and self.selected_dto.id in dict_entity_id:
-            self.selected_dto = new_dto
+    #     # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
+    #     if self.selected_dto and self.selected_dto.id in dict_entity_id:
+    #         self.selected_dto = new_dto
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -3883,9 +3946,9 @@ class PaginatedListPage(
         # #     self._save_child_components_for_parent(self.selected_dto.id)
 
         # Если текущая выбранная строка была новой – обновляем selected_dto
-        # if self.selected_dto and self.selected_dto.id in new_map:
-        #     self.selected_dto = new_map[self.selected_dto.id]
-        self._clear_selected_dto_dict(new_map, new_map[self.selected_dto.id])
+        if self.selected_dto and self.selected_dto.id in new_map:
+            self.selected_dto = new_map[self.selected_dto.id]
+        # self._clear_selected_dto_dict(new_map, new_map[self.selected_dto.id])
         
         # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID) и для всех существующих строк, у которых есть такие черновики
         self._save_child_changes(new_map, session=session)
@@ -4069,7 +4132,11 @@ class PaginatedListPage(
                 continue
 
             # Переносим файлы из временной папки в основное хранилище
-            dto, copied_files, old_files  = self._move_files_from_temp_to_storage(entity_id, dto)
+            dto, copied_files, old_files, copied_dest_paths , _ = self._move_files_from_temp_to_storage(
+                entity_id, 
+                dto, 
+                session=session, 
+            )
 
             # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
             # temp_dir = self._get_temp_dir(entity_id)
@@ -4081,7 +4148,7 @@ class PaginatedListPage(
             # --------------------------------------------------------------
             # Сохраняем обновлённый DTO в БД
             # --------------------------------------------------------------
-            temp_err = False
+            # temp_err = False
             try:
                 updated = self.service.update(
                     dto, 
@@ -4099,26 +4166,44 @@ class PaginatedListPage(
                 self._clear_selected_dto(entity_id, updated)
 
             except Exception as e:
-                # При ошибке удаляем уже скопированные файлы (они в основном хранилище)
+
+                # Логируем ошибку и пробрасываем дальше (транзакция откатится)
+                self.logger.error(f"Ошибка при сохранении строки {entity_id}: {e}")
+
+                # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
                 for files in [
-                    old_files,
-                    copied_files,
+                    # copied_files,  # Удаляем временные файлы (скопированные из временной папки) 
+                    copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+                    # old_files,  # Удаляем старые файлы (заменяемые) 
                 ]:
                     for file in files:
-                         delete_file_safely(
+                         delete_file_safely( # удаление сразу
                              file,
                              logger=self.logger
                          )
-                raise
+                # Временную папку не удаляем – оставляем для повторной попытки
+                # Пробрасываем исключение, транзакция откатится
 
+                raise
+            
+            # Временные файлы (copied_files) и временную папку НЕ удаляем.
+            # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
+            # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
             for files in [
-                copied_files,  # Удаляем временные файлы (скопированные из временной папки) отложенно
+                # copied_files,  # Удаляем временные файлы (скопированные из временной папки) отложенно
+                # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
                 old_files,  # Удаляем старые файлы (заменяемые) отложенно
             ]:
-                self._del_file(files, session=session)
+                self._del_file( # отложенное удаление
+                    files, 
+                    session=session
+                )
 
-
-
+            # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
+            # (через discard_entity_subtree или clear_entity_drafts)
+            # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
+            # # Принудительно удаляем временную папку, если она осталась
+            # self._cleanup_temp_dir(temp_id)
 
             # уточнение:
             # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
@@ -5232,6 +5317,10 @@ class PaginatedListPage(
 
         # self.logger.debug("=== _setup_delegates START ===")
 
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            self.logger.warning("source_model не создан, делегаты не устанавливаются")
+            return
+    
         # Проходим по всем видимым столбцам таблицы
         for visible_idx in range(self.source_model.columnCount()):
             # Получаем объект TableColumn по видимому индексу

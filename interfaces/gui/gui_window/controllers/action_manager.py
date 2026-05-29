@@ -36,7 +36,8 @@
     >>> self.main_window.action_manager.connect_button('save_all', self.save_btn)
 """
 
-from typing import Dict, Optional, Callable
+from typing import Dict, List, Optional, Callable
+import weakref
 
 from app.utils.logger.logger import AppLogger
 
@@ -79,6 +80,29 @@ class ActionManager(QObject):
 
     action_changed = Signal(str, bool)  # имя действия, checked
 
+
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='gui.ActionManager',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
+
     @AppLogger.get_instance(
         name='ActionManager',
         enable_file_logging='system',
@@ -93,8 +117,10 @@ class ActionManager(QObject):
         """
 
         super().__init__(parent)
+
         self._actions: Dict[str, QAction] = {}
-        self.logger = AppLogger.get_instance('gui.ActionManager')
+        self._action_widgets: Dict[str, List[weakref.ref]] = {}
+
 
     # ----------------------------------------------------------------------
     # Регистрация действий
@@ -253,6 +279,20 @@ class ActionManager(QObject):
             # self.logger.debug(f"Действие '{name}' удалено из реестра")
 
         if name in self._actions:
+            # Отвязываем действие от всех кнопок, которые на него ссылаются
+            if name in self._action_widgets:
+                for widget_ref in self._action_widgets[name]:
+                    widget = widget_ref()
+                    if widget is not None and hasattr(widget, 'defaultAction'):
+                        
+                        # Убираем действие у кнопки, чтобы она не ссылалась на удаляемый объект
+                        widget.setDefaultAction(None)
+
+                # Удаляем запись о связях
+                self._action_widgets.pop(name, None)
+
+        # Удаляем само действие
+        if name in self._actions:
             action = self._actions.pop(name, None)
             if action:
                 action.deleteLater()
@@ -393,6 +433,10 @@ class ActionManager(QObject):
         action = self.get_action(name)
         if action and hasattr(button, 'setDefaultAction'):
             button.setDefaultAction(action)
+            # Сохраняем слабую ссылку на кнопку для последующей отвязки
+            if name not in self._action_widgets:
+                self._action_widgets[name] = []
+            self._action_widgets[name].append(weakref.ref(button))
         else:
             self.logger.warning(f"Не удалось привязать действие '{name}' к кнопке {button}")
 

@@ -43,6 +43,7 @@ from typing import (
     Optional, 
     # Optional,
 )
+
 from collections import OrderedDict
 
 import weakref
@@ -364,6 +365,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
 
         self.storage_path = path
 
+        self.clear_cache() # очищаем общий кэш миниатюр
+
     @AppLogger.get_instance(
         name='ImageThumbnailDelegate',
         # share_file_with = 'system',
@@ -655,9 +658,10 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         if model is None:
             return
         
-        idx = model.index(row, 0)
-        if idx.isValid():
-            parent.update(idx)
+        top_left = model.index(row, 0)
+        bottom_right = model.index(row, model.columnCount() - 1)
+        # if top_left.isValid():
+        parent.update(top_left, bottom_right)
 
         # # Сохраняем в кэш (ключ – полный путь, но мы его не знаем – можно передавать)
         # # В упрощённом варианте – обновляем ячейку, заставив перерисовать
@@ -814,14 +818,18 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         if os.path.isabs(rel_path):
             return rel_path if os.path.exists(rel_path) else None
 
-        # Проверяем временную папку черновика
+        # Проверяем временную папку черновика  (через слабую ссылку на страницу)
         # # if self._registry and entity_id is not None and self._entity_type:
         # if self._page and entity_id is not None:
         #     # Получаем существующую временную папку (если есть)
         #     temp_dir = self._page._get_temp_dir(entity_id)
 
         page = self._page_ref() if hasattr(self, '_page_ref') else None
-        if page and entity_id is not None:
+        if (
+            page is not None
+        ) and (
+            entity_id is not None
+        ):
             temp_dir = page._get_temp_dir(entity_id)
             if temp_dir:
                 candidate = os.path.join(temp_dir, rel_path)
@@ -983,8 +991,12 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         #     temp_dir = self._registry.get(temp_key)
         if parent_id is not None :
             # Всегда создаём временную папку для любых строк при редактировании
-            temp_dir = page._ensure_temp_dir(parent_id)
-
+            # temp_dir = page._ensure_temp_dir(parent_id)
+            try:
+                temp_dir = page._ensure_temp_dir(parent_id)
+            except Exception as e:
+                self.logger.error(f"Не удалось создать временную папку для parent_id={parent_id}: {e}")
+                return
             # # Получаем существующую временную папку (если есть)
             # temp_dir = self._page._get_temp_dir(parent_id)
             
@@ -1020,6 +1032,10 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             #             break
             #         parent_widget = parent_widget.parent()
 
+        if temp_dir is None:
+            self.logger.error(f"Не удалось получить временную папку для parent_id={parent_id}")
+            return
+        
         dialog = PhotoEditDialog(
             parent=self.parent(),
             current_path=full_path if full_path and os.path.exists(full_path) else None,
@@ -1036,6 +1052,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             new_path, new_description = dialog.get_result()
             if new_path is None and new_description is None:
                 # Фото удалено – очищаем поле
+                # Полное удаление фото (без изменений описания)
                 model.setData(index, "", Qt.EditRole)
                 self._update_description_field(model, index.row(), "")
                 # if self._description_field:
@@ -1046,7 +1063,11 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 #             desc_index = model.index(index.row(), col)
                 #             model.setData(desc_index, "", Qt.EditRole)
                 #             break
-                                
+            elif new_path is None:
+                # Фото удалено, но описание изменено
+                model.setData(index, "", Qt.EditRole)
+                if new_description is not None:
+                    self._update_description_field(model, index.row(), new_description)                  
             else:
                 # Сохраняем относительный путь (копирование файла выполнит сервис)
                 # Пока сохраняем абсолютный путь – при сохранении строки сервис скопирует

@@ -3343,10 +3343,10 @@ class PaginatedListPage(
         if entity_id is None:
             return
         
-        if isinstance(entity_id, int):
-            # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-            if self.selected_dto and self.selected_dto.id == entity_id:
-                self.selected_dto = new_dto
+        # if isinstance(entity_id, int):
+        #     # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
+        #     if self.selected_dto and self.selected_dto.id == entity_id:
+        #         self.selected_dto = new_dto
 
         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
         if self.selected_dto and self.selected_dto.id == entity_id:

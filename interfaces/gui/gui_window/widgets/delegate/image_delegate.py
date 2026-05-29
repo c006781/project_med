@@ -294,12 +294,6 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         cls._cache.clear()
         cls._pending.clear()
 
-    @classmethod
-    def clear_cache(cls):
-        """Очищает кэш миниатюр (вызывать при уходе со страницы)."""
-        cls._cache.clear()
-        cls._pending.clear()
-
     @AppLogger.get_instance(
         name='ImageThumbnailDelegate',
         # share_file_with = 'system',

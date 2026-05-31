@@ -69,6 +69,29 @@ class DeletionContext:
 
     @classmethod
     def create(cls, session, deletion_type):
+        """
+        Создаёт контекст отложенного удаления.
+
+        **Назначение:**
+            Удобная фабрика для создания `DeletionContext`. Если `session is None`,
+            возвращает `None`, что сигнализирует о необходимости немедленного удаления.
+
+        Args:
+            session (Optional[Session]): Сессия SQLAlchemy (может быть None).
+            deletion_type (DeletionType): Тип удаления (COMMIT или ROLLBACK).
+
+        Returns:
+            Optional[DeletionContext]: Контекст отложенного удаления или None,
+                если сессия не передана.
+
+        Пример:
+            >>> ctx = DeletionContext.create(session, DeletionType.COMMIT)
+            >>> if ctx:
+            ...     # отложенное удаление
+            ... else:
+            ...     # немедленное удаление
+        """
+
         if session is None:
             cls.logger.warning(
                 "DeletionContext.create вызван без сессии – удаление файлов будет немедленным, "
@@ -89,6 +112,11 @@ class DeletionContext:
         """Возвращает True, если контекст задан (отложенное удаление)."""
         return self.session is not None and self.deletion_type is not None
 
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def ensure_deletions_dict(session: Session) -> None:
     """
     Гарантирует, что в сессии есть словарь _deletions с ключами COMMIT и ROLLBACK.
@@ -103,6 +131,12 @@ def ensure_deletions_dict(session: Session) -> None:
         if hasattr(session, '_pending_deletions') and session._pending_deletions:
             session._deletions[DeletionType.COMMIT].extend(session._pending_deletions)
             session._pending_deletions = None
+
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def add_deferred_deletion(
     ctx: DeletionContext,
     path: str,
@@ -128,12 +162,21 @@ def add_deferred_deletion(
     })
 
 
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def get_deletions_by_type(session: Session, dt: DeletionType) -> List[dict]:
     """Возвращает список отложенных удалений для указанного типа."""
     ensure_deletions_dict(session)
     return session._deletions.get(dt, [])
 
-
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def clear_deletions_by_type(session: Session, dt: DeletionType) -> None:
     """Очищает список отложенных удалений для указанного типа."""
     if hasattr(session, '_deletions') and dt in session._deletions:
@@ -275,9 +318,8 @@ def schedule_deletion(
     """
     Планирует удаление файла или папки после успешного коммита транзакции.
 
-    Если передан `session`, удаление откладывается до вызова обработчика `after_commit`.
-    Если `session` не передан или сессия неактивна, удаление выполняется немедленно
-    (через `del_file_and_parent_dir`).
+    Если передан `ctx` с активной сессией, удаление откладывается до соответствующего
+    события (COMMIT или ROLLBACK). Файлы добавляются в список `session._deletions[deletion_type]`.
 
     Args:
         path: Путь к файлу или папке.

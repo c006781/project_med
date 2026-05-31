@@ -108,6 +108,12 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
 
+
+@AppLogger.get_instance(
+    name='api.Database',
+    enable_file_logging='system',
+    use_name_in_filename=False,  # 'system'
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def _make_deletion_handler(deletion_type: DeletionType):
     """Создаёт обработчик для указанного типа отложенного удаления."""
     logger = AppLogger.get_instance(
@@ -115,7 +121,11 @@ def _make_deletion_handler(deletion_type: DeletionType):
         enable_file_logging='user',
         use_name_in_filename=False,
     )
-
+    @AppLogger.get_instance(
+        name='api.Database',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def handler(session, *args):
         items = get_deletions_by_type(session, deletion_type)
         if not items:
@@ -154,6 +164,12 @@ class Database:
         engine (sqlalchemy.engine.Engine): Движок SQLAlchemy для выполнения SQL-запросов.
         Session (scoped_session): Фабрика сессий, привязанная к текущему потоку.
         logger (AppLogger): Логгер для записи событий БД.
+
+    **Примечание о регистрации обработчиков `after_commit` и `after_rollback`:**
+        Для поддержки отложенного удаления файлов при инициализации класса сессии
+        регистрируются два обработчика: один для `after_commit` (удаляет файлы из
+        `session._deletions[COMMIT]`), другой для `after_rollback` (удаляет файлы из
+        `session._deletions[ROLLBACK]`). Регистрация происходит один раз на класс сессии.
 
     Example:
         >>> db = Database("sqlite:///clinic.db")

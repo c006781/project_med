@@ -133,6 +133,17 @@
         вручную вызывать `_load_drafts_for_children()` после операций
         `discard_entity_subtree`, `apply_subtree` и т.п.
 
+**Управление временными папками:**
+    - `_ensure_temp_dir(entity_id)` – создаёт папку, сохраняет путь в реестре
+        по ключу `__temp_dir__:{entity_type}:{entity_id}`.
+    - `_get_temp_dir(entity_id)` – возвращает путь из реестра.
+    - `_cleanup_temp_dir(entity_id)` – удаляет папку и ключ.
+    - `_move_files_from_temp_to_storage(new_id, dto, old_id=None, session=None)` – переносит все
+        файлы, находящиеся во временной папке (old_id или new_id), в основное хранилище,
+        обновляет DTO.
+    - Методы `discard_entity_subtree` и `clear_entity_drafts` переопределены для
+        автоматической очистки временной папки при отмене изменений.
+
 **Параметры инициализации (`__init__`):**
     service (BaseService): Сервис для работы с сущностью (должен реализовывать
         `get_page_filtered`, `create`, `update`, `delete`).
@@ -498,7 +509,7 @@ class PaginatedListPage(
     @property
     def original_data(self) -> Dict[int, Any]:
         try:
-            return self.AttributeError
+            return self.__original_data
         except AttributeError as e:
             self.__original_data = {}
         return self.__original_data
@@ -775,6 +786,11 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _del_file(
         self,
         file_path: Union[str, List[str]],
@@ -783,12 +799,46 @@ class PaginatedListPage(
         force: bool = False,
     ) -> Union[None, str, list]:
         """
-        Отложенное удаление файла(ов).
+        Отложенное удаление файла(ов) с поддержкой контекста транзакции.
 
-        :param ctx: Контекст отложенного удаления (сессия + тип).
-            Если None – удаление немедленное.
-            Для успешного сохранения передавать DeletionContext.create(session, DeletionType.COMMIT).
-            Для отката при ошибке передавать DeletionContext.create(session, DeletionType.ROLLBACK).
+        **Назначение:**
+            Делегирует удаление функции `schedule_deletion` из модуля `file_deletions`.
+            Если передан `ctx` с активной сессией, удаление откладывается до соответствующего
+            события COMMIT/ROLLBACK. Иначе выполняется немедленно.
+
+        **Особенности:**
+            - Для одиночного пути возвращает строку с ошибкой или None при успехе.
+            - Для списка путей возвращает список ошибок (или None, если все удалены успешно).
+            - При отложенном удалении ошибки не возвращаются сразу, а логируются в обработчике after_commit.
+
+        Args:
+            file_path (Union[str, List[str]]): Абсолютный путь к файлу или список путей.
+                Может указывать как на файл, так и на папку.
+            ctx (Optional[DeletionContext]): Контекст отложенного удаления.
+                Если None или неактивен – удаление немедленное.
+            if_delete_parent_dir (bool): Если True и удаляется **файл**, после успешного удаления
+                пытается удалить родительскую папку (только если она стала пустой).
+            force (bool): Если True и удаляется **папка**, удаляет её рекурсивно (вместе с содержимым).
+                Игнорируется для файлов.
+
+        Returns:
+            Union[None, str, list]:
+                - None – удаление прошло успешно (или запланировано).
+                - str – сообщение об ошибке для одиночного пути (при немедленном удалении).
+                - list – список сообщений об ошибках для списка путей.
+                При отложенном удалении всегда возвращается None (ошибки логируются асинхронно).
+
+        Raises:
+            TypeError: Если `file_path` не является строкой или списком строк.
+
+        Пример:
+            >>> # Немедленное удаление файла
+            >>> err = self._del_file("/tmp/test.jpg")
+            >>> if err: print(err)
+
+            >>> # Отложенное удаление после коммита
+            >>> ctx = DeletionContext(session, DeletionType.COMMIT)
+            >>> self._del_file(["/tmp/a.jpg", "/tmp/b.jpg"], ctx=ctx)
         """
         if isinstance(file_path, str):
             _, err = schedule_deletion(
@@ -867,29 +917,51 @@ class PaginatedListPage(
     #         self.logger.error(err_rext)
     #         raise TypeError(err_rext)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _is_file_in_temp_dir(
         self,
         temp_dir: str,
         value: str
     ) -> bool:
         """
-        Проверяет, существует ли файл с именем value во временной папке.
-        Учитывает, что value может быть просто именем файла или относительным путём.
+        Проверяет, существует ли файл с указанным именем во временной папке.
+
+        **Алгоритм:**
+            1. Если `value` – абсолютный путь, проверяет, лежит ли он внутри `temp_dir`.
+            2. Иначе пытается соединить `temp_dir` и `value` как есть.
+            3. Если файл не найден, извлекает базовое имя (последний компонент) и повторяет попытку.
+
+        **Предположение:**
+            Во временной папке файлы всегда хранятся под именами, сгенерированными как
+            `uuid.uuid4().hex + расширение` (без разделителей пути). Относительные пути,
+            содержащие разделители, считаются не принадлежащими временной папке.
+
 
         (возможно неверное уточнение:)
-        ВНИМАНИЕ! Этот метод предполагает, что value — это просто имя файла
-        (без разделителей пути) в том случае, когда файл находится во временной папке.
-        Такое имя генерируется в _add_photo_from_file как uuid.uuid4().hex + расширение.
-        Для уже сохранённых записей value может содержать относительный путь
-        (например, "app_123/photo.jpg"), но тогда метод вернёт False (файл не во временной папке),
-        что корректно. Проверка на наличие разделителей не требуется.
+            ВНИМАНИЕ! Этот метод предполагает, что value — это просто имя файла
+            (без разделителей пути) в том случае, когда файл находится во временной папке.
+            Такое имя генерируется в _add_photo_from_file как uuid.uuid4().hex + расширение.
+            Для уже сохранённых записей value может содержать относительный путь
+            (например, "app_123/photo.jpg"), но тогда метод вернёт False (файл не во временной папке),
+            что корректно. Проверка на наличие разделителей не требуется.
 
         Args:
-            temp_dir (str): Путь к временной папке.
-            value (str): Имя файла или относительный путь.
+            temp_dir (str): Абсолютный путь к временной папке черновика.
+            value (str): Имя файла или относительный путь (может быть просто именем).
 
         Returns:
-            bool: True, если файл существует во временной папке.
+            bool: True, если файл существует внутри `temp_dir`, иначе False.
+
+        Пример:
+            >>> temp = "/tmp/med_app_draft_appointment_-1_abc123"
+            >>> self._is_file_in_temp_dir(temp, "photo.jpg")  # True, если файл существует
+            >>> self._is_file_in_temp_dir(temp, "app_123/photo.jpg")  # False (содержит разделитель)
+
+
         """
         
         if not temp_dir or not value:
@@ -904,7 +976,6 @@ class PaginatedListPage(
         if os.path.exists(candidate):
             return True
 
-
         # Если не существует, пробуем извлечь базовое имя файла (последний компонент)
         # на случай, если value содержит лишние разделители (например, "./file.jpg")
         base = os.path.basename(value)
@@ -915,6 +986,11 @@ class PaginatedListPage(
             
         return False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def discard_entity_subtree(
         self,
         entity_id: int,
@@ -934,6 +1010,11 @@ class PaginatedListPage(
         )
         super().discard_entity_subtree(entity_id)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _get_temp_dir(self, entity_id: int) -> Optional[str]:
         """
         Возвращает путь к временной папке для сущности, если она была создана.
@@ -948,6 +1029,11 @@ class PaginatedListPage(
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
         return self._draft_registry.get(key)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _ensure_temp_dir(self, entity_id: int) -> str:
         """
         Создаёт временную папку для сущности, если её нет, и возвращает путь.
@@ -983,6 +1069,11 @@ class PaginatedListPage(
 
         return temp_dir
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _cleanup_temp_dir(
         self,
         entity_id: int,
@@ -990,11 +1081,27 @@ class PaginatedListPage(
     ):
         """
         Удаляет временную папку сущности и соответствующий ключ в реестре черновиков.
-        Если папка не существует, ничего не делает.
+
+        **Назначение:**
+            Вызывается при отмене изменений (discard) или после успешного сохранения,
+            чтобы очистить временные файлы, созданные в процессе редактирования.
+
+        **Алгоритм:**
+            1. Получает путь к временной папке из реестра по ключу `__temp_dir__:{entity_type}:{entity_id}`.
+            2. Если папка существует, удаляет её через `_del_file` (с учётом контекста `ctx`).
+            3. При успешном удалении (или если удаление отложено) удаляет ключ из реестра.
 
         Args:
-            entity_id (int): ID сущности.
-            ctx: Контекст отложенного удаления (если None – немедленное).
+            entity_id (int): ID сущности (может быть временным отрицательным).
+            ctx (Optional[DeletionContext]): Контекст отложенного удаления.
+                Если None – удаление немедленное, иначе отложенное (после COMMIT/ROLLBACK).
+
+        Returns:
+            None
+
+        Примечание:
+            Если папка не существует или ключ отсутствует, метод ничего не делает.
+            Ошибки удаления логируются внутри `_del_file`, но не прерывают выполнение.
         """
 
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
@@ -1103,7 +1210,11 @@ class PaginatedListPage(
         old_id: Optional[int] = None,
         session: Optional[Session] = None,
     ) -> Tuple[
-        Any, List[str], List[str], List[str], List[str]
+        Any,           # updated_dto
+        List[str],     # copied_files (исходные пути во временной папке)
+        List[str],     # old_files (старые пути в хранилище, подлежащие удалению)
+        List[str],     # copied_dest_paths (целевые пути в хранилище)
+        List[str],     # error_messages
     ]:
         """
         Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
@@ -1115,25 +1226,28 @@ class PaginatedListPage(
         и удалять их в _save_modified_rows_for_ids после вызова service.update.
 
         **Алгоритм:**
-            1. Определяет временную папку: по old_id, если передан, иначе по new_id.
-            2. Если временная папка не существует – возвращает DTO без изменений.
-            3. Для каждого поля с `widget_type='image_thumbnail'` проверяет, является ли
-               текущее значение DTO именем файла, присутствующим во временной папке.
-            4. Копирует файл во `storage_path/app_{new_id}/`, удаляет исходный, заменяет
-               путь в DTO на относительный (относительно `storage_path`).
-            5. Если хотя бы один файл не удалось скопировать – накапливает ошибки и в конце
-               выбрасывает `RuntimeError`, отменяя транзакцию.
+            1. Определяет временную папку по old_id (если передан) или new_id.
+            2. Для каждого поля с widget_type='image_thumbnail' проверяет, является ли
+               значение DTO именем файла, присутствующим во временной папке.
+            3. Копирует файл в `storage_path/app_{new_id}/`, удаляет исходный, заменяет
+               путь в DTO на относительный.
+            4. Если старый путь был относительным (существующий файл) – добавляет его в old_files.
+            5. В случае любой ошибки копирования накапливает сообщения и выбрасывает исключение.
 
         Args:
             new_id (int): Реальный ID сущности после сохранения (целевая папка).
-            dto (Any): DTO сущности, содержащий поля с путями к фото.
+            dto (Any): DTO сущности, содержащий поля с путями к фото (будет изменён).
             old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
-                                    Если не указан, используется new_id (для уже сохранённых строк).
-            session  (Optional[Session]): Сессия SQLAlchemy, необходимая для доступа
-                к списку отложенных удалений. Должна быть передана из вызывающего метода.
+                Если None, используется new_id (для уже сохранённых строк).
+            session (Optional[Session]): Сессия SQLAlchemy для доступа к отложенным удалениям.
 
         Returns:
-            Any: Обновлённый DTO (те же поля, но с изменёнными путями).
+            Tuple[Any, List[str], List[str], List[str], List[str]]:
+                - updated_dto (Any): DTO с обновлёнными относительными путями.
+                - copied_files (List[str]): Список исходных путей во временной папке (будут удалены после коммита).
+                - old_files (List[str]): Список старых файлов в хранилище (подлежат удалению).
+                - copied_dest_paths (List[str]): Список целевых путей в хранилище (для отката при ошибке).
+                - error_messages (List[str]): Список сообщений об ошибках (если не пуст – перенос не удался).
 
         Raises:
             RuntimeError: Если хотя бы один файл не удалось перенести – транзакция откатывается.
@@ -1380,6 +1494,11 @@ class PaginatedListPage(
     #
     #     return dto
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _get_allowed_extensions_for_photo(
         self, 
         field_name: str = None,
@@ -1425,6 +1544,11 @@ class PaginatedListPage(
     #                 item.layout().addWidget(self.multi_photo_btn)
     #                 break
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _on_multi_photo_clicked(self):
         """Обработчик кнопки массового добавления фото."""
         if not self.edit_mode:
@@ -1460,6 +1584,11 @@ class PaginatedListPage(
             for file_path in file_paths:
                 self._add_photo_from_file(file_path, photo_field)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _add_photo_from_file(
         self, 
         file_path: str,
@@ -1527,6 +1656,11 @@ class PaginatedListPage(
         self._update_row_color(row)
         self._update_save_button_state()
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _has_photo_column(self) -> bool:
         """
         Проверяет, есть ли в текущей конфигурации столбец с типом виджета 'image_thumbnail'.
@@ -1541,6 +1675,11 @@ class PaginatedListPage(
             
         return False
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _set_edit_mode(self, enable: bool) -> None:
         """
         Устанавливает режим редактирования и синхронизирует состояние кнопки.
@@ -1552,6 +1691,11 @@ class PaginatedListPage(
             self.edit_mode_btn.setChecked(enable)
             self.edit_mode_btn.blockSignals(False)
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     @Slot(bool)
     def _on_edit_mode_toggled(self, checked: bool):
         """
@@ -4065,6 +4209,8 @@ class PaginatedListPage(
         # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
         self._clear_entity_registry()
 
+        return True
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -4338,6 +4484,12 @@ class PaginatedListPage(
         **Примечание:** 
             Этот метод не удаляет черновики дочерних компонентов – они
             обрабатываются отдельно в `_save_child_components_for_parent`.
+
+        **Для полей с `widget_type='image_thumbnail'`**:
+            - Вызывает `_move_files_from_temp_to_storage` для переноса файлов из временной папки
+              в основное хранилище.
+            - В случае успеха обновляет DTO и сохраняет в БД, иначе откатывает транзакцию.
+            - После сохранения настраивает отложенное удаление временных файлов и старых файлов.
 
         Args:
             entity_ids: Множество ID сущностей, которые нужно обновить в БД.
@@ -5256,6 +5408,11 @@ class PaginatedListPage(
                     return arg
         return annotation
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _reapply_delegates(self):
         """
         Переустанавливает все делегаты для столбцов таблицы.
@@ -5523,9 +5680,9 @@ class PaginatedListPage(
     #     return dto
 
     @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
+        name = 'PaginatedListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -5535,9 +5692,9 @@ class PaginatedListPage(
         return config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
 
     @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
+        name = 'PaginatedListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
@@ -5633,8 +5790,15 @@ class PaginatedListPage(
 
             # Для DatePickerDelegate и TimePickerDelegate аргументы (config) уже переданы из _get_delegate_for_field
 
-            # --- ДЛЯ ФОТО (новый блок) ---
+            #  ДЛЯ ФОТО
             elif col.delegate_class.__name__ == 'ImageThumbnailDelegate':
+                """
+                **Для `ImageThumbnailDelegate`:**  
+                    - В `delegate_args` обязательно передаётся ключ `'page'` со значением `self` (ссылка на страницу).  
+                      Это необходимо делегату для доступа к временным папкам через `_get_temp_dir` и `_ensure_temp_dir`.  
+                    - Дополнительно могут быть переданы `allowed_extensions` и `description_field` из конфигурации поля.  
+                    - Режим `readonly` синхронизируется с `self.edit_mode` через вызов `set_readonly` в `_update_ui_for_edit_mode`.
+                """
 
                 # Получаем путь к хранилищу из конфигурации
                 storage_path = self._get_photo_storage_path()

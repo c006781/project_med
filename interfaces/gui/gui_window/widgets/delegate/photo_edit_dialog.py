@@ -197,9 +197,11 @@ class PhotoEditDialog(QDialog):
     )
     def reject(self) -> None:
         """
-        Переопределяем reject для очистки временного файла при отмене.
+        Переопределяет reject для очистки временного файла при отмене.
+
         Если был создан временный файл (self._new_path) и существует временная папка,
-        удаляем файл перед закрытием диалога.
+        удаляет файл через `schedule_deletion` (немедленно, так как ctx=None).
+        Также удаляет временную папку, если она стала пустой.
         """
         if self._new_path and self._temp_dir:
             full_path = os.path.join(self._temp_dir, self._new_path)
@@ -292,10 +294,36 @@ class PhotoEditDialog(QDialog):
     )
     def _copy_file_to_storage(self, source_path: str) -> str:
         """
-        Копирует файл во временную папку черновика.
-        Всегда предполагает, что временная папка (self._temp_dir) передана.
+        Копирует файл во временную папку черновика (self._temp_dir).
+
+        Всегда предполагает, что временная папка передана при создании диалога.
         Возвращает просто имя файла (без пути).
+
+        **Назначение:**
+            Используется в режиме 'single' для копирования выбранного пользователем файла
+            во временную папку, связанную с родительской сущностью. Возвращает только имя
+            файла (без пути), которое затем сохраняется в DTO.
+
+        **Требования:**
+            - `self._temp_dir` должна быть установлена до вызова (обычно в конструкторе).
+            - Если `self._temp_dir` не задана, выбрасывается `RuntimeError`.
+
+        Args:
+            source_path (str): Абсолютный путь к исходному файлу.
+
+        Returns:
+            str: Уникальное имя файла во временной папке (например, "a1b2c3d4.jpg").
+
+        Raises:
+            RuntimeError: Если `self._temp_dir` не задана.
+            PhotoFileError: При ошибках копирования (пробрасывается из `shutil.copy2`).
+
+        Пример:
+            >>> dialog = PhotoEditDialog(..., temp_dir="/tmp/med_app_draft_...")
+            >>> name = dialog._copy_file_to_storage("/home/user/photo.jpg")
+            >>> print(name)  # "a1b2c3d4.jpg"
         """
+
         if not self._temp_dir:
             raise RuntimeError(
                 "Для копирования файла необходима временная папка (temp_dir). "

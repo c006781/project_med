@@ -137,7 +137,7 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'order'         : 6,            # Порядковый номер колонки.
         'source_attr'   : 'description_note',   # Имя атрибута в ORM-объекте, по которому можно получить связанную заметку.
         'compute'       : {             # Настройка вычисления значения виртуального поля.
-            'func'  : lambda note: note.text if note else None, # Функция: берёт текст из заметки.
+            'func'      : lambda note: note.text if note else None, # Функция: берёт текст из заметки.
             'args'  : ['description_note'],     # Аргументы функции: имя атрибута, который будет передан в функцию.
         },
         'is_note'       : 'description_id',     # Метка, что это виртуальное поле, ссылающееся на заметку + ID заметки.
@@ -314,7 +314,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
             'func'  : lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
             'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
         },
-        'counts': 'photos',                  # указывает, что нужно подсчитать количество связанных записей
+        'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
     },
 }
 

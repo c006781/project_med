@@ -36,7 +36,10 @@
     >>> self.main_window.action_manager.connect_button('save_all', self.save_btn)
 """
 
-from typing import Dict, List, Optional, Callable
+from typing import (
+    Dict, List,
+    Optional, Callable
+)
 import weakref
 
 from app.utils.logger.logger import AppLogger

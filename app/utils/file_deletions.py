@@ -5,13 +5,145 @@
 
 import os
 import shutil
-from typing import Optional, Tuple
-
-from sqlalchemy.orm import Session
+from enum import Enum
+from typing import Optional, Tuple, List
 
 from app.utils.logger.logger import AppLogger
 
+from sqlalchemy.orm import Session
 
+
+class DeletionType(Enum):
+    """
+    Тип отложенного удаления.
+
+    COMMIT   – удалить после успешного коммита транзакции.
+    ROLLBACK – удалить при откате транзакции.
+    """
+    COMMIT = "commit"
+    ROLLBACK = "rollback"
+
+class DeletionContext:
+    """
+    Контекст отложенного удаления: объединяет сессию и тип удаления.
+
+    Используется в _del_file и schedule_deletion для того, чтобы явно указать,
+    при каком исходе транзакции (COMMIT или ROLLBACK) следует удалять файлы.
+    Если передан None – удаление немедленное.
+
+    Если передан в schedule_deletion, файлы будут удалены только после
+    наступления соответствующего события (COMMIT или ROLLBACK).
+
+    Пример:
+        # Отложенное удаление после успешного коммита
+        ctx = DeletionContext(session, DeletionType.COMMIT)
+
+        # Отложенное удаление при откате
+        ctx = DeletionContext(session, DeletionType.ROLLBACK)
+
+        # Немедленное удаление
+        ctx = None
+    """
+    __slots__ = ('session', 'deletion_type')
+
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(cls) -> AppLogger:
+        try:
+            return cls._logger
+        except AttributeError as e:
+            cls._logger = AppLogger.get_instance(
+                name='api.DeletionContext',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return cls._logger
+
+    @logger.setter
+    def logger(cls, value):
+        cls._logger = value
+
+    @classmethod
+    def create(cls, session, deletion_type):
+        if session is None:
+            cls.logger.warning(
+                "DeletionContext.create вызван без сессии – удаление файлов будет немедленным, "
+                "атомарность не гарантирована"
+            )
+            return None
+        return cls(session, deletion_type)
+
+    def __init__(
+        self,
+        session: Session,
+        deletion_type: 'DeletionType'
+    ):
+        self.session = session
+        self.deletion_type = deletion_type
+
+    def __bool__(self) -> bool:
+        """Возвращает True, если контекст задан (отложенное удаление)."""
+        return self.session is not None and self.deletion_type is not None
+
+def ensure_deletions_dict(session: Session) -> None:
+    """
+    Гарантирует, что в сессии есть словарь _deletions с ключами COMMIT и ROLLBACK.
+    Для обратной совместимости также переносит старый список _pending_deletions в COMMIT.
+    """
+    if not hasattr(session, '_deletions'):
+        session._deletions = {
+            DeletionType.COMMIT: [],
+            DeletionType.ROLLBACK: []
+        }
+        # Переносим старые записи из _pending_deletions (если есть)
+        if hasattr(session, '_pending_deletions') and session._pending_deletions:
+            session._deletions[DeletionType.COMMIT].extend(session._pending_deletions)
+            session._pending_deletions = None
+def add_deferred_deletion(
+    ctx: DeletionContext,
+    path: str,
+    remove_parent_if_empty: bool = False,
+    force: bool = False,
+) -> None:
+    """
+    Добавляет файл или папку в отложенное удаление согласно контексту.
+
+    Args:
+        ctx: Контекст удаления (сессия + тип). Если ctx ложный (None), ничего не делает.
+        path: Путь к файлу или папке.
+        remove_parent_if_empty: Удалить родительскую папку, если она станет пустой.
+        force: Принудительное рекурсивное удаление (для папок).
+    """
+    if not ctx:
+        return
+    ensure_deletions_dict(ctx.session)
+    ctx.session._deletions[ctx.deletion_type].append({
+        'path': path,
+        'remove_parent_if_empty': remove_parent_if_empty,
+        'force': force,
+    })
+
+
+def get_deletions_by_type(session: Session, dt: DeletionType) -> List[dict]:
+    """Возвращает список отложенных удалений для указанного типа."""
+    ensure_deletions_dict(session)
+    return session._deletions.get(dt, [])
+
+
+def clear_deletions_by_type(session: Session, dt: DeletionType) -> None:
+    """Очищает список отложенных удалений для указанного типа."""
+    if hasattr(session, '_deletions') and dt in session._deletions:
+        session._deletions[dt].clear()
+
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def delete_file_safely(
     file_path: str, 
     logger: Optional[AppLogger] = None
@@ -43,7 +175,7 @@ def delete_file_safely(
 
     if not os.path.isfile(file_path):
         logger.debug(f"Файл не существует, удаление не требуется: {file_path}")
-        return True , None
+        return True, None
 
     try:
         os.remove(file_path)
@@ -51,10 +183,15 @@ def delete_file_safely(
         return True, None
         
     except OSError as e:
-        logger.warning(f"Не удалось удалить файл {file_path}: {e}")
-        return False, str(e)
+        err_text = f"Не удалось удалить файл {file_path}: {e}"
+        logger.warning(err_text)
+        return False, err_text
 
-
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def delete_empty_directory(
         dir_path: str, 
         force: bool = False,
@@ -84,7 +221,7 @@ def delete_empty_directory(
             name = 'file_deletions',
             # share_file_with = 'system',
             enable_file_logging = 'user',
-            use_name_in_filename = False, # 'system',
+            use_name_in_filename = False,  # 'system',
         )
 
     if not dir_path:
@@ -102,8 +239,9 @@ def delete_empty_directory(
             return True , None
         
         except OSError as e:
-            logger.warning(f"Не удалось удалить {dir_path} со всем содержимым: {e}")
-            return False, str(e)
+            err_text = f"Не удалось удалить {dir_path} со всем содержимым: {e}"
+            logger.warning(err_text)
+            return False, err_text
         
     # удалить пустую папку
     try:
@@ -117,14 +255,21 @@ def delete_empty_directory(
             return False , None
         
     except OSError as e:
-        logger.warning(f"Не удалось удалить папку {dir_path}: {e}")
-        return False , str(e)
+        err_text = f"Не удалось удалить папку {dir_path}: {e}"
+        logger.warning(err_text)
+        return False , err_text
 
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def schedule_deletion(
     path: str,
     remove_parent_if_empty: bool = False,
-    force: bool = False,     
-    session: Optional[Session] = None,
+    force: bool = False,
+    # session: Optional[Session] = None,
+    ctx: Optional[DeletionContext] = None,
     logger: Optional[AppLogger] = None
 ) -> Tuple[bool, Optional[str]]:
     """
@@ -139,7 +284,7 @@ def schedule_deletion(
         remove_parent_if_empty: Если True и удаляется файл, то после успешного удаления
             файла родительская папка будет удалена, если она станет пустой.
         force: Если True и удаляется папка, удаляет её рекурсивно (даже непустую).
-        session: Сессия SQLAlchemy (если указана, удаление откладывается).
+        ctx: Контекст отложенного удаления (сессия + тип). Если None – удаление немедленное.
         logger: Опциональный логгер.
 
     Returns:
@@ -155,34 +300,48 @@ def schedule_deletion(
             enable_file_logging = 'user',
             use_name_in_filename = False, # 'system',
         )
+    if ctx is None or not ctx.session.is_active:
+        # Немедленное удаление
+        return del_file_and_parent_dir(path, remove_parent_if_empty, force, logger)
 
-    if (
-        (session is None) 
-    ) or (
-        (session is not None) and not session.is_active
-    ):
-        logger.warning("Сессия неактивна, удаление будет выполнено немедленно")
-        return del_file_and_parent_dir(
-            file_path = path, 
-            remove_parent_if_empty = remove_parent_if_empty,
-            force = force,    
-            logger = logger
-        )
+    else:
+        # Отложенное удаление
+        add_deferred_deletion(ctx, path, remove_parent_if_empty, force)
+        return True, None
 
-    if not hasattr(session, '_pending_deletions'):
-        session._pending_deletions = []
+    # if (
+    #     (session is None)
+    # ) or (
+    #     (session is not None) and not session.is_active
+    # ):
+    #
+    #     logger.warning("Сессия неактивна, удаление будет выполнено немедленно")
+    #     return del_file_and_parent_dir(
+    #         file_path = path,
+    #         remove_parent_if_empty = remove_parent_if_empty,
+    #         force = force,
+    #         logger = logger
+    #     )
+    #
+    # if not hasattr(session, '_pending_deletions'):
+    #     session._pending_deletions = []
+    #
+    # session._pending_deletions.append({
+    #     'path': path,
+    #     'remove_parent_if_empty': remove_parent_if_empty,
+    #     # 'is_directory': is_directory,
+    #     'force': force,
+    # })
+    #
+    # logger.debug(f"Запланировано удаление: {path}")
+    #
+    # return True, None
 
-    session._pending_deletions.append({
-        'path': path,
-        'remove_parent_if_empty': remove_parent_if_empty,
-        # 'is_directory': is_directory,
-        'force': force,
-    })
-
-    logger.debug(f"Запланировано удаление: {path}")
-
-    return True, None 
-    
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
 def del_file_and_parent_dir(
     file_path: str,
     remove_parent_if_empty: bool = False,
@@ -219,20 +378,18 @@ def del_file_and_parent_dir(
             name = 'file_deletions',
             # share_file_with = 'system',
             enable_file_logging = 'user',
-            use_name_in_filename = False, # 'system',
+            use_name_in_filename = False,  # 'system',
         )
-    
     if not file_path:
         logger.warning("Попытка запланировать удаление объекта по пустому пути, игнорируем")
         return False, None    
 
-  
     if not os.path.exists(file_path):
         logger.warning(f"Попытка удалить несуществующий файл / папку: {file_path}")
         return False, None
 
-    if_isfile = os.path.isfile(file_path) # проверяем файл ли это 
-    if_isdir= os.path.isdir(file_path) # проверяем папка ли это ли это 
+    if_isfile = os.path.isfile(file_path)  # проверяем файл ли это
+    if_isdir = os.path.isdir(file_path)  # проверяем папка ли это ли это
 
     if not if_isfile and not if_isdir:
         logger.warning(f"Попытка удалить не типичный объект: {file_path}")
@@ -240,13 +397,16 @@ def del_file_and_parent_dir(
 
     if if_isfile:
         #  удаляем немедленно файл, но с предупреждением
-        success, error = delete_file_safely(file_path, logger=logger)
+        success, error = delete_file_safely(
+            file_path,
+            logger=logger
+        )
     elif if_isdir:
         #  удаляем немедленно папку, но с предупреждением
         success, error = delete_empty_directory(
             file_path,
             force = force,    
-            logger=logger
+            logger = logger
         )
     else:        
         logger.warning(f"Попытка удалить не типичный объект: {file_path}")

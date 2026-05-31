@@ -51,7 +51,6 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-
 import shutil
 import uuid
 
@@ -67,16 +66,11 @@ import time as time_module
 
 from contextlib import contextmanager
 
-from sqlalchemy import (
-    func, or_, #inspect
-)
-
+from app.utils.logger import AppLogger
 
 # from app.dependencies import get_appointment_service
 # from app.dependencies import clear_services_cache
 # from app.dependencies import _NOTE_USAGE_MODELS
-from app.utils.logger import AppLogger
-
 
 
 # Импорты модулей
@@ -175,8 +169,12 @@ from app.database.database_shema.clinic import (
 
 # try:
 from app.repositories.repositories_all import (
-    BaseRepository, PatientRepository, AppointmentRepository, 
-    PatientRepository, AppointmentNoteRepository, PhotoRepository
+    BaseRepository,
+    # PatientRepository,
+    AppointmentRepository,
+    PatientRepository,
+    AppointmentNoteRepository,
+    PhotoRepository
 )
 # except ImportError as e:
 #     try:
@@ -189,7 +187,8 @@ from app.repositories.repositories_all import (
 
 # try:
 from app.dto import (
-    PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
+    PatientDTO, AppointmentDTO,
+    AppointmentNoteDTO, PhotoDTO
 )
 # except ImportError as e:
 #     try:
@@ -217,7 +216,10 @@ from app.exceptions import (
 #         pass #  raise # e # pass
 
 
-from app.utils.file_deletions import schedule_deletion
+from app.utils.file_deletions import (
+    schedule_deletion, DeletionContext,
+    DeletionType
+)
 
 # try:
 from app.utils.filtering.filtering import (
@@ -239,9 +241,17 @@ from app.utils.virtual_fields import enrich_dto_with_computed_fields
 
 # Сторонние библиотеки
 
-from sqlalchemy.orm import Query, Session
-from sqlalchemy.orm import joinedload
-from sqlalchemy.orm import selectinload
+from sqlalchemy import (
+    func, or_, #inspect
+)
+
+from sqlalchemy.orm import (
+    Query, Session,
+    joinedload, selectinload
+)
+# from sqlalchemy.orm import Query, Session
+# from sqlalchemy.orm import joinedload
+# from sqlalchemy.orm import selectinload
 
 
 
@@ -501,8 +511,10 @@ class BaseService(
             в `Database.session_scope`. Не используйте этот метод с сессиями, созданными вручную без этого атрибута.
             - Если файл не существует, метод ничего не делает (только логирует отладочное сообщение).
         """
+        ctx = DeletionContext.create(session, DeletionType.COMMIT)
         _ , err = schedule_deletion(
-            session = session,
+            # session = session,
+            ctx=ctx,
             path = file_path,
             remove_parent_if_empty = if_delete_parent_dir,
         )

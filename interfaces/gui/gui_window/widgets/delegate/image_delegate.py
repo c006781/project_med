@@ -56,10 +56,10 @@ from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEd
 
 from PySide6.QtCore import (
     # QMetaObject, Q_ARG, QRect, 
-    Q_ARG, QEvent, QMetaObject, QModelIndex, 
+    Q_ARG, QEvent, QMetaObject,
     QRect, QRunnable, QSize, 
     QThreadPool, Qt, Signal, 
-    Slot, 
+    Slot, QModelIndex,
     # QThread, 
 )
 from PySide6.QtGui import (
@@ -71,8 +71,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QStyle,
     QStyleOptionButton,
-    QStyledItemDelegate, 
-    QStyleOptionViewItem,
+    QStyledItemDelegate,
+    QStyleOptionViewItem, QMessageBox,
 )
 
 class AsyncImageLoader(QRunnable):
@@ -653,15 +653,18 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         parent = self.parent()
         if parent is None:
             return
-        
+
+        if not parent.isVisible():
+            return
+
         model = parent.model()
         if model is None:
             return
         
         top_left = model.index(row, 0)
         bottom_right = model.index(row, model.columnCount() - 1)
-        # if top_left.isValid():
-        parent.update(top_left, bottom_right)
+        if top_left.isValid():
+            parent.update(top_left, bottom_right)
 
         # # Сохраняем в кэш (ключ – полный путь, но мы его не знаем – можно передавать)
         # # В упрощённом варианте – обновляем ячейку, заставив перерисовать
@@ -795,7 +798,11 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _get_full_path(self, rel_path: str, entity_id: int) -> str:
+    def _get_full_path(
+        self,
+        rel_path: str,
+        entity_id: int
+    ) -> str:
         """
         Возвращает полный путь к файлу.
 
@@ -824,12 +831,13 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         #     # Получаем существующую временную папку (если есть)
         #     temp_dir = self._page._get_temp_dir(entity_id)
 
+        # Проверяем временную папку черновика
         page = self._page_ref() if hasattr(self, '_page_ref') else None
-        if (
-            page is not None
-        ) and (
-            entity_id is not None
-        ):
+        if (page is None)  :
+            self.logger.warning("ImageThumbnailDelegate: page уже уничтожена, невозможно получить временную папку")
+            return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
+
+        if (entity_id is not None):
             temp_dir = page._get_temp_dir(entity_id)
             if temp_dir:
                 candidate = os.path.join(temp_dir, rel_path)
@@ -855,7 +863,6 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     # ------------------------------------------------------------------
     # Диалог редактирования
     # ------------------------------------------------------------------
-
 
     def _update_description_field(
         self, 
@@ -996,6 +1003,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 temp_dir = page._ensure_temp_dir(parent_id)
             except Exception as e:
                 self.logger.error(f"Не удалось создать временную папку для parent_id={parent_id}: {e}")
+
+                QMessageBox.critical(self.parent(), "Ошибка", "Не удалось создать временную папку для черновика.")
                 return
             # # Получаем существующую временную папку (если есть)
             # temp_dir = self._page._get_temp_dir(parent_id)

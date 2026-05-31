@@ -37,14 +37,19 @@ import shutil
 from typing import List, Optional, Tuple
 import uuid
 
-from app.utils.file_deletions import schedule_deletion
 from app.utils.logger.logger import AppLogger
+from app.utils.file_deletions import schedule_deletion
 
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QListWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QMessageBox, QTextEdit, QScrollArea
+    QDialog, QDialogButtonBox, QListWidget,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFileDialog, QMessageBox, QTextEdit,
+    # QScrollArea
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import (
+    Qt,
+    # Signal
+)
 from PySide6.QtGui import QPixmap
 
 
@@ -201,7 +206,7 @@ class PhotoEditDialog(QDialog):
 
             schedule_deletion(
                 path=full_path,
-                session=None,
+                ctx=None,
                 remove_parent_if_empty=False,
                 force=False,
                 logger=self.logger
@@ -223,7 +228,7 @@ class PhotoEditDialog(QDialog):
             if not os.listdir(self._temp_dir):
                 schedule_deletion(
                     path=self._temp_dir,
-                    session=None,
+                    ctx=None,
                     remove_parent_if_empty=False,
                     force=False,
                     logger=self.logger
@@ -762,7 +767,7 @@ class PhotoEditDialog(QDialog):
             old_full = os.path.join(self._temp_dir, self._new_path)
             schedule_deletion(
                 path=old_full,
-                session=None,
+                ctx=None,
                 remove_parent_if_empty=False,
                 force=False,
                 logger=self.logger
@@ -785,7 +790,7 @@ class PhotoEditDialog(QDialog):
         self._new_path = self._copy_file_to_storage(file_path)
 
         # Обновляем текущий путь для корректной работы при повторном открытии диалога
-        self._current_path = self._new_path
+        self._current_path = self._new_path  # синхронизируем
         self.delete_btn.setEnabled(True)
 
     @AppLogger.get_instance(
@@ -814,7 +819,7 @@ class PhotoEditDialog(QDialog):
 
             schedule_deletion(
                 path=full_path,
-                session=None,
+                ctx=None,
                 remove_parent_if_empty=False,
                 force=False,
                 logger=self.logger
@@ -833,7 +838,7 @@ class PhotoEditDialog(QDialog):
 
             schedule_deletion(
                 path=full_path,
-                session=None,
+                ctx=None,
                 remove_parent_if_empty=False,
                 force=False,
                 logger=self.logger
@@ -930,7 +935,7 @@ class PhotoEditDialog(QDialog):
             if not os.listdir(self._temp_dir):
                 schedule_deletion(
                     path=self._temp_dir,
-                    session=None,
+                    ctx=None,
                     remove_parent_if_empty=False,
                     force=False,
                     logger=self.logger

@@ -55,7 +55,7 @@ import shutil
 import uuid
 
 from typing import (
-    Type, TypeVar, Generic, 
+    Callable, Type, TypeVar, Generic, 
     List, Optional, Dict, 
     Any, Tuple, Union
 )
@@ -452,6 +452,158 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _new_file_field(
+        self,
+        dest_dir: str,
+        source_path: Optional[str] = None,
+        naming_func: Optional[Callable[[], str]] = None,
+        session: Optional[Session] = None
+    ) -> Union[str, None]:
+        """
+        Копирует новый файл в хранилище и возвращает относительный путь.
+        При откате транзакции (rollback) скопированный файл будет удалён.
+
+        Args:
+            source_path: к исходному файлу (временный черновик).
+            dest_dir: к директории назначения.
+            naming_func: Функция, возвращающая имя файла (без пути). Если None – генерируется UUID.
+            session: Сессия SQLAlchemy (для создания контекста ROLLBACK).
+
+        Returns:
+            Union[str, None]: Относительный путь от dest_dir до скопированного файла.
+        """
+
+        if source_path is None:
+            return None
+        
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"Исходный файл не найден: {source_path}")
+
+        os.makedirs(dest_dir, exist_ok=True)
+        if naming_func is None:
+            ext = os.path.splitext(source_path)[1]
+            name = f"{uuid.uuid4().hex}{ext}"
+        else:
+            name = naming_func()
+
+        dest_path = os.path.join(dest_dir, name)
+        shutil.copy2(source_path, dest_path)
+        self.logger.debug(f"Файл скопирован: {source_path} -> {dest_path}")
+
+        # При откате транзакции нужно удалить только что скопированный файл
+        ctx_rollback = DeletionContext(session, DeletionType.ROLLBACK) 
+        self._del_file_ctx(
+            file_path=os.path.abspath(dest_path),
+            ctx=ctx_rollback, 
+            if_delete_parent_dir=False, 
+        )
+
+        return os.path.relpath(dest_path, dest_dir)
+    
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _delete_file_field(
+        self,
+        file_path: Optional[str],
+        dest_dir: str,
+        session: Optional[Session] = None
+    ) -> None:
+        """
+        Помечает файл на удаление при успешном коммите.
+        """
+        if file_path:
+            ctx_commit = DeletionContext(session, DeletionType.COMMIT) 
+            self._del_file_ctx(
+                file_path=os.path.abspath(
+                    os.path.join(dest_dir, file_path)   
+                ),
+                ctx=ctx_commit, 
+                if_delete_parent_dir=True
+            )
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_file_field(
+        self,
+        old_path: Optional[str],
+        new_source_path: Optional[str],
+        dest_dir: str,
+        naming_func: Optional[Callable[[], str]] = None,
+        session: Optional[Session] = None
+    ) -> Optional[str]:
+        """
+        Обновляет файловое поле: копирует новый файл и помечает старый на удаление при коммите.
+
+        Args:
+            old_path:  к старому файлу (None, если не было).
+            new_source_path:  к новому файлу (None, если удаляем).
+            dest_dir: директория назначения.
+            naming_func: Функция генерации имени (если None – UUID).
+            session: Сессия SQLAlchemy.
+
+        Returns:
+            Новый относительный путь или None, если файл удалён.
+        """
+        # Удаляем старый файл при коммите
+        self._delete_file_field(
+            file_path=old_path,
+            dest_dir=dest_dir,
+            session=session
+        )
+        # Копируем новый файл (при rollback удалится)
+        return self._new_file_field(
+            source_path=new_source_path,
+            dest_dir=dest_dir,
+            naming_func=naming_func,
+            session=session
+        )
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _del_file_ctx(
+        self,
+        file_path: str,
+        ctx: Optional[DeletionContext] = None,
+        if_delete_parent_dir: bool = False,
+    ) -> Optional[str]:
+        """
+        Удаляет файл с использованием явного контекста отложенного удаления.
+        Если ctx is None – удаляет немедленно.
+        Если ctx передан – добавляет файл в список отложенных удалений соответствующего типа.
+
+        Args:
+            ctx: Контекст отложенного удаления (сессия + тип) или None для немедленного удаления.
+            file_path: Абсолютный путь к файлу.
+            if_delete_parent_dir: Удалить ли родительскую папку, если она станет пустой.
+
+        Returns:
+            None при успехе, иначе текст ошибки (если немедленное удаление не удалось).
+        """
+        
+        # from app.utils.file_deletions import schedule_deletion
+        _, err = schedule_deletion(
+            path=file_path,
+            remove_parent_if_empty=if_delete_parent_dir,
+            ctx=ctx,
+            logger=self.logger
+        )
+        return err
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _del_file(
         self,
         file_path: str,
@@ -512,10 +664,15 @@ class BaseService(
             - Если файл не существует, метод ничего не делает (только логирует отладочное сообщение).
         """
         ctx = DeletionContext.create(session, DeletionType.COMMIT)
-        _ , err = schedule_deletion(
-            # session = session,
+        # err = schedule_deletion(
+        #     # session = session,
+        #     ctx=ctx,
+        #     path = file_path,
+        #     remove_parent_if_empty = if_delete_parent_dir,
+        # )
+        err = self._del_file_ctx(
+            file_path = file_path,
             ctx=ctx,
-            path = file_path,
             remove_parent_if_empty = if_delete_parent_dir,
         )
         return err
@@ -5447,6 +5604,108 @@ class PhotoService(
         # Создаем директорию для хранения фотографий, если она не существует
         self._ensure_storage_exists()
 
+
+        # В __init__ уже есть self._storage_path
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def create(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+        """
+        Создаёт фото. file_path – копирует в хранилище.
+        """
+        if dto.file_path and os.path.isabs(dto.file_path):
+            # Определяем целевую директорию: self._storage_path/app_{appointment_id}
+            app_id = dto.appointment_id
+            if not app_id:
+                raise ValueError("Для фото необходимо указать appointment_id")
+            
+            dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
+
+            # Копируем файл (при rollback удалится)
+            rel_path = self._new_file_field(
+                source_path=dto.file_path,
+                dest_dir=dest_dir,
+                naming_func=None,  # UUID
+                session=session
+            )
+            dto.file_path =  os.path.join(f"app_{app_id}",rel_path)
+
+        # Сохраняем в БД
+        return self._create_entity(dto, session=session)
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def update(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+
+        if dto.id is None:
+            raise ValueError("ID фото не указан")
+
+        # Загружаем старую запись, чтобы получить старый путь
+        repo = self._get_repo(session)
+        old_photo = repo.get_by_id(dto.id)
+        if not old_photo:
+            raise PhotoNotFoundError(dto.id)
+
+        old_path = old_photo.file_path
+        new_path = dto.file_path
+
+        dest_dir = os.path.join(self._storage_path, f"app_{dto.appointment_id}")
+
+        # Обрабатываем файл
+        if new_path and os.path.isabs(new_path):
+            # Новый временный файл – копируем, старый удалим при коммите
+            rel_path = self._update_file_field(
+                old_path=old_path,
+                new_source_path=new_path,
+                dest_dir=dest_dir,
+                naming_func=None,
+                session=session
+            )
+            dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
+        elif new_path is None and old_path:
+            # Файл удалён – помечаем старый на удаление при коммите
+            self._delete_file_field(old_path, dest_dir, session)
+            dto.file_path = None
+        # else: путь не изменился – ничего не делаем
+
+        return self._update_entity(dto, dto.id, session=session)
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def delete(self, photo_id: int, session: Optional[Session] = None) -> None:
+
+        self.logger.debug(f"Удаление фото id={photo_id}")
+        
+        # Загружаем фото, получаем путь
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            photo = repo.get_by_id(photo_id)
+            if not photo:
+                raise PhotoNotFoundError(photo_id)
+
+            # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
+            # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
+            # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
+            # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
+            # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
+            # через _delete_entity (который не трогает файл). Это корректно и атомарн
+
+            dest_dir = os.path.join(self._storage_path, f"app_{photo.appointment_id}")
+            # Помечаем файл на удаление при коммите
+            self._delete_file_field(photo.file_path, dest_dir, sess)
+
+            # Удаляем запись из БД
+            self._delete_entity(photo_id, sess)
+
     @AppLogger.get_instance(
         name = 'PhotoService',
         # share_file_with = 'system',
@@ -5834,95 +6093,97 @@ class PhotoService(
             файл будет удалён только после успешного коммита, что сохраняет атомарность.
             - Если файл уже отсутствует на диске, метод всё равно удалит запись из БД (файл не мешает).
         """
-        self.logger.debug(f"Удаление фото id={photo_id}")
 
-        # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
-        with self._session_scope(session) as sess:
+        return self.delete(photo_id, session)
+        # self.logger.debug(f"Удаление фото id={photo_id}")
 
-            repo = self._get_repo(sess)
-            photo = repo.get_by_id(photo_id)
+        # # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
+        # with self._session_scope(session) as sess:
 
-            if photo is None:
-                raise PhotoNotFoundError(photo_id)
+        #     repo = self._get_repo(sess)
+        #     photo = repo.get_by_id(photo_id)
 
-            # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
-            # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
-            # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
-            # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
-            # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
-            # через _delete_entity (который не трогает файл). Это корректно и атомарно.
+        #     if photo is None:
+        #         raise PhotoNotFoundError(photo_id)
+
+        #     # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
+        #     # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
+        #     # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
+        #     # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
+        #     # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
+        #     # через _delete_entity (который не трогает файл). Это корректно и атомарно.
 
             
-            file_path = os.path.join(self._storage_path, photo.file_path)
-            # Удаляем физический файл (или добавляем в отложенное удаление)
-            err_text = self._del_file(
-                file_path, 
-                session = sess,
-                if_delete_parent_dir = True,
-            )
-            if err_text is not None:
-                raise PhotoFileError(file_path, "удаление", str(err_text))
+        #     file_path = os.path.join(self._storage_path, photo.file_path)
+        #     # Удаляем физический файл (или добавляем в отложенное удаление)
+        #     err_text = self._del_file(
+        #         file_path, 
+        #         session = sess,
+        #         if_delete_parent_dir = True,
+        #     )
+        #     if err_text is not None:
+        #         raise PhotoFileError(file_path, "удаление", str(err_text))
 
-            # if os.path.exists(file_path):
-            #     if (sess is not None) and hasattr(sess, '_pending_deletions'):
-            #         sess._pending_deletions.append(file_path)
-            #         self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
-            #     else:
-            #         # Fallback – удаляем немедленно, но с предупреждением
-            #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
-            #
-            #         try:
-            #             os.remove(file_path)
-            #         except OSError as e:
-            #             raise PhotoFileError(file_path, "удаление", str(e))
-            # # Удаляем запись через базовый метод
-            # self._delete_entity(photo_id, sess)
+        #     # if os.path.exists(file_path):
+        #     #     if (sess is not None) and hasattr(sess, '_pending_deletions'):
+        #     #         sess._pending_deletions.append(file_path)
+        #     #         self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+        #     #     else:
+        #     #         # Fallback – удаляем немедленно, но с предупреждением
+        #     #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+        #     #
+        #     #         try:
+        #     #             os.remove(file_path)
+        #     #         except OSError as e:
+        #     #             raise PhotoFileError(file_path, "удаление", str(e))
+        #     # # Удаляем запись через базовый метод
+        #     # self._delete_entity(photo_id, sess)
 
-            # # удаляем запись
-            # repo.delete(photo)
+        #     # # удаляем запись
+        #     # repo.delete(photo)
 
-            # После удаления файла вызываем базовый метод для удаления записи
-            # Важно: передаём ту же сессию, чтобы операция была атомарной
-            self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
+        #     # После удаления файла вызываем базовый метод для удаления записи
+        #     # Важно: передаём ту же сессию, чтобы операция была атомарной
+        #     self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
  
-            # # 2. Получаем репозиторий фотографий
-            # repo = self._get_repo(sess)
+        #     # # 2. Получаем репозиторий фотографий
+        #     # repo = self._get_repo(sess)
             
-            # # 3. Получаем фотографию по ID
-            # photo = repo.get_by_id(photo_id)
-            # if photo is None:
-            #     err_ = PhotoNotFoundError(photo_id)
-            #     self.logger.exception(err_.message)
+        #     # # 3. Получаем фотографию по ID
+        #     # photo = repo.get_by_id(photo_id)
+        #     # if photo is None:
+        #     #     err_ = PhotoNotFoundError(photo_id)
+        #     #     self.logger.exception(err_.message)
 
-            #     raise err_
+        #     #     raise err_
 
-            # # 4. Запоминаем путь к файлу до удаления записи
-            # file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
+        #     # # 4. Запоминаем путь к файлу до удаления записи
+        #     # file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
 
-            # # 5. Пытаемся удалить файл
-            # try:
-            #     if os.path.exists(file_path_to_delete):
-            #         os.remove(file_path_to_delete)
-            #         self.logger.debug(f"Удалён файл {file_path_to_delete}")
+        #     # # 5. Пытаемся удалить файл
+        #     # try:
+        #     #     if os.path.exists(file_path_to_delete):
+        #     #         os.remove(file_path_to_delete)
+        #     #         self.logger.debug(f"Удалён файл {file_path_to_delete}")
 
-            #         # попытка уделения папки для хранения фото от удалённого приёма
-            #         # Проверяем, не стала ли родительская папка пустой
-            #         parent_dir = os.path.dirname(file_path_to_delete)
-            #         if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-            #             try:
-            #                 os.rmdir(parent_dir)
-            #                 self.logger.debug(f"Удалена пустая папка {parent_dir}")
+        #     #         # попытка уделения папки для хранения фото от удалённого приёма
+        #     #         # Проверяем, не стала ли родительская папка пустой
+        #     #         parent_dir = os.path.dirname(file_path_to_delete)
+        #     #         if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+        #     #             try:
+        #     #                 os.rmdir(parent_dir)
+        #     #                 self.logger.debug(f"Удалена пустая папка {parent_dir}")
 
-            #             except OSError as e:
-            #                 self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+        #     #             except OSError as e:
+        #     #                 self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
                             
-            # except Exception as e:
-            #     self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
-            #     raise PhotoFileError(file_path_to_delete, "удаление", str(e))
+        #     # except Exception as e:
+        #     #     self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
+        #     #     raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
-            # # 6. Если файл успешно удалён (или не существовал), удаляем запись
-            # repo.delete(photo)  # Удаляем запись
-            # self.logger.info(f"Удалена запись фото id={photo_id}")
+        #     # # 6. Если файл успешно удалён (или не существовал), удаляем запись
+        #     # repo.delete(photo)  # Удаляем запись
+        #     # self.logger.info(f"Удалена запись фото id={photo_id}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы (не требуют сессии)
@@ -5988,7 +6249,7 @@ class PhotoService(
         os.makedirs(self._storage_path, exist_ok=True)
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -6028,7 +6289,7 @@ class PhotoService(
     # внутри класса PhotoService, после метода __init__ или в любом месте
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
@@ -6051,7 +6312,7 @@ class PhotoService(
         self.logger.info(f"Путь к фото обновлён: {self._storage_path}")
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))

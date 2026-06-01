@@ -44,8 +44,12 @@ import weakref
 
 from app.utils.logger.logger import AppLogger
 
-from PySide6.QtWidgets import QAction, QWidget
-from PySide6.QtGui import QKeySequence, QIcon
+from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import  (
+    QAction, 
+    QKeySequence, 
+    QIcon
+)
 from PySide6.QtCore import QObject, Signal
 
 
@@ -434,14 +438,43 @@ class ActionManager(QObject):
         """
         
         action = self.get_action(name)
-        if action and hasattr(button, 'setDefaultAction'):
+        if not action:
+            self.logger.warning(f"Действие '{name}' не найдено")
+            return
+
+        if name not in self._action_widgets:
+            self._action_widgets[name] = []
+
+        # Стандартный путь (через setDefaultAction) – для QToolButton, QMenu и т.п.
+        if hasattr(button, 'setDefaultAction'):
             button.setDefaultAction(action)
-            # Сохраняем слабую ссылку на кнопку для последующей отвязки
-            if name not in self._action_widgets:
-                self._action_widgets[name] = []
-            self._action_widgets[name].append(weakref.ref(button))
+            # Сохраняем слабую ссылку и флаг "стандартное связывание"
+            self._action_widgets[name].append((weakref.ref(button), False))
+            return
+
+        # Ручное связывание для виджетов без setDefaultAction (QPushButton)
+        button.setText(action.text())
+        if action.icon():
+            button.setIcon(action.icon())
+        if action.isCheckable():
+            button.setCheckable(True)
+            button.setChecked(action.isChecked())
+            action.toggled.connect(button.setChecked)
+            button.toggled.connect(action.setChecked)
         else:
-            self.logger.warning(f"Не удалось привязать действие '{name}' к кнопке {button}")
+            button.clicked.connect(action.trigger)
+
+        # Сохраняем слабую ссылку и флаг "ручное связывание"
+        self._action_widgets[name].append((weakref.ref(button), True))
+    
+        # if hasattr(button, 'setDefaultAction'):
+        #     button.setDefaultAction(action)
+        #     # Сохраняем слабую ссылку на кнопку для последующей отвязки
+        #     if name not in self._action_widgets:
+        #         self._action_widgets[name] = []
+        #     self._action_widgets[name].append(weakref.ref(button))
+        # else:
+        #     self.logger.warning(f"Не удалось привязать действие '{name}' к кнопке {button}")
 
     # @AppLogger.get_instance(
     #     name='ActionManager',

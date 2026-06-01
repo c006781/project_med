@@ -16,10 +16,13 @@ import tempfile
 from typing import List
 # import sys
 
-from app.config import APP_VERSION, GITHUB_REPO_SLUG
-
+from app.config import (
+    APP_VERSION, 
+    # GITHUB_REPO_SLUG
+)
 
 from app.utils.logger.logger import AppLogger
+
 from app.updater import AppUpdater
 
 from app.config.config_manager.manager import AppConfigManager
@@ -39,15 +42,20 @@ from app.dto.field_configs import (
     APPOINTMENT_CONFIG, NOTE_CONFIG, 
     PATIENT_CONFIG, PHOTO_CONFIG
 )
+from interfaces.gui.gui_window.controllers.action_manager import ActionManager
 
 from interfaces.gui.gui_window.dialogs.instructions_dialog import InstructionsDialog
 
 from interfaces.gui.gui_window.controllers.page_manager import PageManager
+
+from interfaces.gui.gui_window.frames.appointment_photo_frame import AppointmentPhotoFrame
+
 from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
 from interfaces.gui.gui_window.pages.patient_list_page import PatientListPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
+
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
@@ -253,6 +261,12 @@ class PagesCreationMixin:
         # Страница настроек (создаётся отдельно, так как она не использует динамические шаблоны)
         self.settings_page = SettingsPage(page_title="Настройки")
 
+        # Создаём новую страницу "Приёмы и фото"
+        self.appointment_photo_page = AppointmentPhotoFrame(
+            parent=self,
+            shared_registry=None   # или self._shared_draft_registry, если используется глобальный
+        )
+
         # Словарь всех страниц с их идентификаторами
         pages = {
             'patient_list': self.patient_list_page,
@@ -264,6 +278,8 @@ class PagesCreationMixin:
             'photo_list': self.photo_list_page,
             'photo_edit': self.photo_edit_page,
             'settings': self.settings_page,
+
+            'appointment_photo': self.appointment_photo_page,  
         }
 
         # Добавляем каждую страницу в стековый виджет
@@ -685,7 +701,8 @@ class NavigationMixin:
         Передаётся patient_id в extra_data для фильтрации списка.
         """
         self.page_manager.switch_to(
-            'appointment_list',
+            # 'appointment_list',
+            'appointment_photo',
             extra_data={'patient_id': patient_dto.id}
         )
 
@@ -1514,6 +1531,9 @@ class MainWindow(
 
         # Построение интерфейса
         self._setup_ui()
+
+        # Создаём менеджер действий
+        self.action_manager = ActionManager(self)  
 
         # Подключение обработчика логов к виджету LogViewer
         self._setup_log_viewer()

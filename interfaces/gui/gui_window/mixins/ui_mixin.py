@@ -101,6 +101,9 @@ class UIMixin:
     def logger(self, value):
         self._logger = value
 
+
+
+
     @AppLogger.get_instance(
         name='UIMixin',
         # share_file_with = 'system',

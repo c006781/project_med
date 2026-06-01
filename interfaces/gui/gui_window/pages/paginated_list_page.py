@@ -793,7 +793,7 @@ class PaginatedListPage(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _del_file(
         self,
-        file_path: Union[str, List[str]],
+        file_path: Union[str, List[str], None],
         ctx: Optional[DeletionContext] = None,
         if_delete_parent_dir: bool = False,
         force: bool = False,
@@ -840,6 +840,13 @@ class PaginatedListPage(
             >>> ctx = DeletionContext(session, DeletionType.COMMIT)
             >>> self._del_file(["/tmp/a.jpg", "/tmp/b.jpg"], ctx=ctx)
         """
+
+
+        # Добавляем ранний выход при None
+        if file_path is None:
+            self.logger.debug("_del_file вызван с None, удаление не требуется")
+            return None
+        
         if isinstance(file_path, str):
             _, err = schedule_deletion(
                 path=file_path,
@@ -1107,6 +1114,10 @@ class PaginatedListPage(
         key = f"__temp_dir__:{self._entity_type}:{entity_id}"
         temp_dir = self._draft_registry.get(key)
 
+        # Если временная папка не создавалась, ничего не делаем
+        if temp_dir is None:
+            return
+        
         # if temp_dir and os.path.exists(temp_dir):
         #     # shutil.rmtree(temp_dir, ignore_errors=True)
         err = self._del_file(
@@ -1198,210 +1209,210 @@ class PaginatedListPage(
         )
         super().clear_entity_drafts(entity_id)
 
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _move_files_from_temp_to_storage(
-        self,
-        new_id: int,
-        dto: Any,
-        old_id: Optional[int] = None,
-        session: Optional[Session] = None,
-    ) -> Tuple[
-        Any,           # updated_dto
-        List[str],     # copied_files (исходные пути во временной папке)
-        List[str],     # old_files (старые пути в хранилище, подлежащие удалению)
-        List[str],     # copied_dest_paths (целевые пути в хранилище)
-        List[str],     # error_messages
-    ]:
-        """
-        Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
-        в основное хранилище в папку `app_{new_id}`. Обновляет пути в DTO на относительные.
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def _move_files_from_temp_to_storage(
+    #     self,
+    #     new_id: int,
+    #     dto: Any,
+    #     old_id: Optional[int] = None,
+    #     session: Optional[Session] = None,
+    # ) -> Tuple[
+    #     Any,           # updated_dto
+    #     List[str],     # copied_files (исходные пути во временной папке)
+    #     List[str],     # old_files (старые пути в хранилище, подлежащие удалению)
+    #     List[str],     # copied_dest_paths (целевые пути в хранилище)
+    #     List[str],     # error_messages
+    # ]:
+    #     """
+    #     Переносит файлы из временной папки сущности (определяемой по old_id или new_id)
+    #     в основное хранилище в папку `app_{new_id}`. Обновляет пути в DTO на относительные.
 
-        TODO: При замене фото (когда в DTO уже был относительный путь) необходимо
-        удалить старый файл в хранилище после успешного сохранения нового.
-        Это можно реализовать, возвращая дополнительно список старых путей,
-        и удалять их в _save_modified_rows_for_ids после вызова service.update.
+    #     TODO: При замене фото (когда в DTO уже был относительный путь) необходимо
+    #     удалить старый файл в хранилище после успешного сохранения нового.
+    #     Это можно реализовать, возвращая дополнительно список старых путей,
+    #     и удалять их в _save_modified_rows_for_ids после вызова service.update.
 
-        **Алгоритм:**
-            1. Определяет временную папку по old_id (если передан) или new_id.
-            2. Для каждого поля с widget_type='image_thumbnail' проверяет, является ли
-               значение DTO именем файла, присутствующим во временной папке.
-            3. Копирует файл в `storage_path/app_{new_id}/`, удаляет исходный, заменяет
-               путь в DTO на относительный.
-            4. Если старый путь был относительным (существующий файл) – добавляет его в old_files.
-            5. В случае любой ошибки копирования накапливает сообщения и выбрасывает исключение.
+    #     **Алгоритм:**
+    #         1. Определяет временную папку по old_id (если передан) или new_id.
+    #         2. Для каждого поля с widget_type='image_thumbnail' проверяет, является ли
+    #            значение DTO именем файла, присутствующим во временной папке.
+    #         3. Копирует файл в `storage_path/app_{new_id}/`, удаляет исходный, заменяет
+    #            путь в DTO на относительный.
+    #         4. Если старый путь был относительным (существующий файл) – добавляет его в old_files.
+    #         5. В случае любой ошибки копирования накапливает сообщения и выбрасывает исключение.
 
-        Args:
-            new_id (int): Реальный ID сущности после сохранения (целевая папка).
-            dto (Any): DTO сущности, содержащий поля с путями к фото (будет изменён).
-            old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
-                Если None, используется new_id (для уже сохранённых строк).
-            session (Optional[Session]): Сессия SQLAlchemy для доступа к отложенным удалениям.
+    #     Args:
+    #         new_id (int): Реальный ID сущности после сохранения (целевая папка).
+    #         dto (Any): DTO сущности, содержащий поля с путями к фото (будет изменён).
+    #         old_id (Optional[int]): Временный ID сущности, по которому находим временную папку.
+    #             Если None, используется new_id (для уже сохранённых строк).
+    #         session (Optional[Session]): Сессия SQLAlchemy для доступа к отложенным удалениям.
 
-        Returns:
-            Tuple[Any, List[str], List[str], List[str], List[str]]:
-                - updated_dto (Any): DTO с обновлёнными относительными путями.
-                - copied_files (List[str]): Список исходных путей во временной папке (будут удалены после коммита).
-                - old_files (List[str]): Список старых файлов в хранилище (подлежат удалению).
-                - copied_dest_paths (List[str]): Список целевых путей в хранилище (для отката при ошибке).
-                - error_messages (List[str]): Список сообщений об ошибках (если не пуст – перенос не удался).
+    #     Returns:
+    #         Tuple[Any, List[str], List[str], List[str], List[str]]:
+    #             - updated_dto (Any): DTO с обновлёнными относительными путями.
+    #             - copied_files (List[str]): Список исходных путей во временной папке (будут удалены после коммита).
+    #             - old_files (List[str]): Список старых файлов в хранилище (подлежат удалению).
+    #             - copied_dest_paths (List[str]): Список целевых путей в хранилище (для отката при ошибке).
+    #             - error_messages (List[str]): Список сообщений об ошибках (если не пуст – перенос не удался).
 
-        Raises:
-            RuntimeError: Если хотя бы один файл не удалось перенести – транзакция откатывается.
+    #     Raises:
+    #         RuntimeError: Если хотя бы один файл не удалось перенести – транзакция откатывается.
 
-        Примечание:
-            Метод вызывается внутри `_save_new_row_recursive` и `_save_modified_rows_for_ids`
-            перед сохранением DTO в БД. Если возникает исключение, транзакция откатывается.
+    #     Примечание:
+    #         Метод вызывается внутри `_save_new_row_recursive` и `_save_modified_rows_for_ids`
+    #         перед сохранением DTO в БД. Если возникает исключение, транзакция откатывается.
 
-        **Важно**:
-            При ошибке копирования (или при последующем падении service.update)
-            скопированные целевые файлы НЕ УДАЛЯЮТСЯ немедленно. Вместо этого они
-            добавляются в session._pending_deletions и будут удалены только после
-            успешного коммита. Если транзакция откатывается, файлы остаются на диске,
-            чтобы пользователь мог повторить сохранение. Это поведение правильное,
-            не заменяйте вызов self._del_file на немедленное удаление.
-        """
+    #     **Важно**:
+    #         При ошибке копирования (или при последующем падении service.update)
+    #         скопированные целевые файлы НЕ УДАЛЯЮТСЯ немедленно. Вместо этого они
+    #         добавляются в session._pending_deletions и будут удалены только после
+    #         успешного коммита. Если транзакция откатывается, файлы остаются на диске,
+    #         чтобы пользователь мог повторить сохранение. Это поведение правильное,
+    #         не заменяйте вызов self._del_file на немедленное удаление.
+    #     """
 
-        # Определяем, по какому ID искать временную папку
-        temp_id = old_id if old_id is not None else new_id
-        temp_dir = self._get_temp_dir(temp_id)
+    #     # Определяем, по какому ID искать временную папку
+    #     temp_id = old_id if old_id is not None else new_id
+    #     temp_dir = self._get_temp_dir(temp_id)
 
-        if not temp_dir or not os.path.exists(temp_dir):
-            # Временной папки нет – нечего переносить
-            return dto, [], [], [], []
+    #     if not temp_dir or not os.path.exists(temp_dir):
+    #         # Временной папки нет – нечего переносить
+    #         return dto, [], [], [], []
 
-        storage_path = self._get_photo_storage_path()
-        parent_folder = os.path.join(storage_path, f"app_{new_id}")
-        os.makedirs(parent_folder, exist_ok=True)
+    #     storage_path = self._get_photo_storage_path()
+    #     parent_folder = os.path.join(storage_path, f"app_{new_id}")
+    #     os.makedirs(parent_folder, exist_ok=True)
 
-        # any_success = False
-        error_messages = []
+    #     # any_success = False
+    #     error_messages = []
 
-        copied_dest_paths = []  # ЦЕЛЕВЫЕ файлы в хранилище (для отката при ошибке)
-        copied_files = []          # исходные файлы во временной папке (будут удалены после переноса)
-        old_files = []   # старые файлы в хранилище (будут удалены после успешного update)
+    #     copied_dest_paths = []  # ЦЕЛЕВЫЕ файлы в хранилище (для отката при ошибке)
+    #     copied_files = []          # исходные файлы во временной папке (будут удалены после переноса)
+    #     old_files = []   # старые файлы в хранилище (будут удалены после успешного update)
 
-        for field_name, config in self.field_configs.items():
-            if config.get('widget_type') != 'image_thumbnail':
-                continue
+    #     for field_name, config in self.field_configs.items():
+    #         if config.get('widget_type') != 'image_thumbnail':
+    #             continue
             
-            old_value = getattr(dto, field_name, None)   # сохраняем старый путь ДО изменения
-            current_value = old_value                    # текущее значение из DTO
+    #         old_value = getattr(dto, field_name, None)   # сохраняем старый путь ДО изменения
+    #         current_value = old_value                    # текущее значение из DTO
 
-            if not current_value or not isinstance(current_value, str):
-                continue
+    #         if not current_value or not isinstance(current_value, str):
+    #             continue
 
-            # Проверяем, является ли значение именем файла во временной папке
-            if not self._is_file_in_temp_dir(temp_dir, current_value):
-                if not os.path.isabs(current_value) and '/' not in current_value and '\\' not in current_value:
-                    error_messages.append(f"Файл {current_value} не найден во временной папке")
-                continue
+    #         # Проверяем, является ли значение именем файла во временной папке
+    #         if not self._is_file_in_temp_dir(temp_dir, current_value):
+    #             if not os.path.isabs(current_value) and '/' not in current_value and '\\' not in current_value:
+    #                 error_messages.append(f"Файл {current_value} не найден во временной папке")
+    #             continue
             
-            src = os.path.join(temp_dir, current_value)
-            dst = os.path.join(parent_folder, current_value)
+    #         src = os.path.join(temp_dir, current_value)
+    #         dst = os.path.join(parent_folder, current_value)
 
-            try:
-                # Копируем, затем удаляем исходный
+    #         try:
+    #             # Копируем, затем удаляем исходный
                 
-                shutil.copy2(src, dst)
-                copied_files.append(src)   # запоминаем исходный путь для последующего удаления
-                copied_dest_paths.append(dst)  # запоминаем целевой путь
-                # os.remove(src)
-                rel_path = os.path.relpath(dst, storage_path)
-                setattr(dto, field_name, rel_path)
+    #             shutil.copy2(src, dst)
+    #             copied_files.append(src)   # запоминаем исходный путь для последующего удаления
+    #             copied_dest_paths.append(dst)  # запоминаем целевой путь
+    #             # os.remove(src)
+    #             rel_path = os.path.relpath(dst, storage_path)
+    #             setattr(dto, field_name, rel_path)
 
-                # Если старый путь был относительным (не временная папка) – помечаем на удаление
-                if old_value is not None and not os.path.isabs(old_value):
-                    old_full = os.path.join(storage_path, old_value)
-                    if os.path.exists(old_full) and old_full != dst:
-                        old_files.append(old_full)
+    #             # Если старый путь был относительным (не временная папка) – помечаем на удаление
+    #             if old_value is not None and not os.path.isabs(old_value):
+    #                 old_full = os.path.join(storage_path, old_value)
+    #                 if os.path.exists(old_full) and old_full != dst:
+    #                     old_files.append(old_full)
 
-                self.logger.debug(f"файл скопирован {current_value} -> {rel_path} для поля {field_name}")
-                # any_success = True
+    #             self.logger.debug(f"файл скопирован {current_value} -> {rel_path} для поля {field_name}")
+    #             # any_success = True
 
-            except Exception as e:
-                self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
+    #         except Exception as e:
+    #             self.logger.error(f"Ошибка переноса файла {current_value}: {e}")
                 
-                # Очищаем список, чтобы не пытаться удалить их повторно
-                error_messages.append(str(e))
-                # Не обновляем DTO, файл остаётся во временной папке
+    #             # Очищаем список, чтобы не пытаться удалить их повторно
+    #             error_messages.append(str(e))
+    #             # Не обновляем DTO, файл остаётся во временной папке
 
-        # if if_del_copied_dest_paths_in_err and len(copied_dest_paths) > 0:
-        #     if session is None:
-        #         self.logger.warning(
-        #             "_move_files_from_temp_to_storage вызван без сессии – удаление файлов будет немедленным, атомарность не гарантирована"
-        #         )
-        #     # ОТКАТ: удаляем уже скопированные целевые файлы
-        #     #
-        #     # ВНИМАНИЕ! НЕ ИСПОЛЬЗОВАТЬ НЕМЕДЛЕННОЕ УДАЛЕНИЕ (os.remove) В ЭТОМ МЕСТЕ!
-        #     # Причина: вызов self._del_file с session=session добавляет файлы в список
-        #     # session._pending_deletions, которые будут удалены ТОЛЬКО после успешного
-        #     # коммита транзакции. Если транзакция откатится (например, из-за ошибки
-        #     # в service.update), эти файлы НЕ БУДУТ УДАЛЕНЫ (обработчик after_commit
-        #     # не вызывается). Это соответствует ожидаемому поведению: при ошибке
-        #     # пользователь должен иметь возможность исправить данные и повторить
-        #     # сохранение, а файлы уже скопированы в целевое хранилище. Их удаление
-        #     # сейчас приведёт к потере данных. Оставляем файлы на месте, повторная
-        #     # попытка сохранения перезапишет их (или создаст новые). Временная папка
-        #     # с исходными файлами остаётся нетронутой.
-        #     #
-        #     # # НЕ ЗАМЕНЯТЬ НА delete_file_safely ИЛИ os.remove!
-        #     # self._del_file(
-        #     #     copied_dest_paths,
-        #     #     # session=None, # намеренно. чтобы немедленно удалить (принудительно)
-        #     #     session=session,
-        #     #     if_delete_parent_dir=False,
-        #     #     force=False
-        #     # )
-        #
-        #     # При ошибке копирования файлы будут удалены при откате транзакции
-        #     ctx_rollback = DeletionContext.create(session, DeletionType.ROLLBACK)
-        #     self._del_file(
-        #         copied_dest_paths,
-        #         ctx=ctx_rollback,
-        #         if_delete_parent_dir=False,
-        #         force=False
-        #     )
-        #     copied_dest_paths.clear()
-        #     # =================================================================
-        #     # ПОЧЕМУ НЕ УДАЛЯЕМ copied_files И old_files?
-        #     # =================================================================
-        #     # При ошибке копирования (например, диск заполнен) мы должны:
-        #     #   1. Удалить уже скопированные целевые файлы (copied_dest_paths),
-        #     #      чтобы они не остались в хранилище.
-        #     #   2. НЕ УДАЛЯТЬ исходные файлы из временной папки (copied_files) и
-        #     #      старые файлы (old_files), потому что пользователь может
-        #     #      исправить причину ошибки (освободить место, изменить права)
-        #     #      и повторить сохранение.
-        #     # Если бы мы удалили copied_files, то при повторной попытке
-        #     # сохранения эти файлы были бы потеряны, и пользователю пришлось бы
-        #     # заново выбирать фото. Оставление их во временной папке даёт
-        #     # возможность повторить операцию без потери данных.
-        #
-        #     # copied_files.clear()
-        #
-        # if error_messages:
-        #     err_text = f"Не удалось перенести файлы из временной папки: {', '.join(error_messages)}"
-        #     self.logger.error(err_text)
-        #     if if_del_copied_dest_paths_in_err:
-        #         raise RuntimeError(err_text)
+    #     # if if_del_copied_dest_paths_in_err and len(copied_dest_paths) > 0:
+    #     #     if session is None:
+    #     #         self.logger.warning(
+    #     #             "_move_files_from_temp_to_storage вызван без сессии – удаление файлов будет немедленным, атомарность не гарантирована"
+    #     #         )
+    #     #     # ОТКАТ: удаляем уже скопированные целевые файлы
+    #     #     #
+    #     #     # ВНИМАНИЕ! НЕ ИСПОЛЬЗОВАТЬ НЕМЕДЛЕННОЕ УДАЛЕНИЕ (os.remove) В ЭТОМ МЕСТЕ!
+    #     #     # Причина: вызов self._del_file с session=session добавляет файлы в список
+    #     #     # session._pending_deletions, которые будут удалены ТОЛЬКО после успешного
+    #     #     # коммита транзакции. Если транзакция откатится (например, из-за ошибки
+    #     #     # в service.update), эти файлы НЕ БУДУТ УДАЛЕНЫ (обработчик after_commit
+    #     #     # не вызывается). Это соответствует ожидаемому поведению: при ошибке
+    #     #     # пользователь должен иметь возможность исправить данные и повторить
+    #     #     # сохранение, а файлы уже скопированы в целевое хранилище. Их удаление
+    #     #     # сейчас приведёт к потере данных. Оставляем файлы на месте, повторная
+    #     #     # попытка сохранения перезапишет их (или создаст новые). Временная папка
+    #     #     # с исходными файлами остаётся нетронутой.
+    #     #     #
+    #     #     # # НЕ ЗАМЕНЯТЬ НА delete_file_safely ИЛИ os.remove!
+    #     #     # self._del_file(
+    #     #     #     copied_dest_paths,
+    #     #     #     # session=None, # намеренно. чтобы немедленно удалить (принудительно)
+    #     #     #     session=session,
+    #     #     #     if_delete_parent_dir=False,
+    #     #     #     force=False
+    #     #     # )
+    #     #
+    #     #     # При ошибке копирования файлы будут удалены при откате транзакции
+    #     #     ctx_rollback = DeletionContext.create(session, DeletionType.ROLLBACK)
+    #     #     self._del_file(
+    #     #         copied_dest_paths,
+    #     #         ctx=ctx_rollback,
+    #     #         if_delete_parent_dir=False,
+    #     #         force=False
+    #     #     )
+    #     #     copied_dest_paths.clear()
+    #     #     # =================================================================
+    #     #     # ПОЧЕМУ НЕ УДАЛЯЕМ copied_files И old_files?
+    #     #     # =================================================================
+    #     #     # При ошибке копирования (например, диск заполнен) мы должны:
+    #     #     #   1. Удалить уже скопированные целевые файлы (copied_dest_paths),
+    #     #     #      чтобы они не остались в хранилище.
+    #     #     #   2. НЕ УДАЛЯТЬ исходные файлы из временной папки (copied_files) и
+    #     #     #      старые файлы (old_files), потому что пользователь может
+    #     #     #      исправить причину ошибки (освободить место, изменить права)
+    #     #     #      и повторить сохранение.
+    #     #     # Если бы мы удалили copied_files, то при повторной попытке
+    #     #     # сохранения эти файлы были бы потеряны, и пользователю пришлось бы
+    #     #     # заново выбирать фото. Оставление их во временной папке даёт
+    #     #     # возможность повторить операцию без потери данных.
+    #     #
+    #     #     # copied_files.clear()
+    #     #
+    #     # if error_messages:
+    #     #     err_text = f"Не удалось перенести файлы из временной папки: {', '.join(error_messages)}"
+    #     #     self.logger.error(err_text)
+    #     #     if if_del_copied_dest_paths_in_err:
+    #     #         raise RuntimeError(err_text)
 
 
-        # Удаляем временную папку после успешного переноса
-        # self._cleanup_temp_dir(temp_id)
-        # if any_success:
-        #     # Проверяем, не стала ли родительская папка пустой (если была создана только для этих файлов)
-        #     if os.path.exists(parent_folder) and not os.listdir(parent_folder):
-        #         try:
-        #             os.rmdir(parent_folder)
-        #             self.logger.debug(f"Удалена пустая папка {parent_folder}")
-        #         except OSError as e:
-        #             self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
+    #     # Удаляем временную папку после успешного переноса
+    #     # self._cleanup_temp_dir(temp_id)
+    #     # if any_success:
+    #     #     # Проверяем, не стала ли родительская папка пустой (если была создана только для этих файлов)
+    #     #     if os.path.exists(parent_folder) and not os.listdir(parent_folder):
+    #     #         try:
+    #     #             os.rmdir(parent_folder)
+    #     #             self.logger.debug(f"Удалена пустая папка {parent_folder}")
+    #     #         except OSError as e:
+    #     #             self.logger.warning(f"Не удалось удалить пустую папку {parent_folder}: {e}")
 
-        return dto, copied_files, old_files, copied_dest_paths, error_messages
+    #     return dto, copied_files, old_files, copied_dest_paths, error_messages
 
     # def _move_files_from_temp_to_storage(self, entity_id: int, dto: Any) -> Any:
     #     """
@@ -1589,6 +1600,108 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _prepare_new_dto(
+        self,
+        overrides: Optional[Dict[str, Any]] = None,
+        assign_temp_id: bool = True
+    ) -> Optional[Any]:
+        """
+        Создаёт новый DTO для новой строки, заполняя все поля DTO (включая скрытые)
+        значениями из контекстных параметров (_context_params) и переопределений.
+
+        Args:
+            overrides: Словарь с переопределениями полей (например, {'file_path': '...'}).
+            assign_temp_id: Если True, присваивает временный отрицательный ID.
+                            Если False, ID остаётся None (будет присвоен позже).
+
+        Returns:
+            DTO или None, если не удалось создать (ошибка валидации, отсутствие обязательных полей).
+        """
+        # Создаём словарь для всех полей DTO (включая скрытые)
+        all_fields = self.dto_class.model_fields.keys()
+        data = {field_name: None for field_name in all_fields}
+
+        # Заполняем из контекстных параметров (приоритет выше, чем None)
+        if hasattr(self, '_context_params') and self._context_params:
+            for key, value in self._context_params.items():
+                if key in data:
+                    data[key] = value
+
+        # Применяем переопределения
+        if overrides:
+            for key, value in overrides.items():
+                if key in data:
+                    data[key] = value
+
+        # Проверяем обязательные поля
+        missing = []
+        for field_name, config in self.field_configs.items():
+            if config.get('required', False):
+                value = data.get(field_name)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    missing.append(field_name)
+
+        if missing:
+            self.logger.error(f"Не удалось создать новую строку: отсутствуют обязательные поля {missing}")
+            return None
+
+        # Создаём DTO
+        try:
+            dto = self.dto_class(**data)
+        except Exception as e:
+            self.logger.exception(f"Ошибка создания DTO: {e}")
+            return None
+
+        # Присваиваем временный ID, если нужно
+        if assign_temp_id:
+            temp_id = self._next_temp_id
+            self._next_temp_id -= 1
+            dto.id = temp_id
+
+        return dto
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _finalize_new_row(self, dto: Any, temp_id: int, row: int) -> None:
+        """
+        Выполняет завершающие шаги после создания DTO новой строки:
+        - сохраняет черновик в реестр,
+        - добавляет строку в модель (если row не был передан, но в наших вызовах он уже передан),
+        - помечает как изменённую,
+        - уведомляет родителя,
+        - обновляет цвет строки с учётом возможной сортировки,
+        - обновляет состояние кнопки сохранения.
+        """
+
+        # Сохраняем в реестр как новую строку
+        self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
+
+        # Помечаем как имеющую собственные изменения (новая строка)
+        self.mark_own_change(temp_id)
+
+        # Уведомляем родителя о появлении нового потомка
+        self._register_new_row_parent_balance(dto, temp_id)
+
+        # После возможной сортировки нужно найти актуальную строку по temp_id
+        actual_row = self._find_row_by_id(temp_id)
+
+        self.logger.debug(f"actual_row = {actual_row}")
+
+        if actual_row >= 0:
+            self._update_row_color(actual_row)
+        else:
+            self._update_row_color(row)
+
+        self._update_save_button_state()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _add_photo_from_file(
         self, 
         file_path: str,
@@ -1623,39 +1736,133 @@ class PaginatedListPage(
             self.logger.error(f"Не удалось скопировать файл {file_path} во временную папку: {e}")
             return
 
-        defaults = {}
-        for col in self.columns:
-            if col.column_type == ColumnType.DATA:
-                defaults[col.field_name] = None
+        # Создаём DTO с переопределением photo_field
+        overrides = {photo_field: rel_path_in_temp}
+        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
+        if dto is None:
+            return
 
-        # Копируем контекстные параметры
-        if hasattr(self, '_context_params'):
-            for key, value in self._context_params.items():
-                if key in defaults:
-                    defaults[key] = value
+        temp_id = dto.id
 
-        # defaults[photo_field] = file_path
-        defaults[photo_field] = rel_path_in_temp
-        dto = self.dto_class(**defaults)
+        # Добавляем в модель
+        row = self.source_model.add_row(dto)
+
+        self._finalize_new_row(dto, temp_id, row)
+
+        # # Сохраняем в реестр как новую строку
+        # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
+
+        # # Добавляем в модель
+        # row = self.source_model.add_row(dto)
+
+        # # Помечаем как имеющую собственные изменения (новая строка)
+        # self.mark_own_change(temp_id)
+
+        # # Уведомляем родителя о появлении нового потомка
+        # self._register_new_row_parent_balance(dto, temp_id)
+
+        # # После возможной сортировки нужно найти актуальную строку по temp_id
+        # actual_row = self._find_row_by_id(temp_id)
+
+        # self.logger.debug(f"actual_row = {actual_row}")
+        # if actual_row >= 0:
+        #     self._update_row_color(actual_row)
+        # else:
+        #     self._update_row_color(row)
+
+        # self._update_save_button_state()
+
+        # # --- Универсальное создание DTO с учётом всех полей и контекста ---
+        # # 1. Создаём словарь со значениями по умолчанию для ВСЕХ полей DTO (включая скрытые)
+        # defaults = {}
+        # all_dto_fields = self.dto_class.model_fields.keys()
+        # for field_name in all_dto_fields:
+        #     defaults[field_name] = None
+
+        # # 2. Заполняем из контекстных параметров (приоритет выше)
+        # if hasattr(self, '_context_params'):
+        #     for key, value in self._context_params.items():
+        #         if key in defaults:
+        #             defaults[key] = value
+
+        # # 3. Устанавливаем путь к фото (переопределяем, если нужно)
+        # defaults[photo_field] = rel_path_in_temp
+
+        # # 4. Проверяем наличие обязательных полей (согласно field_configs)
+        # missing_required = []
+        # for field_name, config in self.field_configs.items():
+        #     if config.get('required', False) and defaults.get(field_name) is None:
+        #         missing_required.append(field_name)
+
+        # if missing_required:
+        #     self.logger.error(
+        #         f"Не удалось создать новую строку: отсутствуют обязательные поля {missing_required}. "
+        #         f"Контекстные параметры: {self._context_params}"
+        #     )
+        #     return
+
+        # try:
+        #     dto = self.dto_class(**defaults)
+        # except Exception as e:
+        #     self.logger.error(f"Ошибка создания DTO: {e}, defaults={defaults}")
+        #     return
+
+        # # --- Регистрация новой строки ---
         # temp_id = self._next_temp_id
-        dto.id = self._next_temp_id
-        self._next_temp_id -= 1
-
+        # self._next_temp_id -= 1
         # dto.id = temp_id
 
-        #  # создаём временную папку для этой новой строки (черновик)
-        # self._ensure_temp_dir(temp_id)
+        # # defaults = {}
+        # # for col in self.columns:
+        # #     if col.column_type == ColumnType.DATA:
+        # #         defaults[col.field_name] = None
 
-        # Сохраняем в реестр черновиков как новую строку
-        self._draft_registry.set(
-            f"__new__:{self._entity_type}:{dto.id}", {"dto": dto}
-        )
-        row = self.source_model.add_row(dto)
-        self.mark_own_change(dto.id)
-        self._register_new_row_parent_balance(dto, dto.id)
-        self._update_row_color(row)
-        self._update_save_button_state()
+        # # # Копируем контекстные параметры
+        # # if hasattr(self, '_context_params'):
+        # #     for key, value in self._context_params.items():
+        # #         if key in defaults:
+        # #             defaults[key] = value
 
+        # # # defaults[photo_field] = file_path
+        # # defaults[photo_field] = rel_path_in_temp
+        # # dto = self.dto_class(**defaults)
+        # # # temp_id = self._next_temp_id
+        # # dto.id = self._next_temp_id
+        # # self._next_temp_id -= 1
+
+        # # # dto.id = temp_id
+
+        # # #  # создаём временную папку для этой новой строки (черновик)
+        # # # self._ensure_temp_dir(temp_id)
+
+        # # Сохраняем в реестр черновиков как новую строку
+        # self._draft_registry.set(
+        #     f"__new__:{self._entity_type}:{dto.id}", {"dto": dto}
+        # )
+        # row = self.source_model.add_row(dto)
+        # self.mark_own_change(dto.id)
+        # self._register_new_row_parent_balance(dto, dto.id)
+        # self._update_row_color(row)
+        # self._update_save_button_state()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_photo_field_name_impl(self) -> Optional[str]:
+        """
+        Возвращает имя первого поля с widget_type='image_thumbnail' в field_configs.
+
+        Returns:
+            Имя поля или None, если такое поле отсутствует.
+        """
+        for field_name, config in self.field_configs.items():
+            if config.get('widget_type') == 'image_thumbnail':
+                return field_name
+
+        return None
+    
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -1668,12 +1875,331 @@ class PaginatedListPage(
         Returns:
             bool: True, если хотя бы один такой столбец существует.
         """
-
-        for field_name, config in self.field_configs.items():
-            if config.get('widget_type') == 'image_thumbnail':
-                return True
             
+        return self._get_photo_field_name_impl() is not None
+
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_current_photo_full_path(
+        self,
+        dto: Any,
+        photo_field: str,
+        entity_id: Optional[int]
+    ) -> Optional[str]:
+        """
+        Возвращает абсолютный путь к текущему файлу фото (если есть),
+        проверяя сначала временную папку черновика, затем основное хранилище.
+        """
+        rel_path = getattr(dto, photo_field, None)
+        if not rel_path:
+            return None
+
+        # Временная папка
+        if entity_id is not None:
+            temp_dir = self._get_temp_dir(entity_id)
+            if temp_dir:
+                candidate = os.path.join(temp_dir, rel_path)
+                if os.path.exists(candidate):
+                    return candidate
+
+        # Основное хранилище
+        storage_path = self._get_photo_storage_path()
+        if storage_path:
+            candidate = os.path.join(storage_path, rel_path)
+            if os.path.exists(candidate):
+                return candidate
+
+        return None
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _show_photo_edit_dialog(
+        self,
+        current_full_path: Optional[str],
+        description: str,
+        photo_field: str,
+        entity_id: Optional[int]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Открывает диалог редактирования фото.
+        Возвращает (new_path, new_description).
+        new_path – относительный путь (имя файла) внутри временной папки,
+        new_description – новое описание (может быть None, если не изменилось).
+        """
+        # from interfaces.gui.gui_window.widgets.photo_edit_dialog import PhotoEditDialog
+
+        # Подготавливаем временную папку для черновика (создаём, если нужно)
+        temp_dir = self._ensure_temp_dir(entity_id) if entity_id is not None else None
+
+        allowed_extensions = self._get_allowed_extensions_for_photo(photo_field)
+        storage_path = self._get_photo_storage_path()
+
+        dialog = PhotoEditDialog(
+            parent=self,
+            current_path=current_full_path,
+            description=description,
+            allowed_extensions=allowed_extensions,
+            readonly=not self.edit_mode,
+            parent_id=entity_id if entity_id is not None and entity_id > 0 else None,
+            storage_path=storage_path,
+            mode='single',
+            temp_dir=temp_dir
+        )
+
+        if dialog.exec() == QDialog.Accepted:
+            return dialog.get_result()
+        
+        return (None, None)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_photo_to_row_impl(
+        self,
+        row: int,
+        file_path: str,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Реализация добавления фото в строку.
+
+        Args:
+            row: Индекс строки в модели (source_model).
+            file_path: Абсолютный путь к файлу изображения.
+            photo_field: Имя поля с фото (если None, определяется автоматически).
+
+        Returns:
+            True при успехе, False при ошибке.
+        """
+
+        if row < 0 or row >= self.source_model.rowCount():
+            self.logger.warning(f"_add_photo_to_row_impl: неверный индекс строки {row}")
+            return False
+
+        dto = self.source_model.get_item_at_row(row)
+        if dto is None:
+            return False
+
+        if photo_field is None:
+            photo_field = self._get_photo_field_name_impl()
+            if photo_field is None:
+                self.logger.error("_add_photo_to_row_impl: нет поля с widget_type='image_thumbnail'")
+                return False
+
+        # Проверка расширения
+        ext = os.path.splitext(file_path)[1].lower()
+        allowed = self._get_allowed_extensions_for_photo(photo_field)
+        if ext not in allowed:
+            self.logger.warning(f"_add_photo_to_row_impl: недопустимое расширение {ext}")
+            return False
+
+        entity_id = getattr(dto, 'id', None)
+        is_new = (entity_id is None or entity_id < 0)
+
+        # Если строка новая – создаём временный ID
+        if is_new:
+            if entity_id is None:
+                entity_id = self._next_temp_id
+                self._next_temp_id -= 1
+                dto.id = entity_id
+                self.source_model.update_row(row, dto)
+                # Регистрируем новую строку в реестре, если ещё нет
+                if not self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):
+                    self._draft_registry.set(f"__new__:{self._entity_type}:{entity_id}", {"dto": dto})
+                    self.mark_own_change(entity_id)
+
+        # Временная папка для черновика
+        temp_dir = self._ensure_temp_dir(entity_id)
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        dest_path = os.path.join(temp_dir, unique_name)
+
+        try:
+            shutil.copy2(file_path, dest_path)
+        except Exception as e:
+            self.logger.exception(f"_add_photo_to_row_impl: копирование файла {file_path} не удалось: {e}")
+            return False
+
+        # Обновляем DTO
+        setattr(dto, photo_field, unique_name)
+        self.source_model.update_row(row, dto)
+
+        if not is_new:
+            self.mark_own_change(entity_id)
+
+        self._update_row_color(row)
+        self._update_save_button_state()
+        return True    
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _edit_photo_in_row_impl(
+        self,
+        row: int,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Реализация редактирования фото в строке.
+
+        Args:
+            row: Индекс строки в модели (source_model).
+            photo_field: Имя поля с фото (если None, определяется автоматически).
+
+        Returns:
+            True, если были изменения, иначе False.
+        """
+
+        if row < 0 or row >= self.source_model.rowCount():
+            self.logger.warning(f"_edit_photo_in_row_impl: неверный индекс строки {row}")
+            return False
+
+        dto = self.source_model.get_item_at_row(row)
+        if dto is None:
+            return False
+
+        if photo_field is None:
+            photo_field = self._get_photo_field_name_impl()
+            if photo_field is None:
+                self.logger.error("_edit_photo_in_row_impl: нет поля с widget_type='image_thumbnail'")
+                return False
+
+        entity_id = getattr(dto, 'id', None)
+        is_new = (entity_id is None or entity_id < 0)
+
+        # Если строка новая и нет ID – создаём временный
+        if is_new and entity_id is None:
+            entity_id = self._next_temp_id
+            self._next_temp_id -= 1
+            dto.id = entity_id
+            self.source_model.update_row(row, dto)
+            if not self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):
+                self._draft_registry.set(f"__new__:{self._entity_type}:{entity_id}", {"dto": dto})
+                self.mark_own_change(entity_id)
+
+        # Текущий абсолютный путь
+        current_full_path = self._get_current_photo_full_path(dto, photo_field, entity_id)
+
+        # Текущее описание
+        desc_field = self.field_configs.get(photo_field, {}).get('description_field')
+        current_description = getattr(dto, desc_field, "") if desc_field else ""
+
+        # Открываем диалог
+        new_path, new_description = self._show_photo_edit_dialog(
+            current_full_path,
+            current_description,
+            photo_field,
+            entity_id
+        )
+
+        if new_path is None and new_description is None:
+            return False  # изменений нет
+
+        changed = False
+
+        # Удаление фото
+        if new_path is None and new_description is None:
+            if getattr(dto, photo_field, None) is not None:
+                setattr(dto, photo_field, None)
+                changed = True
+        # Замена/добавление фото
+        elif new_path is not None:
+            if new_path != getattr(dto, photo_field, None):
+                setattr(dto, photo_field, new_path)
+                changed = True
+
+        # Изменение описания
+        if new_description is not None and desc_field:
+            if getattr(dto, desc_field, None) != new_description:
+                setattr(dto, desc_field, new_description)
+                changed = True
+
+        if changed:
+            self.source_model.update_row(row, dto)
+            if not is_new:
+                self.mark_own_change(entity_id)
+            self._update_row_color(row)
+            self._update_save_button_state()
+            return True
+
         return False
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _delete_photo_in_row_impl(
+        self,
+        row: int,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Реализация удаления фото из строки.
+
+        Args:
+            row: Индекс строки в модели (source_model).
+            photo_field: Имя поля с фото (если None, определяется автоматически).
+
+        Returns:
+            True, если поле было не пустым и очищено, иначе False.
+        """
+        if row < 0 or row >= self.source_model.rowCount():
+            self.logger.warning(f"_delete_photo_in_row_impl: неверный индекс строки {row}")
+            return False
+
+        dto = self.source_model.get_item_at_row(row)
+        if dto is None:
+            return False
+
+        if photo_field is None:
+            photo_field = self._get_photo_field_name_impl()
+            if photo_field is None:
+                self.logger.error("_delete_photo_in_row_impl: нет поля с widget_type='image_thumbnail'")
+                return False
+
+        current = getattr(dto, photo_field, None)
+        if current is None:
+            return False
+
+        # Очищаем поле фото
+        setattr(dto, photo_field, None)
+
+        # Очищаем поле описания, если оно есть
+        desc_field = self.field_configs.get(photo_field, {}).get('description_field')
+        if desc_field and hasattr(dto, desc_field):
+            setattr(dto, desc_field, "")
+
+        self.source_model.update_row(row, dto)
+
+        entity_id = getattr(dto, 'id', None)
+        is_new = (entity_id is None or entity_id < 0)
+
+        if is_new:
+            if entity_id is None:
+                entity_id = self._next_temp_id
+                self._next_temp_id -= 1
+                dto.id = entity_id
+                self.source_model.update_row(row, dto)
+                if not self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):
+                    self._draft_registry.set(f"__new__:{self._entity_type}:{entity_id}", {"dto": dto})
+                    self.mark_own_change(entity_id)
+        else:
+            self.mark_own_change(entity_id)
+
+        self._update_row_color(row)
+        self._update_save_button_state()
+        return True
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2308,6 +2834,7 @@ class PaginatedListPage(
         с основным списком (например, пациенты или приёмы). Поэтому возвращаем None.
         Если страница будет использоваться как дочерняя, метод переопределяется.
         """
+
         return None
 
     @AppLogger.get_instance(
@@ -2511,7 +3038,6 @@ class PaginatedListPage(
 
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
         
-
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -2773,7 +3299,6 @@ class PaginatedListPage(
 
         return False
 
-
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -2898,6 +3423,33 @@ class PaginatedListPage(
 
             self._draft_registry.discard(inc_key)
 
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _convert_photo_paths_to_absolute(
+        self,
+        entity_id,
+        dto,
+    ):
+        # --- Преобразование относительных путей в абсолютные ---
+        temp_dir = self._get_temp_dir(entity_id)
+        if temp_dir:
+            for field_name, config in self.field_configs.items():
+                if config.get('widget_type') != 'image_thumbnail':
+                    continue
+                rel_path = getattr(dto, field_name, None)
+                if rel_path and isinstance(rel_path, str) and not os.path.isabs(rel_path):
+                    abs_path = os.path.join(temp_dir, rel_path)
+                    if os.path.exists(abs_path):
+                        setattr(dto, field_name, abs_path)   
+        return temp_dir
+        
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -3004,6 +3556,9 @@ class PaginatedListPage(
             self._draft_registry.set(key, {"dto": dto})
             self.logger.debug(f"Обновлён parent_id новой строки {temp_id} -> {real_parent_id}")
 
+        # Преобразование относительных путей в абсолютные (для передачи в сервис)
+        temp_dir = self._convert_photo_paths_to_absolute(temp_id, dto)
+    
         # ВНИМАНИЕ: порядок важен – сначала создаём запись в БД, чтобы получить реальный ID,
         # затем переносим файлы из временной папки в папку с реальным ID,
         # и обновляем DTO, чтобы в БД сохранились относительные пути. 
@@ -3029,116 +3584,124 @@ class PaginatedListPage(
             # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
             raise
 
-        # Переносим файлы из временной папки в основное хранилище
-        updated_dto, copied_files, old_files, copied_dest_paths, error_messages = self._move_files_from_temp_to_storage(
-            created.id, 
-            created, 
-            old_id=temp_id, 
-            session=session, 
-        )
+        # # Переносим файлы из временной папки в основное хранилище
+        # updated_dto, copied_files, old_files, copied_dest_paths, error_messages = self._move_files_from_temp_to_storage(
+        #     created.id, 
+        #     created, 
+        #     old_id=temp_id, 
+        #     session=session, 
+        # )
 
-        if error_messages:
-            raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
+        # if error_messages:
+        #     raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
 
-        # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-        # temp_dir = self._get_temp_dir(temp_id)
-        # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-        #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-        #     self.logger.error(error_msg)
-        #     raise RuntimeError(error_msg)
+        # # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
+        # # temp_dir = self._get_temp_dir(temp_id)
+        # # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
+        # #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
+        # #     self.logger.error(error_msg)
+        # #     raise RuntimeError(error_msg)
 
-        # # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
-        # created = self._process_photo_fields_for_new_row(created, created.id, session)
+        # # # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
+        # # created = self._process_photo_fields_for_new_row(created, created.id, session)
 
-        # # Удаляем временную папку новой строки, так как файлы уже скопированы 
-        # self._cleanup_temp_dir(temp_id)
+        # # # Удаляем временную папку новой строки, так как файлы уже скопированы 
+        # # self._cleanup_temp_dir(temp_id)
 
-        # Обновляем запись в БД, сохраняя относительные пути
-        if copied_files or old_files or copied_dest_paths:
-            try:
-                updated_dto = self.service.update(updated_dto, session=session)
-            except Exception as e:
+        # # Обновляем запись в БД, сохраняя относительные пути
+        # if copied_files or old_files or copied_dest_paths:
+        #     try:
+        #         updated_dto = self.service.update(updated_dto, session=session)
+        #     except Exception as e:
 
-                # Логируем ошибку и пробрасываем дальше (транзакция откатится)
-                self.logger.error(f"Ошибка при переносе файлов или сохранении строки {temp_id}: {e}")
+        #         # Логируем ошибку и пробрасываем дальше (транзакция откатится)
+        #         self.logger.error(f"Ошибка при переносе файлов или сохранении строки {temp_id}: {e}")
 
-                 # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
-                ctx_rollback = DeletionContext.create(session, DeletionType.ROLLBACK)
-                for files in [
-                    # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-                    copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
-                    # old_files,  # Удаляем старые файлы (заменяемые)
-                ]:
-                    # for file in files:
-                    #
-                    #     delete_file_safely(  # удаление сразу
-                    #         file,
-                    #         logger = self.logger
-                    #     )
-                    self._del_file(
-                        file_path=files,
-                        # session=None,  # Моментальное удаление
-                        # session=session,
-                        ctx=ctx_rollback,
-                        if_delete_parent_dir=False,
-                        force=False,
-                    )
+        #          # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
+        #         ctx_rollback = DeletionContext.create(session, DeletionType.ROLLBACK)
+        #         for files in [
+        #             # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+        #             copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+        #             # old_files,  # Удаляем старые файлы (заменяемые)
+        #         ]:
+        #             # for file in files:
+        #             #
+        #             #     delete_file_safely(  # удаление сразу
+        #             #         file,
+        #             #         logger = self.logger
+        #             #     )
+        #             self._del_file(
+        #                 file_path=files,
+        #                 # session=None,  # Моментальное удаление
+        #                 # session=session,
+        #                 ctx=ctx_rollback,
+        #                 if_delete_parent_dir=False,
+        #                 force=False,
+        #             )
 
-                # Не удаляем временную папку! Она остаётся для повторной попытки.
-                #    Пользователь сможет исправить ошибку и сохранить снова.
-                # # Старые файлы не удаляем – они остались как были
-                # # Временную папку всё равно чистим
-                # # self._cleanup_temp_dir(temp_id)
+        #         # Не удаляем временную папку! Она остаётся для повторной попытки.
+        #         #    Пользователь сможет исправить ошибку и сохранить снова.
+        #         # # Старые файлы не удаляем – они остались как были
+        #         # # Временную папку всё равно чистим
+        #         # # self._cleanup_temp_dir(temp_id)
 
-                # schedule_deletion(
-                #     path=temp_id,
-                #     session=session,
-                #     remove_parent_if_empty=False,
-                #     force=False,
-                #     logger=self.logger
-                # )
+        #         # schedule_deletion(
+        #         #     path=temp_id,
+        #         #     session=session,
+        #         #     remove_parent_if_empty=False,
+        #         #     force=False,
+        #         #     logger=self.logger
+        #         # )
 
-                raise
+        #         raise
 
-            # Временные файлы (copied_files) и временную папку НЕ удаляем.
-            # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
-            # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
-            ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
-            for files in [
-                copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-                # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
-                old_files,  # Удаляем старые файлы (заменяемые)
-            ]:
-                self._del_file(  # отложенное удаление
-                    files,
-                    # session=session
-                    ctx=ctx_commit,
-                )
+        #     # Временные файлы (copied_files) и временную папку НЕ удаляем.
+        #     # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
+        #     # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
+        #     ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
+        #     for files in [
+        #         copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+        #         # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+        #         old_files,  # Удаляем старые файлы (заменяемые)
+        #     ]:
+        #         self._del_file(  # отложенное удаление
+        #             files,
+        #             # session=session
+        #             ctx=ctx_commit,
+        #         )
 
 
-            # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
-            # (через discard_entity_subtree или clear_entity_drafts)
-            # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
-            # # Принудительно удаляем временную папку, если она осталась
-            # self._cleanup_temp_dir(temp_id)
+        #     # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
+        #     # (через discard_entity_subtree или clear_entity_drafts)
+        #     # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
+        #     # # Принудительно удаляем временную папку, если она осталась
+        #     # self._cleanup_temp_dir(temp_id)
 
-            created = updated_dto   # теперь created ссылается на окончательный DTO
-        else:
-            updated_dto = created  # без изменений
+        #     created = updated_dto   # теперь created ссылается на окончательный DTO
+        # else:
+        #     updated_dto = created  # без изменений
 
+        # Обновляем модель
         # Найти строку в модели по временному ID и заменить DTO
         row = self._find_row_by_id(temp_id)
         if row >= 0:
             # self._source_model_update_row(row, created)
             # Обновляем модель DTO с уже исправленными путями
-            self._source_model_update_row(row, updated_dto)
+            # self._source_model_update_row(row, updated_dto)
+            self._source_model_update_row(row, created)
+            # self.original_data[row] = created
+            # if self.selected_dto and self.selected_dto.id == temp_id:
+            #     self.selected_dto = created
+
+            self._clear_selected_dto(temp_id, created)
         else:
             self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
         
         self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
 
         # Если эта строка была выбрана, обновляем selected_dto
-        self._clear_selected_dto(temp_id, updated_dto)
+        # self._clear_selected_dto(temp_id, updated_dto)
+        self._clear_selected_dto(temp_id, created)
 
         # Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик
         self._balance_parent_counter(temp_id, created.id)
@@ -3155,14 +3718,18 @@ class PaginatedListPage(
             ctx = DeletionContext.create(session, DeletionType.COMMIT)
         )
 
-        # Снимаем флаг собственных изменений (строка сохранена, статус пересчитается с учётом детей)
-        self.clear_own_change(created.id)
+        # # Снимаем флаг собственных изменений (строка сохранена, статус пересчитается с учётом детей)
+        # self.clear_own_change(created.id)
 
         # Удаляем ключ __new__ текущей строки
         self._draft_registry.discard(key)
 
         # Находим и рекурсивно сохраняем всех прямых потомков
         self._recursive_save_new_row(temp_id, created.id, session=session)
+
+        # Очистка черновиков и временной папки после успешного сохранения
+        ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
+        self.clear_entity_drafts(created.id, ctx_commit)
 
         return created
 
@@ -4294,21 +4861,24 @@ class PaginatedListPage(
             вызывающего кода.
         """
 
-        if session is None:
-            with self.service._db.session_scope() as new_session:
-                return self._save_all_changes_impl_session(new_session)
+        # if session is None:
+        #     with self.service._db.session_scope() as new_session:
+        #         return self._save_all_changes_impl_session(new_session)
 
-        if self._saving_in_progress:
-            self.logger.warning("Попытка рекурсивного сохранения")
-            return False
-        self._saving_in_progress = True
 
-        try:
+        # if self._saving_in_progress: # тут ненужна...
+        #     self.logger.warning("Попытка рекурсивного сохранения")
+        #     return False
+        
+        # self._saving_in_progress = True
+
+        with self.service._session_scope(session) as sess:
+            # try:
 
             # with self.service._db.session_scope() as session:
 
             # Сохраняем новые строки, получаем словарь {temp_id: created_dto}
-            new_map = self._save_new_rows(session=session)
+            new_map = self._save_new_rows(session=sess)
 
             # # Если текущая выбранная строка была новой – обновляем selected_dto
             # if self.selected_dto and self.selected_dto.id in new_map:
@@ -4331,18 +4901,18 @@ class PaginatedListPage(
             # self._clear_selected_dto_dict(new_map, new_map[self.selected_dto.id])
 
             # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID) и для всех существующих строк, у которых есть такие черновики
-            self._save_child_changes(new_map, session=session)
+            self._save_child_changes(new_map, session=sess)
 
             # Сохраняем изменённые строки
-            self._save_modified_rows(session=session)
+            self._save_modified_rows(session=sess)
 
             # Сохраняем удалённые строки
-            self._save_deleted_rows(session=session)
+            self._save_deleted_rows(session=sess)
 
-        finally:
-            self._saving_in_progress = False
+            # finally:
+            #     self._saving_in_progress = False
 
-        return True
+            return True
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -4525,44 +5095,47 @@ class PaginatedListPage(
                 if dto is None:
                     continue
 
-                # Получаем оригинальный DTO
-                original_dto = self.original_data.get(row)
-                storage_path = self._get_photo_storage_path()
-                deleted_old_files = []  # для файлов, которые были удалены (поле очищено)
+                # Преобразование относительных путей в абсолютные (для передачи в сервис)
+                temp_dir = self._convert_photo_paths_to_absolute(entity_id, dto)
 
-                # Проверяем фото-поля на удаление
-                for field_name, config in self.field_configs.items():
-                    if config.get('widget_type') != 'image_thumbnail':
-                        continue
-                    old_value = getattr(original_dto, field_name, None) if original_dto else None
-                    new_value = getattr(dto, field_name, None)
-                    # Если раньше был путь, а теперь пусто – удаляем старый файл
-                    if old_value and not new_value:
-                        full_old_path = os.path.join(storage_path, old_value)
-                        if os.path.exists(full_old_path):
-                            deleted_old_files.append(full_old_path)
+                # # Получаем оригинальный DTO
+                # original_dto = self.original_data.get(row)
+                # storage_path = self._get_photo_storage_path()
+                # deleted_old_files = []  # для файлов, которые были удалены (поле очищено)
+
+                # # Проверяем фото-поля на удаление
+                # for field_name, config in self.field_configs.items():
+                #     if config.get('widget_type') != 'image_thumbnail':
+                #         continue
+                #     old_value = getattr(original_dto, field_name, None) if original_dto else None
+                #     new_value = getattr(dto, field_name, None)
+                #     # Если раньше был путь, а теперь пусто – удаляем старый файл
+                #     if old_value and not new_value:
+                #         full_old_path = os.path.join(storage_path, old_value)
+                #         if os.path.exists(full_old_path):
+                #             deleted_old_files.append(full_old_path)
 
 
-                # Переносим файлы из временной папки в основное хранилище
-                dto, copied_files, old_files, copied_dest_paths , error_messages = self._move_files_from_temp_to_storage(
-                    entity_id,
-                    dto,
-                    session=sess,
-                )
-                if error_messages:
-                    raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
+                # # Переносим файлы из временной папки в основное хранилище
+                # dto, copied_files, old_files, copied_dest_paths , error_messages = self._move_files_from_temp_to_storage(
+                #     entity_id,
+                #     dto,
+                #     session=sess,
+                # )
+                # if error_messages:
+                #     raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
 
-                # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-                # temp_dir = self._get_temp_dir(entity_id)
-                # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-                #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-                #     self.logger.error(error_msg)
-                #     raise RuntimeError(error_msg)
+                # # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
+                # # temp_dir = self._get_temp_dir(entity_id)
+                # # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
+                # #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
+                # #     self.logger.error(error_msg)
+                # #     raise RuntimeError(error_msg)
 
-                # --------------------------------------------------------------
-                # Сохраняем обновлённый DTO в БД
-                # --------------------------------------------------------------
-                # temp_err = False
+                # # --------------------------------------------------------------
+                # # Сохраняем обновлённый DTO в БД
+                # # --------------------------------------------------------------
+                # # temp_err = False
                 try:
                     updated = self.service.update(
                         dto,
@@ -4572,6 +5145,8 @@ class PaginatedListPage(
                     # self.original_data[row] = updated
 
                     self._source_model_update_row(row, updated)
+
+                    # self.original_data[row] = updated
 
                     # Обновляем selected_dto, если эта строка была выбрана
                     # if self.selected_dto and self.selected_dto.id == entity_id:
@@ -4583,49 +5158,49 @@ class PaginatedListPage(
                     # Логируем ошибку и пробрасываем дальше (транзакция откатится)
                     self.logger.error(f"Ошибка при сохранении строки {entity_id}: {e}")
 
-                    # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
-                    ctx_rollback = DeletionContext.create(sess, DeletionType.ROLLBACK)
-                    for files in [
-                        # deleted_old_files, # заменённые при переносе файлы
-                        # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-                        copied_dest_paths, # Удаляем целевые файлы (уже скопированные)
-                        # old_files,  # Удаляем старые файлы (заменяемые)
-                    ]:
-                        # for file in files:
-                        #      delete_file_safely( # удаление сразу
-                        #          file,
-                        #          logger=self.logger
-                        #      )
-                        self._del_file(
-                            file_path=files,
-                            # session=None,  # Моментальное удаление
-                            # session=sess,
-                            ctx=ctx_rollback,
-                            if_delete_parent_dir=False,
-                            force=False,
-                        )
+                    # # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
+                    # ctx_rollback = DeletionContext.create(sess, DeletionType.ROLLBACK)
+                    # for files in [
+                    #     # deleted_old_files, # заменённые при переносе файлы
+                    #     # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+                    #     copied_dest_paths, # Удаляем целевые файлы (уже скопированные)
+                    #     # old_files,  # Удаляем старые файлы (заменяемые)
+                    # ]:
+                    #     # for file in files:
+                    #     #      delete_file_safely( # удаление сразу
+                    #     #          file,
+                    #     #          logger=self.logger
+                    #     #      )
+                    #     self._del_file(
+                    #         file_path=files,
+                    #         # session=None,  # Моментальное удаление
+                    #         # session=sess,
+                    #         ctx=ctx_rollback,
+                    #         if_delete_parent_dir=False,
+                    #         force=False,
+                    #     )
 
                     # Временную папку не удаляем – оставляем для повторной попытки
                     # Пробрасываем исключение, транзакция откатится
 
                     raise
 
-                # Временные файлы (copied_files) и временную папку НЕ удаляем.
-                # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
-                # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
+                # # Временные файлы (copied_files) и временную папку НЕ удаляем.
+                # # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
+                # # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
 
-                ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
-                for files in [
-                    deleted_old_files, # заменённые при переносе файлы
-                    copied_files,  # Удаляем временные файлы (скопированные из временной папки) отложенно
-                    # copied_dest_paths, # Удаляем целевые файлы (уже скопированные)
-                    old_files,  # Удаляем старые файлы (заменяемые) отложенно
-                ]:
-                    self._del_file( # отложенное удаление
-                        files,
-                        # session=sess
-                        ctx = ctx_commit,
-                    )
+                # ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
+                # for files in [
+                #     deleted_old_files, # заменённые при переносе файлы
+                #     copied_files,  # Удаляем временные файлы (скопированные из временной папки) отложенно
+                #     # copied_dest_paths, # Удаляем целевые файлы (уже скопированные)
+                #     old_files,  # Удаляем старые файлы (заменяемые) отложенно
+                # ]:
+                #     self._del_file( # отложенное удаление
+                #         files,
+                #         # session=sess
+                #         ctx = ctx_commit,
+                #     )
 
                 # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
                 # (через discard_entity_subtree или clear_entity_drafts)
@@ -4649,6 +5224,7 @@ class PaginatedListPage(
                 #   Обновляет статус в реестре и кэше.
                 #   Если статус изменился, вызывает _propagate_status_up(entity_id) (пересчитывает статус родителей).
                 # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
+                ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
                 self.clear_entity_drafts(  # Удаляет черновики для данной сущности
                     entity_id,
                     ctx=ctx_commit  # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
@@ -4674,6 +5250,8 @@ class PaginatedListPage(
     
         super().reload_with_filters(filters_tree)   # вызывает _load_first_page() в миксине
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
+        # Принудительно переустанавливаем делегаты после загрузки данных, чтобы миниатюры отображались
+        self._reapply_delegates()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -5391,9 +5969,6 @@ class PaginatedListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _get_real_type(self, annotation):
-
-
-
 
         # from typing import get_origin, get_args, Union
         origin = get_origin(annotation)
@@ -6142,112 +6717,162 @@ class PaginatedListPage(
                 (например, новый приём для уже выбранного пациента).
         """
 
-        defaults = {}
+        # Подготавливаем значения по умолчанию для DATA-столбцов
+        overrides = {}
         for col in self.columns:
-
             if col.column_type != ColumnType.DATA:
                 continue
-
             if col.data_type == str:
-                defaults[col.field_name] = ""
-
+                overrides[col.field_name] = ""
             elif col.data_type == int:
-                defaults[col.field_name] = 0
-
+                overrides[col.field_name] = 0
             elif col.data_type == datetime.date:
-                defaults[col.field_name] = datetime.date.today()
+                overrides[col.field_name] = datetime.date.today()
+            # иначе не добавляем – останутся None, будут взяты из _context_params
 
-            else:
-                defaults[col.field_name] = None
+        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
+        if dto is None:
+            return
 
-        if hasattr(self, '_context_params'):
-            for key, value in self._context_params.items():
-                if key in defaults:
-                    defaults[key] = value
-
-        dto = self.dto_class(**defaults)
-
-        temp_id = self._next_temp_id
-        self._next_temp_id -= 1
-        dto.id = temp_id
-
-        # # создаём временную папку для этой новой строки (черновик)
-        # self._ensure_temp_dir(temp_id) # (папка будет создана при первом добавлении фото)
-
-        # Сохраняем в реестр как новую строку
-        self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
+        temp_id = dto.id
 
         # Добавляем в модель
         row = self.source_model.add_row(dto)
 
-        # Помечаем как имеющую собственные изменения (новая строка)
-        self.mark_own_change(temp_id)  # устанавливает статус 'own' для временного ID (без уведомления родителя)
+        self._finalize_new_row(dto, temp_id, row)
 
-        # # Уведомляем родителя о появлении нового потомка (если есть родитель)
-        # # parent_id = self._get_parent_id_for_new_row(dto)
-        # # if parent_id is not None:
-        # #     self.mark_child_change(parent_id, +1)
-        #
-        # # Увеличиваем счётчик родителя только если родитель существует (ID > 0) и не помечен на удаление
-        #
-        # # if parent_id is not None and parent_id > 0:
-        # #     # Причина:
-        # #     # Родитель с временным ID (parent_id < 0) не должен влиять на счётчик, так как он сам ещё не сохранён.
-        # #     # Если родитель уже помечен на удаление, то новая строка не должна увеличивать его счётчик, так как родитель всё равно будет удалён. Это предотвращает дисбаланс счётчиков.
-        # #
-        # #     if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
-        # #         self.mark_child_change(parent_id, +1)
-        # #     else:
-        # #         self.logger.debug(
-        # #             f"Родитель {parent_id} помечен на удаление, счётчик не увеличен для новой строки {temp_id}")
+        # # Сохраняем в реестр как новую строку
+        # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
 
-        # # Уведомляем родителя о появлении нового потомка (если есть родитель)
-        # parent_id = self._get_parent_id_for_new_row(dto)
-        # self._update_parent_counter(parent_id, 1, temp_id)
+        # # Добавляем в модель
+        # row = self.source_model.add_row(dto)
 
-        # # # Уведомляем родителя о появлении нового потомка с изменениями
-        # # self._update_parent_child_counter(temp_id, +1)
+        # # Помечаем как имеющую собственные изменения (новая строка)
+        # self.mark_own_change(temp_id)
 
-        # Уведомляем родителя о появлении нового потомка
-        self._register_new_row_parent_balance(dto, temp_id)
+        # # Уведомляем родителя о появлении нового потомка
+        # self._register_new_row_parent_balance(dto, temp_id)
 
-        # self._update_row_color(row)  # Перекрашиваем строку
+        # # После возможной сортировки нужно найти актуальную строку по temp_id
+        # actual_row = self._find_row_by_id(temp_id)
 
-        # После возможной сортировки нужно найти актуальную строку по temp_id
-        actual_row = self._find_row_by_id(temp_id)
+        # self.logger.debug(f"actual_row = {actual_row}")
+        # if actual_row >= 0:
+        #     self._update_row_color(actual_row)
+        # else:
+        #     self._update_row_color(row)
 
-        self.logger.debug(
-            f"actual_row = {actual_row} "
-        )
-        if actual_row >= 0:
-            self._update_row_color(actual_row)  # Перекрашиваем строку
-        else:
-            self._update_row_color(row)  # fallback  # Перекрашиваем строку
+        # self._update_save_button_state()
 
-        self._update_save_button_state() # Обновляем состояние кнопки сохранения
 
-        # # Создать пустой DTO и добавить
+
+
         # defaults = {}
         # for col in self.columns:
+
         #     if col.column_type != ColumnType.DATA:
         #         continue
+
         #     if col.data_type == str:
         #         defaults[col.field_name] = ""
+
         #     elif col.data_type == int:
         #         defaults[col.field_name] = 0
+
         #     elif col.data_type == datetime.date:
         #         defaults[col.field_name] = datetime.date.today()
+
         #     else:
         #         defaults[col.field_name] = None
-        # # Применяем контекстные параметры
+
         # if hasattr(self, '_context_params'):
         #     for key, value in self._context_params.items():
         #         if key in defaults:
         #             defaults[key] = value
+
         # dto = self.dto_class(**defaults)
-        # dto.id = self._next_temp_id if hasattr(self, '_next_temp_id') else -1
-        # self._next_temp_id = (self._next_temp_id or -1) - 1
-        # self._add_new_row(dto)
+
+        # temp_id = self._next_temp_id
+        # self._next_temp_id -= 1
+        # dto.id = temp_id
+
+        # # # создаём временную папку для этой новой строки (черновик)
+        # # self._ensure_temp_dir(temp_id) # (папка будет создана при первом добавлении фото)
+
+        # # Сохраняем в реестр как новую строку
+        # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
+
+        # # Добавляем в модель
+        # row = self.source_model.add_row(dto)
+
+        # # Помечаем как имеющую собственные изменения (новая строка)
+        # self.mark_own_change(temp_id)  # устанавливает статус 'own' для временного ID (без уведомления родителя)
+
+        # # # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        # # # parent_id = self._get_parent_id_for_new_row(dto)
+        # # # if parent_id is not None:
+        # # #     self.mark_child_change(parent_id, +1)
+        # #
+        # # # Увеличиваем счётчик родителя только если родитель существует (ID > 0) и не помечен на удаление
+        # #
+        # # # if parent_id is not None and parent_id > 0:
+        # # #     # Причина:
+        # # #     # Родитель с временным ID (parent_id < 0) не должен влиять на счётчик, так как он сам ещё не сохранён.
+        # # #     # Если родитель уже помечен на удаление, то новая строка не должна увеличивать его счётчик, так как родитель всё равно будет удалён. Это предотвращает дисбаланс счётчиков.
+        # # #
+        # # #     if not self._draft_registry.has(f"__deleted__:{self._entity_type}:{parent_id}"):
+        # # #         self.mark_child_change(parent_id, +1)
+        # # #     else:
+        # # #         self.logger.debug(
+        # # #             f"Родитель {parent_id} помечен на удаление, счётчик не увеличен для новой строки {temp_id}")
+
+        # # # Уведомляем родителя о появлении нового потомка (если есть родитель)
+        # # parent_id = self._get_parent_id_for_new_row(dto)
+        # # self._update_parent_counter(parent_id, 1, temp_id)
+
+        # # # # Уведомляем родителя о появлении нового потомка с изменениями
+        # # # self._update_parent_child_counter(temp_id, +1)
+
+        # # Уведомляем родителя о появлении нового потомка
+        # self._register_new_row_parent_balance(dto, temp_id)
+
+        # # self._update_row_color(row)  # Перекрашиваем строку
+
+        # # После возможной сортировки нужно найти актуальную строку по temp_id
+        # actual_row = self._find_row_by_id(temp_id)
+
+        # self.logger.debug(
+        #     f"actual_row = {actual_row} "
+        # )
+        # if actual_row >= 0:
+        #     self._update_row_color(actual_row)  # Перекрашиваем строку
+        # else:
+        #     self._update_row_color(row)  # fallback  # Перекрашиваем строку
+
+        # self._update_save_button_state() # Обновляем состояние кнопки сохранения
+
+        # # # Создать пустой DTO и добавить
+        # # defaults = {}
+        # # for col in self.columns:
+        # #     if col.column_type != ColumnType.DATA:
+        # #         continue
+        # #     if col.data_type == str:
+        # #         defaults[col.field_name] = ""
+        # #     elif col.data_type == int:
+        # #         defaults[col.field_name] = 0
+        # #     elif col.data_type == datetime.date:
+        # #         defaults[col.field_name] = datetime.date.today()
+        # #     else:
+        # #         defaults[col.field_name] = None
+        # # # Применяем контекстные параметры
+        # # if hasattr(self, '_context_params'):
+        # #     for key, value in self._context_params.items():
+        # #         if key in defaults:
+        # #             defaults[key] = value
+        # # dto = self.dto_class(**defaults)
+        # # dto.id = self._next_temp_id if hasattr(self, '_next_temp_id') else -1
+        # # self._next_temp_id = (self._next_temp_id or -1) - 1
+        # # self._add_new_row(dto)
 
     # def _update_parent_child_counter(self, entity_id, delta:int): # перенесён в DraftTreeMixin
     #     # Если есть родитель, увеличиваем счётчик его потомков
@@ -6505,7 +7130,6 @@ class PaginatedListPage(
         #         self.mark_child_change(parent_id, -1)
         self._update_parent_counter(parent_id, -1)
 
-    
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -6911,5 +7535,134 @@ class PaginatedListPage(
         finally:
             self._entity_type = original_type
             self._saving_in_progress = False
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_current_selected_row(self) -> Optional[int]:
+        """
+        Возвращает индекс текущей выбранной строки в исходной модели (source_model).
+        Если строка не выбрана или индекс невалиден, возвращает None.
+        """
+        current = self.table_view.currentIndex()
+        if current.isValid():
+            source_index = self.proxy_model.mapToSource(current) if hasattr(self, 'proxy_model') else current
+            return source_index.row()
+        return None
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_photo_field_name(self) -> Optional[str]:
+        """
+        Возвращает имя первого поля с widget_type='image_thumbnail' в field_configs.
+        Используется для проверки наличия фото-столбца и получения его имени.
+        """
+        return self._get_photo_field_name_impl()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def has_photo_column(self) -> bool:
+        """Проверяет, есть ли в таблице столбец с фото."""
+        return self._has_photo_column()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def add_photo_from_file(self, file_path: str, photo_field: Optional[str] = None) -> bool:
+        """
+        Добавляет новую строку с фото из указанного файла.
+        Если photo_field не указан, определяется автоматически.
+        Возвращает True при успешном добавлении.
+        """
+        if photo_field is None:
+            photo_field = self._get_photo_field_name_impl()
+            if photo_field is None:
+                self.logger.error("add_photo_from_file: не найдено поле с фото")
+                return False
+        self._add_photo_from_file(file_path, photo_field)
+        return True
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def add_photo_to_row(
+        self,
+        row: int,
+        file_path: str,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Добавляет фото в существующую строку (индекс в source_model).
+        Если строка новая (временный ID), создаёт временную папку и помечает как изменённую.
+        Возвращает True при успехе.
+
+        Args:
+            row: Индекс строки в таблице.
+            file_path: Абсолютный путь к файлу изображения.
+            photo_field: Имя поля с фото (если None, используется первое подходящее поле).
+
+        Returns:
+            True при успешном добавлении, иначе False.
+        """
+        return self._add_photo_to_row_impl(row, file_path, photo_field)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def edit_photo_in_row(
+        self,
+        row: int,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Открывает диалог редактирования фото для указанной строки.
+        Позволяет заменить/удалить фото и изменить описание (если есть поле описания).
+        Возвращает True, если были внесены изменения.
+
+        Args:
+            row: Индекс строки в таблице.
+            photo_field: Имя поля с фото (если None, используется первое подходящее поле).
+
+        Returns:
+            True, если были внесены изменения, иначе False.
+        """
+        return self._edit_photo_in_row_impl(row, photo_field)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def delete_photo_in_row(
+        self,
+        row: int,
+        photo_field: Optional[str] = None
+    ) -> bool:
+        """
+        Удаляет фото из указанной строки (очищает поле file_path и поле описания, если есть).
+        Возвращает True, если поле было не пустым и очищено.
+
+        Args:
+            row: Индекс строки в таблице.
+            photo_field: Имя поля с фото (если None, используется первое подходящее поле).
+
+        Returns:
+            True, если поле было очищено, иначе False.
+        """
+        return self._delete_photo_in_row_impl(row, photo_field)
 
 

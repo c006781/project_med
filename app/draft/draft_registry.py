@@ -87,6 +87,11 @@ class DraftRegistry(QObject):
     # Работа со статусами сущностей
     # ==================================================================
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def set_entity_status(
         self, entity_type: str, entity_id: int, status: Optional[str]
     ) -> None:
@@ -109,6 +114,11 @@ class DraftRegistry(QObject):
             self.set(key, {"status": status})
         0==0
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_entity_status(
         self, 
         entity_type: str, 
@@ -128,6 +138,11 @@ class DraftRegistry(QObject):
         data = self.get(f"__status__:{entity_type}:{entity_id}")
         return data["status"] if data else None
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def delete_entity_status(self, entity_type: str, entity_id: int) -> None:
         """
         Удаляет статус сущности (сбрасывает до None).
@@ -143,6 +158,11 @@ class DraftRegistry(QObject):
     # Счётчики потомков (для оптимизации пересчёта статуса родителя)
     # ==================================================================
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def inc_child_counter(
         self, 
         parent_type: str, 
@@ -177,11 +197,21 @@ class DraftRegistry(QObject):
 
         return new_count
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def dec_child_counter(self, parent_type: str, parent_id: int) -> int:
         """Уменьшает счётчик потомков на -1 (удобная обёртка)."""
 
         return self.inc_child_counter(parent_type, parent_id, -1)
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_child_counter(
         self, 
         parent_type: str, 
@@ -205,6 +235,11 @@ class DraftRegistry(QObject):
     # Управление черновиками и статусами по префиксу (для поддеревьев)
     # ==================================================================
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def discard_entity_subtree(self, entity_type: str, entity_id: int) -> None:
         """
         Удаляет черновики и статус ТОЛЬКО для указанной сущности (не рекурсивно).
@@ -241,6 +276,11 @@ class DraftRegistry(QObject):
         # Удаляем метку удаления, если была
         self.discard(f"__deleted__:{entity_type}:{entity_id}")
 
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def discard_subtree_by_prefix(self, prefix: str) -> None:
         """Универсальный метод удаления по префиксу (любые ключи)."""
         # for key in list(self._storage.keys()):

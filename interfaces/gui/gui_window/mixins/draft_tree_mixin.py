@@ -637,6 +637,8 @@ class DraftTreeMixin:
         # Распространяем изменение вверх
         self._propagate_status_up(entity_id)
 
+        0==0
+
     @AppLogger.get_instance(
         name='DraftTreeMixin',
         # share_file_with = 'system',

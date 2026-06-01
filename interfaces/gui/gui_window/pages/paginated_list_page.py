@@ -2340,6 +2340,10 @@ class PaginatedListPage(
         # --- Дополнительная синхронизация кнопки "Сохранить" ---
         self._update_save_button_state()
 
+        # Принудительная перерисовка, чтобы убрать артефакты
+        self.table_view.viewport().update()
+        # self.table_view.horizontalHeader().update()
+
         self.logger.debug(f"Режим редактирования: {'включён' if edit_mode else 'выключен'}, UI обновлён")
 
 
@@ -6025,6 +6029,11 @@ class PaginatedListPage(
             - Для `TextPopupDelegate` дополнительно в `_update_ui_for_edit_mode` вызывается
             `set_readonly`, чтобы синхронизировать режим редактирования.
         """
+        # Очищаем все существующие делегаты, чтобы при сдвиге индексов (например, добавление чекбокс-столбца)
+        # старые делегаты не оставались на старых позициях
+        if hasattr(self, 'table_view') and self.table_view.model():
+            for col in range(self.table_view.model().columnCount()):
+                self.table_view.setItemDelegateForColumn(col, None)
 
         self._setup_delegates()
 
@@ -6148,45 +6157,25 @@ class PaginatedListPage(
         # )
         # import datetime
 
-        # 1) Выпадающий список
+        # по метке:
+
+        # Выпадающий список
         choices = config.get('choices')
         if choices:
             return ComboBoxDelegate, {'choices': choices}
 
-        # 2) Многострочный текст
+        # Многострочный текст
         if config.get('widget_type') == 'textarea':
             return TextPopupDelegate, {'readonly': not self.edit_mode}
 
-        # 3) Автодополнение для строк
-        real_type = self._get_real_type(self.dto_class.model_fields[field_name].annotation)
-        if real_type == str and config.get('autocomplete', False):
-            return CompleterStringDelegate, {'column': None}  # column будет передан при установке
-
-        # 4) Дата
-        if real_type == datetime.date:
-            return DatePickerDelegate, {'config': config}
-
-        # 5) Время
-        if real_type == datetime.time:
-            return TimePickerDelegate, {'config': config}
-
-        # 6) Булево
-        if real_type == bool:
-            return BoolDelegate, {}
-
-        # 7) Строка (обычная или с маской)
-        if real_type == str:
-            # Для строк с маской используем StringDelegate, без маски – тоже StringDelegate
-            return StringDelegate, {}
-
-        # 8) Отображение миниатюры изображения
+        # Отображение миниатюры изображения
         if config.get('widget_type') == 'image_thumbnail':
             # from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
             # from app.config.config_manager.manager import AppConfigManager
 
             # # Путь к хранилищу фото нужно получить из конфигурации
             storage_path = AppConfigManager.get_instance().get(
-                'PHOTOS_STORAGE_PATH', 
+                'PHOTOS_STORAGE_PATH',
                 os.path.join('.', 'photos')
             )
 
@@ -6200,7 +6189,34 @@ class PaginatedListPage(
 
             return ImageThumbnailDelegate, args
 
-        # 9) Остальные типы – нет делегата (стандартный)
+        # по типу данных:
+
+        # Автодополнение для строк
+        # tt = self.dto_class.model_fields[field_name].annotation
+        real_type = self._get_real_type(self.dto_class.model_fields[field_name].annotation)
+        if real_type == str and config.get('autocomplete', False):
+            return CompleterStringDelegate, {'column': None}  # column будет передан при установке
+
+        # Дата
+        if real_type == datetime.date:
+            return DatePickerDelegate, {'config': config}
+
+        # Время
+        if real_type == datetime.time:
+            return TimePickerDelegate, {'config': config}
+
+        # Булево
+        if real_type == bool:
+            return BoolDelegate, {}
+
+        # Строка (обычная или с маской)
+        if real_type == str:
+            # Для строк с маской используем StringDelegate, без маски – тоже StringDelegate
+            return StringDelegate, {}
+
+
+
+        # Остальные типы – нет делегата (стандартный)
         return None, {}
 
     # @AppLogger.get_instance(

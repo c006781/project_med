@@ -107,7 +107,7 @@ class AsyncImageLoader(QRunnable):
             target_size: Желаемый размер миниатюры.
         """
 
-        # super().__init__()
+        super().__init__()
         self.widget = widget
         self.row = row
         self.full_path = full_path
@@ -667,7 +667,19 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         top_left = model.index(row, 0)
         bottom_right = model.index(row, model.columnCount() - 1)
         if top_left.isValid():
-            parent.update(top_left, bottom_right)
+            # parent.update(top_left, bottom_right)
+            # parent.viewport().update()
+
+            # Используем invokeMethod для гарантии выполнения в главном потоке
+            QMetaObject.invokeMethod(
+                parent,
+                "update",
+                Qt.QueuedConnection,
+                Q_ARG(QModelIndex, top_left),
+                Q_ARG(QModelIndex, bottom_right)
+            )
+
+
 
         # # Сохраняем в кэш (ключ – полный путь, но мы его не знаем – можно передавать)
         # # В упрощённом варианте – обновляем ячейку, заставив перерисовать
@@ -679,14 +691,14 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
     # Обработка событий
     # ------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='ImageThumbnailDelegate',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='ImageThumbnailDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def eventFilter(self, obj, event) -> bool:
         """
         Фильтр событий для отслеживания ухода курсора мыши из таблицы.

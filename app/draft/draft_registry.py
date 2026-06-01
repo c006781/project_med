@@ -107,6 +107,7 @@ class DraftRegistry(QObject):
 
         else:
             self.set(key, {"status": status})
+        0==0
 
     def get_entity_status(
         self, 

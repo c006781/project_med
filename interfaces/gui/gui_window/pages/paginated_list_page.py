@@ -806,6 +806,11 @@ class PaginatedListPage(
         """
         # Применяем черновики к загруженным данным
         page = self._apply_drafts_to_page(page)
+        # Если это загрузка первой страницы (append=False), добавляем новые строки из __new__
+        if not append:
+            page = self._draft_registry.merge_new_dtos(
+                self._entity_type, page, self.dto_class, sort_by_id=True
+            )
         # Вызываем родительский метод (из PaginationMixin)
         super()._on_page_loaded(page, total, append)
 

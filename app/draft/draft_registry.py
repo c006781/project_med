@@ -29,7 +29,7 @@
 from typing import (
     Dict, Any,
     Optional, Callable,
-    Set, Type
+    Set, Type, List
 )
 from collections import defaultdict
 # from weakref import ref
@@ -775,3 +775,84 @@ class DraftRegistry(QObject):
         """
         key = f"{entity_type}:{entity_id}:draft"
         self.discard(key)
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def get_new_dtos(self, entity_type: str, dto_class: Type) -> List[Any]:
+        """
+        Возвращает список DTO всех новых строк для указанного типа сущности.
+
+        **Назначение:**
+            Извлекает из реестра все ключи вида `__new__:{entity_type}:{temp_id}`
+            и восстанавливает DTO из сохранённых словарей.
+
+        **Параметры:**
+            entity_type (str): Тип сущности (например, "appointment").
+            dto_class (Type): Класс DTO (Pydantic модель) для восстановления объектов.
+
+        **Возвращает:**
+            List[Any]: Список DTO новых строк (может быть пустым).
+
+        **Пример:**
+            >>> new_dtos = registry.get_new_dtos("appointment", AppointmentDTO)
+            >>> for dto in new_dtos:
+            ...     print(dto.id, dto.date)  # id отрицательные
+        """
+        result = []
+        prefix = f"__new__:{entity_type}:"
+        for key in self.get_keys_by_prefix(prefix):
+            data = self.get(key)
+            if data and 'dto' in data:
+                dto_dict = data['dto']
+                # Если уже экземпляр DTO (например, при прямом сохранении), используем его
+                if hasattr(dto_dict, 'id') and hasattr(dto_dict, 'model_dump'):
+                    result.append(dto_dict)
+                else:
+                    # Восстанавливаем из словаря
+                    result.append(dto_class(**dto_dict))
+        return result
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def merge_new_dtos(
+            self,
+            entity_type: str,
+            page_data: List[Any],
+            dto_class: Type,
+            sort_by_id: bool = True
+    ) -> List[Any]:
+        """
+        Объединяет список DTO, загруженных из БД, со списком новых строк из реестра.
+
+        **Назначение:**
+            Добавляет в конец `page_data` все новые строки (из `__new__`), которые
+            ещё не присутствуют в `page_data` (по id). Предотвращает дублирование.
+
+        **Параметры:**
+            entity_type (str): Тип сущности.
+            page_data (List[Any]): Список DTO, загруженных из БД (или из пагинации).
+            dto_class (Type): Класс DTO для восстановления.
+            sort_by_id (bool): Если True, результат сортируется по id (отрицательные
+                               идут первыми, затем положительные). По умолчанию True.
+
+        **Возвращает:**
+            List[Any]: Объединённый список DTO.
+
+        **Пример:**
+            >>> merged = registry.merge_new_dtos("appointment", db_page, AppointmentDTO)
+            >>> # merged содержит сначала новые строки (id < 0), затем загруженные из БД
+        """
+        new_dtos = self.get_new_dtos(entity_type, dto_class)
+        # Исключаем дубликаты: если в page_data уже есть DTO с тем же id
+        existing_ids = {dto.id for dto in page_data if dto.id is not None}
+        filtered_new = [dto for dto in new_dtos if dto.id not in existing_ids]
+        merged = page_data + filtered_new
+        if sort_by_id:
+            merged.sort(key=lambda x: x.id)
+        return merged

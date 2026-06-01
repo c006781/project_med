@@ -27,9 +27,9 @@
 """
 
 from typing import (
-    Dict, Any, 
-    Optional, Callable, 
-    Set
+    Dict, Any,
+    Optional, Callable,
+    Set, Type
 )
 from collections import defaultdict
 # from weakref import ref
@@ -628,3 +628,110 @@ class DraftRegistry(QObject):
     def discard_subtree(self, prefix: str) -> None:
         """Удаляет все черновики, ключи которых начинаются с prefix."""
         self.discard_by_prefix(prefix)
+
+    # ----------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def save_draft_dto(
+        self,
+        dto: Any,
+        entity_type: str,
+        entity_id: int,
+        field_configs: Dict[str, Dict[str, Any]],
+        exclude_fields: Optional[set] = None
+    ) -> None:
+        """
+        Сохраняет сериализованную копию DTO в реестр как черновик.
+
+        **Динамическое исключение полей:**
+            Поля, помеченные в `field_configs` как `virtual=True` без `is_note`,
+            а также поля с `compute` без `is_note`, автоматически исключаются из сохранения.
+            Это позволяет сохранять только те данные, которые реально изменяются пользователем.
+
+        **Параметры:**
+            dto (Any): Экземпляр DTO (Pydantic модель).
+            entity_type (str): Тип сущности (например, "appointment").
+            entity_id (int): ID сущности (положительный для существующих, отрицательный для новых).
+            field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей (из модуля `field_configs`).
+            exclude_fields (Optional[set]): Дополнительный набор имён полей для исключения.
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> registry.save_draft_dto(appointment_dto, "appointment", 123, APPOINTMENT_CONFIG)
+        """
+        if exclude_fields is None:
+            exclude_fields = set()
+
+        # Динамически собираем поля для исключения
+        for field_name, config in field_configs.items():
+            if config.get('virtual', False) and not config.get('is_note'):
+                exclude_fields.add(field_name)
+            if config.get('compute') and not config.get('is_note'):
+                exclude_fields.add(field_name)
+
+        data = dto.model_dump(exclude=exclude_fields, exclude_none=False)
+        key = f"{entity_type}:{entity_id}:draft"
+        self.set(key, {"dto": data})
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def load_draft_dto(
+        self,
+        entity_type: str,
+        entity_id: int,
+        dto_class: Type
+    ) -> Optional[Any]:
+        """
+        Загружает черновик DTO из реестра.
+
+        **Параметры:**
+            entity_type (str): Тип сущности.
+            entity_id (int): ID сущности.
+            dto_class (Type): Класс DTO (Pydantic модель) для восстановления объекта.
+
+        **Возвращает:**
+            Optional[Any]: Экземпляр DTO, если черновик существует, иначе None.
+
+        **Пример:**
+            >>> restored = registry.load_draft_dto("appointment", 123, AppointmentDTO)
+        """
+        key = f"{entity_type}:{entity_id}:draft"
+        data = self.get(key)
+        if data:
+            return dto_class(**data["dto"])
+        return None
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def clear_draft_dto(
+        self,
+        entity_type: str,
+        entity_id: int
+    ) -> None:
+        """
+        Удаляет черновик DTO из реестра.
+
+        **Параметры:**
+            entity_type (str): Тип сущности.
+            entity_id (int): ID сущности.
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> registry.clear_draft_dto("appointment", 123)
+        """
+        key = f"{entity_type}:{entity_id}:draft"
+        self.discard(key)

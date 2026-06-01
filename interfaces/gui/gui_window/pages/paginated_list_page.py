@@ -791,6 +791,29 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_page_loaded(self, page: List[Any], total: int, append: bool) -> None:
+        """
+        Переопределяет метод из PaginationMixin для применения черновиков к загруженной странице.
+
+        **Параметры:**
+            page (List[Any]): Список DTO, загруженных из сервиса.
+            total (int): Общее количество записей в БД (с учётом фильтров).
+            append (bool): Если True, данные добавляются к уже загруженным;
+                           если False, модель сначала очищается.
+
+        **Возвращает:**
+            None
+        """
+        # Применяем черновики к загруженным данным
+        page = self._apply_drafts_to_page(page)
+        # Вызываем родительский метод (из PaginationMixin)
+        super()._on_page_loaded(page, total, append)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _del_file(
         self,
         file_path: Union[str, List[str], None],
@@ -2555,7 +2578,14 @@ class PaginatedListPage(
             temp_dir_prefix,
         ]:
             # Удалить все черновики с этим префиксом (включая дочерние, но они уже удалены рекурсивно)
-            self._draft_registry.discard_by_prefix(prefix)  
+            self._draft_registry.discard_by_prefix(prefix)
+
+        # Дополнительно удаляем черновики DTO (ключи вида "entity_type:entity_id:draft")
+        # Они не попадают под discard_by_prefix, так как суффикс :draft не входит в префиксы выше
+        draft_prefix = f"{self._entity_type}:"
+        for key in list(self._draft_registry.get_keys_by_prefix(draft_prefix)):
+            if key.endswith(':draft'):
+                self._draft_registry.discard(key)
 
         # Удаляем физические папки
         err_text = []
@@ -2794,6 +2824,8 @@ class PaginatedListPage(
                 self.logger.debug(f"Редактирование удалённой строки {dto.id} игнорировано")
                 return
 
+            # Сохраняем изменённый DTO в реестр
+            self._save_draft_dto(dto.id, dto)
             self.logger.debug(f"Вызов mark_own_change для id={dto.id}")
             self.mark_own_change(dto.id)
         else:
@@ -3572,6 +3604,7 @@ class PaginatedListPage(
         # Сохраняем строку в БД
         try:
             created = self.service.create(dto, session=session)
+            self._clear_draft_dto(temp_id)
         except Exception as e:
             self.logger.error(f"Ошибка сохранения новой строки {temp_id}: {e}")
             
@@ -5145,6 +5178,9 @@ class PaginatedListPage(
                         dto,
                         session=sess
                     )
+
+                    self._clear_draft_dto(entity_id)
+
                     # self.source_model.update_row(row, updated)
                     # self.original_data[row] = updated
 
@@ -7681,4 +7717,100 @@ class PaginatedListPage(
         """
         return self._delete_photo_in_row_impl(row, photo_field)
 
+    # ------------------------------------------------------------------
+    # Методы для работы с черновиками DTO (обёртки над DraftRegistry)
+    # ------------------------------------------------------------------
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _save_draft_dto(self, entity_id: int, dto: Any) -> None:
+        """
+        Сохраняет копию DTO в реестр (обёртка над registry.save_draft_dto).
+
+        **Параметры:**
+            entity_id (int): ID сущности.
+            dto (Any): Текущий DTO строки.
+
+        **Возвращает:**
+            None
+        """
+        self._draft_registry.save_draft_dto(
+            dto, self._entity_type, entity_id, self.field_configs
+        )
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _load_draft_dto(self, entity_id: int) -> Optional[Any]:
+        """
+        Загружает черновик DTO из реестра (обёртка).
+
+        **Параметры:**
+            entity_id (int): ID сущности.
+
+        **Возвращает:**
+            Optional[Any]: DTO из черновика или None.
+        """
+        return self._draft_registry.load_draft_dto(
+            self._entity_type, entity_id, self.dto_class
+        )
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _clear_draft_dto(self, entity_id: int) -> None:
+        """
+        Удаляет черновик DTO из реестра (обёртка).
+
+        **Параметры:**
+            entity_id (int): ID сущности.
+
+        **Возвращает:**
+            None
+        """
+        self._draft_registry.clear_draft_dto(self._entity_type, entity_id)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _apply_drafts_to_page(self, page_data: List[Any]) -> List[Any]:
+        """
+        Заменяет DTO в загруженной странице на черновики, если они есть.
+
+        **Алгоритм:**
+            1. Для каждого DTO в `page_data` пытается загрузить черновик.
+            2. Если черновик найден, использует его.
+            3. Для полей с фото (widget_type='image_thumbnail') принудительно создаёт
+               временную папку, если путь относительный (чтобы фото из черновика
+               было доступно в UI).
+
+        **Параметры:**
+            page_data (List[Any]): Список DTO, загруженных из БД (или из пагинации).
+
+        **Возвращает:**
+            List[Any]: Список DTO с применёнными черновиками.
+        """
+        result = []
+        for dto in page_data:
+            draft = self._load_draft_dto(dto.id)
+            if draft:
+                # Для фото-полей: если путь относительный, убеждаемся, что временная папка существует
+                for field_name, config in self.field_configs.items():
+                    if config.get('widget_type') == 'image_thumbnail':
+                        rel_path = getattr(draft, field_name, None)
+                        if rel_path and not os.path.isabs(rel_path):
+                            self._ensure_temp_dir(dto.id)
+                result.append(draft)
+            else:
+                result.append(dto)
+        return result
 

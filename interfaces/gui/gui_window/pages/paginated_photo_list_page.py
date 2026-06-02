@@ -67,6 +67,10 @@ class PaginatedPhotoListPage(PaginatedListPage):
             show_controls=show_controls
         )
 
+        # # Отключаем обработку двойного клика на уровне страницы,
+        # # потому что фото редактируется через делегат ImageThumbnailDelegate
+        # self.action_requested.disconnect()
+
     @AppLogger.get_instance(
         name='PaginatedPhotoListPage',
         # share_file_with = 'system',

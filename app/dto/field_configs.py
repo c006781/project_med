@@ -363,7 +363,7 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
     'description'   : {
         'title'         : 'Описание',   # заголовок колонки
         'editable'      : True,         # редактируемый ли
-        'autocomplete'  : True,         # включает автодополнение в таблице и форме
+        # 'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'updatable'     : True,         # полее не должно обновляться автоматически
     },
 }

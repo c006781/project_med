@@ -2124,7 +2124,7 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _edit_photo_in_row_impl(
+    def edit_photo_in_row(
         self,
         row: int,
         photo_field: Optional[str] = None
@@ -2141,7 +2141,7 @@ class PaginatedListPage(
         """
 
         if row < 0 or row >= self.source_model.rowCount():
-            self.logger.warning(f"_edit_photo_in_row_impl: неверный индекс строки {row}")
+            self.logger.warning(f"edit_photo_in_row: неверный индекс строки {row}")
             return False
 
         dto = self.source_model.get_item_at_row(row)
@@ -2151,7 +2151,7 @@ class PaginatedListPage(
         if photo_field is None:
             photo_field = self._get_photo_field_name_impl()
             if photo_field is None:
-                self.logger.error("_edit_photo_in_row_impl: нет поля с widget_type='image_thumbnail'")
+                self.logger.error("edit_photo_in_row: нет поля с widget_type='image_thumbnail'")
                 return False
 
         entity_id = getattr(dto, 'id', None)
@@ -2184,6 +2184,7 @@ class PaginatedListPage(
 
         # if new_path is None and new_description is None:
         #     return False  # изменений нет
+        
         if not if_new:
             return False  # изменений нет
 
@@ -7729,30 +7730,6 @@ class PaginatedListPage(
             True при успешном добавлении, иначе False.
         """
         return self._add_photo_to_row_impl(row, file_path, photo_field)
-
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def edit_photo_in_row(
-        self,
-        row: int,
-        photo_field: Optional[str] = None
-    ) -> bool:
-        """
-        Открывает диалог редактирования фото для указанной строки.
-        Позволяет заменить/удалить фото и изменить описание (если есть поле описания).
-        Возвращает True, если были внесены изменения.
-
-        Args:
-            row: Индекс строки в таблице.
-            photo_field: Имя поля с фото (если None, используется первое подходящее поле).
-
-        Returns:
-            True, если были внесены изменения, иначе False.
-        """
-        return self._edit_photo_in_row_impl(row, photo_field)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

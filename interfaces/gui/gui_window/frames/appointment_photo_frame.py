@@ -123,27 +123,27 @@ class AppointmentPhotoFrame(BasePage):
             self._update_buttons_state
         )
 
-        self.photo_page.action_requested.connect(
-            self._on_photo_action_requested
-        )
+        # self.photo_page.action_requested.connect( #  оно не нужно, потому что делегат сам откроет диалог
+        #     self._on_photo_action_requested
+        # )
 
         self._actions_setup = False
 
-    @AppLogger.get_instance(
-        name='AppointmentPhotoFrame',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _on_photo_action_requested(self, dto):
-        """Обработчик двойного клика по строке фото – открывает редактирование."""
-        if not self.photo_page.edit_mode:
-            self._toggle_edit_mode(True)
-        row = self.photo_page._find_row_by_id(dto.id)  # можно использовать find_row_by_id (сделать публичным)
-        if row is not None:
-            self.photo_page.edit_photo_in_row(row)
+    # @AppLogger.get_instance(
+    #     name='AppointmentPhotoFrame',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _on_photo_action_requested(self, dto):
+    #     """Обработчик двойного клика по строке фото – открывает редактирование."""
+    #     if not self.photo_page.edit_mode:
+    #         self._toggle_edit_mode(True)
+    #     row = self.photo_page._find_row_by_id(dto.id)  # можно использовать find_row_by_id (сделать публичным)
+    #     if row is not None:
+    #         self.photo_page.edit_photo_in_row(row)
 
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',

@@ -1348,6 +1348,7 @@ class ParsingProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Импорт данных из Word")
         self.setMinimumWidth(600)
+
         self.setModal(True)
         layout = QVBoxLayout(self)
 
@@ -1515,7 +1516,11 @@ class MainWindow(
 
         # Настройки окна
         self.setWindowTitle("Медицинское приложение")
-        self.resize(1200, 800)
+        self.setMinimumSize(400, 300)
+        self.resize(800, 600)  # желаемый начальный размер
+        # Опционально: можно сбросить минимальный размер, чтобы окно можно было сжимать ещё сильнее,
+        # но лучше оставить как есть, чтобы не ломать интерфейс
+        # self.setMinimumSize(400, 300)  # уже установлен
 
         # Логгер для данного класса (используется во всех миксинах через self.logger)
         self.logger = AppLogger.get_instance(
@@ -1914,9 +1919,10 @@ class MainWindow(
         self.show_log_btn.toggled.connect(self.log_viewer.setVisible)
         self.header_layout.addWidget(self.show_log_btn)
 
-        self.dump_sizes_btn = QPushButton("Dump sizes")
-        self.dump_sizes_btn.clicked.connect(self._dump_layout_sizes)
-        self.header_layout.addWidget(self.dump_sizes_btn)
+        # # ДЕБАГ КНОПКА. ВЫВОД РАЗМЕРОВ ОБЬЕКТОВ В КОНСОЛЬ!
+        # self.dump_sizes_btn = QPushButton("Dump sizes")
+        # self.dump_sizes_btn.clicked.connect(self._dump_layout_sizes)
+        # self.header_layout.addWidget(self.dump_sizes_btn)
 
     @AppLogger.get_instance(
         name='MainWindow',

@@ -21,10 +21,10 @@ from interfaces.gui.gui_window.pages.paginated_appointment_list_page import Pagi
 from interfaces.gui.gui_window.pages.paginated_photo_list_page import PaginatedPhotoListPage
 
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout, 
-    QMessageBox, QPushButton, 
-    QVBoxLayout, QSplitter, 
-    QWidget, 
+    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
+    QMessageBox, QPushButton,
+    QVBoxLayout, QSplitter,
+    QWidget, QScrollArea, QFrame,
 )
 from PySide6.QtCore import (
     Qt, 
@@ -97,16 +97,33 @@ class AppointmentPhotoFrame(BasePage):
 
         # Размещение: панель сверху, сплиттер под ней
         main_layout = QVBoxLayout(self)
+        # main_layout.addWidget(self.toolbar_widget)
+
+        # splitter = QSplitter(
+        #     Qt.Vertical # вертикальная ориентация
+        # )
+        # splitter.addWidget(self.appointment_page)
+        # splitter.addWidget(self.photo_page)
+        # splitter.setSizes([300, 500])
+        #
+        # main_layout.addWidget(splitter)
         main_layout.addWidget(self.toolbar_widget)
 
-        splitter = QSplitter(
-            Qt.Vertical # вертикальная ориентация     
-        )
+        splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.appointment_page)
         splitter.addWidget(self.photo_page)
         splitter.setSizes([300, 500])
 
-        main_layout.addWidget(splitter)
+        # Оборачиваем сплиттер в QScrollArea, чтобы страницу можно было сжимать
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.setWidget(splitter)
+
+        main_layout.addWidget(scroll_area)
+
+        # Убираем у самой страницы минимальный размер, чтобы не влиять на стек
+        self.setMinimumSize(0, 0)
 
         # Подключаем сигнал выбора строки в таблице приёмов
         self.appointment_page.table_view.selectionModel().selectionChanged.connect(

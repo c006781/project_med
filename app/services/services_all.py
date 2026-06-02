@@ -673,7 +673,7 @@ class BaseService(
         err = self._del_file_ctx(
             file_path = file_path,
             ctx=ctx,
-            remove_parent_if_empty = if_delete_parent_dir,
+            if_delete_parent_dir = if_delete_parent_dir,
         )
         return err
     
@@ -1652,8 +1652,9 @@ class BaseService(
             >>> # Теперь entity.last_name обновлён, и если photo_path изменился,
             >>> # старый файл удалён с диска.
         """        
-
-        for field_info in self._get_simple_updatable_fields():
+        tt = self._get_simple_updatable_fields()
+        # for field_info in self._get_simple_updatable_fields():
+        for field_info in tt:
 
             if not field_info.get('editable', True) or field_info.get('updatable') is False:
                 continue

@@ -823,27 +823,88 @@ class PaginatedListPage(
             None
         """
 
+        # old_count = self.source_model.rowCount()
+
+        # # Применяем черновики к загруженным данным
+        # page = self._apply_drafts_to_page(page)
+
+        # # Если это загрузка первой страницы (append=False), добавляем новые строки из __new__
+        # if not append:
+        #     page = self._draft_registry.merge_new_dtos(
+        #         self._entity_type, page, self.dto_class, sort_by_id=True
+        #     )
+
+        # # Вызываем родительский метод (из PaginationMixin)
+        # super()._on_page_loaded(page, total, append)
+
+        # new_count = self.source_model.rowCount()
+
+        # # После загрузки страницы перекрашиваем строки (особенно важно при append=False)
+        # self._refresh_all_row_colors(
+        #     new_count = new_count,
+        #     old_count = old_count if append else None
+        # )
+
         old_count = self.source_model.rowCount()
-
-        # Применяем черновики к загруженным данным
         page = self._apply_drafts_to_page(page)
-
-        # Если это загрузка первой страницы (append=False), добавляем новые строки из __new__
         if not append:
-            page = self._draft_registry.merge_new_dtos(
-                self._entity_type, page, self.dto_class, sort_by_id=True
-            )
-
-        # Вызываем родительский метод (из PaginationMixin)
+            # Получаем все новые DTO из реестра
+            new_dtos = self._draft_registry.get_new_dtos(self._entity_type, self.dto_class)
+            # Применяем текущие фильтры к новым DTO
+            if new_dtos and self._current_filters:
+                filtered_new = self._filter_new_dtos_by_filters(new_dtos, self._current_filters)
+                page = page + filtered_new
+            else:
+                page = page + new_dtos
+            # Для совместимости со старым вызовом merge_new_dtos (если он ещё где-то используется) – оставляем без изменений,
+            # но в текущей логике страницы он больше не нужен.
+            # self._draft_registry.merge_new_dtos(...) – убираем.
         super()._on_page_loaded(page, total, append)
-
         new_count = self.source_model.rowCount()
-
-        # После загрузки страницы перекрашиваем строки (особенно важно при append=False)
         self._refresh_all_row_colors(
             new_count = new_count,
             old_count = old_count if append else None
         )
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _filter_new_dtos_by_filters(self, new_dtos: List[Any], filters_tree: Any) -> List[Any]:
+        """
+        Фильтрует список новых DTO по дереву фильтров.
+        Поддерживает только простые условия вида {'column': ..., 'operator': 'eq', 'value': ...}
+        и составные узлы {'and': [...]} (рекурсивно). Для других операторов (like, fuzzy и т.д.)
+        новые строки не проходят фильтр – считается, что они не удовлетворяют условию.
+        """
+        if not new_dtos or not filters_tree:
+            return new_dtos
+
+        def _matches(dto, node):
+            if isinstance(node, dict):
+                # Узел-лист (условие)
+                if 'column' in node and 'operator' in node:
+                    col = node['column']
+                    op = node['operator']
+                    val = node.get('value')
+                    if op == 'eq':
+                        return getattr(dto, col, None) == val
+                    # Для простоты другие операторы не поддерживаем – возвращаем False
+                    return False
+                # Составной узел AND
+                if 'and' in node:
+                    return all(_matches(dto, sub) for sub in node['and'])
+                # Составной узел OR
+                if 'or' in node:
+                    return any(_matches(dto, sub) for sub in node['or'])
+            elif isinstance(node, list):
+                # Список условий – объединяем через AND
+                return all(_matches(dto, sub) for sub in node)
+            return True
+
+        return [dto for dto in new_dtos if _matches(dto, filters_tree)]
+
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1680,11 +1741,7 @@ class PaginatedListPage(
         all_fields = self.dto_class.model_fields.keys()
         data = {field_name: None for field_name in all_fields}
 
-        # Заполняем из контекстных параметров (приоритет выше, чем None)
-        if hasattr(self, '_context_params') and self._context_params:
-            for key, value in self._context_params.items():
-                if key in data:
-                    data[key] = value
+
 
         # Применяем переопределения
         if overrides:
@@ -1692,6 +1749,12 @@ class PaginatedListPage(
                 if key in data:
                     data[key] = value
 
+        # Заполняем из контекстных параметров (приоритет выше, чем None)
+        if hasattr(self, '_context_params') and self._context_params:
+            for key, value in self._context_params.items():
+                if key in data:
+                    data[key] = value
+                    
         # Проверяем обязательные поля
         missing = []
         for field_name, config in self.field_configs.items():
@@ -2184,7 +2247,7 @@ class PaginatedListPage(
 
         # if new_path is None and new_description is None:
         #     return False  # изменений нет
-        
+
         if not if_new:
             return False  # изменений нет
 

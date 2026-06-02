@@ -140,7 +140,7 @@ class AppointmentPhotoFrame(BasePage):
     # def _on_photo_action_requested(self, dto):
     #     """Обработчик двойного клика по строке фото – открывает редактирование."""
     #     if not self.photo_page.edit_mode:
-    #         self._toggle_edit_mode(True)
+    #         self._request_edit_mode(True)
     #     row = self.photo_page._find_row_by_id(dto.id)  # можно использовать find_row_by_id (сделать публичным)
     #     if row is not None:
     #         self.photo_page.edit_photo_in_row(row)
@@ -431,8 +431,29 @@ class AppointmentPhotoFrame(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system'
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _request_edit_mode(self, enable: bool) -> None:
+        """
+        Переключает режим редактирования через ActionManager (если доступен)
+        или напрямую. Это обеспечивает синхронизацию кнопки и состояния страниц.
+        
+        Args:
+            enable: True – включить режим редактирования, False – выключить.
+        """
+        if hasattr(self, 'main_window') and self.main_window.action_manager:
+            self.main_window.action_manager.set_action_checked('edit_mode', enable)
+        else:
+            # fallback на случай, если ActionManager недоступен
+            self._toggle_edit_mode(enable)
+
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _toggle_edit_mode(self, checked: bool):
         """Переключает режим редактирования для обеих таблиц."""
+        # Переключаем режим у страниц
         self.appointment_page.set_edit_mode(checked)
         self.photo_page.set_edit_mode(checked)
         self._update_buttons_state()
@@ -456,7 +477,7 @@ class AppointmentPhotoFrame(BasePage):
             self.appointment_page._add_inline_row()
         else:
             # Если режим редактирования выключен – включаем и добавляем
-            self._toggle_edit_mode(True)
+            self._request_edit_mode(True)
             self.appointment_page._add_inline_row()
 
         # Восстанавливаем контекст
@@ -489,7 +510,7 @@ class AppointmentPhotoFrame(BasePage):
 
         # Если режим редактирования выключен – включаем
         if not self.photo_page.edit_mode:
-            self._toggle_edit_mode(True)
+            self._request_edit_mode(True)
 
         # Находим строку, соответствующую выбранному приёму? Нет – фото добавляется в новую строку
         # Но фото привязано к приёму, поэтому создаём новую строку в таблице фото
@@ -511,7 +532,7 @@ class AppointmentPhotoFrame(BasePage):
 
         # Если режим редактирования выключен, включаем его
         if not (self.appointment_page.edit_mode or self.photo_page.edit_mode):
-            self._toggle_edit_mode(True)
+            self._request_edit_mode(True)
 
         if focus_widget == self.appointment_page.table_view:
             self.appointment_page._delete_selected_rows()

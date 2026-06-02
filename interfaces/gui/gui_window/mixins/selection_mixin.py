@@ -101,14 +101,14 @@ class SelectionMixin:
     # Публичные методы
     # ------------------------------------------------------------------
 
-    @AppLogger.get_instance(
-        name='SelectionMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
+    # @AppLogger.get_instance(
+    #     name='SelectionMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def get_selected_entity_ids(self) -> Set[int]:
         """"
         Возвращает множество ID сущностей, выбранных в таблице.

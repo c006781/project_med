@@ -2171,6 +2171,7 @@ class PaginatedListPage(
             if getattr(dto, photo_field, None) is not None:
                 setattr(dto, photo_field, None)
                 changed = True
+                
         # Замена/добавление фото
         elif new_path is not None:
             if new_path != getattr(dto, photo_field, None):
@@ -5538,7 +5539,7 @@ class PaginatedListPage(
         """Определяет цвет строки на основе статуса сущности."""
 
         entity_id = dto.id
-        еуьз = self._draft_registry
+        # еуьз = self._draft_registry
         if entity_id is None or entity_id < 0:
             # Новая строка – зелёный, если есть черновик __new__
             if self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):

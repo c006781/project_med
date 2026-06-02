@@ -358,6 +358,7 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         'required'      : True,                 # Поле обязательно для заполнения (валидация на стороне сервиса).
         'updatable'     : False,                # полее не должно обновляться автоматически
         'widget_type'   : 'image_thumbnail',    # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать
+        'description_field' : 'description',    # имя поля в DTO, где хранится описание
     },
     'description'   : {
         'title'         : 'Описание',   # заголовок колонки

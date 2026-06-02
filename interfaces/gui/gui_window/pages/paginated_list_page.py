@@ -791,6 +791,24 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _refresh_all_row_colors(
+        self, 
+        new_count:int = None,  
+        old_count:int = None,
+    ):
+        """Перекрашивает все строки таблицы в соответствии с их статусом из DraftRegistry."""
+
+        old_count = old_count or 0
+        new_count = new_count or self.source_model.rowCount()
+
+        for row in range(old_count, new_count):
+            self._update_row_color(row)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _on_page_loaded(self, page: List[Any], total: int, append: bool) -> None:
         """
         Переопределяет метод из PaginationMixin для применения черновиков к загруженной странице.
@@ -804,15 +822,28 @@ class PaginatedListPage(
         **Возвращает:**
             None
         """
+
+        old_count = self.source_model.rowCount()
+
         # Применяем черновики к загруженным данным
         page = self._apply_drafts_to_page(page)
+
         # Если это загрузка первой страницы (append=False), добавляем новые строки из __new__
         if not append:
             page = self._draft_registry.merge_new_dtos(
                 self._entity_type, page, self.dto_class, sort_by_id=True
             )
+
         # Вызываем родительский метод (из PaginationMixin)
         super()._on_page_loaded(page, total, append)
+
+        new_count = self.source_model.rowCount()
+
+        # После загрузки страницы перекрашиваем строки (особенно важно при append=False)
+        self._refresh_all_row_colors(
+            new_count = new_count,
+            old_count = old_count if append else None
+        )
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

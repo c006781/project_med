@@ -1475,8 +1475,6 @@ class BaseService(
             # Обновляем простые поля
             self._apply_simple_updates(entity, dto, session = sess)
 
-            self.logger.debug(f"После обновления полей: last_name={entity.last_name}")
-
             sess.flush()
             return self.get_dto_out(entity)
 

@@ -1267,10 +1267,10 @@ class PaginatedTableModel(BaseTableModel):
             Этот способ позволяет сохранять цвета после сортировки (в отличие от привязки к индексу).
         """
 
-        self.logger.debug(
-            f"entity_id is None = {entity_id is None} "
-            f"color is None = {color is None} "
-        )
+        # self.logger.debug(
+        #     f"entity_id is None = {entity_id is None} "
+        #     f"color is None = {color is None} "
+        # )
         if (entity_id is None) or (color is None):
             return
 
@@ -1279,10 +1279,10 @@ class PaginatedTableModel(BaseTableModel):
         # Обновляем все строки, где DTO имеет этот ID (обычно одна строка)
         for row, dto in enumerate(self._data):
 
-            self.logger.debug(
-                f"row = {row} "
-                f"getattr(dto, 'id', None) = {getattr(dto, 'id', None)} "
-            )
+            # self.logger.debug(
+            #     f"row = {row} "
+            #     f"getattr(dto, 'id', None) = {getattr(dto, 'id', None)} "
+            # )
             if getattr(dto, 'id', None) == entity_id:
                 self._redrawing_lines(row)
                 break
@@ -1471,10 +1471,10 @@ class PaginatedTableModel(BaseTableModel):
             f"len(self._data) = {_len_data} "
         )
         for idx in range(start, _len_data):
-            self.logger.debug(
-                f"idx = {idx} "
-                f"idx not in self._checkbox_states = {idx not in self._checkbox_states} "
-            )
+            # self.logger.debug(
+            #     f"idx = {idx} "
+            #     f"idx not in self._checkbox_states = {idx not in self._checkbox_states} "
+            # )
             if idx not in self._checkbox_states:
                 self._checkbox_states[idx] = False
 

@@ -1914,6 +1914,10 @@ class MainWindow(
         self.show_log_btn.toggled.connect(self.log_viewer.setVisible)
         self.header_layout.addWidget(self.show_log_btn)
 
+        self.dump_sizes_btn = QPushButton("Dump sizes")
+        self.dump_sizes_btn.clicked.connect(self._dump_layout_sizes)
+        self.header_layout.addWidget(self.dump_sizes_btn)
+
     @AppLogger.get_instance(
         name='MainWindow',
         # share_file_with = 'system',
@@ -2018,3 +2022,28 @@ class MainWindow(
         for child in self.findChildren(PhotoUploaderWidget):
             result.append(child)
         return result
+
+    def _dump_layout_sizes(self):
+        """Выводит в консоль дерево размеров всех виджетов окна."""
+        print("\n=== DUMP LAYOUT SIZES ===")
+        self._dump_widget_info(self, indent=0)
+        print("=== END DUMP ===\n")
+
+    def _dump_widget_info(self, widget, indent=0):
+        """Рекурсивно выводит информацию о виджете и его дочерних элементах."""
+        prefix = "  " * indent
+        try:
+            min_hint = widget.minimumSizeHint()
+            min_size = widget.minimumSize()
+            size = widget.size()
+            print(f"{prefix}{widget.__class__.__name__}: size={size.width()}x{size.height()}, "
+                  f"minSize={min_size.width()}x{min_size.height()}, "
+                  f"minSizeHint={min_hint.width()}x{min_hint.height()}, "
+                  f"visible={widget.isVisible()}")
+        except Exception as e:
+            print(f"{prefix}{widget.__class__.__name__}: error getting size info - {e}")
+
+        for child in widget.findChildren(QWidget):
+            # Проверяем, что родитель именно этот виджет, а не вложенный глубже
+            if child.parent() == widget:
+                self._dump_widget_info(child, indent + 1)

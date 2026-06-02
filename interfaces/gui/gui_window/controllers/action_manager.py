@@ -284,19 +284,31 @@ class ActionManager(QObject):
         # if name in self._actions:
             # del self._actions[name]
             # self.logger.debug(f"Действие '{name}' удалено из реестра")
-
-        if name in self._actions:
+        if name in self._action_widgets:
             # Отвязываем действие от всех кнопок, которые на него ссылаются
-            if name in self._action_widgets:
-                for widget_ref in self._action_widgets[name]:
-                    widget = widget_ref()
-                    if widget is not None and hasattr(widget, 'defaultAction'):
-                        
-                        # Убираем действие у кнопки, чтобы она не ссылалась на удаляемый объект
-                        widget.setDefaultAction(None)
-
+            for item in self._action_widgets[name]:
+                if isinstance(item, tuple):
+                    widget_ref, manual = item
+                else:
+                    widget_ref, manual = item, False
+                widget = widget_ref()
+                if widget is not None and hasattr(widget, 'defaultAction'):
+                    # Убираем действие у кнопки, чтобы она не ссылалась на удаляемый объект
+                    widget.setDefaultAction(None)
                 # Удаляем запись о связях
-                self._action_widgets.pop(name, None)
+            self._action_widgets.pop(name, None)
+        # if name in self._actions:
+        #     # Отвязываем действие от всех кнопок, которые на него ссылаются
+        #     if name in self._action_widgets:
+        #         for widget_ref in self._action_widgets[name]:
+        #             widget = widget_ref() #
+        #             if widget is not None and hasattr(widget, 'defaultAction'):
+        #
+        #                 # Убираем действие у кнопки, чтобы она не ссылалась на удаляемый объект
+        #                 widget.setDefaultAction(None)
+        #
+        #         # Удаляем запись о связях
+        #         self._action_widgets.pop(name, None)
 
         # Удаляем само действие
         if name in self._actions:

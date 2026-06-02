@@ -299,6 +299,13 @@ class AppointmentPhotoFrame(BasePage):
             parent=self, temporary=True
         )
 
+        # Редактировать приём
+        am.register_action(
+            'edit_appointment', 'Редактировать приём',
+            callback=self._edit_appointment,
+            parent=self, temporary=True
+        )
+
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',
         # share_file_with = 'system',
@@ -340,6 +347,12 @@ class AppointmentPhotoFrame(BasePage):
         am.connect_button('patient_info', self.patient_info_btn)
         self.patient_info_btn.setText("Информация о пациенте")
 
+        # Создаём кнопку и связываем с действием
+        self.edit_appointment_btn = QPushButton()
+        am.connect_button('edit_appointment', self.edit_appointment_btn)
+        self.edit_appointment_btn.setText("Редактировать приём")
+
+
         self.toolbar_layout.addWidget(self.edit_mode_btn)
         self.toolbar_layout.addWidget(self.add_appointment_btn)
         self.toolbar_layout.addWidget(self.add_photo_btn)
@@ -348,9 +361,29 @@ class AppointmentPhotoFrame(BasePage):
 
         self.toolbar_layout.addWidget(self.patient_info_btn)
 
+        # Добавляем в тулбар (например, после кнопки информации о пациенте)
+        self.toolbar_layout.insertWidget(self.toolbar_layout.count() - 1, self.edit_appointment_btn)
+
         self.toolbar_layout.addStretch()
 
-        self._update_buttons_state() 
+        self._update_buttons_state()
+
+    def _edit_appointment(self):
+        """Открывает страницу редактирования выбранного приёма."""
+        dto = self.appointment_page.get_current_selected_dto()
+        if not dto:
+            QMessageBox.warning(self, "Нет приёма", "Сначала выберите приём в левой таблице.")
+            return
+
+        # Переходим на страницу редактирования приёма
+        self.page_manager.switch_to(
+            'appointment_edit',
+            extra_data={
+                'id': dto.id,
+                'return_to_page': self.page_manager.current_page_id,  # вернуться на эту страницу
+                'return_field': None
+            }
+        )
 
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',

@@ -51,6 +51,7 @@ from collections import OrderedDict
 
 import weakref
 
+from app.utils.file_deletions import resolve_photo_path
 from app.utils.logger.logger import AppLogger
 
 # from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
@@ -848,47 +849,58 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             зависимостей между делегатом и страницей.
         """
 
-        if not rel_path:
-            return None
-
-        # Проверка на абсолютный путь
-        if os.path.isabs(rel_path):
-            return rel_path if os.path.exists(rel_path) else None
-
-        # Проверяем временную папку черновика  (через слабую ссылку на страницу)
-        # # if self._registry and entity_id is not None and self._entity_type:
-        # if self._page and entity_id is not None:
-        #     # Получаем существующую временную папку (если есть)
-        #     temp_dir = self._page._get_temp_dir(entity_id)
-
-        # Проверяем временную папку черновика
         page = self._page_ref() if hasattr(self, '_page_ref') else None
-        if (page is None)  :
-            self.logger.warning("ImageThumbnailDelegate: page уже уничтожена, невозможно получить временную папку")
-            return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
-
-        if (entity_id is not None):
+        temp_dir = None
+        if page and entity_id is not None:
             temp_dir = page._get_temp_dir(entity_id)
-            if temp_dir:
-                candidate = os.path.join(temp_dir, rel_path)
-                if os.path.exists(candidate):
-                    return candidate
-                
-        # elif self._registry is None:
-        #     self.logger.warning("ImageThumbnailDelegate: реестр не установлен, невозможно проверить временную папку")
+        
+        return resolve_photo_path(
+            rel_path=rel_path,
+            temp_dir=temp_dir,
+            storage_path=self.storage_path,
+        )
 
-        # Основное хранилище
-        return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
-    
-        # """Возвращает полный путь к файлу, сначала проверяя временную папку."""
-        # if self._registry and entity_id is not None and self._entity_type:
-        #     temp_key = f"__temp_dir__:{self._entity_type}:{entity_id}"
-        #     temp_dir = self._registry.get(temp_key)
+        # if not rel_path:
+        #     return None
+
+        # # Проверка на абсолютный путь
+        # if os.path.isabs(rel_path):
+        #     return rel_path if os.path.exists(rel_path) else None
+
+        # # Проверяем временную папку черновика  (через слабую ссылку на страницу)
+        # # # if self._registry and entity_id is not None and self._entity_type:
+        # # if self._page and entity_id is not None:
+        # #     # Получаем существующую временную папку (если есть)
+        # #     temp_dir = self._page._get_temp_dir(entity_id)
+
+        # # Проверяем временную папку черновика
+        # page = self._page_ref() if hasattr(self, '_page_ref') else None
+        # if (page is None)  :
+        #     self.logger.warning("ImageThumbnailDelegate: page уже уничтожена, невозможно получить временную папку")
+        #     return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
+
+        # if (entity_id is not None):
+        #     temp_dir = page._get_temp_dir(entity_id)
         #     if temp_dir:
         #         candidate = os.path.join(temp_dir, rel_path)
         #         if os.path.exists(candidate):
         #             return candidate
-        # return os.path.join(self.storage_path, rel_path)
+                
+        # # elif self._registry is None:
+        # #     self.logger.warning("ImageThumbnailDelegate: реестр не установлен, невозможно проверить временную папку")
+
+        # # Основное хранилище
+        # return os.path.join(self.storage_path, rel_path) if self.storage_path else rel_path
+    
+        # # """Возвращает полный путь к файлу, сначала проверяя временную папку."""
+        # # if self._registry and entity_id is not None and self._entity_type:
+        # #     temp_key = f"__temp_dir__:{self._entity_type}:{entity_id}"
+        # #     temp_dir = self._registry.get(temp_key)
+        # #     if temp_dir:
+        # #         candidate = os.path.join(temp_dir, rel_path)
+        # #         if os.path.exists(candidate):
+        # #             return candidate
+        # # return os.path.join(self.storage_path, rel_path)
 
     # ------------------------------------------------------------------
     # Диалог редактирования
@@ -1037,106 +1049,142 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             self.logger.error("ImageThumbnailDelegate: нет ссылки на страницу, невозможно создать временную папку")
             return
         
-        temp_dir = None
-        # if self._registry and parent_id is not None and self._entity_type:
-        #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
-        #     temp_dir = self._registry.get(temp_key)
-        if parent_id is not None :
-            # Всегда создаём временную папку для любых строк при редактировании
-            # temp_dir = page._ensure_temp_dir(parent_id)
-            try:
-                temp_dir = page._ensure_temp_dir(parent_id)
-            except Exception as e:
-                self.logger.error(f"Не удалось создать временную папку для parent_id={parent_id}: {e}")
+        # temp_dir = None
+        # # if self._registry and parent_id is not None and self._entity_type:
+        # #     temp_key = f"__temp_dir__:{self._entity_type}:{parent_id}"
+        # #     temp_dir = self._registry.get(temp_key)
+        # if parent_id is not None :
+        #     # Всегда создаём временную папку для любых строк при редактировании
+        #     # temp_dir = page._ensure_temp_dir(parent_id)
+        #     try:
+        #         temp_dir = page._ensure_temp_dir(parent_id)
+        #     except Exception as e:
+        #         self.logger.error(f"Не удалось создать временную папку для parent_id={parent_id}: {e}")
 
-                QMessageBox.critical(self.parent(), "Ошибка", "Не удалось создать временную папку для черновика.")
-                return
-            # # Получаем существующую временную папку (если есть)
-            # temp_dir = self._page._get_temp_dir(parent_id)
+        #         QMessageBox.critical(self.parent(), "Ошибка", "Не удалось создать временную папку для черновика.")
+        #         return
+        #     # # Получаем существующую временную папку (если есть)
+        #     # temp_dir = self._page._get_temp_dir(parent_id)
             
-            # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
-            # if temp_dir is None:
-            #     temp_dir = self._page._ensure_temp_dir(parent_id)
+        #     # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
+        #     # if temp_dir is None:
+        #     #     temp_dir = self._page._ensure_temp_dir(parent_id)
 
-            # # Гарантируем существование временной папки для существующей строки
-            # if parent_id > 0:
-            #     # Получаем существующую временную папку (если есть)
-            #     temp_dir = self._page._get_temp_dir(parent_id)
-            # else:
-            #     # Если временной папки нет, создаём её для любой строки (и новой, и существующей)  
-            #     temp_dir = self._page._ensure_temp_dir(parent_id)
+        #     # # Гарантируем существование временной папки для существующей строки
+        #     # if parent_id > 0:
+        #     #     # Получаем существующую временную папку (если есть)
+        #     #     temp_dir = self._page._get_temp_dir(parent_id)
+        #     # else:
+        #     #     # Если временной папки нет, создаём её для любой строки (и новой, и существующей)  
+        #     #     temp_dir = self._page._ensure_temp_dir(parent_id)
 
-            # # Получаем существующую временную папку (если есть)
-            # temp_dir = self._page._get_temp_dir(parent_id)
+        #     # # Получаем существующую временную папку (если есть)
+        #     # temp_dir = self._page._get_temp_dir(parent_id)
 
-            # # # Если временной папки нет, но строка существующая (id > 0) – создаём через страницу
-            # # if temp_dir is None and parent_id > 0 and self._page:
+        #     # # # Если временной папки нет, но строка существующая (id > 0) – создаём через страницу
+        #     # # if temp_dir is None and parent_id > 0 and self._page:
 
-            # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
-            # if temp_dir is None:
-            #     temp_dir = self._page._ensure_temp_dir(parent_id)
+        #     # # Если временной папки нет, создаём её для любой строки (и новой, и существующей)   
+        #     # if temp_dir is None:
+        #     #     temp_dir = self._page._ensure_temp_dir(parent_id)
 
-            # # Если временной папки нет, но строка существующая (id > 0) – создаём
-            # if temp_dir is None and parent_id > 0:
-            #     # Находим родительскую страницу (таблица -> ... -> PaginatedListPage)
-            #     parent_widget = self.parent()
-            #     while parent_widget:
-            #         if hasattr(parent_widget, '_ensure_temp_dir'):
-            #             temp_dir = parent_widget._ensure_temp_dir(parent_id)
-            #             break
-            #         parent_widget = parent_widget.parent()
+        #     # # Если временной папки нет, но строка существующая (id > 0) – создаём
+        #     # if temp_dir is None and parent_id > 0:
+        #     #     # Находим родительскую страницу (таблица -> ... -> PaginatedListPage)
+        #     #     parent_widget = self.parent()
+        #     #     while parent_widget:
+        #     #         if hasattr(parent_widget, '_ensure_temp_dir'):
+        #     #             temp_dir = parent_widget._ensure_temp_dir(parent_id)
+        #     #             break
+        #     #         parent_widget = parent_widget.parent()
 
-        if temp_dir is None:
-            self.logger.error(f"Не удалось получить временную папку для parent_id={parent_id}")
-            return
+        # if temp_dir is None:
+        #     self.logger.error(f"Не удалось получить временную папку для parent_id={parent_id}")
+        #     return
         
-        dialog = PhotoEditDialog(
-            parent=self.parent(),
-            current_path=full_path if full_path and os.path.exists(full_path) else None,
+        # dialog = PhotoEditDialog(
+        #     parent=self.parent(),
+        #     current_path=full_path if full_path and os.path.exists(full_path) else None,
+        #     description=description,
+        #     allowed_extensions=self._allowed_extensions,
+        #     readonly=self._readonly,
+        #     parent_id=parent_id,
+        #     storage_path=self.storage_path,
+        #     mode='single',
+        #     temp_dir=temp_dir, # всегда передан для любых parent_id (не None)
+        # )
+
+        # if dialog.exec() == QDialog.Accepted:
+        #     new_path, new_description = dialog.get_result()
+        #     if new_path is None and new_description is None:
+        #         # Фото удалено – очищаем поле
+        #         # Полное удаление фото (без изменений описания)
+        #         model.setData(index, "", Qt.EditRole)
+        #         self._update_description_field(model, index.row(), "")
+        #         # if self._description_field:
+        #         #     # Найти индекс столбца описания и очистить
+        #         #     for col in range(model.columnCount()):
+        #         #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
+        #         #         if col_info and col_info.field_name == self._description_field:
+        #         #             desc_index = model.index(index.row(), col)
+        #         #             model.setData(desc_index, "", Qt.EditRole)
+        #         #             break
+        #     elif new_path is None:
+        #         # Фото удалено, но описание изменено
+        #         model.setData(index, "", Qt.EditRole)
+        #         if new_description is not None:
+        #             self._update_description_field(model, index.row(), new_description)                  
+        #     else:
+        #         # Сохраняем относительный путь (копирование файла выполнит сервис)
+        #         # Пока сохраняем абсолютный путь – при сохранении строки сервис скопирует
+        #         # Для правильного хранения нужно определить целевой относительный путь,
+        #         # но это выходит за рамки делегата. Оставляем как есть – модель сохранит строку.
+        #         # Новое фото
+        #         model.setData(index, new_path, Qt.EditRole)
+        #         if new_description is not None and new_description != description:
+        #             self._update_description_field(model, index.row(), new_description)
+        #             # if self._description_field:
+        #             #     for col in range(model.columnCount()):
+        #             #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
+        #             #         if col_info and col_info.field_name == self._description_field:
+        #             #             desc_index = model.index(index.row(), col)
+        #             #             model.setData(desc_index, new_description, Qt.EditRole)
+        #             #             break
+
+        
+        # Получаем имя поля фото (если не задано в делегате)
+        photo_field = getattr(self, '_photo_field', None)
+        if photo_field is None:
+            photo_field = page.get_photo_field_name()  # предполагаем, что метод добавлен
+            if photo_field is None:
+                self.logger.error("ImageThumbnailDelegate: не удалось определить поле фото")
+                return
+
+        # Вызываем централизованный метод страницы
+        new_path, new_description = page.show_photo_edit_dialog(
+            current_full_path=full_path,
             description=description,
-            allowed_extensions=self._allowed_extensions,
-            readonly=self._readonly,
-            parent_id=parent_id,
-            storage_path=self.storage_path,
-            mode='single',
-            temp_dir=temp_dir, # всегда передан для любых parent_id (не None)
+            photo_field=photo_field,
+            entity_id=parent_id
         )
 
-        if dialog.exec() == QDialog.Accepted:
-            new_path, new_description = dialog.get_result()
-            if new_path is None and new_description is None:
-                # Фото удалено – очищаем поле
-                # Полное удаление фото (без изменений описания)
-                model.setData(index, "", Qt.EditRole)
+        # Применяем изменения
+        if new_path is None and new_description is None:
+            # Фото удалено – очищаем поле
+            model.setData(index, "", Qt.EditRole)
+            if self._description_field:
                 self._update_description_field(model, index.row(), "")
-                # if self._description_field:
-                #     # Найти индекс столбца описания и очистить
-                #     for col in range(model.columnCount()):
-                #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
-                #         if col_info and col_info.field_name == self._description_field:
-                #             desc_index = model.index(index.row(), col)
-                #             model.setData(desc_index, "", Qt.EditRole)
-                #             break
-            elif new_path is None:
-                # Фото удалено, но описание изменено
-                model.setData(index, "", Qt.EditRole)
-                if new_description is not None:
-                    self._update_description_field(model, index.row(), new_description)                  
-            else:
-                # Сохраняем относительный путь (копирование файла выполнит сервис)
-                # Пока сохраняем абсолютный путь – при сохранении строки сервис скопирует
-                # Для правильного хранения нужно определить целевой относительный путь,
-                # но это выходит за рамки делегата. Оставляем как есть – модель сохранит строку.
-                # Новое фото
-                model.setData(index, new_path, Qt.EditRole)
-                if new_description is not None and new_description != description:
-                    self._update_description_field(model, index.row(), new_description)
-                    # if self._description_field:
-                    #     for col in range(model.columnCount()):
-                    #         col_info = model.get_column_at_visible_index(col) if hasattr(model, 'get_column_at_visible_index') else None
-                    #         if col_info and col_info.field_name == self._description_field:
-                    #             desc_index = model.index(index.row(), col)
-                    #             model.setData(desc_index, new_description, Qt.EditRole)
-                    #             break
+        elif new_path is None:
+            # Фото удалено, но описание изменено
+            model.setData(index, "", Qt.EditRole)
+            if new_description is not None:
+                self._update_description_field(model, index.row(), new_description)
+        else:
+            # Новое фото
+            model.setData(index, new_path, Qt.EditRole)
+            if new_description is not None and new_description != description:
+                self._update_description_field(model, index.row(), new_description)
 
+        
+        
         self._button_rect = None

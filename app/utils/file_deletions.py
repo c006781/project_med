@@ -477,3 +477,55 @@ def del_file_and_parent_dir(
         logger=logger
     )
     
+
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+def resolve_photo_path(
+    rel_path: Optional[str],
+    temp_dir: Optional[str] = None,
+    storage_path: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Преобразует относительный путь к фото в абсолютный.
+    
+    Алгоритм:
+        1. Если rel_path пустой – вернуть None.
+        2. Если rel_path – абсолютный путь и файл существует – вернуть его.
+        3. Если передан temp_dir и файл существует в нём – вернуть полный путь.
+        4. Если передан storage_path и файл существует в нём – вернуть полный путь.
+        5. Иначе вернуть None.
+    
+    Args:
+        rel_path: Относительный путь (или просто имя файла) или абсолютный путь.
+        temp_dir: Временная папка черновика (может быть None).
+        storage_path: Базовый путь к хранилищу фотографий (может быть None).
+    
+    Returns:
+        Абсолютный путь к существующему файлу или None.
+    """
+    if not rel_path:
+        return None
+    
+    if os.path.isabs(rel_path):
+        return rel_path if os.path.exists(rel_path) else None
+    
+    # Проверяем временную папку
+    if temp_dir:
+        cand = os.path.join(temp_dir, rel_path)
+        if os.path.exists(cand):
+            return cand
+    
+    # Проверяем основное хранилище
+    if storage_path:
+        # Если rel_path уже содержит storage_path как префикс – не дублируем
+        if rel_path.startswith(storage_path):
+            cand = rel_path
+        else:
+            cand = os.path.join(storage_path, rel_path)
+        if os.path.exists(cand):
+            return cand
+    
+    return None

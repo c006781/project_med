@@ -38,7 +38,7 @@ from typing import List, Optional, Tuple
 import uuid
 
 from app.utils.logger.logger import AppLogger
-from app.utils.file_deletions import schedule_deletion
+from app.utils.file_deletions import resolve_photo_path, schedule_deletion
 
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget,
@@ -260,25 +260,51 @@ class PhotoEditDialog(QDialog):
         Returns:
             Optional[str]: Абсолютный путь к существующему файлу, или None, если файл не найден.
         """
-                
-        if not rel_path:
-            return None
+        return resolve_photo_path(
+            rel_path=rel_path,
+            temp_dir=self._temp_dir,
+            storage_path=self._storage_path,
+        )        
+        # if not rel_path:
+        #     return None
         
-        if os.path.isabs(rel_path):
-            return rel_path if os.path.exists(rel_path) else None
+        # if os.path.isabs(rel_path):
+        #     return rel_path if os.path.exists(rel_path) else None
         
-        # Относительный путь – ищем во временной папке, потом в основной
-        if self._temp_dir:
-            cand = os.path.join(self._temp_dir, rel_path)
-            if os.path.exists(cand):
-                return cand
+        # # # Относительный путь – ищем во временной папке, потом в основной
+        # # if self._temp_dir:
+        # #     cand = os.path.join(self._temp_dir, rel_path)
+        # #     if os.path.exists(cand):
+        # #         return cand
             
-        if self._storage_path:
-            cand = os.path.join(self._storage_path, rel_path)
-            if os.path.exists(cand):
-                return cand
+        # # if self._storage_path:
+        # #     cand = os.path.join(self._storage_path, rel_path)
+        # #     if os.path.exists(cand):
+        # #         return cand
+
+        # # Если rel_path уже содержит self._storage_path как префикс – не дублируем
+        # if self._storage_path and rel_path.startswith(self._storage_path):
+        #     cand = rel_path
+        # else:
+        #     cand = os.path.join(self._storage_path, rel_path) if self._storage_path else rel_path
+        
+        # if os.path.exists(cand):
+        #     return cand
+        
+        # # Проверка во временной папке (если есть)
+        # if self._temp_dir:
+        #     # Пробуем соединить как есть
+        #     cand2 = os.path.join(self._temp_dir, rel_path)
+        #     if os.path.exists(cand2):
+        #         return cand2
             
-        return None
+        #     # Если rel_path содержит вложенные папки, пробуем взять только имя файла
+        #     base = os.path.basename(rel_path)
+        #     cand3 = os.path.join(self._temp_dir, base)
+        #     if os.path.exists(cand3):
+        #         return cand3
+            
+        # return None
     
     # ------------------------------------------------------------------
     # Копирование файла в хранилище (для single-режима)

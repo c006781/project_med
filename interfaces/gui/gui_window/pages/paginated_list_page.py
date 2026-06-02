@@ -285,7 +285,7 @@ from app.utils.logger import AppLogger
 from app.config.config_manager.manager import AppConfigManager
 
 from app.utils.file_deletions import (
-    schedule_deletion, DeletionContext,
+    resolve_photo_path, schedule_deletion, DeletionContext,
     DeletionType
     # , delete_file_safely
 )
@@ -1956,23 +1956,40 @@ class PaginatedListPage(
         rel_path = getattr(dto, photo_field, None)
         if not rel_path:
             return None
-
-        # Временная папка
-        if entity_id is not None:
-            temp_dir = self._get_temp_dir(entity_id)
-            if temp_dir:
-                candidate = os.path.join(temp_dir, rel_path)
-                if os.path.exists(candidate):
-                    return candidate
-
-        # Основное хранилище
+        
+        temp_dir = self._get_temp_dir(entity_id) if entity_id is not None else None
         storage_path = self._get_photo_storage_path()
-        if storage_path:
-            candidate = os.path.join(storage_path, rel_path)
-            if os.path.exists(candidate):
-                return candidate
+        
+        return resolve_photo_path(
+            rel_path=rel_path,
+            temp_dir=temp_dir,
+            storage_path=storage_path,
+        )
 
-        return None
+        # rel_path = getattr(dto, photo_field, None)
+        # if not rel_path:
+        #     return None
+
+        # # Если путь абсолютный – проверяем существование и возвращаем
+        # if os.path.isabs(rel_path):
+        #     return rel_path if os.path.exists(rel_path) else None
+
+        # # Временная папка
+        # if entity_id is not None:
+        #     temp_dir = self._get_temp_dir(entity_id)
+        #     if temp_dir:
+        #         candidate = os.path.join(temp_dir, rel_path)
+        #         if os.path.exists(candidate):
+        #             return candidate
+
+        # # Основное хранилище
+        # storage_path = self._get_photo_storage_path()
+        # if storage_path:
+        #     candidate = os.path.join(storage_path, rel_path)
+        #     if os.path.exists(candidate):
+        #         return candidate
+
+        # return None
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1999,6 +2016,9 @@ class PaginatedListPage(
 
         allowed_extensions = self._get_allowed_extensions_for_photo(photo_field)
         storage_path = self._get_photo_storage_path()
+
+        if temp_dir is None:
+            self.logger.error(f"Не удалось получить временную папку для {entity_id}")
 
         dialog = PhotoEditDialog(
             parent=self,
@@ -2154,7 +2174,7 @@ class PaginatedListPage(
         current_description = getattr(dto, desc_field, "") if desc_field else ""
 
         # Открываем диалог
-        new_path, new_description = self._show_photo_edit_dialog(
+        new_path, new_description = self.show_photo_edit_dialog(
             current_full_path,
             current_description,
             photo_field,
@@ -2171,7 +2191,7 @@ class PaginatedListPage(
             if getattr(dto, photo_field, None) is not None:
                 setattr(dto, photo_field, None)
                 changed = True
-                
+
         # Замена/добавление фото
         elif new_path is not None:
             if new_path != getattr(dto, photo_field, None):
@@ -7753,6 +7773,26 @@ class PaginatedListPage(
             True, если поле было очищено, иначе False.
         """
         return self._delete_photo_in_row_impl(row, photo_field)
+
+    def show_photo_edit_dialog(
+        self,
+        current_full_path: Optional[str],
+        description: str,
+        photo_field: str,
+        entity_id: Optional[int]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Открывает диалог редактирования фото и возвращает (новый_путь, новое_описание).
+        Параметры:
+            current_full_path – абсолютный путь к текущему фото (может быть None)
+            description – текущее описание
+            photo_field – имя поля DTO, содержащего путь к фото
+            entity_id – ID сущности (может быть временным отрицательным)
+        """
+        
+        return self._show_photo_edit_dialog(
+            current_full_path, description, photo_field, entity_id
+        )
 
     # ------------------------------------------------------------------
     # Методы для работы с черновиками DTO (обёртки над DraftRegistry)

@@ -4,6 +4,8 @@
 Используется в новом фрейме с двумя таблицами (приёмы + фото).
 """
 
+from typing import Optional
+
 from app.utils.logger.logger import AppLogger
 
 from app.dependencies import get_photo_service
@@ -73,12 +75,44 @@ class PaginatedPhotoListPage(PaginatedListPage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _get_parent_id_for_new_row(self, dto) -> int:
+    def _get_parent_id_for_new_row(self, dto) -> int: # в будущем перенести в PaginatedListPage и сделать диначическим
         """
         Возвращает ID приёма, к которому относится новое фото.
         Значение берётся из контекстных параметров (устанавливается родительским фреймом).
         """
         return self._context_params.get('appointment_id', None)
+
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_parent_id(self, child_id: int) -> Optional[int]:
+        """
+        Возвращает ID приёма (appointment_id) для фото.
+        Используется для уведомления родителя об изменениях.
+        """
+        # Находим строку по ID фото в модели
+        row = self._find_row_by_id(child_id)
+        if row < 0:
+            return None
+        
+        dto = self.source_model.get_item_at_row(row)
+        if dto:
+            return getattr(dto, 'appointment_id', None)
+        
+        return None
+    
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_parent_entity_type(self, child_id: int) -> str:
+        """
+        Родитель фото – приём, тип 'appointment'.
+        """
+        return 'appointment'
 
     @AppLogger.get_instance(
         name='PaginatedPhotoListPage',

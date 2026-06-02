@@ -626,6 +626,21 @@ class DraftTreeMixin:
 
         if new_status == old_status:
             return
+        
+        # Уведомляем родителя об изменении наличия собственных изменений
+        old_has_own = old_status in ('own', 'both')
+        new_has_own = has_own_change
+        if old_has_own != new_has_own:
+            parent_id = self._get_parent_id(entity_id)
+            if parent_id is not None:
+                parent_type = self._get_parent_entity_type(entity_id)
+                original_type = self._entity_type
+                try:
+                    self._entity_type = parent_type
+                    delta = 1 if new_has_own else -1
+                    self.mark_child_change(parent_id, delta)
+                finally:
+                    self._entity_type = original_type
 
         self._set_cached_status(entity_id, new_status)
         self._draft_registry.set_entity_status(
@@ -781,7 +796,28 @@ class DraftTreeMixin:
         if parent_id is None:
             return
 
-        self._recompute_parent_status(parent_id)
+        # self._recompute_parent_status(parent_id)
+        parent_type = self._get_parent_entity_type(entity_id)
+        original_type = self._entity_type
+        try:
+            # Подменяем тип на родительский для корректной работы _recompute_parent_status
+            self._entity_type = parent_type
+            self._recompute_parent_status(parent_id)
+        finally:
+            self._entity_type = original_type
+
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_parent_entity_type(self, child_id: int) -> str:
+        """
+        Возвращает тип сущности родителя для дочерней сущности.
+        По умолчанию возвращает self._entity_type.
+        Переопределяется в наследниках, если родитель имеет другой тип.
+        """
+        return self._entity_type
 
     @AppLogger.get_instance(
         name='DraftTreeMixin',
@@ -831,7 +867,8 @@ class DraftTreeMixin:
         if status is None:
             self._status_cache.pop(entity_id, None)
         else:
-            self._status_cache[entity_id] = status
+            # self._status_cache[entity_id] = status
+            self._status_cache.update({entity_id: status})
 
     @AppLogger.get_instance(
         name='DraftTreeMixin',

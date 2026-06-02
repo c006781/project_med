@@ -2002,7 +2002,7 @@ class PaginatedListPage(
         description: str,
         photo_field: str,
         entity_id: Optional[int]
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Открывает диалог редактирования фото.
         Возвращает (new_path, new_description).
@@ -2033,9 +2033,10 @@ class PaginatedListPage(
         )
 
         if dialog.exec() == QDialog.Accepted:
-            return dialog.get_result()
+            new_path, new_description = dialog.get_result()
+            return True, new_path, new_description
         
-        return (None, None)
+        return (False,None, None)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2174,14 +2175,16 @@ class PaginatedListPage(
         current_description = getattr(dto, desc_field, "") if desc_field else ""
 
         # Открываем диалог
-        new_path, new_description = self.show_photo_edit_dialog(
+        if_new, new_path, new_description = self.show_photo_edit_dialog(
             current_full_path,
             current_description,
             photo_field,
             entity_id
         )
 
-        if new_path is None and new_description is None:
+        # if new_path is None and new_description is None:
+        #     return False  # изменений нет
+        if not if_new:
             return False  # изменений нет
 
         changed = False
@@ -7780,7 +7783,7 @@ class PaginatedListPage(
         description: str,
         photo_field: str,
         entity_id: Optional[int]
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Открывает диалог редактирования фото и возвращает (новый_путь, новое_описание).
         Параметры:

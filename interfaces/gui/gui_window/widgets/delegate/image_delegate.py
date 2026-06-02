@@ -1161,30 +1161,33 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
                 return
 
         # Вызываем централизованный метод страницы
-        new_path, new_description = page.show_photo_edit_dialog(
+        if_new, new_path, new_description = page.show_photo_edit_dialog(
             current_full_path=full_path,
             description=description,
             photo_field=photo_field,
             entity_id=parent_id
         )
 
+        if not if_new:
+            return  # изменений нет
+        
         # Применяем изменения
         if new_path is None and new_description is None:
             # Фото удалено – очищаем поле
             model.setData(index, "", Qt.EditRole)
             if self._description_field:
                 self._update_description_field(model, index.row(), "")
+
         elif new_path is None:
             # Фото удалено, но описание изменено
             model.setData(index, "", Qt.EditRole)
             if new_description is not None:
                 self._update_description_field(model, index.row(), new_description)
+
         else:
             # Новое фото
             model.setData(index, new_path, Qt.EditRole)
             if new_description is not None and new_description != description:
                 self._update_description_field(model, index.row(), new_description)
-
-        
         
         self._button_rect = None

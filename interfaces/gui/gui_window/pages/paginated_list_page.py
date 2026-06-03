@@ -6397,6 +6397,10 @@ class PaginatedListPage(
         if config.get('widget_type') == 'textarea':
             return TextPopupDelegate, {'readonly': not self.edit_mode}
 
+        # Виртуальные поля-заметки (is_note) – тоже используем TextPopupDelegate
+        if config.get('virtual', False) and config.get('is_note'):
+            return TextPopupDelegate, {'readonly': not self.edit_mode}
+
         # Отображение миниатюры изображения
         if config.get('widget_type') == 'image_thumbnail':
             # from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate

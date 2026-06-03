@@ -628,7 +628,9 @@ class UIMixin:
         Args:
             edit_mode (bool): True – режим редактирования включён, False – выключен.
         """
-
+        # self.table_view.setUpdatesEnabled(False)
+        # try:
+        
         # описание в def _create_top_panel
         
         if hasattr(self, 'action_combo') and self.action_combo:
@@ -650,3 +652,5 @@ class UIMixin:
         self.table_view.setEditTriggers(
             QAbstractItemView.DoubleClicked if edit_mode else QAbstractItemView.NoEditTriggers
         )
+        # finally:
+        # self.table_view.setUpdatesEnabled(True)

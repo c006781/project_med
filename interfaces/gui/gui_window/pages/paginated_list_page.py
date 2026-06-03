@@ -307,6 +307,7 @@ from interfaces.gui.gui_window.mixins.controller_mixin import ControllerMixin
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
+from interfaces.gui.gui_window.utils.gui_helpers import get_visible_row_range
 from interfaces.gui.gui_window.widgets.paginated_table_model import PaginatedTableModel
 from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
 
@@ -785,6 +786,7 @@ class PaginatedListPage(
     #     if hasattr(header, 'filter_requested'):
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
+
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1754,7 +1756,7 @@ class PaginatedListPage(
             for key, value in self._context_params.items():
                 if key in data:
                     data[key] = value
-                    
+
         # Проверяем обязательные поля
         missing = []
         for field_name, config in self.field_configs.items():
@@ -2425,7 +2427,28 @@ class PaginatedListPage(
         # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(checked)
-    
+
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_delegates_readonly(self) -> None:
+        """
+        Обновляет режим только для чтения у существующих делегатов без их пересоздания.
+        Вызывается при переключении режима редактирования.
+        """
+
+        # --- Обновление read-only для ImageThumbnailDelegate (фото) ---
+        # (делегат фото создаётся в _setup_delegates, но его нужно настроить после переустановки)
+        # if hasattr(self, 'table_view') and self.table_view:
+        for col in range(self.table_view.model().columnCount()):
+            delegate = self.table_view.itemDelegateForColumn(col)
+            if delegate and hasattr(delegate, 'set_readonly'):
+                # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
+                delegate.set_readonly(not self.edit_mode)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -2462,23 +2485,28 @@ class PaginatedListPage(
         if hasattr(self, 'source_model'):
             self.source_model.set_checkbox_column_visible(edit_mode)
 
-        # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
-        self._reapply_delegates()  
+        # Вместо полного пересоздания делегатов обновляем их read-only
+        self._update_delegates_readonly()
+
+        # # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
+        # self._reapply_delegates()  
         
+        # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
+        # но оставляем для обратной совместимости)
         # --- Обновление read-only для TextPopupDыelegate (если есть) ---
         for col in range(self.table_view.model().columnCount()):
             delegate = self.table_view.itemDelegateForColumn(col)
             if isinstance(delegate, TextPopupDelegate):
                 delegate.set_readonly(not edit_mode)
 
-        # --- Обновление read-only для ImageThumbnailDelegate (фото) ---
-        # (делегат фото создаётся в _setup_delegates, но его нужно настроить после переустановки)
-        if hasattr(self, 'table_view') and self.table_view:
-            for col in range(self.table_view.model().columnCount()):
-                delegate = self.table_view.itemDelegateForColumn(col)
-                if delegate and hasattr(delegate, 'set_readonly'):
-                    # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
-                    delegate.set_readonly(not edit_mode)
+        # # --- Обновление read-only для ImageThumbnailDelegate (фото) ---
+        # # (делегат фото создаётся в _setup_delegates, но его нужно настроить после переустановки)
+        # if hasattr(self, 'table_view') and self.table_view:
+        #     for col in range(self.table_view.model().columnCount()):
+        #         delegate = self.table_view.itemDelegateForColumn(col)
+        #         if delegate and hasattr(delegate, 'set_readonly'):
+        #             # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
+        #             delegate.set_readonly(not edit_mode)
 
         # Управление видимостью кнопки массового добавления
         if hasattr(self, 'multi_photo_btn'):
@@ -2487,9 +2515,9 @@ class PaginatedListPage(
         # --- Дополнительная синхронизация кнопки "Сохранить" ---
         self._update_save_button_state()
 
-        # Принудительная перерисовка, чтобы убрать артефакты
-        self.table_view.viewport().update()
-        # self.table_view.horizontalHeader().update()
+        # # Принудительная перерисовка, чтобы убрать артефакты
+        # self.table_view.viewport().update()
+        # # self.table_view.horizontalHeader().update()
 
         self.logger.debug(f"Режим редактирования: {'включён' if edit_mode else 'выключен'}, UI обновлён")
 
@@ -2970,7 +2998,18 @@ class PaginatedListPage(
         (когда PaginatedTableModel.sort сбрасывает цвета).
         """
 
-        for row in range(self.source_model.rowCount()):
+        # for row in range(self.source_model.rowCount()):
+        #     self._update_row_color(row)
+        
+        # Перекрашиваем только видимые строки, чтобы ускорить
+        if not self.table_view or not self.table_view.isVisible():
+            return
+        first, last = get_visible_row_range(self.table_view)
+        if first < 0:
+            first = 0
+        if last >= self.source_model.rowCount():
+            last = self.source_model.rowCount() - 1
+        for row in range(first, last + 1):
             self._update_row_color(row)
 
     # def _load_data(self): # Удалить метод полностью – он больше не нужен # Если в наследниках он переопределялся, их нужно переписать, используя пагинацию

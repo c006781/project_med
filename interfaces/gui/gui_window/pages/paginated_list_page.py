@@ -6360,6 +6360,9 @@ class PaginatedListPage(
             return
         
         super()._create_table()
+        
+         # Включаем отслеживание движения мыши без нажатия для появления кнопки при наведении
+        self.table_view.setMouseTracking(True)
 
 
     @AppLogger.get_instance(
@@ -6665,6 +6668,9 @@ class PaginatedListPage(
                     f"(видимый индекс {visible_idx})"
                 )
                 continue
+
+            if 'readonly' in args:
+                args['readonly'] =not  self.edit_mode
 
             # Создаём экземпляр делегата
             delegate = col.delegate_class(self.table_view, **args)

@@ -3894,6 +3894,10 @@ class PaginatedListPage(
         # else:
         #     updated_dto = created  # без изменений
 
+
+
+
+
         # Обновляем модель
         # Найти строку в модели по временному ID и заменить DTO
         row = self._find_row_by_id(temp_id)
@@ -3915,6 +3919,18 @@ class PaginatedListPage(
         # Если эта строка была выбрана, обновляем selected_dto
         # self._clear_selected_dto(temp_id, updated_dto)
         self._clear_selected_dto(temp_id, created)
+
+
+        # Обновляем внешние ключи во всех дочерних новых строках других типов (например, фото)
+        foreign_key_field = f"{self._entity_type}_id"
+        updated = self._draft_registry.update_foreign_key_in_new_dtos(
+            temp_id, created.id, foreign_key_field
+        )
+        if updated:
+            self.logger.debug(f"Обновлено {updated} дочерних новых строк после сохранения родителя {created.id}")
+
+        # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
+        self._transferring_child_drafts(temp_id, created.id)
 
         # Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик
         self._balance_parent_counter(temp_id, created.id)
@@ -5168,7 +5184,8 @@ class PaginatedListPage(
             self._save_all_changes_impl_reload_clear_entity_registry()
 
             # Выходим из режима редактирования (отключаем чекбоксы, блокируем редактирование)
-            self._exit_edit_mode()
+            # self._exit_edit_mode()
+            self._set_edit_mode(False)
 
             self._update_save_button_state() # Обновляем состояние кнопки сохранения (на случай, если _exit_edit_mode не вызывает)
 

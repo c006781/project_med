@@ -856,3 +856,48 @@ class DraftRegistry(QObject):
         if sort_by_id:
             merged.sort(key=lambda x: x.id)
         return merged
+
+    @AppLogger.get_instance(
+        name='DraftRegistry',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def update_foreign_key_in_new_dtos(
+        self,
+        old_parent_id: int,
+        new_parent_id: int,
+        foreign_key_field: str
+    ) -> int:
+        """
+        Обновляет значение внешнего ключа во всех новых строках (__new__),
+        у которых поле foreign_key_field равно old_parent_id.
+
+        Args:
+            old_parent_id: Старый (временный) ID родителя.
+            new_parent_id: Новый (реальный) ID родителя после сохранения.
+            foreign_key_field: Имя поля в DTO, содержащего внешний ключ на родителя.
+                Например, 'appointment_id' для фото.
+
+        Returns:
+            int: Количество обновлённых записей.
+        """
+        updated_count = 0
+        prefix = "__new__:"
+        for key in list(self.get_keys_by_prefix(prefix)):
+            data = self.get(key)
+            if not data or 'dto' not in data:
+                continue
+
+            dto = data['dto']
+            if (
+                hasattr(dto, foreign_key_field)
+            ) and (
+                getattr(dto, foreign_key_field) == old_parent_id
+            ):
+                setattr(dto, foreign_key_field, new_parent_id)
+                self.set(key, {'dto': dto})
+                updated_count += 1
+                self.logger.debug(
+                    f"Обновлён {foreign_key_field} в {key} с {old_parent_id} на {new_parent_id}"
+                )
+        return updated_count

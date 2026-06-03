@@ -573,6 +573,176 @@ class TextEditDialog(QDialog):
 #         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
 #         return None
 
+# class TextPopupDelegate(QStyledItemDelegate):
+#     """
+#     Делегат для ячеек с многострочным текстом.
+#     При наведении мыши показывает маленькую кнопку (один общий QPushButton на всю таблицу),
+#     по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
+#     В режиме только для чтения диалог открывается без возможности редактирования.
+#     """
+#     _shared_button = None        # одна кнопка на все экземпляры
+#     _current_delegate = None     # делегат, который сейчас показывает кнопку
+
+#     @classmethod
+#     def _get_shared_button(cls, parent):
+#         """Создаёт общую кнопку, если её ещё нет."""
+#         if cls._shared_button is None:
+#             cls._shared_button = QPushButton("...", parent)
+#             cls._shared_button.setFixedSize(20, 20)
+#             cls._shared_button.setCursor(Qt.PointingHandCursor)
+#             cls._shared_button.hide()
+#         return cls._shared_button
+
+#     def __init__(
+#         self,
+#         parent=None,
+#         readonly=False,
+#         get_completion_list=None,
+#     ):
+#         super().__init__(parent)
+#         self._readonly = readonly
+#         self._get_completion_list = get_completion_list
+#         self._current_row = -1
+#         self._current_col = -1
+
+#         if parent:
+#             parent.setMouseTracking(True)
+#             parent.installEventFilter(self)
+
+#     def _show_button(self, index):
+#         """Показывает кнопку над указанной ячейкой."""
+#         # if self._readonly or not index.isValid():
+#         if  not index.isValid():
+#             return
+
+#         viewport = self.parent().viewport()
+#         btn = self._get_shared_button(viewport)
+
+#         # Обновляем родителя (на случай, если viewport изменился)
+#         btn.setParent(viewport)
+
+#         # Позиционируем кнопку
+#         rect = self.parent().visualRect(index)
+#         btn_rect = QRect(
+#             rect.right() - 22,
+#             rect.top() + (rect.height() - 20) // 2,
+#             20, 20
+#         )
+#         btn.setGeometry(btn_rect)
+
+#         # Переназначаем сигнал (отключаем старые, чтобы не было дублей)
+#         try:
+#             btn.clicked.disconnect()
+#         except TypeError:
+#             pass
+#         btn.clicked.connect(self._on_button_clicked)
+
+#         btn.show()
+#         btn.raise_()
+
+#         self._current_row = index.row()
+#         self._current_col = index.column()
+#         self.__class__._current_delegate = self
+
+#     def _hide_button(self):
+#         """Скрывает общую кнопку."""
+#         if self.__class__._shared_button is not None:
+#             self.__class__._shared_button.hide()
+#         self._current_row = -1
+#         self._current_col = -1
+#         self.__class__._current_delegate = None
+
+#     def _on_button_clicked(self):
+#         """Обработчик клика по кнопке."""
+#         if self._current_row >= 0 and self._current_col >= 0:
+#             model = self.parent().model()
+#             idx = model.index(self._current_row, self._current_col)
+#             if idx.isValid():
+#                 self._open_popup(model, idx)
+
+#     def editorEvent(self, event, model, option, index):
+#         """Обрабатывает события мыши для показа/скрытия кнопки."""
+#         # Обработка движения мыши – обновляем hover и показываем кнопку
+#         if event.type() == QEvent.MouseMove:
+#             if index.isValid():
+#                 if (index.row(), index.column()) != (self._current_row, self._current_col):
+#                     # Скрываем кнопку (через класс, чтобы все делегаты видели)
+#                     if self.__class__._shared_button:
+#                         self.__class__._shared_button.hide()
+#                     self.__class__._current_delegate = None
+#                     self._current_row = -1
+#                     self._current_col = -1
+#                     # Показываем кнопку для новой ячейки
+#                     self._show_button(index)
+#             else:
+#                 self._hide_button()
+#             return False
+
+#         # Обработка двойного клика – открываем диалог (только в режиме редактирования)
+#         if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+#             if not self._readonly:
+#                 self._open_popup(model, index)
+#                 return True
+#             return False
+
+#         # Клик по кнопке уже обработан отдельно через сигнал
+#         return super().editorEvent(event, model, option, index)
+
+#     def eventFilter(self, obj, event):
+
+#         # Обработка выхода мыши из таблицы
+#         if obj == self.parent() and event.type() == QEvent.Leave:
+#             self._hide_button()
+#             return False
+
+#         # Обработка движения мыши по таблице (для скрытия кнопки над чужими делегатами)
+#         if obj == self.parent() and event.type() == QEvent.MouseMove:
+#             # Если кнопка не видна, можно не проверять
+#             if self.__class__._shared_button and self.__class__._shared_button.isVisible():
+#                 pos = event.pos()
+#                 index = self.parent().indexAt(pos)
+#                 if index.isValid():
+#                     delegate = self.parent().itemDelegateForColumn(index.column())
+#                     if not isinstance(delegate, TextPopupDelegate):
+#                         self._hide_button()
+#                 else:
+#                     self._hide_button()
+#             return False
+
+#         return super().eventFilter(obj, event)
+#         # """При выходе мыши из таблицы скрываем кнопку."""
+#         # if obj == self.parent() and event.type() == QEvent.Leave:
+#         #     self._hide_button()
+#         # return super().eventFilter(obj, event)
+
+#     def paint(self, painter, option, index):
+#         """Стандартная отрисовка без рисования кнопки (кнопка – реальный виджет)."""
+#         super().paint(painter, option, index)
+
+#     def set_readonly(self, readonly):
+#         """Устанавливает режим только для просмотра."""
+#         self._readonly = readonly
+#         if readonly:
+#             self._hide_button()
+
+#     def _open_popup(self, model, index):
+#         """Открывает диалог просмотра/редактирования текста."""
+#         value = model.data(index, Qt.EditRole)
+#         text = str(value) if value is not None else ""
+
+#         # Получаем список вариантов для автодополнения
+#         completion_list = self._get_completion_list() if self._get_completion_list else []
+
+#         dialog = TextEditDialog(self.parent(), text, self._readonly, completion_list)
+#         if dialog.exec() == QDialog.Accepted:
+#             new_text = dialog.get_text()
+#             if new_text != text:
+#                 model.setData(index, new_text, Qt.EditRole)
+
+#     def createEditor(self, parent, option, index):
+#         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
+#         return None
+
 class TextPopupDelegate(QStyledItemDelegate):
     """
     Делегат для ячеек с многострочным текстом.
@@ -582,6 +752,7 @@ class TextPopupDelegate(QStyledItemDelegate):
     """
     _shared_button = None        # одна кнопка на все экземпляры
     _current_delegate = None     # делегат, который сейчас показывает кнопку
+    _global_filter_installed = False  # флаг, что глобальный фильтр установлен
 
     @classmethod
     def _get_shared_button(cls, parent):
@@ -608,11 +779,19 @@ class TextPopupDelegate(QStyledItemDelegate):
         if parent:
             parent.setMouseTracking(True)
             parent.installEventFilter(self)
+            self._install_global_hover_monitor(parent)
+
+    def _install_global_hover_monitor(self, table):
+        """Устанавливает фильтр событий на viewport таблицы для отслеживания движения мыши."""
+        if self.__class__._global_filter_installed:
+            return
+        viewport = table.viewport()
+        viewport.installEventFilter(self)
+        self.__class__._global_filter_installed = True
 
     def _show_button(self, index):
         """Показывает кнопку над указанной ячейкой."""
-        # if self._readonly or not index.isValid():
-        if  not index.isValid():
+        if not index.isValid():
             return
 
         viewport = self.parent().viewport()
@@ -685,35 +864,28 @@ class TextPopupDelegate(QStyledItemDelegate):
                 return True
             return False
 
-        # Клик по кнопке уже обработан отдельно через сигнал
         return super().editorEvent(event, model, option, index)
 
     def eventFilter(self, obj, event):
-
         # Обработка выхода мыши из таблицы
         if obj == self.parent() and event.type() == QEvent.Leave:
             self._hide_button()
             return False
 
-        # Обработка движения мыши по таблице (для скрытия кнопки над чужими делегатами)
-        if obj == self.parent() and event.type() == QEvent.MouseMove:
-            # Если кнопка не видна, можно не проверять
-            if self.__class__._shared_button and self.__class__._shared_button.isVisible():
-                pos = event.pos()
-                index = self.parent().indexAt(pos)
-                if index.isValid():
-                    delegate = self.parent().itemDelegateForColumn(index.column())
-                    if not isinstance(delegate, TextPopupDelegate):
-                        self._hide_button()
-                else:
+        # Обработка движения мыши по viewport (глобальный мониторинг)
+        if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+            pos = event.pos()
+            index = self.parent().indexAt(pos)
+            if index.isValid():
+                delegate = self.parent().itemDelegateForColumn(index.column())
+                # Если делегат под курсором не TextPopupDelegate – скрываем кнопку
+                if not isinstance(delegate, TextPopupDelegate):
                     self._hide_button()
+            else:
+                self._hide_button()
             return False
 
         return super().eventFilter(obj, event)
-        # """При выходе мыши из таблицы скрываем кнопку."""
-        # if obj == self.parent() and event.type() == QEvent.Leave:
-        #     self._hide_button()
-        # return super().eventFilter(obj, event)
 
     def paint(self, painter, option, index):
         """Стандартная отрисовка без рисования кнопки (кнопка – реальный виджет)."""

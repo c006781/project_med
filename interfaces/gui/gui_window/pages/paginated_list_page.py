@@ -787,7 +787,6 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
-
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -2449,6 +2448,20 @@ class PaginatedListPage(
                 # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
                 delegate.set_readonly(not self.edit_mode)
 
+
+    def _reapply_data_delegates(self) -> None:
+        """
+        Переустанавливает делегаты для всех DATA-столбцов на основе их текущих
+        видимых индексов. Используется после изменения видимости чекбокс-столбца,
+        когда индексы сдвигаются.
+        """
+        for col in self.source_model.get_columns():
+            if col.column_type != ColumnType.DATA:
+                continue
+            visible_idx = self.source_model.get_visible_column_index(col.system_name)
+            if visible_idx >= 0:
+                col.apply_delegate(self.table_view, visible_idx)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -2488,16 +2501,16 @@ class PaginatedListPage(
         # Вместо полного пересоздания делегатов обновляем их read-only
         self._update_delegates_readonly()
 
-        # # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
-        # self._reapply_delegates()  
+        # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
+        self._reapply_delegates()  
         
         # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
         # но оставляем для обратной совместимости)
         # --- Обновление read-only для TextPopupDыelegate (если есть) ---
-        for col in range(self.table_view.model().columnCount()):
-            delegate = self.table_view.itemDelegateForColumn(col)
-            if isinstance(delegate, TextPopupDelegate):
-                delegate.set_readonly(not edit_mode)
+        # for col in range(self.table_view.model().columnCount()):
+        #     delegate = self.table_view.itemDelegateForColumn(col)
+        #     if isinstance(delegate, TextPopupDelegate):
+        #         delegate.set_readonly(not edit_mode)
 
         # # --- Обновление read-only для ImageThumbnailDelegate (фото) ---
         # # (делегат фото создаётся в _setup_delegates, но его нужно настроить после переустановки)
@@ -6956,6 +6969,10 @@ class PaginatedListPage(
 
         self._finalize_new_row(dto, temp_id, row)
 
+
+        # self._select_new_row(temp_id) 
+        self._update_save_button_state()
+
         # # Сохраняем в реестр как новую строку
         # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
 
@@ -7972,4 +7989,10 @@ class PaginatedListPage(
             else:
                 result.append(dto)
         return result
+
+
+    # ------------------------------------------------------------------
+
+    
+
 

@@ -7,6 +7,9 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
 
+from PySide6.QtWidgets import (
+    QTableView
+)
 
 class ColumnType(Enum):
     """Тип столбца: обычный (из БД) или системный (чекбокс, кнопка и т.д.)."""
@@ -103,6 +106,28 @@ class TableColumn:
         
         if column_type == ColumnType.SYSTEM and field_name:
             raise ValueError("SYSTEM-столбец не должен иметь field_name")
+    
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def apply_delegate(self, table_view: QTableView, visible_index: int) -> None:
+        """
+        Создаёт и устанавливает делегат для данного столбца по его видимому индексу.
+        Если delegate_class не задан, ничего не делает.
+        
+        Args:
+            table_view: Таблица, для которой устанавливается делегат.
+            visible_index: Текущий видимый индекс столбца (полученный из модели).
+        """
+        if self.delegate_class is None:
+            return
+        delegate = self.delegate_class(table_view, **self.delegate_args)
+        table_view.setItemDelegateForColumn(visible_index, delegate)
 
     # ----------------------------------------------------------------------
     # Методы управления (работают со списком колонок модели)

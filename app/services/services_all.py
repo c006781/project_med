@@ -1017,9 +1017,11 @@ class BaseService(
 
             # Добавляем SQL-вычисления
             compute_fields = self._get_sql_compute_fields()
+            self.logger.debug(f"[DEBUG] compute_fields: {compute_fields}")
             extra_columns = []
             for field_name, config in compute_fields.items():
                 subq = self._build_sql_compute_subquery(field_name, config)
+                self.logger.debug(f"[DEBUG] subquery for {field_name}: {subq}")
                 if subq is not None:
                     extra_columns.append(subq.label(f"__sql_compute_{field_name}"))
             if extra_columns:
@@ -1028,15 +1030,41 @@ class BaseService(
             # Пагинация
             results = loaded_query.offset(offset).limit(limit).all()
 
+            if extra_columns:
+                self.logger.debug(f"[DEBUG] First result type: {type(results[0])}, len: {len(results[0]) if hasattr(results[0], '__len__') else 'N/A'}")
+                self.logger.debug(f"[DEBUG] First result: {results[0]}")
+
             # Извлекаем модели и сохраняем вычисленные значения как временные атрибуты
             items = []
+            # if extra_columns:
+            #     for row in results:
+            #         if isinstance(row, tuple):
+            #             obj = row[0]
+            #             for idx, field_name in enumerate(compute_fields.keys()):
+            #                 value = row[idx + 1]
+            #                 setattr(obj, f"__sql_compute_{field_name}", value)
+            #             items.append(obj)
+            #         else:
+            #             items.append(row)
+            # else:
+            #     items = results
+
             if extra_columns:
+                field_names = list(compute_fields.keys())  # фиксируем порядок
+                items = []
                 for row in results:
-                    if isinstance(row, tuple):
+                    # Проверяем, является ли элемент последовательностью (кортеж, список, Row)
+                    if hasattr(row, '__len__') and not isinstance(row, self._model_class):
+                        # Предполагаем, что первым элементом всегда идёт объект модели
                         obj = row[0]
-                        for idx, field_name in enumerate(compute_fields.keys()):
-                            value = row[idx + 1]
-                            setattr(obj, f"__sql_compute_{field_name}", value)
+                        # Для каждого вычисленного поля устанавливаем временный атрибут
+                        for idx, field_name in enumerate(field_names):
+                            if idx + 1 < len(row):
+                                value = row[idx + 1]
+                                setattr(obj, f"__sql_compute_{field_name}", value)
+                                self.logger.debug(f"[DEBUG] Set __sql_compute_{field_name} = {value} for obj {obj.id}")
+                            else:
+                                setattr(obj, f"__sql_compute_{field_name}", None)
                         items.append(obj)
                     else:
                         items.append(row)
@@ -2651,6 +2679,7 @@ class BaseService(
         if self._field_configs:
 
             extra_data = self._prepare_extra_data(item_s)
+            self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
 
             dto = enrich_dto_with_computed_fields(
                 dto, 

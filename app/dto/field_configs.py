@@ -312,19 +312,19 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'order'         : 0,                # Делаем эту колонку самой левой (необязательно).
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
         'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
-        'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
-            'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
-            'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
-        },
-        'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
+        # 'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
+        #     'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
+        #     'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
+        # },
+        # 'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
 
-        # 'sql_compute': {
-        #     'func': 'COUNT',
-        #     'relation': 'photos',
-        #     'result_type': 'int',
-        #     'extra_key': 'photo_count',  
-        #     'formatter': lambda count: f"{count} фото" if count > 0 else '❌'
-        # }
+        'sql_compute': {
+            'func': 'COUNT',
+            'relation': 'photos',
+            'result_type': 'int',
+            'extra_key': 'photo_count',  
+            'formatter': lambda count: f"{count} фото" if count > 0 else '❌'
+        }
     },
 }
 

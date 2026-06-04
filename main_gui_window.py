@@ -29,6 +29,7 @@ def handle_rename_argument():
         # Удаляем старый файл, если он существует (обычно он уже удалён скриптом, но на всякий случай)
         if os.path.exists(target_exe):
             os.remove(target_exe)
+            
         # Переименовываем текущий exe
         os.rename(current_exe, target_exe)
 
@@ -40,7 +41,7 @@ def handle_rename_argument():
         # Запускаем переименованный exe
         subprocess.Popen([target_exe])
         sys.exit(0)
-        
+
     except Exception as e:
         # Если не удалось переименовать, лучше показать ошибку и продолжить работу со старым именем
         # import traceback

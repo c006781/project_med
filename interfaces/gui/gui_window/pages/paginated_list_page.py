@@ -279,6 +279,7 @@ from typing import (
 )
 import uuid
 
+from app.utils.deferred_actions import ActionContext, ActionType, add_deferred_action
 from app.utils.logger import AppLogger
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
@@ -422,6 +423,10 @@ class PaginatedListPage(
     edit_requested = Signal(object)
     delete_requested = Signal(object)
     action_requested = Signal(object)
+
+    # Сигнал, испускаемый при изменении родительской сущности (например, после добавления/удаления фото)
+    # Параметры: (entity_type: str, entity_id: int)
+    parent_entity_updated = Signal(str, int)
 
     # ------------------------------------------------------------------
     # Ленивая инициализация атрибутов (без __init__)
@@ -753,6 +758,7 @@ class PaginatedListPage(
         if selection_model:
             selection_model.selectionChanged.connect(self._on_selection_changed_for_draft)
 
+        self._affected_parents = set()   # ID родителей, чьи строки нужно обновить после сохранения
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
     # @AppLogger.get_instance(
@@ -786,6 +792,45 @@ class PaginatedListPage(
     #     if hasattr(header, 'filter_requested'):
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _refresh_parent_rows(self, parent_ids: Set[int], session: Optional[Session] = None) -> None:
+        """
+        Загружает свежие DTO для указанных родительских ID и обновляет модель таблицы.
+        """
+        self.logger.debug(f"_refresh_parent_rows: START для {parent_ids}")
+        if not parent_ids:
+            return
+        
+        with self.service._session_scope(session) as sess:
+            for parent_id in parent_ids:
+                row = self._find_row_by_id(parent_id)
+                if row < 0:
+                    self.logger.debug(f"Родитель {parent_id} не найден в модели")
+                    continue
+                try:
+                    fresh_dto = self.service.get_by_id(parent_id, session=sess)
+                    self.logger.debug(
+                        f"Родитель {parent_id} загружен: "  
+                        f"photos={len(fresh_dto.photos or [])}, "
+                        f"has_photos={fresh_dto.has_photos}"
+                        )
+                    
+                    old_dto = self.source_model.get_item_at_row(row)
+                    self.logger.debug(f"Старое has_photos={old_dto.has_photos if old_dto else 'None'}")
+
+                    self._source_model_update_row(row, fresh_dto)
+
+                    # Если это текущая выбранная строка, обновляем selected_dto
+                    if self.selected_dto and self.selected_dto.id == parent_id:
+                        self.selected_dto = fresh_dto
+
+                except Exception as e:
+                    self.logger.exception(f"Не удалось обновить родителя {parent_id}: {e}")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -3662,6 +3707,22 @@ class PaginatedListPage(
                         setattr(dto, field_name, abs_path)   
         return temp_dir
         
+    def _update_affected_parents_and_deferred_action(
+        self, 
+        parent_id,
+        entity_id,
+        session: Optional[Session] = None
+    ):
+        if parent_id is not None and parent_id > 0:
+            self._affected_parents.add(parent_id)
+            parent_type = self._get_parent_entity_type(entity_id)
+            ctx = ActionContext(session, ActionType.COMMIT) if session else None
+            add_deferred_action(
+                ctx,
+                self.parent_entity_updated.emit,
+                args=(parent_type, parent_id)
+            )
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -3894,9 +3955,31 @@ class PaginatedListPage(
         # else:
         #     updated_dto = created  # без изменений
 
+        # добавляем родителя, если есть
+        # parent_id = self._get_parent_id_for_new_row(dto)
+        # if parent_id is not None and parent_id > 0:
+        #     self._affected_parents.add(parent_id)
+        #     parent_type = self._get_parent_entity_type(temp_id)
+        #     self.parent_entity_updated.emit(parent_type, parent_id)
+        #     # 0==0
 
-
-
+        # добавляем родителя, если есть
+        parent_id = self._get_parent_id_for_new_row(dto)
+        # if parent_id is not None and parent_id > 0:
+        #     self._affected_parents.add(parent_id)
+        #     parent_type = self._get_parent_entity_type(temp_id)
+        #     # Откладываем испускание сигнала до после коммита
+        #     ctx = ActionContext(session, ActionType.COMMIT) if session else None
+        #     add_deferred_action(
+        #         ctx,
+        #         self.parent_entity_updated.emit,
+        #         args=(parent_type, parent_id)
+        #     )
+        self._update_affected_parents_and_deferred_action(
+            parent_id,
+            temp_id,
+            session
+        )
 
         # Обновляем модель
         # Найти строку в модели по временному ID и заменить DTO
@@ -4677,9 +4760,25 @@ class PaginatedListPage(
         keys = list(self._draft_registry.get_keys_by_prefix(prefix))
         for key in keys:
             entity_id = int(key.split(':')[-1])
+
+
+            # получаем родителя до удаления
+            parent_id = self._get_parent_id(entity_id)
+
             self._delete_entity_and_children(
                 entity_id=entity_id, 
                 session=session
+            )
+
+            # if parent_id is not None and parent_id > 0:
+            #     self._affected_parents.add(parent_id)
+            #     parent_type = self._get_parent_entity_type(entity_id)
+            #     self.parent_entity_updated.emit(parent_type, parent_id)
+            
+            self._update_affected_parents_and_deferred_action(
+                parent_id,
+                entity_id,
+                session
             )
 
             # Удаляем строку из модели
@@ -4950,60 +5049,117 @@ class PaginatedListPage(
 
         self.logger.debug(f"Глобальная отмена изменений для типа {self._entity_type}")
 
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _save_all_changes_impl_reload_clear_entity_registry(self) -> bool:
+    #     """
+    #     Выполняет сохранение всех изменений в рамках единой транзакции, затем перезагружает данные и очищает реестр.
+
+    #     **Алгоритм:**
+    #         1. Вызывает `_save_all_changes_impl_session()` для выполнения операций сохранения
+    #         (новые строки, дочерние черновики, изменённые строки, удалённые строки) внутри
+    #         одной сессии БД. При возникновении ошибки транзакция откатывается.
+    #         2. После успешного сохранения вызывает `reload_data()` для перезагрузки данных
+    #         из БД в модель таблицы.
+    #         3. Очищает реестр черновиков от всех служебных ключей (статусы, счётчики, черновики)
+    #         для текущего типа сущности через `_clear_entity_registry()`.
+
+    #     **Важно:**
+    #         - Этот метод является **вспомогательным** и вызывается внутри `_save_all_changes_impl`.
+    #         - Он не управляет флагом `_saving_in_progress` – это делает вызывающий код.
+    #         - После вызова метода все черновики для текущей страницы удаляются, а данные
+    #         в таблице соответствуют состоянию БД.
+        
+    #     **Исключения:**
+    #         Любое исключение, возникшее в `_save_all_changes_impl_session()`, пробрасывается выше.
+
+    #     **Пример использования (внутри `_save_all_changes_impl`):**
+    #         >>> try:
+    #         ...     self._save_all_changes_impl_reload_clear_entity_registry()
+    #         ...     self._exit_edit_mode()
+    #         ...     return True
+    #         ... except Exception as e:
+    #         ...     self.logger.exception(f"Ошибка: {e}")
+    #         ...     return False
+
+    #     **Примечания:**
+    #         - Разделение на `_save_all_changes_impl_session` и этот метод позволяет
+    #         вызывать сохранение без перезагрузки данных (например, для дочерних черновиков).
+    #         - Очистка реестра после перезагрузки данных гарантирует, что реестр не содержит
+    #         устаревших ключей, которые могли бы повлиять на следующие операции.
+    #     """
+
+    #     # Сохраняем всех изменений внутри единой транзакции.
+    #     self._save_all_changes_impl_session()
+
+    #     # Перезагружаем данные (и выходим из режима редактирования?????)
+    #     self.reload_data() 
+
+    #     # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
+    #     self._clear_entity_registry()
+
+    #     return True
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
+        enable_file_logging='system',
+        use_name_in_filename=False,
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _save_all_changes_impl_reload_clear_entity_registry(self) -> bool:
         """
-        Выполняет сохранение всех изменений в рамках единой транзакции, затем перезагружает данные и очищает реестр.
+        Выполняет сохранение всех изменений в рамках единой транзакции,
+        затем точечно обновляет изменённые родительские строки и очищает реестр черновиков.
 
         **Алгоритм:**
-            1. Вызывает `_save_all_changes_impl_session()` для выполнения операций сохранения
-            (новые строки, дочерние черновики, изменённые строки, удалённые строки) внутри
-            одной сессии БД. При возникновении ошибки транзакция откатывается.
-            2. После успешного сохранения вызывает `reload_data()` для перезагрузки данных
-            из БД в модель таблицы.
-            3. Очищает реестр черновиков от всех служебных ключей (статусы, счётчики, черновики)
-            для текущего типа сущности через `_clear_entity_registry()`.
+            1. Сбрасывает множество `_affected_parents` (ID родителей, чьи дочерние данные изменились).
+            2. Вызывает `_save_all_changes_impl_session()`, которая выполняет основные операции сохранения
+               (новые строки, дочерние черновики, изменённые строки, удалённые строки) внутри одной сессии.
+            3. Если в процессе сохранения были зафиксированы родители с изменениями (например, добавились
+               или удалились дочерние сущности, влияющие на виртуальные поля), вызывает `_refresh_parent_rows()`
+               для точечного обновления этих строк в модели таблицы без полной перезагрузки.
+            4. Очищает реестр черновиков от всех служебных ключей (статусы, счётчики, черновики, пометки
+               на удаление и новые строки) для текущего типа сущности через `_clear_entity_registry()`.
+            5. Сбрасывает все цвета строк в таблице (вызов `source_model.clear_row_colors()`), так как
+               после очистки реестра ни одна строка не должна иметь подсветку.
+            6. Обновляет состояние кнопки «Сохранить» (делает её неактивной, так как изменений больше нет).
 
-        **Важно:**
-            - Этот метод является **вспомогательным** и вызывается внутри `_save_all_changes_impl`.
-            - Он не управляет флагом `_saving_in_progress` – это делает вызывающий код.
-            - После вызова метода все черновики для текущей страницы удаляются, а данные
-            в таблице соответствуют состоянию БД.
-        
-        **Исключения:**
-            Любое исключение, возникшее в `_save_all_changes_impl_session()`, пробрасывается выше.
+        **Важные замечания:**
+            - В отличие от старой версии, метод **не вызывает** `reload_data()`, что позволяет сохранить
+              позицию прокрутки, выделение строк и избежать повторной загрузки страниц пагинации.
+            - Для корректной работы необходимо, чтобы `_affected_parents` пополнялся во время выполнения
+              `_save_all_changes_impl_session()` внутри методов:
+                * `_save_new_row_recursive` (при создании новой строки с существующим родителем)
+                * `_save_modified_rows_for_ids` (при обновлении строки, у которой есть родитель)
+                * `_save_deleted_rows` (при удалении строки, у которой есть родитель)
+                * `_save_child_components_for_parent` (при применении дочернего черновика)
 
-        **Пример использования (внутри `_save_all_changes_impl`):**
-            >>> try:
-            ...     self._save_all_changes_impl_reload_clear_entity_registry()
-            ...     self._exit_edit_mode()
-            ...     return True
-            ... except Exception as e:
-            ...     self.logger.exception(f"Ошибка: {e}")
-            ...     return False
-
-        **Примечания:**
-            - Разделение на `_save_all_changes_impl_session` и этот метод позволяет
-            вызывать сохранение без перезагрузки данных (например, для дочерних черновиков).
-            - Очистка реестра после перезагрузки данных гарантирует, что реестр не содержит
-            устаревших ключей, которые могли бы повлиять на следующие операции.
+        Returns:
+            bool: Всегда `True`, если исключение не возникло. В случае ошибки исключение пробрасывается выше.
         """
+        self._affected_parents.clear()   # сбрасываем перед сохранением
 
         # Сохраняем всех изменений внутри единой транзакции.
         self._save_all_changes_impl_session()
 
-        # Перезагружаем данные (и выходим из режима редактирования?????)
-        self.reload_data() 
+        # Точечно обновляем родительские строки, у которых изменились дочерние данные
+        if self._affected_parents:
+            self._refresh_parent_rows(self._affected_parents)
 
         # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
         self._clear_entity_registry()
+
+        # Сбрасываем цвета строк (после очистки реестра все строки должны быть белыми)
+        self.source_model.clear_row_colors()
+
+        self._update_save_button_state()
 
         return True
 
@@ -5386,6 +5542,19 @@ class PaginatedListPage(
                     #     self.selected_dto = updated
                     self._clear_selected_dto(entity_id, updated)
 
+                    # добавляем родителя, если есть
+                    parent_id = self._get_parent_id(entity_id)
+                    # if parent_id is not None and parent_id > 0:
+                    #     self._affected_parents.add(parent_id)
+                    #     parent_type = self._get_parent_entity_type(entity_id)
+                    #     self.parent_entity_updated.emit(parent_type, parent_id)
+                    
+                    self._update_affected_parents_and_deferred_action(
+                        parent_id,
+                        entity_id,
+                        session
+                    )
+
                 except Exception as e:
 
                     # Логируем ошибку и пробрасываем дальше (транзакция откатится)
@@ -5546,6 +5715,11 @@ class PaginatedListPage(
                             session=session
                         )
 
+                        self._affected_parents.add(parent_id)  # добавляем родителя в список затронутых
+
+                        # Уведомляем подписчиков (например, родительский фрейм) о том,
+                        # что родительская сущность изменилась из-за дочерних черновиков.
+                        self.parent_entity_updated.emit(self._entity_type, parent_id)
                     except Exception as e:
                         self.logger.exception(
                             f"Ошибка при применении черновика дочернего компонента {child.__class__.__name__} "
@@ -6038,7 +6212,7 @@ class PaginatedListPage(
             self._global_search_text = ""
             self._refresh_filter_bar()
             super().on_enter(extra_data)
-            self.reload_with_filters(None)
+            self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
         # После загрузки данных восстанавливаем прокрутку и выделение
         QTimer.singleShot(100, self._restore_scroll_and_selection)
@@ -6879,6 +7053,52 @@ class PaginatedListPage(
         """Перезагружает данные текущей страницы с учётом активных фильтров."""
 
         self.reload_with_filters(self._current_filters)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def refresh_row_by_id(self, entity_id: int, entity_type: Optional[str] = None) -> bool:
+        """
+        Перезагружает одну строку по ID из БД и обновляет модель таблицы.
+        Используется для точечного обновления строки родителя после изменений в дочерних сущностях.
+
+        Args:
+            entity_id: ID сущности (должен существовать в БД).
+            entity_type: Тип сущности (если передан, проверяется соответствие текущему типу страницы).
+
+        Returns:
+            True, если строка найдена и обновлена, иначе False.
+
+        Примечание:
+            Если передан `entity_type`, не совпадающий с `self._entity_type`, метод ничего не делает
+            и возвращает False (защита от обновления строки на странице с другим типом).
+        """
+        # Проверяем, соответствует ли тип родителя текущей странице
+        if entity_type is not None and entity_type != self._entity_type:
+            self.logger.debug(
+                f"refresh_row_by_id: пропуск обновления, ожидался тип {self._entity_type}, "
+                f"получен {entity_type}"
+            )
+            return False
+
+        row = self._find_row_by_id(entity_id)
+        if row < 0:
+            self.logger.debug(f"refresh_row_by_id: строка с id={entity_id} не найдена в модели")
+            return False
+        
+        try:
+            with self.service._session_scope() as sess:
+                fresh_dto = self.service.get_by_id(entity_id, session=sess)
+                self._source_model_update_row(row, fresh_dto)
+                if self.selected_dto and self.selected_dto.id == entity_id:
+                    self.selected_dto = fresh_dto
+            self.logger.debug(f"Строка id={entity_id} обновлена из БД")
+            return True
+        except Exception as e:
+            self.logger.exception(f"Ошибка обновления строки {entity_id}: {e}")
+            return False   
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

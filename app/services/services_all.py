@@ -2230,6 +2230,7 @@ class BaseService(
                 if source_attr and source_attr not in relations:
                     extra_rels.append(source_attr)
 
+        self.logger.debug(f"_get_extra_rels: extra_rels={extra_rels if extra_rels else 'None'}")
         return extra_rels
 
     @AppLogger.get_instance(

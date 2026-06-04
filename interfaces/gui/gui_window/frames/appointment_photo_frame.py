@@ -46,6 +46,27 @@ class AppointmentPhotoFrame(BasePage):
         photo_page (PaginatedPhotoListPage): Таблица фото.
     """
 
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='gui.AppointmentPhotoFrame',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+
+        return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',
         # share_file_with = 'system',
@@ -86,6 +107,9 @@ class AppointmentPhotoFrame(BasePage):
             shared_registry=self._draft_registry,
             show_controls=[],   # кнопки будут на уровне этой страницы
         )
+
+        # Подключаем сигнал обновления родительской сущности
+        self.photo_page.parent_entity_updated.connect(self._on_parent_entity_updated)
 
         # Создаём пустую панель инструментов (будет заполнена в set_main_window)
         self.toolbar_widget = QWidget()
@@ -624,3 +648,24 @@ class AppointmentPhotoFrame(BasePage):
         # Удаление доступно только в режиме редактирования хотя бы одной таблицы
         edit_mode_active = self.appointment_page.edit_mode or self.photo_page.edit_mode
         self.delete_btn.setEnabled(has_selection and edit_mode_active)
+
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_parent_entity_updated(self, parent_entity_type: str, parent_id: int):
+        """
+        Обработчик сигнала parent_entity_updated от дочерней страницы (фото).
+        Обновляет соответствующую строку в таблице приёмов, если тип родителя совпадает.
+
+        Args:
+            parent_entity_type (str): Тип родительской сущности (например, 'appointment').
+            parent_id (int): ID родительской записи.
+        """
+        if parent_entity_type == 'appointment':
+            # 0==0
+            self.logger.debug(f"Обновление строки приёма id={parent_id} после изменений в фото")
+            # 0==0
+            self.appointment_page.refresh_row_by_id(parent_id, parent_entity_type)
+            # 0==0

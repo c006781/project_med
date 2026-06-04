@@ -75,6 +75,7 @@ import os
 #         __package__ = None
 
 
+from app.utils.deferred_actions import ActionType, clear_actions_by_type, execute_actions, get_actions_by_type
 from app.utils.logger.logger import AppLogger
 
 from app.utils.file_deletions import (
@@ -251,6 +252,36 @@ class Database:
             event.listen(Session, "after_commit", _make_deletion_handler(DeletionType.COMMIT))
             event.listen(Session, "after_rollback", _make_deletion_handler(DeletionType.ROLLBACK))
             Session._deletion_handlers_registered = True
+
+        # Регистрация обработчиков для отложенных действий (обновлений UI)
+        if not hasattr(Session, '_deferred_actions_registered'):
+            # from app.utils.deferred_actions import (
+            #     get_actions_by_type, clear_actions_by_type, execute_actions,
+            #     ActionType
+            # )
+
+            logger=AppLogger.get_instance(
+                name = 'api.Database',
+                # share_file_with = 'system',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system',
+            )
+
+            @event.listens_for(Session, "after_commit")
+            def execute_commit_actions(session, *args):
+                actions = get_actions_by_type(session, ActionType.COMMIT)
+                if actions:
+                    execute_actions(actions, logger=logger)
+                    clear_actions_by_type(session, ActionType.COMMIT)
+
+            @event.listens_for(Session, "after_rollback")
+            def execute_rollback_actions(session, *args):
+                actions = get_actions_by_type(session, ActionType.ROLLBACK)
+                if actions:
+                    execute_actions(actions, logger=logger)
+                    clear_actions_by_type(session, ActionType.ROLLBACK)
+
+            Session._deferred_actions_registered = True
 
         # # Регистрируем обработчик только один раз для данного класса сессии
         # if not hasattr(Session, '_after_commit_registered'):

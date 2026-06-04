@@ -313,7 +313,7 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
         'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
         'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
-            'func'  : lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
+            'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
             'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
         },
         'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей

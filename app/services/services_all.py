@@ -1411,8 +1411,13 @@ class BaseService(
             repo = self._get_repo(sess)
             repo.add(entity)
             sess.flush()
+
+            # Пост-обработка для добавления временных атрибутов (например, _count_photos)
+            items = self._post_process_items([entity], sess)
+            processed_entity = items[0] if items else entity
             
-            return self.get_dto_out(entity)
+            # return self.get_dto_out(entity)
+            return self.get_dto_out(processed_entity)
 
 
     @AppLogger.get_instance(

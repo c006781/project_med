@@ -3706,7 +3706,15 @@ class PaginatedListPage(
                     if os.path.exists(abs_path):
                         setattr(dto, field_name, abs_path)   
         return temp_dir
-        
+    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    ) 
     def _update_affected_parents_and_deferred_action(
         self, 
         parent_id,

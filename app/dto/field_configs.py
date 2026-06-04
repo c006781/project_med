@@ -317,6 +317,14 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
             'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
         },
         'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
+
+        # 'sql_compute': {
+        #     'func': 'COUNT',
+        #     'relation': 'photos',
+        #     'result_type': 'int',
+        #     'extra_key': 'photo_count',  
+        #     'formatter': lambda count: f"{count} фото" if count > 0 else '❌'
+        # }
     },
 }
 

@@ -808,12 +808,13 @@ class TextPopupDelegate(QStyledItemDelegate):
             20, 20
         )
         btn.setGeometry(btn_rect)
-
+        
         # Переназначаем сигнал (отключаем старые, чтобы не было дублей)
         try:
             btn.clicked.disconnect()
         except TypeError:
             pass
+
         btn.clicked.connect(self._on_button_clicked)
 
         btn.show()

@@ -241,6 +241,7 @@ from app.utils.virtual_fields import enrich_dto_with_computed_fields
 
 # Сторонние библиотеки
 
+from sqlalchemy import func as sa_func, select
 from sqlalchemy import (
     func, or_, #inspect
 )
@@ -564,7 +565,6 @@ class BaseService(
             session=session
         )
 
-
     @AppLogger.get_instance(
         name='BaseService',
         enable_file_logging='system',
@@ -722,6 +722,89 @@ class BaseService(
         #     return e
 
         # return None
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_sql_compute_fields(self) -> Dict[str, Dict[str, Any]]:
+        """Возвращает поля, у которых в конфигурации есть ключ 'sql_compute'."""
+        return {
+            field_name: config['sql_compute']
+            for field_name, config in self._field_configs.items()
+            if 'sql_compute' in config
+        }
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _build_sql_compute_subquery(self, field_name: str, config: Dict[str, Any]):
+        """
+        Строит подзапрос для SQL-вычисления.
+
+        Параметры config:
+            - func (str): агрегатная функция ('COUNT', 'SUM', 'AVG', 'MAX', 'MIN')
+            - relation (str): имя отношения в модели (например, 'photos')
+            - column (str, optional): столбец для SUM/AVG (если не указан, для SUM/AVG ошибка)
+            - filter (dict, optional): дополнительные фильтры для дочерних записей
+            - result_type (str): 'int', 'float', 'str' (для приведения)
+            - formatter (callable, optional): функция форматирования результата
+
+        Returns:
+            SQLAlchemy scalar subquery или None при ошибке.
+        """
+        # from sqlalchemy import func as sa_func
+
+        relation_name = config.get('relation')
+        if not relation_name:
+            self.logger.warning(f"sql_compute для {field_name}: отсутствует 'relation'")
+            return None
+
+        relation_attr = getattr(self._model_class, relation_name, None)
+        if relation_attr is None:
+            self.logger.warning(f"sql_compute для {field_name}: отношение '{relation_name}' не найдено")
+            return None
+
+        try:
+            primaryjoin = relation_attr.property.primaryjoin
+        except Exception as e:
+            self.logger.warning(f"sql_compute для {field_name}: не удалось получить primaryjoin: {e}")
+            return None
+
+        child_model = relation_attr.property.mapper.class_
+        func_name = config.get('func', 'COUNT').upper()
+
+        if func_name == 'COUNT':
+            agg = sa_func.count()
+        elif func_name in ('SUM', 'AVG'):
+            column_name = config.get('column')
+            if not column_name:
+                self.logger.warning(f"sql_compute для {field_name}: для {func_name} требуется 'column'")
+                return None
+            col = getattr(child_model, column_name, None)
+            if col is None:
+                self.logger.warning(f"sql_compute для {field_name}: столбец '{column_name}' не найден")
+                return None
+            agg = sa_func.sum(col) if func_name == 'SUM' else sa_func.avg(col)
+        else:
+            agg = getattr(sa_func, func_name.lower(), None)
+            if agg is None:
+                self.logger.warning(f"sql_compute для {field_name}: неизвестная функция '{func_name}'")
+                return None
+
+        query = select(agg).select_from(child_model).where(primaryjoin)
+
+        extra_filter = config.get('filter')
+        if extra_filter:
+            for col_name, val in extra_filter.items():
+                col = getattr(child_model, col_name, None)
+                if col is not None:
+                    query = query.where(col == val)
+
+        return query.scalar_subquery()
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -932,8 +1015,33 @@ class BaseService(
             # Применяем жадную подгрузку
             loaded_query = self._apply_eager_loading(ordered_query, relations)
 
+            # Добавляем SQL-вычисления
+            compute_fields = self._get_sql_compute_fields()
+            extra_columns = []
+            for field_name, config in compute_fields.items():
+                subq = self._build_sql_compute_subquery(field_name, config)
+                if subq is not None:
+                    extra_columns.append(subq.label(f"__sql_compute_{field_name}"))
+            if extra_columns:
+                loaded_query = loaded_query.add_columns(*extra_columns)
+
             # Пагинация
-            items = loaded_query.offset(offset).limit(limit).all()
+            results = loaded_query.offset(offset).limit(limit).all()
+
+            # Извлекаем модели и сохраняем вычисленные значения как временные атрибуты
+            items = []
+            if extra_columns:
+                for row in results:
+                    if isinstance(row, tuple):
+                        obj = row[0]
+                        for idx, field_name in enumerate(compute_fields.keys()):
+                            value = row[idx + 1]
+                            setattr(obj, f"__sql_compute_{field_name}", value)
+                        items.append(obj)
+                    else:
+                        items.append(row)
+            else:
+                items = results
 
             # Пост-фильтры (например, нечёткий поиск) применяем уже к загруженным объектам
             if post_filters:
@@ -945,6 +1053,7 @@ class BaseService(
 
             # Преобразование в DTO
             dtos = self.get_dtos(items)
+
             return dtos, total
 
     @AppLogger.get_instance(
@@ -2136,15 +2245,39 @@ class BaseService(
     def _prepare_extra_data(self, obj: ModelType) -> Dict[str, Any]:
         """
         Подготавливает словарь extra_data для enrich_dto_with_computed_fields.
-        Собирает все временные атрибуты, созданные в _post_process_items.
+        Собирает все временные атрибуты, созданные в _post_process_items (counts),
+        а также значения из sql_compute (подзапросы).
         """
         extra = {}
+        # 1. Старые count-поля
         for mapping in self._get_count_mappings().values():
             attr_name = mapping['attr_name']
             extra_key = mapping['extra_key']
             if hasattr(obj, attr_name):
                 extra[extra_key] = getattr(obj, attr_name)
 
+        # 2. Новые sql_compute-поля
+        # Добавляем значения sql_compute
+        compute_fields = self._get_sql_compute_fields()
+        for field_name, config in compute_fields.items():
+            temp_attr = f"__sql_compute_{field_name}"
+            if hasattr(obj, temp_attr):
+                value = getattr(obj, temp_attr)
+
+                # Применяем форматтер, только если значение не None
+                formatter = config.get('formatter')
+                if formatter and callable(formatter):
+                    value = formatter(value)
+
+                # Кладём результат под именем поля (для виртуального поля)
+                extra[field_name] = value
+
+                # Если в конфигурации указан extra_key – дублируем значение под этим ключом
+                extra_key = config.get('extra_key')
+                if extra_key:
+                    
+                    # Для числовых значений можно оставить как есть, для строк – передаём как есть
+                    extra[extra_key] = value
         return extra
 
     @AppLogger.get_instance(

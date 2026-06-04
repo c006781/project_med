@@ -312,13 +312,15 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'order'         : 0,                # Делаем эту колонку самой левой (необязательно).
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
         'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
+
+        'width'         : 80,               # принудительный размер ширены
         # 'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
         #     'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
         #     'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
         # },
         # 'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
 
-        'sql_compute': {
+        'sql_compute': {                    # Вычисляем: количество через sql
             'func': 'COUNT',
             'relation': 'photos',
             'result_type': 'int',

@@ -6471,6 +6471,9 @@ class PaginatedListPage(
 
         # from interfaces.gui.gui_window.widgets.table_column import TableColumn
         self.columns = []
+        # Для полей без order будем использовать счётчик, чтобы сохранить порядок объявления
+        counter = 0
+        order_max =  len(self.field_configs) * 100
         for field_name, config in self.field_configs.items():
             if field_name in self.exclude_columns:
                 continue
@@ -6481,6 +6484,12 @@ class PaginatedListPage(
             # Получаем делегат для этого поля
             delegate_class, delegate_args = self._get_delegate_for_field(field_name, config)
 
+            order = config.get('order')
+            if order is None:
+                # Поля без явного order отправляем в конец, сохраняя относительный порядок
+                order = order_max + counter
+                counter += 1
+
             col = TableColumn(
                 system_name=field_name,
                 title=config.get('title', field_name.replace('_', ' ').title()),
@@ -6489,12 +6498,15 @@ class PaginatedListPage(
                     self.dto_class.model_fields[field_name].annotation
                 ),
                 editable=config.get('editable', False),
-                order=config.get('order', 0),
+                # order=config.get('order', 0),
+                order=order,
                 choices=config.get('choices'),
                 autocomplete=config.get('autocomplete', False),
                 input_mask=config.get('input_mask'),
                 delegate_class=delegate_class,
                 delegate_args=delegate_args,
+                width=config.get('width'),   #  поддержка ширины из конфига
+        
             )
             self.columns.append(col)
         self.columns.sort(key=lambda c: c.order)

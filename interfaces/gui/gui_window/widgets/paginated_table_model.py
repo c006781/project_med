@@ -1254,7 +1254,62 @@ class PaginatedTableModel(BaseTableModel):
             # Поэтому возвращаем исходный row – он всё равно будет неактуален, но это не критично.
 
         return row
+    
+    def insert_row_at(self, row: int, dto: Any) -> None:
+        """
+        Вставляет новую строку в указанную позицию модели.
 
+        **Назначение:**
+            Позволяет вставить DTO в произвольное место (не только в конец), сдвигая
+            все последующие строки вниз. Корректно обновляет состояния чекбоксов.
+
+        **Алгоритм:**
+            1. Проверяет допустимость индекса `row`. Если `row` выходит за границы
+            [0, rowCount], вставляет в конец.
+            2. Вызывает `beginInsertRows` с позицией `row`.
+            3. Вставляет DTO во внутренний список `_data`.
+            4. Сдвигает состояния чекбоксов для всех строк, начиная с `row`, на +1.
+            5. Вызывает `endInsertRows`.
+
+        **Важно:**
+            - Метод НЕ испускает сигнал `row_modified`, так как новая строка ещё
+            не имеет черновиков (изменения будут помечены отдельно через реестр).
+            - После вставки необходимо вручную зарегистрировать строку в реестре
+            черновиков и вызвать `mark_own_change` (это делает вызывающий код).
+
+        **Параметры:**
+            row (int): Индекс, по которому вставляется строка (0‑based).
+                    Допустимые значения от 0 до `rowCount()` включительно.
+            dto (Any): DTO новой записи (обычно с временным отрицательным ID).
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> model.insert_row_at(0, new_dto)  # вставить в начало
+            >>> model.insert_row_at(model.rowCount(), new_dto)  # вставить в конец
+        """
+        # Проверка границ
+        if row < 0 or row > len(self._data):
+            row = len(self._data)
+
+        self.beginInsertRows(QModelIndex(), row, row)
+
+        self._data.insert(row, dto)
+
+        # вертикальный Сдвигаем чекбоксы
+        new_states = {}
+        for r, state in self._checkbox_states.items(): 
+            if r >= row:
+                new_states[r + 1] = state
+            else:
+                new_states[r] = state
+                    
+        self._checkbox_states = new_states
+
+        self.endInsertRows()
+        # Сигнал row_modified для новой строки не испускаем, она будет помечена через реестр
+    
     @AppLogger.get_instance(
         name='PaginatedTableModel',
         # share_file_with = 'system',

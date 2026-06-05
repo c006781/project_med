@@ -1841,13 +1841,28 @@ class PaginatedListPage(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _finalize_new_row(self, dto: Any, temp_id: int, row: int) -> None:
         """
-        Выполняет завершающие шаги после создания DTO новой строки:
-        - сохраняет черновик в реестр,
-        - добавляет строку в модель (если row не был передан, но в наших вызовах он уже передан),
-        - помечает как изменённую,
-        - уведомляет родителя,
-        - обновляет цвет строки с учётом возможной сортировки,
-        - обновляет состояние кнопки сохранения.
+        Завершает создание новой строки: регистрирует в реестре, помечает изменения,
+        уведомляет родителя.
+
+        **Действия:**
+            1. Сохраняет DTO в реестре по ключу `__new__:{entity_type}:{temp_id}`.
+            2. Вызывает `mark_own_change(temp_id)`, что устанавливает статус 'own'
+            и перекрашивает строку.
+            3. Уведомляет родителя о появлении нового потомка через
+            `_register_new_row_parent_balance`.
+
+        **Параметры:**
+            dto (Any): Созданный DTO (с временным ID).
+            temp_id (int): Временный ID (отрицательный).
+            row (int): Индекс строки (используется только для логирования).
+
+        **Возвращает:**
+            None
+
+        **Примечание:**
+            - Цвет строки обновляется через сигнал `entity_status_changed`,
+            испускаемый внутри `mark_own_change`.
+            - Родительская балансировка счётчиков описана в `_register_new_row_parent_balance`.
         """
 
         # Сохраняем в реестр как новую строку
@@ -7278,45 +7293,153 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _add_inline_row(self):
+    def _get_insertion_pos(self) -> int:
         """
-        Добавляет новую пустую строку в конец таблицы (режим редактирования).
+        Определяет позицию для вставки новой строки в исходной модели (source_model).
 
-        **Алгоритм:**
-            1. Создаёт пустой DTO, заполняя поля значениями по умолчанию:
-                - строковые поля → пустая строка
-                - целочисленные поля → 0
-                - дата → сегодняшняя дата
-                - остальные → None
-            
-            2. Если есть контекстные параметры (`self._context_params`), перезаписывает
-                соответствующие поля (например, `patient_id` для дочерних сущностей).
-            3. Генерирует временный отрицательный ID (self._next_temp_id).
-            4. Сохраняет DTO в реестре черновиков по ключу `__new__:{entity_type}:{temp_id}`.
-            5. Добавляет строку в модель таблицы (self.source_model.add_row).
-            6. Помечает сущность как имеющую собственные изменения (mark_own_change(temp_id)).
-            7. Уведомляет родителя (если есть) о появлении нового потомка:
-                - вызывает `_register_new_row_parent_balance(dto, temp_id)`
-                - этот метод увеличивает счётчик родителя (через `_update_parent_counter(parent_id, +1)`)
-                - если родитель существующий и не удалён, создаёт служебный ключ `__parent_counter_inc__:{temp_id}`
-            8. Обновляет цвет строки (зелёный) и состояние кнопки «Сохранить».
-
-        **Балансировка счётчиков:**
-            - При добавлении новой строки **с существующим родителем** счётчик родителя увеличивается,
-            и создаётся служебный ключ, который будет использован при сохранении для уменьшения счётчика.
-            - Для новых родителей (временный ID) счётчик не увеличивается и служебный ключ не создаётся.
+        **Правила позиционирования:**
+            1. Если таблица пуста → возвращает 0 (единственная строка).
+            2. Если есть выделенная строка (обычное выделение) →
+            возвращает индекс строки, следующей за выделенной (`row + 1`).
+            3. Если выделенной строки нет, но таблица имеет видимые строки →
+            возвращает индекс **первой видимой строки** (вставка перед ней).
+            4. Иначе (выделения нет и видимых строк нет) → возвращает 0.
 
         **Примечания:**
-            - Временный ID генерируется отрицательным и уникальным для текущей сессии редактирования.
-            - Метод не вызывает `save_to_registry` – все данные сохраняются напрямую в реестр.
-            - Родитель определяется через переопределяемый метод `_get_parent_id_for_new_row(dto)`.
-            - Если родитель помечен на удаление, счётчик не увеличивается (и ключ не создаётся).
-            - Контекстные параметры из `_context_params` имеют приоритет
-                над значениями по умолчанию и позволяют создавать дочерние строки
-                (например, новый приём для уже выбранного пациента).
+            - Метод использует `get_current_selected_dto()` (из `SelectionMixin`),
+            который возвращает DTO текущей выделенной строки.
+            - Для определения видимых строк используется `get_visible_row_range()`
+            из `gui_helpers.py`, которая возвращает индексы строк в исходной модели.
+            - Если выделенная строка имеет временный ID (отрицательный) – она
+            считается существующей в модели, и вставка происходит после неё.
+
+        **Возвращает:**
+            int: Индекс в исходной модели (source_model), куда должна быть вставлена новая строка.
         """
 
-        # Подготавливаем значения по умолчанию для DATA-столбцов
+        # Если таблица пуста – вставляем в конец (0, т.к. rowCount=0)
+        if self.source_model.rowCount() == 0:
+            return 0
+
+        # Если есть выделенная строка (обычное выделение)
+        selected_dto = self.get_current_selected_dto()
+        if selected_dto is not None and selected_dto.id is not None:
+            row = self._find_row_by_id(selected_dto.id)
+            if row >= 0:
+                # Вставляем после неё
+                return row + 1
+            
+        # Приоритет 2: первая видимая строка
+        first_visible, _ = get_visible_row_range(self.table_view)
+        if first_visible >= 0:
+            return first_visible
+
+        # Иначе вставляем в начало
+        return 0
+
+    def  _map_to_source_index_mapFromSource(self, proxy_index):
+        # Если есть прокси-модель (у нас её нет в новой реализации), преобразуем
+        source_index = proxy_index
+
+        if (
+            hasattr(self, 'proxy_model')
+        # ) and (
+        #     hasattr(self, 'proxy_model')
+        ) and (
+            self.proxy_model
+        ):
+            source_index = self.proxy_model.mapFromSource(proxy_index)
+
+        return source_index
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _select_row_by_id(self, entity_id: int) -> bool:
+        """
+        Выделяет строку в таблице по ID сущности и прокручивает к ней.
+
+        **Алгоритм:**
+            1. Ищет строку в исходной модели (`source_model`) через `_find_row_by_id`.
+            2. Если строка найдена, получает прокси-индекс через `mapFromSource`.
+            3. Устанавливает текущий индекс таблицы (`setCurrentIndex`).
+            4. Прокручивает таблицу так, чтобы строка стала видимой (`scrollTo`).
+
+        **Параметры:**
+            entity_id (int): ID сущности (может быть временным отрицательным).
+
+        **Возвращает:**
+            bool: True, если строка найдена и выделена, иначе False.
+
+        **Примечания:**
+            - Метод не снимает предыдущее выделение – таблица поддерживает множественное
+            выделение только в режиме редактирования, но при вызове этого метода
+            обычно нужно сбросить предыдущее выделение (это делает вызывающий код,
+            например, `_add_inline_row` очищает выделение перед вставкой).
+            - Используется для автоматического позиционирования после вставки новой строки.
+        """
+        row = self._find_row_by_id(entity_id)
+        if row < 0:
+            return False
+
+        source_index = self.source_model.index(row, 0)
+        if not source_index.isValid():
+            return False
+
+        proxy_index = self._map_to_source_index_mapFromSource(source_index)
+        if not proxy_index.isValid():
+            return False
+
+        self.table_view.setCurrentIndex(proxy_index)
+        self.table_view.scrollTo(proxy_index)
+        return True
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _add_inline_row(self):
+        """
+        Добавляет новую пустую строку в таблицу (режим редактирования).
+
+        **Поведение вставки:**
+            - Если таблица пуста → новая строка становится единственной.
+            - Если есть выделенная строка → новая строка вставляется **сразу под ней**.
+            - Если выделенной строки нет → новая строка вставляется **в начало таблицы**.
+
+        **Действия:**
+            1. Создаёт DTO с заполненными значениями по умолчанию (строки → "", числа → 0,
+            дата → сегодня, остальные → None) и контекстными параметрами (`_context_params`).
+            2. Генерирует временный отрицательный ID.
+            3. Определяет позицию вставки через `_get_insertion_pos()`.
+            4. Вставляет DTO в модель через `source_model.insert_row_at()`.
+            5. Регистрирует новую строку в реестре черновиков (ключ `__new__`).
+            6. Помечает строку как имеющую собственные изменения (`mark_own_change`).
+            7. Уведомляет родителя (через `_register_new_row_parent_balance`).
+            8. Выделяет новую строку (`_select_row_by_id`) и прокручивает к ней.
+            9. Обновляет состояние кнопки «Сохранить».
+
+        **Важно:**
+            - После вставки цвет строки обновляется автоматически через сигнал
+            `entity_status_changed` (вызывается из `mark_own_change`).
+            - Если родительская сущность существует и не помечена на удаление,
+            создаётся служебный ключ `__parent_counter_inc__` для балансировки счётчика.
+            - Новая строка не вызывает `row_modified` сигнал модели, так как она не
+            является результатом редактирования существующей строки.
+
+        **Возвращает:**
+            None
+        """
+        # Подготовка значений по умолчанию для DATA-столбцов
         overrides = {}
         for col in self.columns:
             if col.column_type != ColumnType.DATA:
@@ -7327,22 +7450,94 @@ class PaginatedListPage(
                 overrides[col.field_name] = 0
             elif col.data_type == datetime.date:
                 overrides[col.field_name] = datetime.date.today()
-            # иначе не добавляем – останутся None, будут взяты из _context_params
+            # остальные поля остаются None – будут взяты из _context_params
 
         dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
         if dto is None:
             return
 
         temp_id = dto.id
+        pos = self._get_insertion_pos()
 
-        # Добавляем в модель
-        row = self.source_model.add_row(dto)
+        # Снимаем выделение перед вставкой
+        self.table_view.clearSelection()
 
-        self._finalize_new_row(dto, temp_id, row)
+        # Вставка в модель
+        self.source_model.insert_row_at(pos, dto)
 
+        # Регистрация в реестре и пометка изменений
+        self._finalize_new_row(dto, temp_id, pos)
 
-        # self._select_new_row(temp_id) 
+        # Выделение новой строки
+        self._select_row_by_id(temp_id)
+
         self._update_save_button_state()
+
+    # def _add_inline_row(self):
+    #     """
+    #     Добавляет новую пустую строку в конец таблицы (режим редактирования).
+
+    #     **Алгоритм:**
+    #         1. Создаёт пустой DTO, заполняя поля значениями по умолчанию:
+    #             - строковые поля → пустая строка
+    #             - целочисленные поля → 0
+    #             - дата → сегодняшняя дата
+    #             - остальные → None
+            
+    #         2. Если есть контекстные параметры (`self._context_params`), перезаписывает
+    #             соответствующие поля (например, `patient_id` для дочерних сущностей).
+    #         3. Генерирует временный отрицательный ID (self._next_temp_id).
+    #         4. Сохраняет DTO в реестре черновиков по ключу `__new__:{entity_type}:{temp_id}`.
+    #         5. Добавляет строку в модель таблицы (self.source_model.add_row).
+    #         6. Помечает сущность как имеющую собственные изменения (mark_own_change(temp_id)).
+    #         7. Уведомляет родителя (если есть) о появлении нового потомка:
+    #             - вызывает `_register_new_row_parent_balance(dto, temp_id)`
+    #             - этот метод увеличивает счётчик родителя (через `_update_parent_counter(parent_id, +1)`)
+    #             - если родитель существующий и не удалён, создаёт служебный ключ `__parent_counter_inc__:{temp_id}`
+    #         8. Обновляет цвет строки (зелёный) и состояние кнопки «Сохранить».
+
+    #     **Балансировка счётчиков:**
+    #         - При добавлении новой строки **с существующим родителем** счётчик родителя увеличивается,
+    #         и создаётся служебный ключ, который будет использован при сохранении для уменьшения счётчика.
+    #         - Для новых родителей (временный ID) счётчик не увеличивается и служебный ключ не создаётся.
+
+    #     **Примечания:**
+    #         - Временный ID генерируется отрицательным и уникальным для текущей сессии редактирования.
+    #         - Метод не вызывает `save_to_registry` – все данные сохраняются напрямую в реестр.
+    #         - Родитель определяется через переопределяемый метод `_get_parent_id_for_new_row(dto)`.
+    #         - Если родитель помечен на удаление, счётчик не увеличивается (и ключ не создаётся).
+    #         - Контекстные параметры из `_context_params` имеют приоритет
+    #             над значениями по умолчанию и позволяют создавать дочерние строки
+    #             (например, новый приём для уже выбранного пациента).
+    #     """
+
+    #     # Подготавливаем значения по умолчанию для DATA-столбцов
+    #     overrides = {}
+    #     for col in self.columns:
+    #         if col.column_type != ColumnType.DATA:
+    #             continue
+    #         if col.data_type == str:
+    #             overrides[col.field_name] = ""
+    #         elif col.data_type == int:
+    #             overrides[col.field_name] = 0
+    #         elif col.data_type == datetime.date:
+    #             overrides[col.field_name] = datetime.date.today()
+    #         # иначе не добавляем – останутся None, будут взяты из _context_params
+
+    #     dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
+    #     if dto is None:
+    #         return
+
+    #     temp_id = dto.id
+
+    #     # Добавляем в модель
+    #     row = self.source_model.add_row(dto)
+
+    #     self._finalize_new_row(dto, temp_id, row)
+
+
+    #     # self._select_new_row(temp_id) 
+    #     self._update_save_button_state()
 
         # # Сохраняем в реестр как новую строку
         # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})

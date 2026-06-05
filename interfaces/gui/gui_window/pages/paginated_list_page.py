@@ -6789,7 +6789,10 @@ class PaginatedListPage(
         
         if col.width != new_size:
             col.width = new_size
-            self.logger.debug(f"Ширина столбца '{col.system_name}' изменена с {old_size} на {new_size}")
+            self.logger.debug(
+                f"Ширина столбца '{col.system_name}' "
+                f"изменена с {old_size} на {new_size}"
+            )
 
     @AppLogger.get_instance(
         name = 'PaginatedListPage',

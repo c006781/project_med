@@ -52,10 +52,19 @@ class PaginatedAppointmentListPage(PaginatedListPage):
                 'search'
             ]
 
-        # if exclude_columns is None:
-        #     exclude_columns = []
+        if exclude_columns is None:
+            exclude_columns = []
 
-        # exclude_columns = exclude_columns + ['appointment_id']
+        # Добавляем поля, которые не должны отображаться в таблице
+        exclude_columns = list(
+            set(
+                exclude_columns + [
+                    'appointment_id', 
+                    'patient_id', 
+                    'photos'
+                ]
+            )
+        )
 
         super().__init__(
             service=get_appointment_service(),

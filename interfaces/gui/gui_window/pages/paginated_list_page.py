@@ -894,6 +894,7 @@ class PaginatedListPage(
 
         old_count = self.source_model.rowCount()
         page = self._apply_drafts_to_page(page)
+
         if not append:
             # Получаем все новые DTO из реестра
             new_dtos = self._draft_registry.get_new_dtos(self._entity_type, self.dto_class)
@@ -901,12 +902,16 @@ class PaginatedListPage(
             if new_dtos and self._current_filters:
                 filtered_new = self._filter_new_dtos_by_filters(new_dtos, self._current_filters)
                 page = page + filtered_new
+
             else:
                 page = page + new_dtos
+
             # Для совместимости со старым вызовом merge_new_dtos (если он ещё где-то используется) – оставляем без изменений,
             # но в текущей логике страницы он больше не нужен.
             # self._draft_registry.merge_new_dtos(...) – убираем.
+
         super()._on_page_loaded(page, total, append)
+        
         new_count = self.source_model.rowCount()
         self._refresh_all_row_colors(
             new_count = new_count,
@@ -5386,9 +5391,9 @@ class PaginatedListPage(
         **Назначение:**
             Данный метод инкапсулирует две операции, которые должны выполняться вместе:
                 1. Обновление DTO в `self.source_model` (основной модели таблицы) через
-                вызов `self.source_model.update_row(row, updated)`.
+                    вызов `self.source_model.update_row(row, updated)`.
                 2. Обновление словаря `self.original_data[row]` (копии данных до редактирования)
-                на тот же DTO `updated`.
+                    на тот же DTO `updated`.
 
             Это гарантирует, что после сохранения изменений (например, после вызова
             `service.update`) исходная копия данных для строки будет соответствовать
@@ -5418,6 +5423,10 @@ class PaginatedListPage(
 
         Returns:
             None
+        
+        Note:
+            Этот метод должен использоваться везде, где модель обновляется после
+            сохранения изменений, чтобы `original_data` оставалась синхронизированной.
 
         Example:
             >>> dto = self.service.update(dto, session=session)
@@ -5428,6 +5437,10 @@ class PaginatedListPage(
         self.source_model.update_row(row, updated)
 
         self.original_data[row] = updated
+
+        # Обновляем строку (пересчёт высоты + перерисовка)
+        if hasattr(self.table_view, 'refreshRow'):
+            self.table_view.refreshRow(row)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -7166,7 +7179,10 @@ class PaginatedListPage(
     def refresh_row_by_id(self, entity_id: int, entity_type: Optional[str] = None) -> bool:
         """
         Перезагружает одну строку по ID из БД и обновляет модель таблицы.
-        Используется для точечного обновления строки родителя после изменений в дочерних сущностях.
+
+        **Назначение:**
+            Используется для точечного обновления строки родителя после изменений
+            в дочерних сущностях (например, после добавления/удаления фото).
 
         Args:
             entity_id: ID сущности (должен существовать в БД).
@@ -7174,6 +7190,10 @@ class PaginatedListPage(
 
         Returns:
             True, если строка найдена и обновлена, иначе False.
+
+        Note:
+            После обновления DTO в модели вызывает `refreshRow` у таблицы,
+            чтобы пересчитать высоту строки (важно для фото-столбцов). 
 
         Примечание:
             Если передан `entity_type`, не совпадающий с `self._entity_type`, метод ничего не делает

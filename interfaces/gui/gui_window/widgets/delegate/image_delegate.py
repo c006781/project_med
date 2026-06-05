@@ -273,7 +273,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         super().__init__(parent)
         
         self.storage_path = storage_path
-        self.target_size = target_size
+        
+        self.target_size = target_size 
 
         self._allowed_extensions = allowed_extensions or ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
         self._description_field = description_field
@@ -661,25 +662,40 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
 
         if not parent.isVisible():
             return
-
-        model = parent.model()
-        if model is None:
-            return
         
-        top_left = model.index(row, 0)
-        bottom_right = model.index(row, model.columnCount() - 1)
-        if top_left.isValid():
-            # parent.update(top_left, bottom_right)
-            # parent.viewport().update()
 
-            # Используем invokeMethod для гарантии выполнения в главном потоке
+        # Асинхронно обновляем строку (пересчёт высоты + перерисовка)
+        if hasattr(parent, 'refreshRow'):
             QMetaObject.invokeMethod(
                 parent,
-                "update",
+                "refreshRow",
                 Qt.QueuedConnection,
-                Q_ARG(QModelIndex, top_left),
-                Q_ARG(QModelIndex, bottom_right)
+                Q_ARG(int, row)
             )
+        else:
+            # Fallback для старых версий (без refreshRow)
+            parent.resizeRowToContents(row)
+            QMetaObject.invokeMethod(parent, "update", Qt.QueuedConnection)
+
+        # model = parent.model()
+        # if model is None:
+        #     return
+        
+        # top_left = model.index(row, 0)
+        # bottom_right = model.index(row, model.columnCount() - 1)
+        # if top_left.isValid():
+        #     # parent.update(top_left, bottom_right)
+        #     # parent.viewport().update()
+        #     parent.viewport().update()
+            
+        #         # # Используем invokeMethod для гарантии выполнения в главном потоке
+        #     QMetaObject.invokeMethod(
+        #         parent,
+        #         "update",
+        #         Qt.QueuedConnection,
+        #         Q_ARG(QModelIndex, top_left),
+        #         Q_ARG(QModelIndex, bottom_right)
+        #     )
 
 
 

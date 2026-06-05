@@ -1924,6 +1924,11 @@ class MainWindow(
         # self.dump_sizes_btn.clicked.connect(self._dump_layout_sizes)
         # self.header_layout.addWidget(self.dump_sizes_btn)
 
+        # #  кнопка для дампа ячеек таблицы фото
+        # self.dump_photo_cells_btn = QPushButton("Dump photo cells")
+        # self.dump_photo_cells_btn.clicked.connect(self._dump_photo_cell_sizes)
+        # self.header_layout.addWidget(self.dump_photo_cells_btn)
+
     @AppLogger.get_instance(
         name='MainWindow',
         # share_file_with = 'system',
@@ -2029,6 +2034,8 @@ class MainWindow(
             result.append(child)
         return result
 
+
+# ----------- методы для отладки расположения виджетов
     def _dump_layout_sizes(self):
         """Выводит в консоль дерево размеров всех виджетов окна."""
         print("\n=== DUMP LAYOUT SIZES ===")
@@ -2053,3 +2060,78 @@ class MainWindow(
             # Проверяем, что родитель именно этот виджет, а не вложенный глубже
             if child.parent() == widget:
                 self._dump_widget_info(child, indent + 1)
+
+    def _dump_photo_cell_sizes(self):
+        """Выводит в консоль размеры ячеек таблицы фото (для отладки)."""
+        current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        if not current_page:
+            print("Текущая страница не найдена")
+            return
+
+        # Проверяем, является ли текущая страница AppointmentPhotoFrame
+        if hasattr(current_page, 'photo_page') and hasattr(current_page.photo_page, 'table_view'):
+            table = current_page.photo_page.table_view
+            model = table.model()
+            if not model:
+                print("Нет модели у таблицы фото")
+                return
+
+            # Находим индекс столбца с фото (первый DATA-столбец с ImageThumbnailDelegate)
+            photo_col = -1
+            for col in range(model.columnCount()):
+                delegate = table.itemDelegateForColumn(col)
+                if delegate and delegate.__class__.__name__ == 'ImageThumbnailDelegate':
+                    photo_col = col
+                    break
+
+            if photo_col == -1:
+                print("Столбец с фото не найден")
+                return
+
+            source_model = current_page.photo_page.source_model
+            if source_model is None:
+                print("Нет source_model")
+                return
+
+            # Импортируем ImageThumbnailDelegate для доступа к кэшу (локальный импорт)
+            from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
+
+            print("\n=== DUMP PHOTO CELL SIZES ===")
+            for row in range(source_model.rowCount()):
+                # Получаем DTO и ID сущности
+                dto = source_model.get_item_at_row(row)
+                entity_id = getattr(dto, 'id', None) if dto else None
+
+                # Получаем индекс в таблице (через прокси-модель, если есть)
+                proxy_model = table.model()
+                if proxy_model and hasattr(proxy_model, 'mapFromSource'):
+                    source_idx = source_model.index(row, photo_col)
+                    proxy_idx = proxy_model.mapFromSource(source_idx)
+                else:
+                    proxy_idx = source_model.index(row, photo_col)
+
+                if not proxy_idx.isValid():
+                    continue
+
+                rect = table.visualRect(proxy_idx)
+                row_height = table.rowHeight(proxy_idx.row())  # используем индекс после прокси
+
+                # Путь к файлу (из source_model через UserRole)
+                file_path = source_model.data(source_model.index(row, photo_col), Qt.UserRole)
+                full_path = file_path
+                if file_path and not os.path.isabs(file_path):
+                    storage_path = current_page.photo_page._get_photo_storage_path()
+                    full_path = os.path.join(storage_path, file_path)
+
+                # Размер миниатюры из кэша (глобальный кэш делегата)
+                cache_info = ""
+                if full_path in ImageThumbnailDelegate._cache:
+                    pixmap = ImageThumbnailDelegate._cache[full_path]
+                    cache_info = f", cached_size={pixmap.width()}x{pixmap.height()}"
+
+                print(f"Row {row} (id={entity_id}): rect={rect.width()}x{rect.height()} at ({rect.x()},{rect.y()}), "
+                    f"rowHeight={row_height}{cache_info}, path={file_path}")
+
+            print("=== END DUMP ===\n")
+        else:
+            print("Текущая страница не содержит таблицу фото или не является AppointmentPhotoFrame")

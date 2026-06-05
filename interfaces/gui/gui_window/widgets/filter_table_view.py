@@ -66,13 +66,18 @@ from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.filter_column import FilterColumnDialog
 
 from PySide6.QtWidgets import (
-    QComboBox, QTableView, QHeaderView, QMenu, 
+    QComboBox, QTableView, 
+    QHeaderView, QMenu, 
     QDialog, QListWidget, 
-    QVBoxLayout, QHBoxLayout, QPushButton,
+    QVBoxLayout, QHBoxLayout, 
+    QPushButton,
     # QInputDialog, QListWidgetItem,
 )
 
-from PySide6.QtCore import Qt, Signal #, Slot
+from PySide6.QtCore import (
+    QModelIndex, Qt, 
+    Signal, Slot
+) 
 from PySide6.QtGui import QAction
 
 
@@ -749,3 +754,108 @@ class FilterTableView(QTableView):
                 return parent.has_active_fuzzy_filter()
             parent = parent.parent()
         return False
+
+    # ------------------------------------------------------------------
+    # Новые методы для точечного обновления (вызываются из делегатов)
+    # ------------------------------------------------------------------
+
+    @Slot(QModelIndex, QModelIndex)
+    def update_range(self, top_left: QModelIndex, bottom_right: QModelIndex) -> None:
+        """
+        Обновляет прямоугольную область ячеек от top_left до bottom_right.
+
+        **Назначение:**
+            Позволяет перерисовать только необходимые ячейки после асинхронной загрузки,
+            не затрагивая всю таблицу. Эффективно при обновлении миниатюр в фото-столбце.
+
+        **Параметры:**
+            top_left (QModelIndex): Индекс верхней левой ячейки диапазона.
+            bottom_right (QModelIndex): Индекс нижней правой ячейки диапазона.
+
+        **Возвращает:**
+            None
+
+        **Примечание:**
+            Если индексы невалидны, метод ничего не делает.
+            Вычисляет объединённый прямоугольник видимых ячеек и обновляет viewport.
+        """
+        if not top_left.isValid() or not bottom_right.isValid():
+            return
+
+        # Получаем прямоугольники обеих ячеек в координатах viewport
+        rect_top = self.visualRect(top_left)
+        rect_bottom = self.visualRect(bottom_right)
+
+        # Объединяем в один прямоугольник, покрывающий весь диапазон
+        update_rect = rect_top.united(rect_bottom)
+
+        # Обновляем только эту область
+        self.viewport().update(update_rect)
+
+    @Slot(int)
+    def update_row(self, row: int) -> None:
+        """
+        Обновляет всю строку таблицы по её индексу.
+
+        **Назначение:**
+            Удобная обёртка над `update_range` для обновления целой строки.
+            Используется в `ImageThumbnailDelegate` после загрузки миниатюры,
+            чтобы перерисовать строку с новым размером и изображением.
+
+        **Параметры:**
+            row (int): Индекс строки (в прокси-модели, если используется, либо в исходной модели,
+                       но метод работает с тем `model()`, который установлен в таблице).
+
+        **Возвращает:**
+            None
+
+        **Примечание:**
+            Если строка с таким индексом отсутствует, метод ничего не делает.
+        """
+        model = self.model()
+        if model is None:
+            return
+
+        # Проверяем, что строка существует
+        if row < 0 or row >= model.rowCount():
+            return
+
+        top_left = model.index(row, 0)
+        bottom_right = model.index(row, model.columnCount() - 1)
+        self.update_range(top_left, bottom_right)
+
+    @Slot(int)
+    def refreshRow(self, row: int) -> None:
+        """
+        Пересчитывает высоту указанной строки и перерисовывает её.
+
+        **Назначение:**
+            Удобный метод для вызова из делегатов после асинхронной загрузки
+            миниатюр. Объединяет resizeRowToContents и update_row.
+
+        **Параметры:**
+            row (int): Индекс строки.
+
+        **Возвращает:**
+            None
+        """
+        self.resizeRowToContents(row)
+        self.update_row(row)
+        
+    @Slot(int)
+    def refreshRow(self, row: int) -> None:
+        """
+        Пересчитывает высоту указанной строки и перерисовывает её.
+
+        **Назначение:**
+            Удобный метод для вызова из делегатов после асинхронной загрузки
+            миниатюр. Объединяет resizeRowToContents и update_row.
+
+        **Параметры:**
+            row (int): Индекс строки.
+
+        **Возвращает:**
+            None
+        """
+        self.resizeRowToContents(row)
+        self.update_row(row)

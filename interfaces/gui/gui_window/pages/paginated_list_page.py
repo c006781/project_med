@@ -688,10 +688,8 @@ class PaginatedListPage(
         self.exclude_columns = exclude_columns or []
 
         self._show_controls = show_controls or []  # Список дополнительных элементов управления
-        
 
         self._entity_type = entity_type
-
 
         self._saved_state = {
             'filters': None,
@@ -723,6 +721,9 @@ class PaginatedListPage(
         # 2. Теперь вызываем setup_ui, который создаст таблицу и настроит её
         self.setup_ui()
 
+        # Подключаем сохранение ширины столбцов при изменении пользователем
+        header = self.table_view.horizontalHeader()
+        header.sectionResized.connect(self._on_section_resized)
 
         # Настройка высоты строк для корректного отображения миниатюр
         # from PySide6.QtWidgets import QHeaderView
@@ -2540,8 +2541,16 @@ class PaginatedListPage(
         super()._update_ui_for_edit_mode(edit_mode)
         
         # --- Работа с чекбокс-столбцом ---
-        if hasattr(self, 'source_model'):
-            self.source_model.set_checkbox_column_visible(edit_mode)
+        # if hasattr(self, 'source_model'):
+            # self.source_model.set_checkbox_column_visible(edit_mode)
+
+        if hasattr(self, 'source_model') and self.source_model is not None:
+            for visible_idx in range(self.source_model.columnCount()):
+                col = self.source_model.get_column_at_visible_index(visible_idx)
+                if col is not None:
+                    # Обновляем сохранённую ширину актуальным значением из таблицы
+                    col.width = self.table_view.columnWidth(visible_idx)
+
 
         # Вместо полного пересоздания делегатов обновляем их read-only
         self._update_delegates_readonly()
@@ -6471,9 +6480,25 @@ class PaginatedListPage(
 
         # from interfaces.gui.gui_window.widgets.table_column import TableColumn
         self.columns = []
+
         # Для полей без order будем использовать счётчик, чтобы сохранить порядок объявления
+        # Находим максимальный явный order
+        order_max = 0
+        for config in self.field_configs.values():
+            order = config.get('order')
+            if (
+                order is not None
+            ) and (
+                order >= 0
+            ) and (
+                order  > order_max
+            ):
+                order_max = order
+
+        order_max = order_max + 1
+
         counter = 0
-        order_max =  len(self.field_configs) * 100
+
         for field_name, config in self.field_configs.items():
             if field_name in self.exclude_columns:
                 continue
@@ -6492,7 +6517,9 @@ class PaginatedListPage(
 
             col = TableColumn(
                 system_name=field_name,
-                title=config.get('title', field_name.replace('_', ' ').title()),
+                title=config.get(
+                    'title', field_name.replace('_', ' ').title()
+                ),
                 field_name=field_name,
                 data_type=self._get_real_type(
                     self.dto_class.model_fields[field_name].annotation
@@ -6506,9 +6533,9 @@ class PaginatedListPage(
                 delegate_class=delegate_class,
                 delegate_args=delegate_args,
                 width=config.get('width'),   #  поддержка ширины из конфига
-        
             )
             self.columns.append(col)
+
         self.columns.sort(key=lambda c: c.order)
 
     @AppLogger.get_instance(
@@ -6713,6 +6740,58 @@ class PaginatedListPage(
         return config.get('PHOTOS_STORAGE_PATH', os.path.join('.', 'photos'))
 
     @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_column_widths(self) -> None:
+        """Устанавливает ширину столбцов таблицы из конфигурации (TableColumn.width)."""
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+        
+        for visible_idx in range(self.source_model.columnCount()):
+            col = self.source_model.get_column_at_visible_index(visible_idx)
+            if (
+                col is not None
+            ) and (
+                col.width is not None
+            # ) and (
+            #     col.width > 0  # Проверка col.width > 0 предотвращает установку нулевой ширины
+            ):
+                self.table_view.setColumnWidth(visible_idx, col.width)
+
+    @AppLogger.get_instance(
+        name = 'PaginatedListPage',
+        enable_file_logging = 'system',
+        use_name_in_filename = False,
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _on_section_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
+        """
+        Сохраняет ширину столбца при изменении пользователем.
+        Использует системное имя столбца (system_name) для надёжности.
+        
+        Args:
+            logical_index: Видимый индекс столбца (0‑based).
+            old_size: Предыдущая ширина (не используется).
+            new_size: Новая ширина, установленная пользователем.
+        """
+        
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+        
+        col = self.source_model.get_column_at_visible_index(logical_index)
+        if col is None:
+            return
+        
+        if col.width != new_size:
+            col.width = new_size
+            self.logger.debug(f"Ширина столбца '{col.system_name}' изменена с {old_size} на {new_size}")
+
+    @AppLogger.get_instance(
         name = 'PaginatedListPage',
         enable_file_logging = 'system',
         use_name_in_filename = False,
@@ -6876,6 +6955,8 @@ class PaginatedListPage(
                 f"  -> {col.delegate_class.__name__} для {col.field_name} "
                 f"(видимый индекс {visible_idx})"
             )
+
+        self._apply_column_widths()   # Устанавливаем ширину столбцов
 
         # self.logger.debug("=== _setup_delegates END ===")
 

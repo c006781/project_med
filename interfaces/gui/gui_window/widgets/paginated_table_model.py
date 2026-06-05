@@ -350,6 +350,123 @@ class PaginatedTableModel(BaseTableModel):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _reorder_columns_by_index(self) -> None:
+        """Обновляет атрибут order у всех столбцов в соответствии с их текущим индексом в _columns."""
+        for idx, col in enumerate(self._columns):
+            col.order = idx
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def insert_column(self, column: TableColumn) -> bool:
+        """
+        Вставляет столбец на позицию, указанную в column.order.
+        Если столбец с таким system_name уже существует, возвращает False.
+        При вставке все столбцы с индексом >= column.order сдвигаются вправо,
+        затем вызывается _reorder_columns_by_index().
+
+        Args:
+            column: Объект TableColumn для вставки.
+
+        Returns:
+            True, если вставка успешна, иначе False (например, столбец с таким system_name уже существует).
+        """
+        
+        if any(c.system_name == column.system_name for c in self._columns):
+            return False
+        
+        order = column.order
+
+        if order is None:
+            order = len(self._columns)
+
+        if  order > len(self._columns): 
+            order = len(self._columns)
+
+        if order < 0:
+            order = 0
+
+        self.beginInsertColumns(QModelIndex(), order, order)
+        self._columns.insert(order, column)
+        self._reorder_columns_by_index()
+        self.endInsertColumns()
+
+        return True
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def remove_column(self, system_name: str) -> bool:
+        """Удаляет столбец с указанным system_name, сдвигает правые столбцы влево."""
+        for idx, col in enumerate(self._columns):
+            if col.system_name == system_name:
+                self.beginRemoveColumns(QModelIndex(), idx, idx)
+                del self._columns[idx]
+                self._reorder_columns_by_index()
+                self.endRemoveColumns()
+                return True
+        return False
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def move_column(self, system_name: str, new_order: int) -> bool:
+        """
+        Перемещает столбец на новую позицию new_order.
+        new_order – желаемый индекс в списке _columns (0-based).
+        """
+        # Найти текущий индекс
+        current_idx = None
+        col_to_move = None
+        for idx, col in enumerate(self._columns):
+            if col.system_name == system_name:
+                current_idx = idx
+                col_to_move = col
+                break
+
+        if current_idx is None:
+            return False
+        
+        if new_order < 0:
+            new_order = 0
+
+        if new_order >= len(self._columns):  
+            new_order = len(self._columns) -1 
+        
+        if current_idx == new_order:
+            return True
+
+        self.layoutAboutToBeChanged.emit()
+        self._columns.pop(current_idx)
+        self._columns.insert(new_order, col_to_move)
+        self._reorder_columns_by_index()
+        self.layoutChanged.emit()
+
+        return True
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def clear_own_change(self, entity_id: int) -> None:
         self.logger.debug(
             f"clear_own_change: entity_id={entity_id}, текущий статус={self._get_cached_status(entity_id)}")
@@ -396,66 +513,99 @@ class PaginatedTableModel(BaseTableModel):
         self,
         system_name: str,
         title: str,
-        position: Optional[int] = None,
+        order: Optional[int] = None, 
         delegate_class: Optional[Type] = None,
         delegate_args: Optional[Dict] = None,
         visible: bool = True,
         width: Optional[int] = None,
     ) -> bool:
         """
-        Добавляет системный столбец в модель.
+        Добавляет системный столбец (не связанный с полем DTO) в модель.
+        Позиция вставки определяется параметром order (если None — столбец добавляется в конец).
+        Использует метод insert_column, который самостоятельно поддерживает порядок.
 
         Args:
             system_name: Уникальное системное имя (например, '__checkbox__').
-            title: Заголовок столбца (может быть пустым).
-            position: Позиция для вставки (0 - первый). Если None, добавляется в конец.
+            title: Заголовок столбца.
+            order: Желаемый индекс в списке столбцов (0-based). Если None, столбец добавляется в конец.
             delegate_class: Класс делегата для отображения/редактирования.
             delegate_args: Аргументы для делегата.
             visible: Видим ли столбец изначально.
             width: Предпочтительная ширина (если None, то по умолчанию).
 
         Returns:
-            True, если столбец добавлен (или уже существовал), False при ошибке.
+            True, если столбец успешно добавлен, False если столбец с таким system_name уже существует.
         """
-        # Проверяем, нет ли уже столбца с таким system_name
-        if self.get_column_by_system_name(system_name):
+        # Проверяем уникальность системного имени
+        if any(c.system_name == system_name for c in self._columns):
             return False
 
+        # Определяем позицию вставки
+        if order is None:
+            order = len(self._columns)   # добавляем в конец
+
+        # Ограничиваем допустимые значения
+        if order < 0:
+            order = 0
+
+        if order > len(self._columns):
+            order = len(self._columns)
+
+        # Создаём объект столбца (системный, не DATA)
         col = TableColumn(
             system_name=system_name,
             title=title,
             column_type=ColumnType.SYSTEM,
-            field_name=None,
+            field_name=None,               # системные столбцы не связаны с DTO
             visible=visible,
-            order=position if position is not None else len(self._columns),
+            order=order,                   # сохраняем желаемую позицию
             delegate_class=delegate_class,
             delegate_args=delegate_args or {},
             width=width,
+            editable=False,                # системные столбцы обычно не редактируются
         )
-        # Вставка с обновлением индексов
 
-        self.logger.debug(
-            f"position is None  = {position is None} "
-        )
-        if position is None:
-            position = len(self._columns)
+        # Вставляем через общий метод, который сам пересчитает order у всех столбцов
+        return self.insert_column(col)
+        # # Проверяем, нет ли уже столбца с таким system_name
+        # if self.get_column_by_system_name(system_name):
+        #     return False
 
-        self.beginInsertColumns(QModelIndex(), position, position)
-        self._columns.insert(position, col)
+        # col = TableColumn(
+        #     system_name=system_name,
+        #     title=title,
+        #     column_type=ColumnType.SYSTEM,
+        #     field_name=None,
+        #     visible=visible,
+        #     order=position if position is not None else len(self._columns),
+        #     delegate_class=delegate_class,
+        #     delegate_args=delegate_args or {},
+        #     width=width,
+        # )
+        # # Вставка с обновлением индексов
 
-        # Обновляем order у всех столбцов после позиции
-        for i in range(position + 1, len(self._columns)):
-            self.logger.debug(
-                f"i  = {i} "
-            )
-            self._columns[i].order = i
+        # self.logger.debug(
+        #     f"position is None  = {position is None} "
+        # )
+        # if position is None:
+        #     position = len(self._columns)
 
-        self.endInsertColumns()
+        # self.beginInsertColumns(QModelIndex(), position, position)
+        # self._columns.insert(position, col)
 
-        # # Обновляем маппинг (нужно перестроить _field_by_column)
-        # self._update_column_mapping()  # Обновление маппинга не требуется – поиск столбцов выполняется через _column_appears_for_index
+        # # Обновляем order у всех столбцов после позиции
+        # for i in range(position + 1, len(self._columns)):
+        #     self.logger.debug(
+        #         f"i  = {i} "
+        #     )
+        #     self._columns[i].order = i
 
-        return True
+        # self.endInsertColumns()
+
+        # # # Обновляем маппинг (нужно перестроить _field_by_column)
+        # # self._update_column_mapping()  # Обновление маппинга не требуется – поиск столбцов выполняется через _column_appears_for_index
+
+        # return True
 
     @AppLogger.get_instance(
         name='PaginatedTableModel',
@@ -465,15 +615,21 @@ class PaginatedTableModel(BaseTableModel):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def add_checkbox_column(self, position: int = 0, visible: bool = False) -> bool:
+    def add_checkbox_column(
+        self, 
+        order: int = 0, 
+        visible: bool = False,
+        width: int = 30,
+        delegate_class = None
+    ) -> bool:
         """Добавляет столбец чекбоксов."""
         return self.add_system_column(
             system_name='__checkbox__',
             title='',
-            position=position,
-            delegate_class=None,
+            order=order,
+            delegate_class=delegate_class,
             visible=visible,
-            width=30,
+            width=width,
         )
 
     @AppLogger.get_instance(
@@ -489,19 +645,20 @@ class PaginatedTableModel(BaseTableModel):
         system_name: str,
         title: str = "",
         button_text: str = "...",
-        position: Optional[int] = None,
+        order: Optional[int] = None,
         visible: bool = True,
+        width: int = 80
     ) -> bool:
         """Добавляет столбец с кнопкой."""
         # from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
         return self.add_system_column(
             system_name=system_name,
             title=title,
-            position=position,
+            order=order,
             delegate_class=ButtonDelegate,
             delegate_args={'button_text': button_text},
             visible=visible,
-            width=80,
+            width=width,
         )
 
     @AppLogger.get_instance(
@@ -674,26 +831,61 @@ class PaginatedTableModel(BaseTableModel):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _ensure_checkbox_column(self) -> None:
-        """Убеждается, что в списке столбцов есть чекбокс-столбец (создаёт, если нет)."""
+        """
+        Убеждается, что в списке столбцов есть чекбокс-столбец.
+        Если он уже есть, но не на первой позиции (order=0), перемещает его в начало.
+        После любых изменений порядка уведомляет родительскую страницу о необходимости
+        переустановить делегаты (через _reapply_delegates).
+        """
 
-        for col in self._columns:
+        idx_checkbox_column = None
+
+        # Проверяем, есть ли уже столбец чекбокса
+        for idx, col in enumerate(self._columns):
             self.logger.debug(
                 f"col  = {col} "
                 f"col.system_name == self._checkbox_column_system_name  = {col.system_name == self._checkbox_column_system_name} "
             )
             if col.system_name == self._checkbox_column_system_name:
-                return
+                idx_checkbox_column = idx
+                break        
+        
+        self.logger.debug(
+            f"idx_checkbox_column is None  = {idx_checkbox_column is None} "
+        )
+        if_update = False
+        if idx_checkbox_column is None:
+            # Если нет – добавляем чекбокс-столбец с order=0 (первая позиция)
+            self.add_checkbox_column(order=0, visible=False)
+            if_update = True
+        else:
+            # Если уже есть – убедимся, что он первый
+            if idx != 0:
+                self.move_column(self._checkbox_column_system_name, 0)
+                if_update = True
             
-        # Добавляем в начало
-        checkbox_col = TableColumn.create_checkbox_column(order=0)
-        self._columns.insert(0, checkbox_col)
+        self.logger.debug(
+            f"if_update  = {if_update} "
+        )
+        if if_update:
+            #  Уведомляем родительскую страницу о необходимости обновить делегаты
+            if self.parent() and hasattr(self.parent(), '_reapply_delegates'):
+                self.parent()._reapply_delegates()
+            else:
+                self.logger.warning(
+                    f"self.parent() and hasattr(self.parent(), '_reapply_delegates')  = False"
+                )
 
-        # Обновляем order у всех
-        for idx, col in enumerate(self._columns):
-            self.logger.debug(
-                f"idx  = {idx} "
-            )
-            col.order = idx
+
+
+
+        # # Создаём чекбокс-столбец с временным order (не важен)
+        # # Добавляем в начало
+        # checkbox_col = TableColumn.create_checkbox_column(
+        #     order=0   # order=0 означает позицию 0
+        # )
+
+        # self.insert_column(checkbox_col)   # позиция берётся из column.order
 
     # ----------------------------------------------------------------------
     # Работа со столбцами (публичные методы)
@@ -1187,6 +1379,10 @@ class PaginatedTableModel(BaseTableModel):
         
         col.visible = visible
         self.layoutChanged.emit()   # перестроит всю модель (но данные останутся)
+
+        # Уведомляем родительскую страницу о необходимости обновить ширину столбцов
+        if self.parent() and hasattr(self.parent(), '_apply_column_widths'): # на всякий случай
+            self.parent()._apply_column_widths()
 
     @AppLogger.get_instance(
         name='PaginatedTableModel',

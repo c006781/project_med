@@ -806,6 +806,28 @@ class BaseService(
 
         return query.scalar_subquery()
 
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_sql_compute_columns_to_query(self, query):
+        """
+        Добавляет в запрос подзапросы для полей sql_compute.
+        Возвращает кортеж (query, extra_columns), где extra_columns – список добавленных колонок.
+        """
+        compute_fields = self._get_sql_compute_fields()
+        extra_columns = []
+        for field_name, config in compute_fields.items():
+            subq = self._build_sql_compute_subquery(field_name, config)
+            if subq is not None:
+                extra_columns.append(subq.label(f"__sql_compute_{field_name}"))
+        if extra_columns:
+            query = query.add_columns(*extra_columns)
+        return query, extra_columns
+
+
     @AppLogger.get_instance(
         name='BaseService',
         enable_file_logging='system',
@@ -2424,8 +2446,11 @@ class BaseService(
 
         # Создаем сессию для работы с БД (если не указана, то используем сессию из self._db)
         with self._session_scope(session) as sess:
-            # Создаем репозиторий с переданной сессией
-            repo = self._get_repo(sess)
+            # Строим базовый запрос
+            query = sess.query(self._model_class).filter(self._model_class.id == entity_id)
+
+            # # Создаем репозиторий с переданной сессией
+            # repo = self._get_repo(sess)
 
             # Получаем список отношений для подгрузки
             relations = self._get_relations_for_eager_loading()
@@ -2436,17 +2461,43 @@ class BaseService(
             if extra_rels:
                 relations = relations + extra_rels          # добавляем к общему списку
 
-            if relations:
-                item = repo.get_with_relations(entity_id, relations)
+            query = self._apply_eager_loading(query, relations)
+
+            # Добавляем подзапросы для sql_compute
+            query, extra_columns = self._add_sql_compute_columns_to_query(query)    
+
+            # Выполняем запрос
+            result = query.first()
+            
+            # # Если запись не найдена, то возвращаем исключение
+            if result is None:
+                raise self._not_found_exception(entity_id)
+            
+            # Извлекаем объект модели и временные атрибуты
+            if extra_columns:
+                # Если есть дополнительные колонки, результат будет кортежем (модель, ...)
+                if isinstance(result, (tuple, list)) or hasattr(result, '__len__'):
+                    item = result[0]
+                    compute_fields = self._get_sql_compute_fields()
+                    for idx, field_name in enumerate(compute_fields.keys()):
+                        value = result[idx + 1]
+                        setattr(item, f"__sql_compute_{field_name}", value)
+                else:
+                    item = result
             else:
-                item = repo.get_by_id(entity_id)
+                item = result
+
+            # if relations:
+            #     item = repo.get_with_relations(entity_id, relations)
+            # else:
+            #     item = repo.get_by_id(entity_id)
 
             # # Получаем запись по ID
             # item = repo.get_by_id(entity_id)
 
-            # Если запись не найдена, то возвращаем исключение
-            if item is None:
-                raise self._not_found_exception(entity_id)
+            # # Если запись не найдена, то возвращаем исключение
+            # if item is None:
+            #     raise self._not_found_exception(entity_id)
 
             # Применяем пост-обработку (добавление временных атрибутов для подсчётов)
             items = self._post_process_items([item], sess)

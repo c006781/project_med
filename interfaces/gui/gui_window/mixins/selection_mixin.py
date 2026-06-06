@@ -460,13 +460,15 @@ class SelectionMixin:
         if not selection_model:
             return []
         
-        rows = []
-        for proxy_index in selection_model.selectedRows(0):
+        rezult = []
+        rows = selection_model.selectedRows(0)
+
+        for proxy_index in rows:
             source_index = self._map_to_source_index(proxy_index) # если есть прокси модель - переход. 
             if source_index.isValid():
-                rows.append(source_index.row())
+                rezult.append(source_index.row())
                 
-        return rows
+        return rezult
 
     @AppLogger.get_instance(
         name='SelectionMixin',
@@ -485,7 +487,8 @@ class SelectionMixin:
         """
 
         dtos = []
-        for row in self._get_selected_rows_indices():
+        rows = self._get_selected_rows_indices()
+        for row in rows:
             dto = self.source_model.get_item_at_row(row)
             if dto:
                 dtos.append(dto)

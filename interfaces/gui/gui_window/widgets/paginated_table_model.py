@@ -350,6 +350,67 @@ class PaginatedTableModel(BaseTableModel):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def update_row_by_id(self, entity_id: int, new_dto: Any) -> Optional[int]:
+        """
+        Находит строку по ID сущности (включая временные отрицательные ID) и заменяет DTO.
+        Возвращает True, если строка найдена и обновлена.
+        """
+        for row, dto in enumerate(self._data):
+            if getattr(dto, 'id', None) == entity_id:
+                self.update_row(row, new_dto)
+                return row
+        return None
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_row_by_id(self, entity_id: int, new_dto: Any, update_selected: bool = True) -> bool:
+        """
+        Обновляет строку в таблице по ID сущности (работает с временными ID).
+        Если строка была выбрана, обновляет self.selected_dto.
+        """
+
+        if not self.source_model.update_row_by_id(entity_id, new_dto):
+            return False
+        
+        # Обновляем original_data
+        self.original_data[new_dto.id] = new_dto
+        if entity_id != new_dto.id:
+            self.original_data.pop(entity_id, None)
+
+        if update_selected and self.selected_dto and self.selected_dto.id == entity_id:
+            self.selected_dto = new_dto
+
+        return True
+
+
+
+
+        # if self.source_model.update_row_by_id(entity_id, new_dto):
+        #     # Обновляем original_data – он хранится по индексу, но после update_row_by_id индекс мог измениться?
+        #     # original_data привязан к индексу, но это отдельная проблема. Лучше перейти на хранение original_data по ID.
+        #     # Для простоты пока найдём строку заново и обновим original_data.
+        #     row = self._find_row_by_id(entity_id)
+        #     if row >= 0:
+        #         self.original_data[row] = new_dto
+        #     if update_selected and self.selected_dto and self.selected_dto.id == entity_id:
+        #         self.selected_dto = new_dto
+        #     return True
+        # return False
+
+    @AppLogger.get_instance(
+        name='PaginatedTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _reorder_columns_by_index(self) -> None:
         """Обновляет атрибут order у всех столбцов в соответствии с их текущим индексом в _columns."""
         for idx, col in enumerate(self._columns):
@@ -1304,7 +1365,7 @@ class PaginatedTableModel(BaseTableModel):
                 new_states[r + 1] = state
             else:
                 new_states[r] = state
-                    
+
         self._checkbox_states = new_states
 
         self.endInsertRows()

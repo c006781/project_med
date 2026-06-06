@@ -543,6 +543,22 @@ class PaginatedListPage(
             self.__photo_service = get_photo_service()
         return self.__photo_service
 
+    @property
+    def _last_selected_dto(self):
+        """
+        Хранит последний DTO строки, которая была выделена в таблице.
+        Используется при добавлении новой строки, если текущее выделение отсутствует.
+        Сбрасывается при потере выделения (в _on_selection_changed_for_draft).
+        """
+        try:
+            return self.__last_selected_dto
+        except AttributeError:
+            self.__last_selected_dto = None
+        return self.__last_selected_dto
+
+    @_last_selected_dto.setter
+    def _last_selected_dto(self, value):
+        self.__last_selected_dto = value
 
     # @property 
     # def _saving_in_progress(self) -> bool: # убрал, так как наследуется  из EditModeMixin
@@ -824,7 +840,11 @@ class PaginatedListPage(
                     old_dto = self.source_model.get_item_at_row(row)
                     self.logger.debug(f"Старое has_photos={old_dto.has_photos if old_dto else 'None'}")
 
-                    self._source_model_update_row(row, fresh_dto)
+                    # self._source_model_update_row(row, fresh_dto)
+
+                    # Обновляем строку по ID (вместо индекса)
+                    self._update_row_by_id(parent_id, fresh_dto)
+
 
                     # Если это текущая выбранная строка, обновляем selected_dto
                     if self.selected_dto and self.selected_dto.id == parent_id:
@@ -3878,7 +3898,12 @@ class PaginatedListPage(
         # Сохраняем строку в БД
         try:
             created = self.service.create(dto, session=session)
+
             self._clear_draft_dto(temp_id)
+
+            # # Перезагружаем, чтобы получить виртуальные поля (has_photos и т.д.)
+            # created = self.service.get_by_id(created.id, session=session)
+
         except Exception as e:
             self.logger.error(f"Ошибка сохранения новой строки {temp_id}: {e}")
             
@@ -3894,6 +3919,8 @@ class PaginatedListPage(
             # сохранения _balance_parent_counter найдёт ключ и корректно уменьшит счётчик.
             # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
             raise
+
+        
 
         # # Переносим файлы из временной папки в основное хранилище
         # updated_dto, copied_files, old_files, copied_dest_paths, error_messages = self._move_files_from_temp_to_storage(
@@ -4017,22 +4044,25 @@ class PaginatedListPage(
             temp_id,
             session
         )
+       
+        # # обновление по индексу на обновление по ID )
+        # self._update_row_by_id(temp_id, created) # перенёс в отложенное 
 
-        # Обновляем модель
-        # Найти строку в модели по временному ID и заменить DTO
-        row = self._find_row_by_id(temp_id)
-        if row >= 0:
-            # self._source_model_update_row(row, created)
-            # Обновляем модель DTO с уже исправленными путями
-            # self._source_model_update_row(row, updated_dto)
-            self._source_model_update_row(row, created)
-            # self.original_data[row] = created
-            # if self.selected_dto and self.selected_dto.id == temp_id:
-            #     self.selected_dto = created
+        # # Обновляем модель
+        # # Найти строку в модели по временному ID и заменить DTO
+        # row = self._find_row_by_id(temp_id)
+        # if row >= 0:
+        #     # self._source_model_update_row(row, created)
+        #     # Обновляем модель DTO с уже исправленными путями
+        #     # self._source_model_update_row(row, updated_dto)
+        #     self._source_model_update_row(row, created)
+        #     # self.original_data[row] = created
+        #     # if self.selected_dto and self.selected_dto.id == temp_id:
+        #     #     self.selected_dto = created
 
-            self._clear_selected_dto(temp_id, created)
-        else:
-            self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
+        #     self._clear_selected_dto(temp_id, created)
+        # else:
+        #     self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
         
         self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
 
@@ -4061,7 +4091,7 @@ class PaginatedListPage(
         # Переносим статус 'own' (если был) с временного ID на реальный
         self._update_id_own_in_real_id(temp_id, created.id)
 
-        # Успешно – удаляем временную папку для temp_id (она больше не нужна)
+        # Успешно – удаляем временную папку для temp_id (она больше не нужна) (отложенное действие)
         self._cleanup_temp_dir(
             temp_id,
             ctx = DeletionContext.create(session, DeletionType.COMMIT)
@@ -4079,6 +4109,13 @@ class PaginatedListPage(
         # Очистка черновиков и временной папки после успешного сохранения
         ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
         self.clear_entity_drafts(created.id, ctx_commit)
+
+        # отложенное действие для обновления строки после коммита
+        add_deferred_action(
+            ctx=ActionContext(session, ActionType.COMMIT) if session else None,
+            func=self._refresh_and_update_row_after_commit,
+            args=(temp_id, created.id)
+        )
 
         return created
 
@@ -5457,6 +5494,55 @@ class PaginatedListPage(
         if hasattr(self.table_view, 'refreshRow'):
             self.table_view.refreshRow(row)
 
+    def _update_row_by_id(self, entity_id: int, new_dto: Any) -> bool:
+        """
+        Обновляет строку в таблице по ID сущности.
+        Если ID сущности изменился (например, при сохранении новой строки),
+        корректно обновляет self.selected_dto.
+        """
+        row = self.source_model.update_row_by_id(entity_id, new_dto)
+
+        if row is None:
+            self.logger.warning(f"_update_row_by_id: не найдена строка с ID {entity_id}")
+            return False
+
+
+        # # Обновляем original_data, если используется (хотя в PaginatedListPage original_data не используется, но на всякий случай)
+        # if hasattr(self, 'original_data'):
+        #     self.original_data[new_dto.id] = new_dto
+        #     if entity_id != new_dto.id:
+        #         self.original_data.pop(entity_id, None)
+
+        # # Принудительно обновляем строку в таблице
+        # self._update_row_color(row)  # перекрасит строку, но также вызовет dataChanged
+        
+        # Обновляем selected_dto, если строка была выбрана
+        if self.selected_dto and self.selected_dto.id == entity_id:
+            self.selected_dto = new_dto
+            # Если ID изменился (временный → реальный), удаляем старый ID из кэша выделения
+            if entity_id != new_dto.id:
+                self._clear_selected_dto(entity_id, new_dto)
+
+        # # Принудительно перерисовываем строку (иногда dataChanged не срабатывает)
+        # idx = self.source_model.index(row, 0)
+        # if idx.isValid():
+        #     self.table_view.update(idx)
+
+
+        return True
+
+    def _refresh_and_update_row_after_commit(self, temp_id: int, real_id: int) -> None:
+        """Отложенное действие: после коммита загружает свежий DTO и обновляет строку."""
+        try:
+            fresh_dto = self.service.get_by_id(real_id)
+            self._update_row_by_id(temp_id, fresh_dto)
+            if temp_id != real_id:
+                self._update_row_by_id(real_id, fresh_dto)
+            self.logger.debug(f"Строка {real_id} обновлена после коммита")
+        except Exception as e:
+            self.logger.exception(f"Ошибка обновления строки {real_id} после коммита: {e}")
+
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -5573,19 +5659,27 @@ class PaginatedListPage(
                         session=sess
                     )
 
+
+                    # Очищаем черновик DTO (если был)
                     self._clear_draft_dto(entity_id)
 
-                    # self.source_model.update_row(row, updated)
-                    # self.original_data[row] = updated
 
-                    self._source_model_update_row(row, updated)
+                    # Обновляем строку в таблице по ID (вместо индекса)
+                    self._update_row_by_id(entity_id, updated)
 
-                    # self.original_data[row] = updated
+                    # # self.source_model.update_row(row, updated)
+                    # # self.original_data[row] = updated
 
-                    # Обновляем selected_dto, если эта строка была выбрана
-                    # if self.selected_dto and self.selected_dto.id == entity_id:
-                    #     self.selected_dto = updated
-                    self._clear_selected_dto(entity_id, updated)
+                    # self._source_model_update_row(row, updated) 
+
+                    # # self.original_data[row] = updated
+
+                    # # Обновляем selected_dto, если эта строка была выбрана
+                    # # if self.selected_dto and self.selected_dto.id == entity_id:
+                    # #     self.selected_dto = updated
+                    # self._clear_selected_dto(entity_id, updated)
+
+                    # Уведомляем родителя об изменении (для обновления виртуальных полей)
 
                     # добавляем родителя, если есть
                     parent_id = self._get_parent_id(entity_id)
@@ -6064,10 +6158,20 @@ class PaginatedListPage(
     def _on_selection_changed_for_draft(self, selected, deselected):
         """
         Обработчик изменения выделения в таблице.
-        Обновляет self.selected_dto и перекрашивает новую строку.
+        Обновляет self.selected_dto и self._last_selected_dto.
+        Если выделение снято, сбрасывает _last_selected_dto.
         """
 
         new_dto = self.get_current_selected_dto()
+
+        # Сохраняем последний выделенный DTO (даже если выделение потеряно позже)
+        if new_dto is not None:
+            self._last_selected_dto = new_dto
+        else:
+            # Если выделение снято, сбрасываем сохранённый DTO
+            self._last_selected_dto = None
+
+
         if new_dto == self.selected_dto:
             return
         
@@ -6137,8 +6241,11 @@ class PaginatedListPage(
             'scroll_pos': self.table_view.verticalScrollBar().value(),
             'selected_id': self.selected_dto.id if self.selected_dto else None,
         }
-        super().on_leave()
 
+        # Сбрасываем сохранённое выделение при уходе со страницы
+        self._last_selected_dto = None
+
+        super().on_leave()
 
         # Очищаем кэш миниатюр, чтобы не накапливать память при переключении страниц
         ImageThumbnailDelegate.clear_cache()
@@ -7293,7 +7400,7 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _get_insertion_pos(self) -> int:
+    def _get_insertion_pos(self, selected_dto: Any = None) -> int:
         """
         Определяет позицию для вставки новой строки в исходной модели (source_model).
 
@@ -7305,6 +7412,14 @@ class PaginatedListPage(
             возвращает индекс **первой видимой строки** (вставка перед ней).
             4. Иначе (выделения нет и видимых строк нет) → возвращает 0.
 
+        Параметры:
+            selected_dto (Any, optional): DTO строки, после которой нужно вставить.
+            Если передан, используется в первую очередь.
+            Если None, пытается получить текущее выделение.
+
+        Возвращает:
+            int: Индекс в source_model для вставки новой строки.
+
         **Примечания:**
             - Метод использует `get_current_selected_dto()` (из `SelectionMixin`),
             который возвращает DTO текущей выделенной строки.
@@ -7313,23 +7428,29 @@ class PaginatedListPage(
             - Если выделенная строка имеет временный ID (отрицательный) – она
             считается существующей в модели, и вставка происходит после неё.
 
-        **Возвращает:**
-            int: Индекс в исходной модели (source_model), куда должна быть вставлена новая строка.
+            дополнительно:
+                - Если таблица пуста – возвращает 0.
+                - Если есть выделенная строка (переданная или текущая) – возвращает её индекс + 1.
+                - Иначе – индекс первой видимой строки (через get_visible_row_range).
+
         """
 
         # Если таблица пуста – вставляем в конец (0, т.к. rowCount=0)
         if self.source_model.rowCount() == 0:
             return 0
+        
+        # Используем переданный DTO или текущее выделение
+        if selected_dto is None:
+            # Если есть выделенная строка (обычное выделение)
+            selected_dto = self.get_current_selected_dto()
 
-        # Если есть выделенная строка (обычное выделение)
-        selected_dto = self.get_current_selected_dto()
         if selected_dto is not None and selected_dto.id is not None:
             row = self._find_row_by_id(selected_dto.id)
             if row >= 0:
                 # Вставляем после неё
                 return row + 1
             
-        # Приоритет 2: первая видимая строка
+        # Если выделения нет, вставляем перед первой видимой строкой
         first_visible, _ = get_visible_row_range(self.table_view)
         if first_visible >= 0:
             return first_visible
@@ -7457,9 +7578,17 @@ class PaginatedListPage(
             return
 
         temp_id = dto.id
-        pos = self._get_insertion_pos()
 
-        # Снимаем выделение перед вставкой
+        # Сохраняем текущее выделение (если есть) до очистки таблицы
+        # Приоритет: текущее выделение -> последнее сохранённое выделение
+        selected_dto = self.get_current_selected_dto()
+        if selected_dto is None:
+            selected_dto = self._last_selected_dto
+
+        # Определяем позицию вставки на основе сохранённого выделения
+        pos = self._get_insertion_pos(selected_dto)
+
+        # Снимаем выделение перед вставкой (после того как сохранили)
         self.table_view.clearSelection()
 
         # Вставка в модель

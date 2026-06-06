@@ -275,12 +275,17 @@ import tempfile
 from typing import (
     Any, Dict,
     Optional, Set,
-    List, Tuple, Type, Union, get_args, get_origin,
+    List, Tuple, Type, 
+    Union, 
+    get_args, get_origin,
 )
 import uuid
 
-from app.utils.deferred_actions import ActionContext, ActionType, add_deferred_action
 from app.utils.logger import AppLogger
+
+from app.utils.deferred_actions import (
+    ActionContext, ActionType, add_deferred_action
+)
 
 # from app.draft.ihierarchical_editable import IHierarchicalEditableComponent
 from app.config.config_manager.manager import AppConfigManager
@@ -329,6 +334,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
 from sqlalchemy.orm import Session
 
 from PySide6.QtCore import (
+    # QItemSelectionModel, 
     QSize, QTimer, 
     Qt, Signal, Slot,
 )
@@ -7512,12 +7518,22 @@ class PaginatedListPage(
         if not source_index.isValid():
             return False
 
-        proxy_index = self._map_to_source_index_mapFromSource(source_index)
-        if not proxy_index.isValid():
-            return False
+        # Преобразуем в индекс прокси-модели, если она есть
+        if hasattr(self, 'proxy_model') and self.proxy_model is not None:
+            source_index = self._map_to_source_index_mapFromSource(source_index)
+            if not source_index.isValid():
+                return False
 
-        self.table_view.setCurrentIndex(proxy_index)
-        self.table_view.scrollTo(proxy_index)
+        # # Принудительно устанавливаем выделение с эмиссией сигнала
+        # selection_model = self.table_view.selectionModel()
+        # if selection_model:
+        #     selection_model.select(source_index, QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
+
+        # Устанавливаем текущий индекс для клавиатурной навигации
+        self.table_view.setCurrentIndex(source_index)
+
+        # Прокручиваем к строке
+        self.table_view.scrollTo(source_index)
         return True
 
     @AppLogger.get_instance(

@@ -241,7 +241,7 @@ class AppointmentPhotoFrame(BasePage):
                 'operator': 'eq',
                 'value': dto.id
             })
-            
+
         else:
             # Очищаем таблицу фото и сбрасываем контекст
             self.photo_page.source_model.clear()
@@ -661,6 +661,10 @@ class AppointmentPhotoFrame(BasePage):
         """
         Обработчик сигнала parent_entity_updated от дочерней страницы (фото).
         Обновляет соответствующую строку в таблице приёмов, если тип родителя совпадает.
+
+        Вызывается после успешного коммита изменений, затронувших родительскую сущность.
+        Для приёма (parent_entity_type == 'appointment') обновляет строку в таблице приёмов,
+        чтобы виртуальные поля (например, has_photos) отобразили актуальное состояние.
 
         Args:
             parent_entity_type (str): Тип родительской сущности (например, 'appointment').

@@ -80,9 +80,15 @@ class PaginatedPhotoListPage(PaginatedListPage):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _get_parent_id_for_new_row(self, dto) -> int: # в будущем перенести в PaginatedListPage и сделать диначическим
+        
         """
-        Возвращает ID приёма, к которому относится новое фото.
-        Значение берётся из контекстных параметров (устанавливается родительским фреймом).
+        Возвращает ID родительской сущности для новой строки фото.
+
+        Для фото родителем является приём (appointment). ID приёма должен быть передан
+        в self._context_params под ключом 'appointment_id' (устанавливается родительским фреймом).
+
+        Returns:
+            ID приёма или None, если контекст не задан.
         """
         return self._context_params.get('appointment_id', None)
 

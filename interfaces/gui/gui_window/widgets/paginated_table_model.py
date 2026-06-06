@@ -358,7 +358,9 @@ class PaginatedTableModel(BaseTableModel):
         for row, dto in enumerate(self._data):
             if getattr(dto, 'id', None) == entity_id:
                 self.update_row(row, new_dto)
+                
                 return row
+            
         return None
 
     @AppLogger.get_instance(

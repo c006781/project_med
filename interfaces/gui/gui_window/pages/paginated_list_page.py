@@ -344,6 +344,7 @@ from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QDialog,
     QHeaderView,
+    QMessageBox,
     # QHBoxLayout,
     # QPushButton,
     # QMessageBox,
@@ -847,96 +848,97 @@ class PaginatedListPage(
         while current is not None and current > 0:
             ancestors.add(current)
             current = self._get_parent_id(current)
+
         return ancestors
     
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _refresh_parent_rows_deferred(self, entity_id: int) -> None:
-        """
-        Отложенное действие: обновляет строку указанной сущности и всех её предков после коммита.
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def _refresh_parent_rows_deferred(self, entity_id: int) -> None:
+    #     """
+    #     Отложенное действие: обновляет строку указанной сущности и всех её предков после коммита.
 
-        **Назначение:**
-            Гарантирует, что после фиксации транзакции (например, после добавления фото к приёму)
-            родительские строки в таблице будут перезагружены из БД с актуальными данными,
-            включая виртуальные поля (например, `has_photos`).
+    #     **Назначение:**
+    #         Гарантирует, что после фиксации транзакции (например, после добавления фото к приёму)
+    #         родительские строки в таблице будут перезагружены из БД с актуальными данными,
+    #         включая виртуальные поля (например, `has_photos`).
 
-        **Алгоритм:**
-            1. Собирает множество ID всех предков (включая переданный `entity_id`), поднимаясь по цепочке
-            через `self._get_parent_id()`.
-            2. Вызывает `self._refresh_parent_rows(ids_to_update)`, который перезагружает DTO для каждого ID
-            и обновляет модель таблицы.
+    #     **Алгоритм:**
+    #         1. Собирает множество ID всех предков (включая переданный `entity_id`), поднимаясь по цепочке
+    #         через `self._get_parent_id()`.
+    #         2. Вызывает `self._refresh_parent_rows(ids_to_update)`, который перезагружает DTO для каждого ID
+    #         и обновляет модель таблицы.
 
-        **Параметры:**
-            entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
+    #     **Параметры:**
+    #         entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
 
-        **Возвращает:**
-            None
+    #     **Возвращает:**
+    #         None
 
-        **Примечание:**
-            Метод должен вызываться через `add_deferred_action` с `ActionContext(session, ActionType.COMMIT)`,
-            чтобы выполниться после успешного коммита транзакции.
-        """
-        # Собираем ID всех предков (включая сам entity_id)
-        # ids_to_update = set()
-        # current_id = entity_id
-        # while current_id is not None and current_id > 0:
-        #     ids_to_update.add(current_id)
-        #     current_id = self._get_parent_id(current_id)
+    #     **Примечание:**
+    #         Метод должен вызываться через `add_deferred_action` с `ActionContext(session, ActionType.COMMIT)`,
+    #         чтобы выполниться после успешного коммита транзакции.
+    #     """
+    #     # Собираем ID всех предков (включая сам entity_id)
+    #     # ids_to_update = set()
+    #     # current_id = entity_id
+    #     # while current_id is not None and current_id > 0:
+    #     #     ids_to_update.add(current_id)
+    #     #     current_id = self._get_parent_id(current_id)
 
-        ids_to_update = self._collect_ancestors(entity_id)
+    #     ids_to_update = self._collect_ancestors(entity_id)
         
-        if ids_to_update:
-            self.logger.debug(f"_refresh_parent_rows_deferred: обновляем родителей {ids_to_update}")
-            self._refresh_parent_rows(ids_to_update)
+    #     if ids_to_update:
+    #         self.logger.debug(f"_refresh_parent_rows_deferred: обновляем родителей {ids_to_update}")
+    #         self._refresh_parent_rows(ids_to_update)
 
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _add_parents_to_affected_set(self, entity_id: int) -> None:
-        """
-        Добавляет указанную сущность и всех её предков в множество `self._affected_parents`.
+    # @AppLogger.get_instance(
+    #     name='PaginatedListPage',
+    #     enable_file_logging='system',
+    #     use_name_in_filename=False,
+    # ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # def _add_parents_to_affected_set(self, entity_id: int) -> None:
+    #     """
+    #     Добавляет указанную сущность и всех её предков в множество `self._affected_parents`.
 
-        **Назначение:**
-            Обеспечивает обновление всей иерархии родителей после сохранения дочерних изменений
-            (например, после добавления фото к приёму должны обновиться строка приёма и строка пациента).
+    #     **Назначение:**
+    #         Обеспечивает обновление всей иерархии родителей после сохранения дочерних изменений
+    #         (например, после добавления фото к приёму должны обновиться строка приёма и строка пациента).
 
-        **Алгоритм:**
-            1. Добавляет `entity_id` в `self._affected_parents`.
-            2. Получает ID родителя через `self._get_parent_id(entity_id)`.
-            3. Если родитель существует (не `None` и > 0), рекурсивно вызывает себя для родителя.
-            (Используется итеративный цикл, чтобы избежать переполнения стека при глубокой вложенности.)
+    #     **Алгоритм:**
+    #         1. Добавляет `entity_id` в `self._affected_parents`.
+    #         2. Получает ID родителя через `self._get_parent_id(entity_id)`.
+    #         3. Если родитель существует (не `None` и > 0), рекурсивно вызывает себя для родителя.
+    #         (Используется итеративный цикл, чтобы избежать переполнения стека при глубокой вложенности.)
 
-        **Параметры:**
-            entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
+    #     **Параметры:**
+    #         entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
 
-        **Возвращает:**
-            None
+    #     **Возвращает:**
+    #         None
 
-        **Пример:**
-            >>> # После сохранения фото для приёма с ID=100
-            >>> self._add_parents_to_affected_set(100)  # добавит 100, затем его родителя-пациента, затем родителя пациента (если есть) и т.д.
-        """
+    #     **Пример:**
+    #         >>> # После сохранения фото для приёма с ID=100
+    #         >>> self._add_parents_to_affected_set(100)  # добавит 100, затем его родителя-пациента, затем родителя пациента (если есть) и т.д.
+    #     """
 
 
-        ancestors = self._collect_ancestors(entity_id)
-        for anc_id in ancestors:
-            if anc_id not in self._affected_parents:
-                self.logger.debug(f"Добавлен родитель {anc_id} в _affected_parents")
-                self._affected_parents.add(anc_id)
+    #     ancestors = self._collect_ancestors(entity_id)
+    #     for anc_id in ancestors:
+    #         if anc_id not in self._affected_parents:
+    #             self.logger.debug(f"Добавлен родитель {anc_id} в _affected_parents")
+    #             self._affected_parents.add(anc_id)
 
-        # current_id = entity_id
-        # while current_id is not None and current_id > 0:
-        #     if current_id not in self._affected_parents:
-        #         self.logger.debug(f"Добавлен родитель {current_id} в _affected_parents")
-        #         self._affected_parents.add(current_id)
+    #     # current_id = entity_id
+    #     # while current_id is not None and current_id > 0:
+    #     #     if current_id not in self._affected_parents:
+    #     #         self.logger.debug(f"Добавлен родитель {current_id} в _affected_parents")
+    #     #         self._affected_parents.add(current_id)
                 
-        #     # Переход к родителю текущей сущности
-        #     current_id = self._get_parent_id(current_id)
+    #     #     # Переход к родителю текущей сущности
+    #     #     current_id = self._get_parent_id(current_id)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1957,11 +1959,12 @@ class PaginatedListPage(
                     data[key] = value
 
         # Проверяем обязательные поля
-        missing = []
+        missing = [] # валидация должна быть только при и сохранении...
         for field_name, config in self.field_configs.items():
             if config.get('required', False):
                 value = data.get(field_name)
-                if value is None or (isinstance(value, str) and not value.strip()):
+                # if value is None or (isinstance(value, str) and not value.strip()):
+                if value is None:
                     missing.append(field_name)
 
         if missing:
@@ -3899,6 +3902,21 @@ class PaginatedListPage(
         entity_id,
         session: Optional[Session] = None
     ):
+        """
+        Регистрирует родительскую сущность для последующего обновления и откладывает испускание сигнала.
+
+        **Назначение:**
+            - Добавляет parent_id в множество self._affected_parents (для возможного массового обновления).
+            - Через add_deferred_action откладывает испускание сигнала parent_entity_updated до после коммита.
+            - Сигнал предназначен для родительского фрейма (например, AppointmentPhotoFrame), который
+            вызовет refresh_row_by_id и обновит виртуальные поля родителя (has_photos и т.п.).
+
+        Args:
+            parent_id: ID родительской сущности (может быть None). Если передан, то будет уведомлён.
+            entity_id: ID дочерней сущности (используется для определения типа родителя).
+            session: Опциональная сессия SQLAlchemy. Если передана, действие откладывается до коммита.
+        """
+
         self.logger.debug(
             f"_update_affected_parents: "
             f"parent_id={parent_id}, "
@@ -4159,27 +4177,9 @@ class PaginatedListPage(
             # else:
             #     updated_dto = created  # без изменений
 
-            # добавляем родителя, если есть
-            # parent_id = self._get_parent_id_for_new_row(dto)
-            # if parent_id is not None and parent_id > 0:
-            #     self._affected_parents.add(parent_id)
-            #     parent_type = self._get_parent_entity_type(temp_id)
-            #     self.parent_entity_updated.emit(parent_type, parent_id)
-            #     # 0==0
 
             # добавляем родителя, если есть
             parent_id = self._get_parent_id_for_new_row(dto)
-            
-            # if parent_id is not None and parent_id > 0:
-            #     self._affected_parents.add(parent_id)
-            #     parent_type = self._get_parent_entity_type(temp_id)
-            #     # Откладываем испускание сигнала до после коммита
-            #     ctx = ActionContext(sess, ActionType.COMMIT) if sess else None
-            #     add_deferred_action(
-            #         ctx,
-            #         self.parent_entity_updated.emit,
-            #         args=(parent_type, parent_id)
-            #     )
 
             # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание)
             self._update_affected_parents_and_deferred_action(
@@ -4331,31 +4331,34 @@ class PaginatedListPage(
             это приведёт к бесконечной рекурсии.
             - Метод **не изменяет** флаг `_saving_in_progress` – это задача вызывающего кода.
         """
-        saved_map = {}
 
-        # Обрабатываем все корневые новые строки
-        for key in list(self._draft_registry.get_keys_by_prefix("__new__")):
-            temp_id = int(key.split(':')[-1])
-            # Пропускаем, если ключ уже был удалён рекурсивным вызовом
-            if not self._draft_registry.has(key):
-                continue
 
-            data = self._draft_registry.get(key)
-            parent_id = getattr(data["dto"], 'parent_id', None)
+        with self.service._session_scope(session) as sess:
+            saved_map = {}
 
-            # Корень: parent_id отсутствует (None), равен 0 или положительному числу
-            if parent_id is None or parent_id >= 0:
-                created = self._save_new_row_recursive(
-                    temp_id,
-                    real_parent_id=None, 
-                    session=session,
-                )
-                if created:
-                    saved_map[temp_id] = created
-            # Если parent_id отрицательный (временный), то эта строка будет обработана
-            # как потомок при сохранении своего родителя – игнорируем здесь.
+            # Обрабатываем все корневые новые строки
+            for key in list(self._draft_registry.get_keys_by_prefix("__new__")):
+                temp_id = int(key.split(':')[-1])
+                # Пропускаем, если ключ уже был удалён рекурсивным вызовом
+                if not self._draft_registry.has(key):
+                    continue
 
-        return saved_map
+                data = self._draft_registry.get(key)
+                parent_id = getattr(data["dto"], 'parent_id', None)
+
+                # Корень: parent_id отсутствует (None), равен 0 или положительному числу
+                if parent_id is None or parent_id >= 0:
+                    created = self._save_new_row_recursive(
+                        temp_id,
+                        real_parent_id=None, 
+                        session=sess,
+                    )
+                    if created:
+                        saved_map[temp_id] = created
+                # Если parent_id отрицательный (временный), то эта строка будет обработана
+                # как потомок при сохранении своего родителя – игнорируем здесь.
+
+            return saved_map
 
     # def _save_new_rows(self) -> Dict[int, Any]:
     #     """
@@ -4726,21 +4729,22 @@ class PaginatedListPage(
 
         self.logger.debug(f"_save_modified_rows: session is None = {session is None}")
         
-        entity_ids = set()
+        with self.service._session_scope(session) as sess:
+            entity_ids = set()
 
-        # Ищем все ключи статусов для данного типа
-        for key in self._draft_registry.get_keys_by_prefix(f"__status__:{self._entity_type}:"):
-            parts = key.split(':')
-            if len(parts) >= 3:
-                entity_id = int(parts[2])
-                status = self._draft_registry.get_entity_status(self._entity_type, entity_id)
-                if status in ('own', 'both'):
-                    entity_ids.add(entity_id)
+            # Ищем все ключи статусов для данного типа
+            for key in self._draft_registry.get_keys_by_prefix(f"__status__:{self._entity_type}:"):
+                parts = key.split(':')
+                if len(parts) >= 3:
+                    entity_id = int(parts[2])
+                    status = self._draft_registry.get_entity_status(self._entity_type, entity_id)
+                    if status in ('own', 'both'):
+                        entity_ids.add(entity_id)
 
-        self._save_modified_rows_for_ids(
-            entity_ids=entity_ids,
-            session=session, 
-        )
+            self._save_modified_rows_for_ids(
+                entity_ids=entity_ids,
+                session=sess, 
+            )
 
         # for entity_id in entity_ids:
         #     row = self._find_row_by_id(entity_id)
@@ -4981,9 +4985,12 @@ class PaginatedListPage(
         """
     
         self.logger.debug(f"_save_deleted_rows: session is None = {session is None}")
+
         with self.service._session_scope(session) as sess:
+
             prefix = f"__deleted__:{self._entity_type}:"
             keys = list(self._draft_registry.get_keys_by_prefix(prefix))
+
             for key in keys:
                 entity_id = int(key.split(':')[-1])
 
@@ -5371,9 +5378,9 @@ class PaginatedListPage(
         # Сохраняем всех изменений внутри единой транзакции.
         self._save_all_changes_impl_session()
 
-        # Точечно обновляем родительские строки, у которых изменились дочерние данные
-        if self._affected_parents:
-            self._refresh_parent_rows(self._affected_parents)
+        # # Точечно обновляем родительские строки, у которых изменились дочерние данные
+        # if self._affected_parents: 
+        #     self._refresh_parent_rows(self._affected_parents) # дублирует работу отложенных сигналов, причём менее надёжно
 
         # Очищаем реестр от служебных ключей (черновики, статусы, счётчики, удалённые, новые)
         self._clear_entity_registry()
@@ -5468,39 +5475,9 @@ class PaginatedListPage(
             вызывающего кода.
         """
 
-        # if session is None:
-        #     with self.service._db.session_scope() as new_session:
-        #         return self._save_all_changes_impl_session(new_session)
-
-
-        # if self._saving_in_progress: # тут ненужна...
-        #     self.logger.warning("Попытка рекурсивного сохранения")
-        #     return False
-        
-        # self._saving_in_progress = True
-
         with self.service._session_scope(session) as sess:
-            # try:
-
-            # with self.service._db.session_scope() as session:
-
             # Сохраняем новые строки, получаем словарь {temp_id: created_dto}
             new_map = self._save_new_rows(session=sess)
-
-            # # Если текущая выбранная строка была новой – обновляем selected_dto
-            # if self.selected_dto and self.selected_dto.id in new_map:
-            #     self.selected_dto = new_map[self.selected_dto.id]
-
-            # # # Сохраняем дочерние черновики (например, фото)
-            # # self._save_child_components()
-
-            # # # Сохраняем дочерние черновики для всех новых строк (они уже имеют реальный ID)
-            # # for temp_id, created in new_map.items():
-            # #     self._save_child_components_for_parent(created.id)
-            # #
-            # # # Сохраняем дочерние черновики для текущей выбранной строки, если она существует и не новая
-            # # if self.selected_dto and self.selected_dto.id >= 0:
-            # #     self._save_child_components_for_parent(self.selected_dto.id)
 
             # Если текущая выбранная строка была новой – обновляем selected_dto
             if self.selected_dto and self.selected_dto.id in new_map:
@@ -5515,9 +5492,6 @@ class PaginatedListPage(
 
             # Сохраняем удалённые строки
             self._save_deleted_rows(session=sess)
-
-            # finally:
-            #     self._saving_in_progress = False
 
             return True
 
@@ -5569,6 +5543,12 @@ class PaginatedListPage(
 
             return True
         
+        except ValueError as e:
+            # Обязательные поля не заполнены – показываем диалог пользователю
+            QMessageBox.critical(self, "Ошибка сохранения", str(e))
+            self.logger.exception(f"Ошибка валидации при сохранении: {e}")
+            return False
+
         except Exception as e:
             self.logger.exception(f"Ошибка при сохранении: {e}")
             return False
@@ -5677,7 +5657,6 @@ class PaginatedListPage(
         # if idx.isValid():
         #     self.table_view.update(idx)
 
-
         return True
 
     @AppLogger.get_instance(
@@ -5692,13 +5671,16 @@ class PaginatedListPage(
         """Отложенное действие: после коммита загружает свежий DTO и обновляет строку."""
         try:
             fresh_dto = self.service.get_by_id(real_id)
+
             self._update_row_by_id(temp_id, fresh_dto)
+
             if temp_id != real_id:
                 self._update_row_by_id(real_id, fresh_dto)
+
             self.logger.debug(f"Строка {real_id} обновлена после коммита")
+
         except Exception as e:
             self.logger.exception(f"Ошибка обновления строки {real_id} после коммита: {e}")
-
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -5815,19 +5797,17 @@ class PaginatedListPage(
                         dto,
                         session=sess
                     )
-                    # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание)
+                    # добавляем родителя, если есть
                     parent_id = self._get_parent_id(entity_id)
+                    # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание) 
                     self._update_affected_parents_and_deferred_action(
                         parent_id, 
                         entity_id, 
                         session=sess
                     )
 
-
-
                     # Очищаем черновик DTO (если был)
                     self._clear_draft_dto(entity_id)
-
 
                     # Обновляем строку в таблице по ID (вместо индекса)
                     self._update_row_by_id(entity_id, updated)
@@ -5843,21 +5823,6 @@ class PaginatedListPage(
                     # # if self.selected_dto and self.selected_dto.id == entity_id:
                     # #     self.selected_dto = updated
                     # self._clear_selected_dto(entity_id, updated)
-
-                    # Уведомляем родителя об изменении (для обновления виртуальных полей)
-
-                    # добавляем родителя, если есть
-                    parent_id = self._get_parent_id(entity_id)
-                    # if parent_id is not None and parent_id > 0:
-                    #     self._affected_parents.add(parent_id)
-                    #     parent_type = self._get_parent_entity_type(entity_id)
-                    #     self.parent_entity_updated.emit(parent_type, parent_id)
-                    
-                    self._update_affected_parents_and_deferred_action(
-                        parent_id,
-                        entity_id,
-                        session
-                    )
 
                 except Exception as e:
 
@@ -5955,7 +5920,10 @@ class PaginatedListPage(
         """Перезагружает данные с новыми фильтрами и обновляет состояние кнопки сохранения."""
     
         super().reload_with_filters(filters_tree)   # вызывает _load_first_page() в миксине
+
         self._update_save_button_state() # Обновляем состояние кнопки сохранения
+
+
         # Принудительно переустанавливаем делегаты после загрузки данных, чтобы миниатюры отображались
         self._reapply_delegates()
 
@@ -6020,8 +5988,8 @@ class PaginatedListPage(
                         )
 
                         # self._affected_parents.add(parent_id)  # добавляем родителя в список затронутых
-                        # Добавляем всех предков (родитель, дед, прадед и т.д.) в множество для обновления
-                        self._add_parents_to_affected_set(parent_id)
+                        # # Добавляем всех предков (родитель, дед, прадед и т.д.) в множество для обновления
+                        # self._add_parents_to_affected_set(parent_id)
 
                         # # Добавляем отложенное действие для обновления родителя и всех его предков после коммита
                         # ctx = ActionContext(session, ActionType.COMMIT) if session else None

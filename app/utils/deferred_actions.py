@@ -119,6 +119,7 @@ def add_deferred_action(
 
     ensure_actions_dict(ctx.session)
     ctx.session._actions[ctx.action_type].append((func, args, kwargs or {}))
+    # 0==0
 
 
 @AppLogger.get_instance(
@@ -181,13 +182,20 @@ def execute_actions(
         return
 
     for func, args, kwargs in actions:
+        logg=logger or print
         # Обёртка для вызова в главном потоке
-        def wrapper():
+        # Создаём частичную функцию с фиксированными аргументами
+        def wrapper(f=func, a=args, k=kwargs, logg=logg):
             try:
-                func(*args, **kwargs)
+                f(*a, **k)
+
+                logg.debug(
+                    f"отложенного действия выполнено: {f.__name__} " 
+                )
+                # 0==0
             except Exception as e:
-                if logger:
-                    logger.exception(f"Ошибка при выполнении отложенного действия: {e}")
+                if logg:
+                    logg.exception(f"Ошибка при выполнении отложенного действия: {e}")
 
         # QMetaObject.invokeMethod(
         #     wrapper,

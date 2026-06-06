@@ -231,14 +231,17 @@ class AppointmentPhotoFrame(BasePage):
         # Получаем выбранный DTO приёма
         dto = self.appointment_page.get_current_selected_dto()
         if dto:
+
             # Устанавливаем контекстный параметр для таблицы фото
             self.photo_page._context_params = {'appointment_id': dto.id}
+
             # Перезагружаем фото с фильтром по appointment_id
             self.photo_page.reload_with_filters({
                 'column': 'appointment_id',
                 'operator': 'eq',
                 'value': dto.id
             })
+            
         else:
             # Очищаем таблицу фото и сбрасываем контекст
             self.photo_page.source_model.clear()
@@ -663,7 +666,7 @@ class AppointmentPhotoFrame(BasePage):
             parent_entity_type (str): Тип родительской сущности (например, 'appointment').
             parent_id (int): ID родительской записи.
         """
-        if parent_entity_type == 'appointment':
+        if parent_entity_type == 'appointment': 
             # 0==0
             self.logger.debug(f"Обновление строки приёма id={parent_id} после изменений в фото")
             # 0==0

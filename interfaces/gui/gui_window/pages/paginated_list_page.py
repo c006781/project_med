@@ -816,6 +816,128 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _collect_ancestors(self, entity_id: int) -> Set[int]:
+        """
+        Возвращает множество ID всех предков сущности (включая саму сущность).
+
+        **Алгоритм:**
+            - Начиная с entity_id, поднимается по цепочке родительских связей
+            через `self._get_parent_id()` до тех пор, пока не достигнет None или ID <= 0.
+            - Каждый встреченный ID добавляется в множество.
+
+        **Параметры:**
+            entity_id (int): ID сущности, с которой начинается обход.
+
+        **Возвращает:**
+            Set[int]: Множество ID всех предков (включая переданный entity_id).
+
+        **Пример:**
+            >>> # Для приёма с ID=100, у которого родитель-пациент ID=10,
+            >>> # а у пациента нет родителя, вернёт {100, 10}
+            >>> ancestors = self._collect_ancestors(100)
+        """
+        ancestors = set()
+        current = entity_id
+        while current is not None and current > 0:
+            ancestors.add(current)
+            current = self._get_parent_id(current)
+        return ancestors
+    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _refresh_parent_rows_deferred(self, entity_id: int) -> None:
+        """
+        Отложенное действие: обновляет строку указанной сущности и всех её предков после коммита.
+
+        **Назначение:**
+            Гарантирует, что после фиксации транзакции (например, после добавления фото к приёму)
+            родительские строки в таблице будут перезагружены из БД с актуальными данными,
+            включая виртуальные поля (например, `has_photos`).
+
+        **Алгоритм:**
+            1. Собирает множество ID всех предков (включая переданный `entity_id`), поднимаясь по цепочке
+            через `self._get_parent_id()`.
+            2. Вызывает `self._refresh_parent_rows(ids_to_update)`, который перезагружает DTO для каждого ID
+            и обновляет модель таблицы.
+
+        **Параметры:**
+            entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
+
+        **Возвращает:**
+            None
+
+        **Примечание:**
+            Метод должен вызываться через `add_deferred_action` с `ActionContext(session, ActionType.COMMIT)`,
+            чтобы выполниться после успешного коммита транзакции.
+        """
+        # Собираем ID всех предков (включая сам entity_id)
+        # ids_to_update = set()
+        # current_id = entity_id
+        # while current_id is not None and current_id > 0:
+        #     ids_to_update.add(current_id)
+        #     current_id = self._get_parent_id(current_id)
+
+        ids_to_update = self._collect_ancestors(entity_id)
+        
+        if ids_to_update:
+            self.logger.debug(f"_refresh_parent_rows_deferred: обновляем родителей {ids_to_update}")
+            self._refresh_parent_rows(ids_to_update)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_parents_to_affected_set(self, entity_id: int) -> None:
+        """
+        Добавляет указанную сущность и всех её предков в множество `self._affected_parents`.
+
+        **Назначение:**
+            Обеспечивает обновление всей иерархии родителей после сохранения дочерних изменений
+            (например, после добавления фото к приёму должны обновиться строка приёма и строка пациента).
+
+        **Алгоритм:**
+            1. Добавляет `entity_id` в `self._affected_parents`.
+            2. Получает ID родителя через `self._get_parent_id(entity_id)`.
+            3. Если родитель существует (не `None` и > 0), рекурсивно вызывает себя для родителя.
+            (Используется итеративный цикл, чтобы избежать переполнения стека при глубокой вложенности.)
+
+        **Параметры:**
+            entity_id (int): ID сущности, с которой начинается обход (обычно прямой родитель дочернего изменения).
+
+        **Возвращает:**
+            None
+
+        **Пример:**
+            >>> # После сохранения фото для приёма с ID=100
+            >>> self._add_parents_to_affected_set(100)  # добавит 100, затем его родителя-пациента, затем родителя пациента (если есть) и т.д.
+        """
+
+
+        ancestors = self._collect_ancestors(entity_id)
+        for anc_id in ancestors:
+            if anc_id not in self._affected_parents:
+                self.logger.debug(f"Добавлен родитель {anc_id} в _affected_parents")
+                self._affected_parents.add(anc_id)
+
+        # current_id = entity_id
+        # while current_id is not None and current_id > 0:
+        #     if current_id not in self._affected_parents:
+        #         self.logger.debug(f"Добавлен родитель {current_id} в _affected_parents")
+        #         self._affected_parents.add(current_id)
+                
+        #     # Переход к родителю текущей сущности
+        #     current_id = self._get_parent_id(current_id)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -853,8 +975,9 @@ class PaginatedListPage(
 
 
                     # Если это текущая выбранная строка, обновляем selected_dto
-                    if self.selected_dto and self.selected_dto.id == parent_id:
-                        self.selected_dto = fresh_dto
+                    # if self.selected_dto and self.selected_dto.id == parent_id:
+                    #     self.selected_dto = fresh_dto
+                    self._clear_selected_dto(entity_id = parent_id, new_dto = fresh_dto)
 
                 except Exception as e:
                     self.logger.exception(f"Не удалось обновить родителя {parent_id}: {e}")
@@ -2192,7 +2315,7 @@ class PaginatedListPage(
             new_path, new_description = dialog.get_result()
             return True, new_path, new_description
         
-        return (False,None, None)
+        return (False, None, None)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -3776,9 +3899,18 @@ class PaginatedListPage(
         entity_id,
         session: Optional[Session] = None
     ):
+        self.logger.debug(
+            f"_update_affected_parents: "
+            f"parent_id={parent_id}, "
+            f"entity_id={entity_id}, "
+            f"session={session is not None}"
+        )
         if parent_id is not None and parent_id > 0:
             self._affected_parents.add(parent_id)
             parent_type = self._get_parent_entity_type(entity_id)
+            # Всегда передаём ActionContext с сессией, даже если session = None,
+            # тогда контекст будет ложным и действие выполнится немедленно.
+            # Но в рамках транзакции (session передан) – отложится.
             ctx = ActionContext(session, ActionType.COMMIT) if session else None
             add_deferred_action(
                 ctx,
@@ -3879,251 +4011,256 @@ class PaginatedListPage(
             не найден в реестре.
         """
 
-        key = f"__new__:{self._entity_type}:{temp_id}"
-        if not self._draft_registry.has(key):
-            return None
+        with self.service._session_scope(session) as sess:
 
-        data = self._draft_registry.get(key)
-        dto = data["dto"]
+            key = f"__new__:{self._entity_type}:{temp_id}"
+            if not self._draft_registry.has(key):
+                return None
 
-        # Если передан реальный ID родителя, обновляем parent_id в DTO
-        if real_parent_id is not None and hasattr(dto, 'parent_id'):
-            dto.parent_id = real_parent_id
-            self._draft_registry.set(key, {"dto": dto})
-            self.logger.debug(f"Обновлён parent_id новой строки {temp_id} -> {real_parent_id}")
+            data = self._draft_registry.get(key)
+            dto = data["dto"]
 
-        # Преобразование относительных путей в абсолютные (для передачи в сервис)
-        temp_dir = self._convert_photo_paths_to_absolute(temp_id, dto)
-    
-        # ВНИМАНИЕ: порядок важен – сначала создаём запись в БД, чтобы получить реальный ID,
-        # затем переносим файлы из временной папки в папку с реальным ID,
-        # и обновляем DTO, чтобы в БД сохранились относительные пути. 
-        # (temp_id - может быть отрицательный. по этом нужен именно реальный created.id)
-        # Отказаться от второго вызова update невозможно без кардинальной переработки логики.  
+            # Если передан реальный ID родителя, обновляем parent_id в DTO
+            if real_parent_id is not None and hasattr(dto, 'parent_id'):
+                dto.parent_id = real_parent_id
+                self._draft_registry.set(key, {"dto": dto})
+                self.logger.debug(f"Обновлён parent_id новой строки {temp_id} -> {real_parent_id}")
+
+            # Преобразование относительных путей в абсолютные (для передачи в сервис)
+            temp_dir = self._convert_photo_paths_to_absolute(temp_id, dto)
         
-        # Сохраняем строку в БД
-        try:
-            created = self.service.create(dto, session=session)
-
-            self._clear_draft_dto(temp_id)
-
-            # # Перезагружаем, чтобы получить виртуальные поля (has_photos и т.д.)
-            # created = self.service.get_by_id(created.id, session=session)
-
-        except Exception as e:
-            self.logger.error(f"Ошибка сохранения новой строки {temp_id}: {e}")
+            # ВНИМАНИЕ: порядок важен – сначала создаём запись в БД, чтобы получить реальный ID,
+            # затем переносим файлы из временной папки в папку с реальным ID,
+            # и обновляем DTO, чтобы в БД сохранились относительные пути. 
+            # (temp_id - может быть отрицательный. по этом нужен именно реальный created.id)
+            # Отказаться от второго вызова update невозможно без кардинальной переработки логики.  
             
-            # ВАЖНО: не удаляем служебный ключ __parent_counter_inc__ при ошибке!
-            # Строка сохраняется в реестре (ключ __new__ остаётся), и счётчик родителя уже увеличен.
-            # При повторном успешном сохранении ключ будет использован для балансировки.
-            # Удаление ключа здесь привело бы к завышению счётчика родителя.
-            # Очистка ключа происходит только при успешном сохранении (в _balance_parent_counter)
-            # или при отмене строки (в _cancel_new_row).
+            # Сохраняем строку в БД
+            try:
+                created = self.service.create(dto, session=sess)
 
-            # ВАЖНО: При ошибке сохранения ключ __parent_counter_inc__ не удаляется,
-            # потому что строка остаётся в реестре (__new__). При повторной попытке
-            # сохранения _balance_parent_counter найдёт ключ и корректно уменьшит счётчик.
-            # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
-            raise
+                self._clear_draft_dto(temp_id)
 
+                # # Перезагружаем, чтобы получить виртуальные поля (has_photos и т.д.)
+                # created = self.service.get_by_id(created.id, session=sess)
+
+            except Exception as e:
+                self.logger.error(f"Ошибка сохранения новой строки {temp_id}: {e}")
+                
+                # ВАЖНО: не удаляем служебный ключ __parent_counter_inc__ при ошибке!
+                # Строка сохраняется в реестре (ключ __new__ остаётся), и счётчик родителя уже увеличен.
+                # При повторном успешном сохранении ключ будет использован для балансировки.
+                # Удаление ключа здесь привело бы к завышению счётчика родителя.
+                # Очистка ключа происходит только при успешном сохранении (в _balance_parent_counter)
+                # или при отмене строки (в _cancel_new_row).
+
+                # ВАЖНО: При ошибке сохранения ключ __parent_counter_inc__ не удаляется,
+                # потому что строка остаётся в реестре (__new__). При повторной попытке
+                # сохранения _balance_parent_counter найдёт ключ и корректно уменьшит счётчик.
+                # Если пользователь отменит строку, ключ будет удалён в _cancel_new_row.
+                raise
+
+            
+
+            # # Переносим файлы из временной папки в основное хранилище
+            # updated_dto, copied_files, old_files, copied_dest_paths, error_messages = self._move_files_from_temp_to_storage(
+            #     created.id, 
+            #     created, 
+            #     old_id=temp_id, 
+            #     session=sess, 
+            # )
+
+            # if error_messages:
+            #     raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
+
+            # # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
+            # # temp_dir = self._get_temp_dir(temp_id)
+            # # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
+            # #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
+            # #     self.logger.error(error_msg)
+            # #     raise RuntimeError(error_msg)
+
+            # # # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
+            # # created = self._process_photo_fields_for_new_row(created, created.id, sess)
+
+            # # # Удаляем временную папку новой строки, так как файлы уже скопированы 
+            # # self._cleanup_temp_dir(temp_id)
+
+            # # Обновляем запись в БД, сохраняя относительные пути
+            # if copied_files or old_files or copied_dest_paths:
+            #     try:
+            #         updated_dto = self.service.update(updated_dto, session=sess)
+            #     except Exception as e:
+
+            #         # Логируем ошибку и пробрасываем дальше (транзакция откатится)
+            #         self.logger.error(f"Ошибка при переносе файлов или сохранении строки {temp_id}: {e}")
+
+            #          # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
+            #         ctx_rollback = DeletionContext.create(sess, DeletionType.ROLLBACK)
+            #         for files in [
+            #             # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+            #             copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+            #             # old_files,  # Удаляем старые файлы (заменяемые)
+            #         ]:
+            #             # for file in files:
+            #             #
+            #             #     delete_file_safely(  # удаление сразу
+            #             #         file,
+            #             #         logger = self.logger
+            #             #     )
+            #             self._del_file(
+            #                 file_path=files,
+            #                 # session=None,  # Моментальное удаление
+            #                 # session=sess,
+            #                 ctx=ctx_rollback,
+            #                 if_delete_parent_dir=False,
+            #                 force=False,
+            #             )
+
+            #         # Не удаляем временную папку! Она остаётся для повторной попытки.
+            #         #    Пользователь сможет исправить ошибку и сохранить снова.
+            #         # # Старые файлы не удаляем – они остались как были
+            #         # # Временную папку всё равно чистим
+            #         # # self._cleanup_temp_dir(temp_id)
+
+            #         # schedule_deletion(
+            #         #     path=temp_id,
+            #         #     session=sess,
+            #         #     remove_parent_if_empty=False,
+            #         #     force=False,
+            #         #     logger=self.logger
+            #         # )
+
+            #         raise
+
+            #     # Временные файлы (copied_files) и временную папку НЕ удаляем.
+            #     # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
+            #     # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
+            #     ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
+            #     for files in [
+            #         copied_files,  # Удаляем временные файлы (скопированные из временной папки)
+            #         # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
+            #         old_files,  # Удаляем старые файлы (заменяемые)
+            #     ]:
+            #         self._del_file(  # отложенное удаление
+            #             files,
+            #             # session=sess
+            #             ctx=ctx_commit,
+            #         )
+
+
+            #     # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
+            #     # (через discard_entity_subtree или clear_entity_drafts)
+            #     # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
+            #     # # Принудительно удаляем временную папку, если она осталась
+            #     # self._cleanup_temp_dir(temp_id)
+
+            #     created = updated_dto   # теперь created ссылается на окончательный DTO
+            # else:
+            #     updated_dto = created  # без изменений
+
+            # добавляем родителя, если есть
+            # parent_id = self._get_parent_id_for_new_row(dto)
+            # if parent_id is not None and parent_id > 0:
+            #     self._affected_parents.add(parent_id)
+            #     parent_type = self._get_parent_entity_type(temp_id)
+            #     self.parent_entity_updated.emit(parent_type, parent_id)
+            #     # 0==0
+
+            # добавляем родителя, если есть
+            parent_id = self._get_parent_id_for_new_row(dto)
+            
+            # if parent_id is not None and parent_id > 0:
+            #     self._affected_parents.add(parent_id)
+            #     parent_type = self._get_parent_entity_type(temp_id)
+            #     # Откладываем испускание сигнала до после коммита
+            #     ctx = ActionContext(sess, ActionType.COMMIT) if sess else None
+            #     add_deferred_action(
+            #         ctx,
+            #         self.parent_entity_updated.emit,
+            #         args=(parent_type, parent_id)
+            #     )
+
+            # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание)
+            self._update_affected_parents_and_deferred_action(
+                parent_id,
+                temp_id,
+                session=sess
+            )
         
+            # # обновление по индексу на обновление по ID )
+            # self._update_row_by_id(temp_id, created) # перенёс в отложенное 
 
-        # # Переносим файлы из временной папки в основное хранилище
-        # updated_dto, copied_files, old_files, copied_dest_paths, error_messages = self._move_files_from_temp_to_storage(
-        #     created.id, 
-        #     created, 
-        #     old_id=temp_id, 
-        #     session=session, 
-        # )
+            # # Обновляем модель
+            # # Найти строку в модели по временному ID и заменить DTO
+            # row = self._find_row_by_id(temp_id)
+            # if row >= 0:
+            #     # self._source_model_update_row(row, created)
+            #     # Обновляем модель DTO с уже исправленными путями
+            #     # self._source_model_update_row(row, updated_dto)
+            #     self._source_model_update_row(row, created)
+            #     # self.original_data[row] = created
+            #     # if self.selected_dto and self.selected_dto.id == temp_id:
+            #     #     self.selected_dto = created
 
-        # if error_messages:
-        #     raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
+            #     self._clear_selected_dto(temp_id, created)
+            # else:
+            #     self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
+            
+            self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
 
-        # # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-        # # temp_dir = self._get_temp_dir(temp_id)
-        # # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-        # #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-        # #     self.logger.error(error_msg)
-        # #     raise RuntimeError(error_msg)
-
-        # # # Обработка фото для новой строки (копирование файлов и преобразование в относительный путь)
-        # # created = self._process_photo_fields_for_new_row(created, created.id, session)
-
-        # # # Удаляем временную папку новой строки, так как файлы уже скопированы 
-        # # self._cleanup_temp_dir(temp_id)
-
-        # # Обновляем запись в БД, сохраняя относительные пути
-        # if copied_files or old_files or copied_dest_paths:
-        #     try:
-        #         updated_dto = self.service.update(updated_dto, session=session)
-        #     except Exception as e:
-
-        #         # Логируем ошибку и пробрасываем дальше (транзакция откатится)
-        #         self.logger.error(f"Ошибка при переносе файлов или сохранении строки {temp_id}: {e}")
-
-        #          # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
-        #         ctx_rollback = DeletionContext.create(session, DeletionType.ROLLBACK)
-        #         for files in [
-        #             # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-        #             copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
-        #             # old_files,  # Удаляем старые файлы (заменяемые)
-        #         ]:
-        #             # for file in files:
-        #             #
-        #             #     delete_file_safely(  # удаление сразу
-        #             #         file,
-        #             #         logger = self.logger
-        #             #     )
-        #             self._del_file(
-        #                 file_path=files,
-        #                 # session=None,  # Моментальное удаление
-        #                 # session=session,
-        #                 ctx=ctx_rollback,
-        #                 if_delete_parent_dir=False,
-        #                 force=False,
-        #             )
-
-        #         # Не удаляем временную папку! Она остаётся для повторной попытки.
-        #         #    Пользователь сможет исправить ошибку и сохранить снова.
-        #         # # Старые файлы не удаляем – они остались как были
-        #         # # Временную папку всё равно чистим
-        #         # # self._cleanup_temp_dir(temp_id)
-
-        #         # schedule_deletion(
-        #         #     path=temp_id,
-        #         #     session=session,
-        #         #     remove_parent_if_empty=False,
-        #         #     force=False,
-        #         #     logger=self.logger
-        #         # )
-
-        #         raise
-
-        #     # Временные файлы (copied_files) и временную папку НЕ удаляем.
-        #     # Они будут удалены автоматически при отмене черновиков (discard_entity_subtree)
-        #     # или при очистке страницы (on_leave -> _clear_page_drafts_prefixes).
-        #     ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
-        #     for files in [
-        #         copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-        #         # copied_dest_paths, # Удаляем целевые (уже скопированные) файлы
-        #         old_files,  # Удаляем старые файлы (заменяемые)
-        #     ]:
-        #         self._del_file(  # отложенное удаление
-        #             files,
-        #             # session=session
-        #             ctx=ctx_commit,
-        #         )
+            # Если эта строка была выбрана, обновляем selected_dto
+            # self._clear_selected_dto(temp_id, updated_dto)
+            self._clear_selected_dto(temp_id, created)
 
 
-        #     # Временную папку НЕ удаляем – она будет удалена при отмене черновиков
-        #     # (через discard_entity_subtree или clear_entity_drafts)
-        #     # Это позволяет избежать удаления до коммита и даёт возможность повторной попытки.
-        #     # # Принудительно удаляем временную папку, если она осталась
-        #     # self._cleanup_temp_dir(temp_id)
+            # Обновляем внешние ключи во всех дочерних новых строках других типов (например, фото)
+            foreign_key_field = f"{self._entity_type}_id"
+            updated = self._draft_registry.update_foreign_key_in_new_dtos(
+                temp_id, created.id, foreign_key_field
+            )
+            if updated:
+                self.logger.debug(f"Обновлено {updated} дочерних новых строк после сохранения родителя {created.id}")
 
-        #     created = updated_dto   # теперь created ссылается на окончательный DTO
-        # else:
-        #     updated_dto = created  # без изменений
+            # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
+            self._transferring_child_drafts(temp_id, created.id)
 
-        # добавляем родителя, если есть
-        # parent_id = self._get_parent_id_for_new_row(dto)
-        # if parent_id is not None and parent_id > 0:
-        #     self._affected_parents.add(parent_id)
-        #     parent_type = self._get_parent_entity_type(temp_id)
-        #     self.parent_entity_updated.emit(parent_type, parent_id)
-        #     # 0==0
+            # Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик
+            self._balance_parent_counter(temp_id, created.id)
 
-        # добавляем родителя, если есть
-        parent_id = self._get_parent_id_for_new_row(dto)
-        # if parent_id is not None and parent_id > 0:
-        #     self._affected_parents.add(parent_id)
-        #     parent_type = self._get_parent_entity_type(temp_id)
-        #     # Откладываем испускание сигнала до после коммита
-        #     ctx = ActionContext(session, ActionType.COMMIT) if session else None
-        #     add_deferred_action(
-        #         ctx,
-        #         self.parent_entity_updated.emit,
-        #         args=(parent_type, parent_id)
-        #     )
-        self._update_affected_parents_and_deferred_action(
-            parent_id,
-            temp_id,
-            session
-        )
-       
-        # # обновление по индексу на обновление по ID )
-        # self._update_row_by_id(temp_id, created) # перенёс в отложенное 
+            # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
+            self._transferring_child_drafts(temp_id, created.id)
 
-        # # Обновляем модель
-        # # Найти строку в модели по временному ID и заменить DTO
-        # row = self._find_row_by_id(temp_id)
-        # if row >= 0:
-        #     # self._source_model_update_row(row, created)
-        #     # Обновляем модель DTO с уже исправленными путями
-        #     # self._source_model_update_row(row, updated_dto)
-        #     self._source_model_update_row(row, created)
-        #     # self.original_data[row] = created
-        #     # if self.selected_dto and self.selected_dto.id == temp_id:
-        #     #     self.selected_dto = created
+            # Переносим статус 'own' (если был) с временного ID на реальный
+            self._update_id_own_in_real_id(temp_id, created.id)
 
-        #     self._clear_selected_dto(temp_id, created)
-        # else:
-        #     self.logger.warning(f"Не найдена строка для временного ID {temp_id} при обновлении модели")
-        
-        self.logger.debug(f"Сохранена новая строка {temp_id} -> реальный ID {created.id}")
+            # Успешно – удаляем временную папку для temp_id (она больше не нужна) (отложенное действие)
+            self._cleanup_temp_dir(
+                temp_id,
+                ctx = DeletionContext.create(sess, DeletionType.COMMIT)
+            )
 
-        # Если эта строка была выбрана, обновляем selected_dto
-        # self._clear_selected_dto(temp_id, updated_dto)
-        self._clear_selected_dto(temp_id, created)
+            # # Снимаем флаг собственных изменений (строка сохранена, статус пересчитается с учётом детей)
+            # self.clear_own_change(created.id)
 
+            # Удаляем ключ __new__ текущей строки
+            self._draft_registry.discard(key)
 
-        # Обновляем внешние ключи во всех дочерних новых строках других типов (например, фото)
-        foreign_key_field = f"{self._entity_type}_id"
-        updated = self._draft_registry.update_foreign_key_in_new_dtos(
-            temp_id, created.id, foreign_key_field
-        )
-        if updated:
-            self.logger.debug(f"Обновлено {updated} дочерних новых строк после сохранения родителя {created.id}")
+            # Находим и рекурсивно сохраняем всех прямых потомков
+            self._recursive_save_new_row(temp_id, created.id, session=sess)
 
-        # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
-        self._transferring_child_drafts(temp_id, created.id)
+            # Очистка черновиков и временной папки после успешного сохранения
+            ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
+            self.clear_entity_drafts(created.id, ctx_commit)
 
-        # Уменьшает счётчик родителя новой строки, если при её создании был увеличен счётчик
-        self._balance_parent_counter(temp_id, created.id)
+            # отложенное действие для обновления строки после коммита
+            add_deferred_action(
+                ctx=ActionContext(sess, ActionType.COMMIT) if sess else None,
+                func=self._refresh_and_update_row_after_commit,
+                args=(temp_id, created.id)
+            )
 
-        # Переносим дочерние черновики (фото, заметки) с temp_id на created.id
-        self._transferring_child_drafts(temp_id, created.id)
-
-        # Переносим статус 'own' (если был) с временного ID на реальный
-        self._update_id_own_in_real_id(temp_id, created.id)
-
-        # Успешно – удаляем временную папку для temp_id (она больше не нужна) (отложенное действие)
-        self._cleanup_temp_dir(
-            temp_id,
-            ctx = DeletionContext.create(session, DeletionType.COMMIT)
-        )
-
-        # # Снимаем флаг собственных изменений (строка сохранена, статус пересчитается с учётом детей)
-        # self.clear_own_change(created.id)
-
-        # Удаляем ключ __new__ текущей строки
-        self._draft_registry.discard(key)
-
-        # Находим и рекурсивно сохраняем всех прямых потомков
-        self._recursive_save_new_row(temp_id, created.id, session=session)
-
-        # Очистка черновиков и временной папки после успешного сохранения
-        ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
-        self.clear_entity_drafts(created.id, ctx_commit)
-
-        # отложенное действие для обновления строки после коммита
-        add_deferred_action(
-            ctx=ActionContext(session, ActionType.COMMIT) if session else None,
-            func=self._refresh_and_update_row_after_commit,
-            args=(temp_id, created.id)
-        )
-
-        return created
+            return created
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -4549,6 +4686,12 @@ class PaginatedListPage(
 
         **Важно:** Дочерний компонент **НЕ ДОЛЖЕН вызывать mark_child_change внутри apply** –
             это приведёт к двойному учёту. Весь учёт счётчиков выполняет только `PaginatedListPage`.
+
+        **Важно:** 
+            После успешного применения черновика родительская строка и все её предки
+            добавляются в множество `_affected_parents`. После коммита транзакции они будут
+            перезагружены из БД (через `_refresh_parent_rows`), что позволяет обновить
+            виртуальные поля (например, `has_photos`) во всей иерархии.
         
         Args:
             parent_ids: Множество ID родителей (должны быть > 0).
@@ -4708,7 +4851,7 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _clear_selected_dto(self, entity_id:int, new_dto = None) -> None:
+    def _clear_selected_dto(self, entity_id:int, new_dto = None) -> bool:
         """
         Сбрасывает текущий выбранный DTO, если он соответствует указанному ID.
 
@@ -4731,7 +4874,7 @@ class PaginatedListPage(
         """
 
         if entity_id is None:
-            return
+            return False
         
         # if isinstance(entity_id, int):
         #     # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
@@ -4741,11 +4884,14 @@ class PaginatedListPage(
         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
         if self.selected_dto and self.selected_dto.id == entity_id:
             self.selected_dto = new_dto
+            return True
+        
         
         # # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
         # if self.selected_dto and self.selected_dto.id == entity_id:
         #     self.selected_dto = new_dto
 
+        return False
 
     # def _save_deleted_rows(self) -> None:
     #     """
@@ -4833,42 +4979,38 @@ class PaginatedListPage(
         Args:
             session: Сессия SQLAlchemy (опционально, для работы в одной транзакции).
         """
-
+    
         self.logger.debug(f"_save_deleted_rows: session is None = {session is None}")
+        with self.service._session_scope(session) as sess:
+            prefix = f"__deleted__:{self._entity_type}:"
+            keys = list(self._draft_registry.get_keys_by_prefix(prefix))
+            for key in keys:
+                entity_id = int(key.split(':')[-1])
 
-        prefix = f"__deleted__:{self._entity_type}:"
-        keys = list(self._draft_registry.get_keys_by_prefix(prefix))
-        for key in keys:
-            entity_id = int(key.split(':')[-1])
 
+                # получаем родителя до удаления
+                parent_id = self._get_parent_id(entity_id)
 
-            # получаем родителя до удаления
-            parent_id = self._get_parent_id(entity_id)
+                self._delete_entity_and_children(
+                    entity_id=entity_id, 
+                    session=sess
+                )
 
-            self._delete_entity_and_children(
-                entity_id=entity_id, 
-                session=session
-            )
+                # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание)
+                self._update_affected_parents_and_deferred_action(
+                    parent_id, 
+                    entity_id, 
+                    session=sess
+                )
 
-            # if parent_id is not None and parent_id > 0:
-            #     self._affected_parents.add(parent_id)
-            #     parent_type = self._get_parent_entity_type(entity_id)
-            #     self.parent_entity_updated.emit(parent_type, parent_id)
-            
-            self._update_affected_parents_and_deferred_action(
-                parent_id,
-                entity_id,
-                session
-            )
+                # Удаляем строку из модели
+                row = self._find_row_by_id(entity_id)
+                if row >= 0:
+                    self.source_model.remove_row(row)
+                    self.original_data.pop(row, None)
 
-            # Удаляем строку из модели
-            row = self._find_row_by_id(entity_id)
-            if row >= 0:
-                self.source_model.remove_row(row)
-                self.original_data.pop(row, None)
-
-            # Если удаляемая строка была выбрана – сбрасываем выделение
-            self._clear_selected_dto(entity_id)
+                # Если удаляемая строка была выбрана – сбрасываем выделение
+                self._clear_selected_dto(entity_id)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -5523,8 +5665,9 @@ class PaginatedListPage(
         # self._update_row_color(row)  # перекрасит строку, но также вызовет dataChanged
         
         # Обновляем selected_dto, если строка была выбрана
-        if self.selected_dto and self.selected_dto.id == entity_id:
-            self.selected_dto = new_dto
+        # if self.selected_dto and self.selected_dto.id == entity_id:
+        #     self.selected_dto = new_dto
+        if self._clear_selected_dto(entity_id, new_dto):
             # Если ID изменился (временный → реальный), удаляем старый ID из кэша выделения
             if entity_id != new_dto.id:
                 self._clear_selected_dto(entity_id, new_dto)
@@ -5537,6 +5680,14 @@ class PaginatedListPage(
 
         return True
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _refresh_and_update_row_after_commit(self, temp_id: int, real_id: int) -> None:
         """Отложенное действие: после коммита загружает свежий DTO и обновляет строку."""
         try:
@@ -5664,6 +5815,14 @@ class PaginatedListPage(
                         dto,
                         session=sess
                     )
+                    # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание)
+                    parent_id = self._get_parent_id(entity_id)
+                    self._update_affected_parents_and_deferred_action(
+                        parent_id, 
+                        entity_id, 
+                        session=sess
+                    )
+
 
 
                     # Очищаем черновик DTO (если был)
@@ -5860,11 +6019,23 @@ class PaginatedListPage(
                             session=session
                         )
 
-                        self._affected_parents.add(parent_id)  # добавляем родителя в список затронутых
+                        # self._affected_parents.add(parent_id)  # добавляем родителя в список затронутых
+                        # Добавляем всех предков (родитель, дед, прадед и т.д.) в множество для обновления
+                        self._add_parents_to_affected_set(parent_id)
 
-                        # Уведомляем подписчиков (например, родительский фрейм) о том,
-                        # что родительская сущность изменилась из-за дочерних черновиков.
-                        self.parent_entity_updated.emit(self._entity_type, parent_id)
+                        # # Добавляем отложенное действие для обновления родителя и всех его предков после коммита
+                        # ctx = ActionContext(session, ActionType.COMMIT) if session else None
+                        # add_deferred_action(
+                        #     ctx,
+                        #     self._refresh_parent_rows_deferred,
+                        #     args=(parent_id,)
+                        # )
+
+
+                        # # Уведомляем подписчиков (например, родительский фрейм) о том,
+                        # # что родительская сущность изменилась из-за дочерних черновиков.
+                        # self.parent_entity_updated.emit(self._entity_type, parent_id)
+
                     except Exception as e:
                         self.logger.exception(
                             f"Ошибка при применении черновика дочернего компонента {child.__class__.__name__} "
@@ -7344,8 +7515,11 @@ class PaginatedListPage(
             with self.service._session_scope() as sess:
                 fresh_dto = self.service.get_by_id(entity_id, session=sess)
                 self._source_model_update_row(row, fresh_dto)
-                if self.selected_dto and self.selected_dto.id == entity_id:
-                    self.selected_dto = fresh_dto
+                # if self.selected_dto and self.selected_dto.id == entity_id:
+                #     self.selected_dto = fresh_dto
+                
+                self._clear_selected_dto(entity_id, fresh_dto)
+
             self.logger.debug(f"Строка id={entity_id} обновлена из БД")
             return True
         except Exception as e:

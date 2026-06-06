@@ -530,8 +530,11 @@ class PaginatedTableModel(BaseTableModel):
     )
     def clear_own_change(self, entity_id: int) -> None:
         self.logger.debug(
-            f"clear_own_change: entity_id={entity_id}, текущий статус={self._get_cached_status(entity_id)}")
+            f"clear_own_change: entity_id={entity_id}, "
+            f"текущий статус={self._get_cached_status(entity_id)}"
+        )
         self._update_own_change(entity_id, False)
+
     @AppLogger.get_instance(
         name='PaginatedTableModel',
         # share_file_with = 'system',
@@ -542,7 +545,9 @@ class PaginatedTableModel(BaseTableModel):
     )
     def mark_own_change(self, entity_id: int) -> None:
         self.logger.debug(
-            f"mark_own_change: entity_id={entity_id}, текущий статус={self._get_cached_status(entity_id)}")
+            f"mark_own_change: entity_id={entity_id}, "
+            f"текущий статус={self._get_cached_status(entity_id)}"
+        )
         self._update_own_change(entity_id, True)
 
     @AppLogger.get_instance(

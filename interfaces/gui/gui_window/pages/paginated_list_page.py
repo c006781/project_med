@@ -2729,6 +2729,20 @@ class PaginatedListPage(
 
         # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
         self._reapply_delegates()  
+
+
+        # # После переустановки делегатов пересчитываем высоту строк,
+        # # так как ширина столбцов могла измениться (появился чекбокс-столбец)
+        # # и миниатюры должны масштабироваться к новой ширине.
+        # self.table_view.resizeRowsToContents()
+        
+        # Оптимизированный пересчёт высоты строк (только видимые + запас)
+        first, last = get_visible_row_range(self.table_view)
+        if first >= 0:
+            start = max(0, first - 5)
+            end = min(self.source_model.rowCount() - 1, last + 5)
+            for row in range(start, end + 1):
+                self.table_view.resizeRowToContents(row)
         
         # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
         # но оставляем для обратной совместимости)

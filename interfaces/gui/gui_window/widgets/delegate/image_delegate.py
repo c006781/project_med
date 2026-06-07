@@ -678,7 +678,6 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         if not parent.isVisible():
             return
         
-
         # Асинхронно обновляем строку (пересчёт высоты + перерисовка)
         if hasattr(parent, 'refreshRow'):
             QMetaObject.invokeMethod(

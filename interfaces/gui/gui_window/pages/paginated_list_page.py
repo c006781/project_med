@@ -433,6 +433,9 @@ class PaginatedListPage(
     delete_requested = Signal(object)
     action_requested = Signal(object)
 
+    # Сигнал, испускаемый при изменении режима редактирования
+    edit_mode_changed = Signal(bool)
+
     # Сигнал, испускаемый при изменении родительской сущности (например, после добавления/удаления фото)
     # Параметры: (entity_type: str, entity_id: int)
     parent_entity_updated = Signal(str, int)
@@ -846,14 +849,13 @@ class PaginatedListPage(
 
         ctx = ActionContext(session, ActionType.COMMIT) if session is not None else None
         
-        # 1. Обновление строки из БД
+        # Обновление строки из БД
         add_deferred_action(
             ctx,
             self._refresh_and_update_row_after_commit,
             args=(temp_id if temp_id is not None else real_id, real_id)
         )
         # 2. Очистка черновиков (удаляет статус и черновики, файлы удалятся отложенно)
-
         # Отложенная очистка черновиков (включая удаление временной папки)
         add_deferred_action(
             ctx,
@@ -2632,14 +2634,19 @@ class PaginatedListPage(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _set_edit_mode(self, enable: bool) -> None:
         """
-        Устанавливает режим редактирования и синхронизирует состояние кнопки.
+        Переопределение метода из EditModeMixin.
+        Устанавливает флаг режима, обновляет UI и испускает сигнал.
         """
         super()._set_edit_mode(enable)
-        # Синхронизируем состояние кнопки, если она существует
+
+        # Синхронизируем состояние кнопки, если она существует (локальная кнопка)
         if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
             self.edit_mode_btn.blockSignals(True)
             self.edit_mode_btn.setChecked(enable)
             self.edit_mode_btn.blockSignals(False)
+
+        # Испускаем сигнал для внешних подписчиков (например, родительского фрейма)
+        self.edit_mode_changed.emit(enable)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

@@ -5,6 +5,8 @@ from typing import List, Set, Tuple, Dict
 
 from app.utils.logger.logger import AppLogger
 
+from app.utils.colors import RowStatusColor
+
 from app.dto import PhotoDTO
 
 from interfaces.gui.gui_window.utils.gui_helpers import add_copy_paste_to_table, install_standard_context_menu
@@ -2263,13 +2265,13 @@ class PhotoUploaderWidget(QWidget):
             raise e
 
         if state == 'new':
-            color = QColor(200, 255, 200)   # светло-зелёный
+            color = RowStatusColor.NEW   # светло-зелёный
         elif state == 'modified':
-            color = QColor(255, 255, 180)   # светло-жёлтый
+            color = RowStatusColor.MODIFIED   # светло-жёлтый
         elif state == 'deleted':
-            color = QColor(255, 200, 200)   # светло-красный
+            color = RowStatusColor.DELETED   # светло-красный
         else:
-            color = QColor(255, 255, 255)   # белый (нормальное состояние)
+            color = RowStatusColor.NORMAL   # белый (нормальное состояние)
 
         self.logger.debug(f"    → выбран цвет для '{state}': {color.name()}")
 

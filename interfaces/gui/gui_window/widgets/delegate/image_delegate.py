@@ -51,11 +51,13 @@ from collections import OrderedDict
 
 import weakref
 
-from app.utils.file_deletions import resolve_photo_path
 from app.utils.logger.logger import AppLogger
 
+from app.utils.colors import RowStatusColor
+from app.utils.file_deletions import resolve_photo_path
+
 # from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
-from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
+# from interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog import PhotoEditDialog
 
 
 from PySide6.QtCore import (
@@ -63,10 +65,12 @@ from PySide6.QtCore import (
     Q_ARG, QEvent, QMetaObject,
     QRect, QRunnable, QSize, 
     QThreadPool, Qt, Signal, 
-    Slot, QModelIndex,
+    Slot, 
+    # QModelIndex,
     # QThread, 
 )
 from PySide6.QtGui import (
+    # QPalette, 
     QPixmap, QPainter, 
     QColor,
 )
@@ -76,7 +80,8 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyleOptionButton,
     QStyledItemDelegate,
-    QStyleOptionViewItem, QMessageBox,
+    QStyleOptionViewItem, 
+    # QMessageBox,
 )
 
 class AsyncImageLoader(QRunnable):
@@ -443,6 +448,19 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             index (QModelIndex): Индекс ячейки в модели.
         """
 
+        # Заливаем фон цветом строки (если задан)
+        bg_color = index.data(Qt.BackgroundRole)
+        if bg_color and isinstance(bg_color, QColor):
+            painter.fillRect(option.rect, bg_color)
+        else:
+            # Если цвета нет
+            painter.fillRect(
+                option.rect, 
+                # option.palette.brush(option.state, QPalette.Window)  # используем стандартный фон из опции
+                # option.palette.color(QPalette.Window)  #, используем стандартный цвет фона из палитры
+                RowStatusColor.NORMAL # используем унифицированный нормальный цвет
+            )
+
         # Получаем путь к файлу (из UserRole, т.к. DisplayRole возвращает строку)
         file_path = index.data(Qt.UserRole) if index.isValid() else None
         if not file_path:
@@ -596,7 +614,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
             text (str): Текст для отображения (например, «Нет фото», «Загрузка...»).
         """
         
-        painter.fillRect(option.rect, QColor(240, 240, 240))
+        # painter.fillRect(option.rect, QColor(240, 240, 240))
+        # Фон уже залит в paint, рисуем только текст
         painter.drawText(option.rect, Qt.AlignCenter, text)
 
     # ------------------------------------------------------------------

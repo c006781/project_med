@@ -283,6 +283,8 @@ import uuid
 
 from app.utils.logger import AppLogger
 
+from app.utils.colors import RowStatusColor, get_color_for_entity_status
+
 from app.utils.deferred_actions import (
     ActionContext, ActionType, add_deferred_action
 )
@@ -6167,24 +6169,35 @@ class PaginatedListPage(
         """Определяет цвет строки на основе статуса сущности."""
 
         entity_id = dto.id
-        # еуьз = self._draft_registry
-        if entity_id is None or entity_id < 0:
-            # Новая строка – зелёный, если есть черновик __new__
-            if self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):
-                return QColor(200, 255, 200)
-            
-            return QColor(255, 255, 255)
-        
-        # Существующая строка
-        if self._draft_registry.has(f"__deleted__:{self._entity_type}:{entity_id}"):
-            return QColor(255, 200, 200)  # красный
-        
-        status = self._get_cached_status(entity_id)
-        if status in ('own', 'child', 'both'):
+        is_new = (
+            entity_id is None or entity_id < 0
+        ) and self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}")
 
-            return QColor(255, 255, 180)  # жёлтый
+        is_deleted = self._draft_registry.has(f"__deleted__:{self._entity_type}:{entity_id}")
+
+        status = self._get_cached_status(entity_id) if not is_deleted and not is_new else None
         
-        return QColor(255, 255, 255)      # белый
+        return get_color_for_entity_status(status, is_new, is_deleted)
+
+        # entity_id = dto.id
+        # # еуьз = self._draft_registry
+        # if entity_id is None or entity_id < 0:
+        #     # Новая строка – зелёный, если есть черновик __new__
+        #     if self._draft_registry.has(f"__new__:{self._entity_type}:{entity_id}"):
+        #         return RowStatusColor.NEW
+            
+        #     return RowStatusColor.NORMAL
+        
+        # # Существующая строка
+        # if self._draft_registry.has(f"__deleted__:{self._entity_type}:{entity_id}"):
+        #     return RowStatusColor.DELETED  # красный
+        
+        # status = self._get_cached_status(entity_id)
+        # if status in ('own', 'child', 'both'):
+
+        #     return RowStatusColor.MODIFIED  # жёлтый
+        
+        # return RowStatusColor.NORMAL      # белый
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -6648,17 +6661,17 @@ class PaginatedListPage(
     #         return
         
     #     if dto.id is None or dto.id < 0:
-    #         color = QColor(200, 255, 200) if row in self.new_rows else QColor(255, 255, 255)
+    #         color = RowStatusColor.NEW if row in self.new_rows else RowStatusColor.NORMAL
 
     #     else:
     #         if dto.id in self.deleted_ids:
-    #             color = QColor(255, 200, 200)
+    #             color = RowStatusColor.DELETED
 
     #         elif dto.id in self.modified_ids or self._draft_modified:
-    #             color = QColor(255, 255, 180)
+    #             color = RowStatusColor.MODIFIED
 
     #         else:
-    #             color = QColor(255, 255, 255)
+    #             color = RowStatusColor.NORMAL
 
     #     self.source_model.set_row_color(row, color)
 

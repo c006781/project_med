@@ -4,10 +4,12 @@
 """
 
 from typing import Set, Dict, Any
-from PySide6.QtGui import QColor
 
 from app.utils.logger import AppLogger
 
+from app.utils.colors import RowStatusColor
+
+from PySide6.QtGui import QColor
 
 class DataChangeMixin:
     """
@@ -42,7 +44,7 @@ class DataChangeMixin:
             # Новая строка (временный ID)
             if row not in self.new_rows:
                 self.new_rows.add(row)
-                self.source_model.set_row_color(row, QColor(200, 255, 200))
+                self.source_model.set_row_color(row, RowStatusColor.NEW)
                 self._update_save_button_state()
             return
         original = self.original_data.get(row)
@@ -81,7 +83,7 @@ class DataChangeMixin:
                 self.modified_ids.discard(entity_id)
             row = self._find_row_by_id(entity_id)
             if row >= 0:
-                self.source_model.set_row_color(row, QColor(255, 200, 200))
+                self.source_model.set_row_color(row, RowStatusColor.DELETED)
             self._update_save_button_state()
 
     @AppLogger.get_instance(
@@ -107,7 +109,7 @@ class DataChangeMixin:
     def _add_new_row(self, dto: Any) -> int:
         row = self.source_model.add_row(dto)
         self.new_rows.add(row)
-        self.source_model.set_row_color(row, QColor(200, 255, 200))
+        self.source_model.set_row_color(row, RowStatusColor.NEW)
         self._update_save_button_state()
         return row
 
@@ -134,14 +136,15 @@ class DataChangeMixin:
         if dto is None:
             return
         if dto.id is None or dto.id < 0:
-            color = QColor(200, 255, 200) if row in self.new_rows else QColor(255, 255, 255)
+            color = RowStatusColor.NEW if row in self.new_rows else RowStatusColor.NORMAL
         else:
             if dto.id in self.deleted_ids:
-                color = QColor(255, 200, 200)
+                color = RowStatusColor.DELETED
             elif dto.id in self.modified_ids:
-                color = QColor(255, 255, 180)
+                color = RowStatusColor.MODIFIED
             else:
-                color = QColor(255, 255, 255)
+                color = RowStatusColor.NORMAL
+                
         self.source_model.set_row_color(row, color)
 
     @AppLogger.get_instance(

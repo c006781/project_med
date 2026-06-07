@@ -30,8 +30,11 @@ from typing import (
 import datetime 
 from copy import deepcopy
 
-from app.dependencies import get_note_service
 from app.utils.logger.logger import AppLogger
+
+from app.utils.colors import RowStatusColor
+
+from app.dependencies import get_note_service
 
 from interfaces.gui.gui_window.controllers.list_controller import IDynamicListController
 from interfaces.gui.gui_window.pages.base_page import BasePage
@@ -1586,13 +1589,13 @@ class ListChangesMixin:
     #         return
 
     #     if row in self.deleted_rows:
-    #         color = QColor(255, 200, 200)   # красный
+    #         color = RowStatusColor.DELETED   # красный
     #     elif row in self.new_rows:
-    #         color = QColor(200, 255, 200)   # зелёный
+    #         color = RowStatusColor.NEW   # зелёный
     #     elif row in self.modified_rows:
-    #         color = QColor(255, 255, 180)   # жёлтый
+    #         color = RowStatusColor.MODIFIED   # жёлтый
     #     else:
-    #         color = QColor(255, 255, 255)   # белый
+    #         color = RowStatusColor.NORMAL   # белый
 
     #     self.logger.debug(f"Обновление цвета строки {row} - {color.name()}")
     #     self.source_model.set_row_color(source_row, color)
@@ -1622,13 +1625,13 @@ class ListChangesMixin:
     #         )
             
     #     if source_row in self.deleted_rows:
-    #         color = QColor(255, 200, 200)   # красный
+    #         color = RowStatusColor.DELETED   # красный
     #     elif source_row in self.new_rows:
-    #         color = QColor(200, 255, 200)   # зелёный
+    #         color = RowStatusColor.NEW   # зелёный
     #     elif source_row in self.modified_rows:
-    #         color = QColor(255, 255, 180)   # жёлтый
+    #         color = RowStatusColor.MODIFIED   # жёлтый
     #     else:
-    #         color = QColor(255, 255, 255)   # белый
+    #         color = RowStatusColor.NORMAL   # белый
 
 
     #     self.logger.debug(f"Обновление цвета строки {source_row} - {color.name()}")
@@ -1653,17 +1656,17 @@ class ListChangesMixin:
         if dto.id is None or dto.id < 0:
             # Новая строка
             if source_row in self.new_rows:
-                color = QColor(200, 255, 200)   # зелёный
+                color = RowStatusColor.NEW   # зелёный
             else:
-                color = QColor(255, 255, 255)   # белый
+                color = RowStatusColor.NORMAL   # белый
         
         else:
             if dto.id in self.deleted_ids:
-                color = QColor(255, 200, 200)   # красный
+                color = RowStatusColor.DELETED   # красный
             elif dto.id in self.modified_ids:
-                color = QColor(255, 255, 180)   # жёлтый
+                color = RowStatusColor.MODIFIED   # жёлтый
             else:
-                color = QColor(255, 255, 255)   # белый
+                color = RowStatusColor.NORMAL   # белый
         
         self.source_model.set_row_color(source_row, color)
         self.table_view.viewport().update() # перерисовка видимой области

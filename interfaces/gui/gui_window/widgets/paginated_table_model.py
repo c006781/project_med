@@ -2145,6 +2145,13 @@ class PaginatedTableModel(BaseTableModel):
             if role == Qt.CheckStateRole:
                 return Qt.Checked if self._checkbox_states.get(row, False) else Qt.Unchecked
             
+            if role == Qt.BackgroundRole:
+                dto = self._data[row]
+                entity_id = getattr(dto, 'id', None)
+                if entity_id is not None:
+                    return self._row_colors.get(entity_id)
+                return None
+            
             return None
 
         # Цвет строки из DTO

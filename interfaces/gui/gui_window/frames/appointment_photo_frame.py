@@ -108,9 +108,6 @@ class AppointmentPhotoFrame(BasePage):
             show_controls=[],   # кнопки будут на уровне этой страницы
         )
 
-
-        self.appointment_page.edit_mode_changed.connect(self._on_edit_mode_changed)
-
         # Подключаем сигнал обновления родительской сущности
         self.photo_page.parent_entity_updated.connect(self._on_parent_entity_updated)
 
@@ -188,21 +185,6 @@ class AppointmentPhotoFrame(BasePage):
     #     row = self.photo_page._find_row_by_id(dto.id)  # можно использовать find_row_by_id (сделать публичным)
     #     if row is not None:
     #         self.photo_page.edit_photo_in_row(row)
-
-    @AppLogger.get_instance(
-        name='AppointmentPhotoFrame',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _on_edit_mode_changed(self, enabled: bool) -> None:
-        """Синхронизирует состояние кнопки в ActionManager."""
-        if hasattr(self, 'main_window') and self.main_window:
-            am = self.main_window.action_manager
-            if am and am.get_action('edit_mode'):
-                am.set_action_checked('edit_mode', enabled)
 
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',

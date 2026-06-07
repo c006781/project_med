@@ -90,7 +90,8 @@ class PaginatedPhotoListPage(PaginatedListPage):
         Returns:
             ID приёма или None, если контекст не задан.
         """
-        return self._context_params.get('appointment_id', None)
+        # return self._context_params.get('appointment_id', None)
+        return getattr(dto, 'appointment_id', None)
 
     @AppLogger.get_instance(
         name='PaginatedPhotoListPage',

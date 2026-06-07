@@ -825,6 +825,62 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _deferred_refresh_and_cleanup(
+        self,
+        real_id: int,
+        temp_id: Optional[int] = None,
+        session: Optional[Session] = None
+    ) -> None:
+        """
+        Откладывает после коммита:
+        1. Обновление строки из БД (через _refresh_and_update_row_after_commit)
+        2. Очистку черновиков сущности (через clear_entity_drafts)
+
+        Используется для новых и изменённых строк.
+
+        Args:
+            real_id: Реальный ID сущности после сохранения в БД.
+            temp_id: Временный ID (для новых строк). Если None, используется real_id.
+            session: Сессия SQLAlchemy (опционально). Если передана, действия откладываются до коммита.
+        """
+
+        ctx = ActionContext(session, ActionType.COMMIT) if session is not None else None
+        
+        # 1. Обновление строки из БД
+        add_deferred_action(
+            ctx,
+            self._refresh_and_update_row_after_commit,
+            args=(temp_id if temp_id is not None else real_id, real_id)
+        )
+        # 2. Очистка черновиков (удаляет статус и черновики, файлы удалятся отложенно)
+
+        # Отложенная очистка черновиков (включая удаление временной папки)
+        add_deferred_action(
+            ctx,
+            self.clear_entity_drafts,
+            args=(real_id,),
+            # kwargs={'ctx': DeletionContext.create(session, DeletionType.COMMIT)} # не передаём, так как и так будет отложенно при session is not None
+        )
+        
+        # ctx_commit = DeletionContext.create(session, DeletionType.COMMIT)
+        # self.clear_entity_drafts(
+        #     entity_id = real_id,
+        #     ctx = ctx_commit
+        # )
+
+        # # 2. Очистка черновиков (удаляет статус и черновики, файлы удалятся отложенно)
+        # add_deferred_action(
+        #     ctx,
+        #     self.clear_entity_drafts,
+        #     args=(real_id,),
+        #     kwargs={'ctx': ctx}
+        # )
+    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _collect_ancestors(self, entity_id: int) -> Set[int]:
         """
         Возвращает множество ID всех предков сущности (включая саму сущность).
@@ -4266,15 +4322,22 @@ class PaginatedListPage(
             self._recursive_save_new_row(temp_id, created.id, session=sess)
 
             # Очистка черновиков и временной папки после успешного сохранения
-            ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
-            self.clear_entity_drafts(created.id, ctx_commit)
-
             # отложенное действие для обновления строки после коммита
-            add_deferred_action(
-                ctx=ActionContext(sess, ActionType.COMMIT) if sess else None,
-                func=self._refresh_and_update_row_after_commit,
-                args=(temp_id, created.id)
+            self._deferred_refresh_and_cleanup(
+                real_id=created.id, 
+                temp_id=temp_id, 
+                session=sess
             )
+            # # Очистка черновиков и временной папки после успешного сохранения
+            # ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
+            # self.clear_entity_drafts(created.id, ctx_commit)
+
+            # # отложенное действие для обновления строки после коммита
+            # add_deferred_action(
+            #     ctx=ActionContext(sess, ActionType.COMMIT) if sess else None,
+            #     func=self._refresh_and_update_row_after_commit,
+            #     args=(temp_id, created.id)
+            # )
 
             return created
 
@@ -4748,7 +4811,7 @@ class PaginatedListPage(
         with self.service._session_scope(session) as sess:
             entity_ids = set()
 
-            # Ищем все ключи статусов для данного типа
+            # Ищем все ключи статусов для статусов 'own' или 'both'
             for key in self._draft_registry.get_keys_by_prefix(f"__status__:{self._entity_type}:"):
                 parts = key.split(':')
                 if len(parts) >= 3:
@@ -4756,112 +4819,12 @@ class PaginatedListPage(
                     status = self._draft_registry.get_entity_status(self._entity_type, entity_id)
                     if status in ('own', 'both'):
                         entity_ids.add(entity_id)
-
+ 
             self._save_modified_rows_for_ids(
                 entity_ids=entity_ids,
                 session=sess, 
             )
 
-        # for entity_id in entity_ids:
-        #     row = self._find_row_by_id(entity_id)
-        #     if row < 0:
-        #         continue
-        #
-        #     dto = self.source_model.get_item_at_row(row)
-        #     if dto is None:
-        #         continue
-        #
-        #     updated = self.service.update(dto)
-        #     self.source_model.update_row(row, updated)
-        #
-        #     # уточнение:
-        #     # так как в дальнейшем может потребоваться делать общий буфер на все страници - чистим сейчас
-        #     self.clear_entity_drafts(entity_id) # Удаляет черновики для данной сущности
-        #
-        #     # Снимаем флаг собственных изменений (обновляем статус)
-        #     self.clear_own_change(entity_id)  # снимаем флаг 'own'
-
-        # """
-        # Сохраняет изменения существующих строк, у которых есть черновики.
-        # Использует ключи вида "entity_type:entity_id:*" (не служебные).
-        # """
-        # prefix = f"{self._entity_type}:"
-        # # Собираем уникальные ID сущностей, у которых есть черновики
-        # entity_ids = set()
-        # for key in self._draft_registry.get_keys_by_prefix(prefix):
-        #     # Пропускаем служебные ключи
-        #     if key.startswith(('__', f"{self._entity_type}:")):
-        #         parts = key.split(':')
-        #         if len(parts) >= 2 and parts[0] == self._entity_type:
-        #             try:
-        #                 entity_id = int(parts[1])
-        #                 entity_ids.add(entity_id)
-        #             except ValueError:
-        #                 pass
-        # # Для каждого ID обновляем запись в БД
-        # for entity_id in entity_ids:
-        #     row = self._find_row_by_id(entity_id)
-        #     if row < 0:
-        #         continue
-        #     dto = self.source_model.get_item_at_row(row)
-        #     if dto is None:
-        #         continue
-        #     updated = self.service.update(dto)
-        #     self.source_model.update_row(row, updated)
-        #     # Снимаем флаг собственных изменений (черновики остаются? Нет, черновики нужно удалить)
-        #     # Решаем: после сохранения все черновики для этой сущности должны быть удалены.
-        #     self._draft_registry.discard_entity_subtree(self._entity_type, entity_id)
-        #     self._update_own_change(entity_id, False)
-
-    
-    # def _save_modified_rows(self):
-    #     for entity_id in list(self.modified_ids):
-    #         row = self._find_row_by_id(entity_id)
-    #         if row < 0:
-    #             continue
-    #         dto = self.source_model.get_item_at_row(row)
-    #         if dto:
-    #             updated = self.service.update(dto)
-    #             self.source_model.update_row(row, updated)
-    #             self.original_data[row] = updated
-    #     self.modified_ids.clear()
-
-    # def _clear_draft_registry(self, entity_id: int) -> None:
-    #     """
-    #     Удаляет черновики для данной сущности.
-    #     Примечание: дочерние черновики (например, фото) уже сохранены и удалены
-    #     в _save_child_components, поэтому удаление по префиксу безопасно.
-    #     """
-
-    #     # # После сохранения сбрасываем статус и черновики
-    #     # self._draft_registry.discard_entity_subtree(self._entity_type, entity_id)
-
-
-    #     # Удаляем все ключи, начинающиеся с "entity_type:entity_id:"
-    #     # (включая возможные остаточные дочерние черновики – они уже применены)
-    #     temp = f"{self._entity_type}:{entity_id}"
-    #     self._draft_registry.discard_by_prefix(f"{temp}:") # Удаляем ТОЛЬКО прямые черновики этой сущности (но не дочерние)
-
-    #     # Удаляем статус и счётчик
-    #     self._draft_registry.delete_entity_status(self._entity_type, entity_id)
-    #     self._draft_registry.discard(f"__counter__:{temp}")
-
-    # @AppLogger.get_instance(
-    #     name='PaginatedListPage',
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system'
-    # ).log_execution_time(
-    #     level=AppLogger._parse_log_level('DEBUG')
-    # )
-    # def _clear_selected_dto_dict(self, dict_entity_id: Dict[int, Any], new_dto = None) -> None:
-
-    #     if dict_entity_id is None:
-    #         return
-
-    #     # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-    #     if self.selected_dto and self.selected_dto.id in dict_entity_id:
-    #         self.selected_dto = new_dto
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -4897,75 +4860,13 @@ class PaginatedListPage(
             return False
         
         # if isinstance(entity_id, int):
-        #     # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-        #     if self.selected_dto and self.selected_dto.id == entity_id:
-        #         self.selected_dto = new_dto
 
         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
         if self.selected_dto and self.selected_dto.id == entity_id:
             self.selected_dto = new_dto
             return True
-        
-        
-        # # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-        # if self.selected_dto and self.selected_dto.id == entity_id:
-        #     self.selected_dto = new_dto
 
         return False
-
-    # def _save_deleted_rows(self) -> None:
-    #     """
-    #     Удаляет строки, помеченные как __deleted__, и каскадно их потомков.
-    #
-    #     **Важное примечание о каскадном удалении:**
-    #     ----------------------------------------------------------------
-    #     В отличие от каскада в БД (ON DELETE CASCADE), этот метод реализует
-    #     каскад на уровне приложения. Это необходимо, потому что:
-    #         1. Дочерние сущности могут иметь свои черновики, которые нужно очистить.
-    #         2. Счётчики родителей должны быть корректно уменьшены.
-    #         3. Мы не хотим полагаться на конкретную реализацию БД (SQLite, PostgreSQL и т.д.).
-    #
-    #     Алгоритм для каждого удаляемого ID:
-    #         1. Рекурсивно помечает на удаление всех потомков (через `_delete_children`).
-    #         2. Удаляет родителя из БД через сервис.
-    #         3. Очищает реестр от всех ключей, связанных с родителем и его потомками.
-    #         4. Уменьшает счётчик родителя (если есть).
-    #     ----------------------------------------------------------------
-    #     """
-    #
-    #     prefix = f"__deleted__:{self._entity_type}:"
-    #
-    #     for key in list(self._draft_registry.get_keys_by_prefix(prefix)):
-    #         entity_id = int(key.split(':')[-1])
-    #
-    #         # Каскадно помечаем всех детей (и внуков) на удаление
-    #         self._delete_children(entity_id)
-    #
-    #         # Если удаляемая строка – текущая выбранная, сбрасываем selected_dto
-    #         self._clear_selected_dto(entity_id)
-    #
-    #         # Удаляем из БД (первым делом, чтобы при ошибке не трогать реестр)
-    #         self.service.delete(entity_id)
-    #
-    #         # Удаляем все черновики дочерних сущностей, связанных с этим родителем
-    #         # ВАЖНО: удаляем ВСЕ черновики дочерних сущностей, связанные с удаляемым родителем...
-    #         self._draft_registry.discard_by_prefix(f"{self._entity_type}:{entity_id}:")
-    #
-    #         # Удаляем сам ключ __deleted__
-    #         self._draft_registry.discard(key)
-    #
-    #         # Удаляем все черновики, статусы и счётчики для этой сущности
-    #         self._draft_registry.delete_entity_status(self._entity_type, entity_id)
-    #         self._draft_registry.discard(f"__counter__:{self._entity_type}:{entity_id}")
-    #
-    #         # Очищаем кэш статусов в миксине
-    #         self._status_cache.pop(entity_id, None)
-    #
-    #         # Уведомляем родителя удаляемой строки (уменьшаем его счётчик)
-    #         self._update_parent_child_counter(entity_id, -1) # -1 к счётчику родителя # Уведомляем родителей (если есть) # Наследован из DraftTreeMixin
-    #
-    #         # # Удаляем из БД
-    #         # self.service.delete(entity_id)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -5010,10 +4911,10 @@ class PaginatedListPage(
             for key in keys:
                 entity_id = int(key.split(':')[-1])
 
-
                 # получаем родителя до удаления
                 parent_id = self._get_parent_id(entity_id)
 
+                # Удаляем сущность и всех её потомков из БД
                 self._delete_entity_and_children(
                     entity_id=entity_id, 
                     session=sess
@@ -5026,11 +4927,19 @@ class PaginatedListPage(
                     session=sess
                 )
 
-                # Удаляем строку из модели
-                row = self._find_row_by_id(entity_id)
-                if row >= 0:
-                    self.source_model.remove_row(row)
-                    self.original_data.pop(row, None)
+                # # Удаляем строку из модели
+                # row = self._find_row_by_id(entity_id)
+                # if row >= 0:
+                #     self.source_model.remove_row(row)
+                #     self.original_data.pop(row, None)
+
+                #  ОТЛОЖЕННОЕ УДАЛЕНИЕ СТРОКИ ИЗ МОДЕЛИ ПОСЛЕ КОММИТА 
+                ctx = ActionContext(sess, ActionType.COMMIT)
+                add_deferred_action(
+                    ctx,
+                    self._remove_row_by_id,
+                    args=(entity_id,)
+                )
 
                 # Если удаляемая строка была выбрана – сбрасываем выделение
                 self._clear_selected_dto(entity_id)
@@ -5740,10 +5649,7 @@ class PaginatedListPage(
         Returns:
             None
         """
-        # if session is None:
-        #     with self.service._db.session_scope() as new_session:
-        #         return self._save_modified_rows_for_ids(entity_ids, session=new_session)
-
+        
         with self.service._session_scope(session) as sess:
 
             self.logger.debug(
@@ -5758,51 +5664,26 @@ class PaginatedListPage(
                     self.logger.debug(f"Строка {entity_id} помечена на удаление – пропуск сохранения")
 
                     continue
+                
 
-                row = self._find_row_by_id(entity_id)
-                if row < 0:
-                    continue
+                 # Пытаемся найти DTO в модели
+                dto = None
+                row = self._find_row_by_id(entity_id) # определяем строку по ID
+                if row >= 0: # если строка найдена
+                    dto = self.source_model.get_item_at_row(row) # определяем DTO по индексу строки   
 
-                dto = self.source_model.get_item_at_row(row)
+                # Если DTO не найден в модели, но у нас есть его ID – мы всё равно должны сохранить изменения.
+                # В этом случае нужно восстановить DTO из черновика или из реестра.
                 if dto is None:
-                    continue
+                    # Пытаемся загрузить черновик DTO из реестра
+                    dto = self._load_draft_dto(entity_id)
+                    if dto is None:
+                        self.logger.warning(f"Не удалось найти DTO для сущности {entity_id} ни в модели, ни в черновиках")
+                        continue
+
 
                 # Преобразование относительных путей в абсолютные (для передачи в сервис)
                 temp_dir = self._convert_photo_paths_to_absolute(entity_id, dto)
-
-                # # Получаем оригинальный DTO
-                # original_dto = self.original_data.get(row)
-                # storage_path = self._get_photo_storage_path()
-                # deleted_old_files = []  # для файлов, которые были удалены (поле очищено)
-
-                # # Проверяем фото-поля на удаление
-                # for field_name, config in self.field_configs.items():
-                #     if config.get('widget_type') != 'image_thumbnail':
-                #         continue
-                #     old_value = getattr(original_dto, field_name, None) if original_dto else None
-                #     new_value = getattr(dto, field_name, None)
-                #     # Если раньше был путь, а теперь пусто – удаляем старый файл
-                #     if old_value and not new_value:
-                #         full_old_path = os.path.join(storage_path, old_value)
-                #         if os.path.exists(full_old_path):
-                #             deleted_old_files.append(full_old_path)
-
-
-                # # Переносим файлы из временной папки в основное хранилище
-                # dto, copied_files, old_files, copied_dest_paths , error_messages = self._move_files_from_temp_to_storage(
-                #     entity_id,
-                #     dto,
-                #     session=sess,
-                # )
-                # if error_messages:
-                #     raise RuntimeError(f"Ошибка переноса файлов: {', '.join(error_messages)}")
-
-                # # # Проверяем, не осталось ли файлов во временной папке (признак ошибки переноса)
-                # # temp_dir = self._get_temp_dir(entity_id)
-                # # if temp_dir and os.path.exists(temp_dir) and os.listdir(temp_dir):
-                # #     error_msg = f"Не удалось перенести файлы из временной папки {temp_dir}. Сохранение отменено."
-                # #     self.logger.error(error_msg)
-                # #     raise RuntimeError(error_msg)
 
                 # # --------------------------------------------------------------
                 # # Сохраняем обновлённый DTO в БД
@@ -5815,6 +5696,7 @@ class PaginatedListPage(
                     )
                     # добавляем родителя, если есть
                     parent_id = self._get_parent_id(entity_id)
+
                     # Уведомляем родителя об изменении дочерней сущности (например, фото изменило описание) 
                     self._update_affected_parents_and_deferred_action(
                         parent_id, 
@@ -5822,50 +5704,19 @@ class PaginatedListPage(
                         session=sess
                     )
 
-                    # Очищаем черновик DTO (если был)
-                    self._clear_draft_dto(entity_id)
-
-                    # Обновляем строку в таблице по ID (вместо индекса)
-                    self._update_row_by_id(entity_id, updated)
-
-                    # # self.source_model.update_row(row, updated)
-                    # # self.original_data[row] = updated
-
-                    # self._source_model_update_row(row, updated) 
-
-                    # # self.original_data[row] = updated
-
-                    # # Обновляем selected_dto, если эта строка была выбрана
-                    # # if self.selected_dto and self.selected_dto.id == entity_id:
-                    # #     self.selected_dto = updated
-                    # self._clear_selected_dto(entity_id, updated)
+                    # Очистка черновиков и временной папки после успешного сохранения
+                    # отложенное действие для обновления строки после коммита
+                    # ВНИМАНИЕ: Счётчик родителя уже был уменьшен при вызове clear_entity_drafts (он вызывает discard_entity_subtree, который уменьшает счётчик). Поэтому clear_own_change НЕ должна изменять счётчик – она только сбрасывает статус 'own' и пересчитывает статус родителя.
+                    self._deferred_refresh_and_cleanup(
+                        real_id=entity_id, 
+                        # temp_id=temp_id, 
+                        session=sess
+                    )
 
                 except Exception as e:
 
                     # Логируем ошибку и пробрасываем дальше (транзакция откатится)
                     self.logger.error(f"Ошибка при сохранении строки {entity_id}: {e}")
-
-                    # # Удаляем только целевые (новые) файлы, которые уже скопированы в хранилище
-                    # ctx_rollback = DeletionContext.create(sess, DeletionType.ROLLBACK)
-                    # for files in [
-                    #     # deleted_old_files, # заменённые при переносе файлы
-                    #     # copied_files,  # Удаляем временные файлы (скопированные из временной папки)
-                    #     copied_dest_paths, # Удаляем целевые файлы (уже скопированные)
-                    #     # old_files,  # Удаляем старые файлы (заменяемые)
-                    # ]:
-                    #     # for file in files:
-                    #     #      delete_file_safely( # удаление сразу
-                    #     #          file,
-                    #     #          logger=self.logger
-                    #     #      )
-                    #     self._del_file(
-                    #         file_path=files,
-                    #         # session=None,  # Моментальное удаление
-                    #         # session=sess,
-                    #         ctx=ctx_rollback,
-                    #         if_delete_parent_dir=False,
-                    #         force=False,
-                    #     )
 
                     # Временную папку не удаляем – оставляем для повторной попытки
                     # Пробрасываем исключение, транзакция откатится
@@ -5910,12 +5761,12 @@ class PaginatedListPage(
                 #   Если старый статус был не None, а новый стал None, вызывает _update_parent_child_counter(entity_id, -1) – уменьшает счётчик родителя на 1.
                 #   Обновляет статус в реестре и кэше.
                 #   Если статус изменился, вызывает _propagate_status_up(entity_id) (пересчитывает статус родителей).
-                # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
-                ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
-                self.clear_entity_drafts(  # Удаляет черновики для данной сущности
-                    entity_id,
-                    ctx=ctx_commit  # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
-                )
+                # # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
+                # ctx_commit = DeletionContext.create(sess, DeletionType.COMMIT)
+                # self.clear_entity_drafts(  # Удаляет черновики для данной сущности
+                #     entity_id,
+                #     ctx=ctx_commit  # (Очищаем черновики сущности – они больше не нужны, данные сохранены в БД)
+                # )
 
                 # ВНИМАНИЕ: Счётчик родителя уже был уменьшен при вызове clear_entity_drafts (он вызывает discard_entity_subtree, который уменьшает счётчик). Поэтому clear_own_change НЕ должна изменять счётчик – она только сбрасывает статус 'own' и пересчитывает статус родителя.
 

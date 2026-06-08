@@ -164,6 +164,10 @@ class AppointmentPhotoFrame(BasePage):
             self._update_buttons_state
         )
 
+        # Подключаем сигналы изменения режима редактирования для синхронизации кнопки
+        self.appointment_page.edit_mode_changed.connect(self._on_edit_mode_changed)
+        self.photo_page.edit_mode_changed.connect(self._on_edit_mode_changed)
+
         # self.photo_page.action_requested.connect( #  оно не нужно, потому что делегат сам откроет диалог
         #     self._on_photo_action_requested
         # )
@@ -508,6 +512,24 @@ class AppointmentPhotoFrame(BasePage):
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system'
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_edit_mode_changed(self, enabled: bool) -> bool:
+        """Синхронизирует состояние действия 'edit_mode' в ActionManager."""
+        rezult = (
+            hasattr(self, 'main_window'
+        ) and self.main_window) and hasattr(self.main_window, 'action_manager')
+        
+        if rezult:
+            # Используем существующий метод для обновления действия
+            self.main_window.action_manager.set_action_checked('edit_mode', enabled)
+        
+        return rezult
+
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _request_edit_mode(self, enable: bool) -> None:
         """
         Переключает режим редактирования через ActionManager (если доступен)
@@ -516,9 +538,7 @@ class AppointmentPhotoFrame(BasePage):
         Args:
             enable: True – включить режим редактирования, False – выключить.
         """
-        if hasattr(self, 'main_window') and self.main_window.action_manager:
-            self.main_window.action_manager.set_action_checked('edit_mode', enable)
-        else:
+        if not self._on_edit_mode_changed(enable):
             # fallback на случай, если ActionManager недоступен
             self._toggle_edit_mode(enable)
 

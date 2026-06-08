@@ -249,7 +249,7 @@ class EditModeMixin(ABC):
 
         if enable == self.edit_mode:
             return
-        
+        # ее = self._has_unsaved_changes()
         if not enable and self._has_unsaved_changes():
             reply = QMessageBox.question(
                 self, "Несохранённые изменения",

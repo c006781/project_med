@@ -738,7 +738,12 @@ class DraftTreeMixin:
             new_count = 0
 
         # Пересчитываем статус родителя (с учётом его собственных изменений)
-        self._recompute_parent_status(parent_id)
+        parent_type = self._get_parent_entity_type(parent_id)
+        # parent_type
+        self._recompute_parent_status(
+            parent_id,
+            parent_type
+        )
 
     @AppLogger.get_instance(
         name='DraftTreeMixin',
@@ -748,14 +753,22 @@ class DraftTreeMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _recompute_parent_status(self, parent_id: int) -> None:
+    def _recompute_parent_status(
+        self, 
+        parent_id: int,
+        _entity_type = None 
+    ) -> None:
         """Пересчитывает статус родителя на основе его собственных изменений и счётчика детей."""
+
+        if _entity_type is not None:
+            self._entity_type = _entity_type
+
         own_status = self._draft_registry.get_entity_status(
-            self._entity_type, parent_id
+            _entity_type, parent_id
         )
         has_own = own_status in ('own', 'both')
         child_count = self._draft_registry.get_child_counter(
-            self._entity_type, parent_id
+            _entity_type, parent_id
         )
         new_status = self._status_from_flags(has_own, child_count > 0)
 
@@ -765,7 +778,7 @@ class DraftTreeMixin:
 
         self._set_cached_status(parent_id, new_status)
         self._draft_registry.set_entity_status(
-            self._entity_type, parent_id, new_status
+            _entity_type, parent_id, new_status
         )
         self.entity_status_changed.emit(parent_id, new_status is not None)
 

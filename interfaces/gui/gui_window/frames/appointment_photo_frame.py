@@ -649,7 +649,13 @@ class AppointmentPhotoFrame(BasePage):
         """Сохраняет изменения в обеих таблицах."""
         # Сначала сохраняем приёмы (они могут создавать новые ID, нужные для фото)
         success_app = self.appointment_page.save_all_changes()
-        success_photo = self.photo_page.save_all_changes()
+
+        try:
+            success_photo = self.photo_page.save_all_changes()
+        except ValueError as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+            return
+        
         if success_app and success_photo:
             QMessageBox.information(self, "Успех", "Все изменения сохранены.")
         else:

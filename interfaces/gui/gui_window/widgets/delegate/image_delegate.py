@@ -557,7 +557,7 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         scaled = pixmap.scaled(rect.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         x = rect.x() + (rect.width() - scaled.width()) // 2
         y = rect.y() + (rect.height() - scaled.height()) // 2
-        self.logger.debug(f"_draw_pixmap: x: {x}, y: {y}")
+        # self.logger.debug(f"_draw_pixmap: x: {x}, y: {y}")
         painter.drawPixmap(x, y, scaled)
 
     @AppLogger.get_instance(

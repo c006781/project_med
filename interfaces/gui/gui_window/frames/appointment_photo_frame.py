@@ -550,10 +550,57 @@ class AppointmentPhotoFrame(BasePage):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _toggle_edit_mode(self, checked: bool):
         """Переключает режим редактирования для обеих таблиц."""
-        # Переключаем режим у страниц
-        self.appointment_page.set_edit_mode(checked)
+        # # Переключаем режим у страниц
+        temp = self.appointment_page.set_edit_mode(checked)
+        
+        # self.photo_page.set_edit_mode(checked)
+        # self.photo_page.set_edit_mode(self.appointment_page.edit_mode)
+
+        # if self.appointment_page.edit_mode != checked:
+        if not temp:
+            action = self.main_window.action_manager.get_action('edit_mode')
+            if action:
+                action.blockSignals(True)
+                action.setChecked(self.appointment_page.edit_mode)
+                action.blockSignals(False)
+
+            return
+
         self.photo_page.set_edit_mode(checked)
         self._update_buttons_state()
+        
+        # #  Сначала пытаемся переключить режим у основной страницы (приёмы)
+        # self.appointment_page.set_edit_mode(checked)
+        # # Если после переключения режим приёмов не совпадает с запрошенным (Cancel),
+        # # то и фото не переключаем, а также восстанавливаем кнопку.
+        # if self.appointment_page.edit_mode != checked:
+        #     # Восстанавливаем кнопку (она уже может быть отжата)
+        #     self.edit_mode_btn.blockSignals(True)
+        #     self.edit_mode_btn.setChecked(self.appointment_page.edit_mode)
+        #     self.edit_mode_btn.blockSignals(False)
+        #     return
+
+        # # Если приёмы успешно переключились, переключаем фото
+        # self.photo_page.set_edit_mode(checked)
+        # self._update_buttons_state()
+
+
+
+        # # Переключаем режим у страницы приёмов
+        # self.appointment_page.set_edit_mode(checked)
+
+        # # Если режим не изменился (пользователь нажал Cancel), восстанавливаем действие
+        # if self.appointment_page.edit_mode != checked:
+        #     action = self.main_window.action_manager.get_action('edit_mode')
+        #     if action:
+        #         action.blockSignals(True)
+        #         action.setChecked(self.appointment_page.edit_mode)
+        #         action.blockSignals(False)
+        #     return
+
+        # # Успешно переключились – переключаем фото и обновляем кнопки
+        # self.photo_page.set_edit_mode(checked)
+        # self._update_buttons_state()
 
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',

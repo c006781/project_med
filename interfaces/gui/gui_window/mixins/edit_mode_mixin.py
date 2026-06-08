@@ -219,7 +219,7 @@ class EditModeMixin(ABC):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def toggle_edit_mode(self, enable: bool) -> None:
+    def toggle_edit_mode(self, enable: bool) -> bool:
         """
         Включает или выключает режим редактирования.
 
@@ -248,7 +248,7 @@ class EditModeMixin(ABC):
         """
 
         if enable == self.edit_mode:
-            return
+            return False
         # ее = self._has_unsaved_changes()
         if not enable and self._has_unsaved_changes():
             reply = QMessageBox.question(
@@ -259,16 +259,18 @@ class EditModeMixin(ABC):
 
             if reply == QMessageBox.StandardButton.Yes:
                 if not self._save_all_changes_impl():
-                    return
+                    return True
                 
             elif reply == QMessageBox.StandardButton.No:
                 self._discard_all_changes()
 
             else:
-                return
+                return False
             
         self._set_edit_mode(enable)
 
+        return True
+    
     @AppLogger.get_instance(
         name='EditModeMixin',
         # share_file_with = 'system',
@@ -402,13 +404,14 @@ class EditModeMixin(ABC):
         """
 
         self.logger.debug(f"_set_edit_mode: enable={enable}")
-        self.edit_mode = enable
+        if self.edit_mode != enable:
+            self.edit_mode = enable
 
-        if hasattr(self, 'source_model'):
-            self.source_model.set_checkbox_column_visible(enable)
+            if hasattr(self, 'source_model'):
+                self.source_model.set_checkbox_column_visible(enable)
 
-        if hasattr(self, '_update_ui_for_edit_mode'):
-            self._update_ui_for_edit_mode(enable)
+            if hasattr(self, '_update_ui_for_edit_mode'):
+                self._update_ui_for_edit_mode(enable)
 
     # def _set_edit_mode(self, enable: bool):
     #     self.edit_mode = enable

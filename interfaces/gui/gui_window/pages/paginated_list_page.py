@@ -2751,11 +2751,27 @@ class PaginatedListPage(
             >>> # При повторном нажатии checked = False -> если есть изменения, предложит сохранить
         """
 
-        self.set_edit_mode(checked)
+        # self.set_edit_mode(checked)
 
-        # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
+        # # Дополнительно управляем видимостью чекбокс‑столбца (если не делается в toggle_edit_mode)
+        # if hasattr(self, 'source_model'):
+        #     self.source_model.set_checkbox_column_visible(checked)
+
+        old_mode = self.edit_mode
+
+        if self.edit_mode != checked  :  
+            self.set_edit_mode(checked)
+
+            # Если режим не изменился (например, из-за Cancel), восстанавливаем кнопку и не трогаем чекбоксы
+            if self.edit_mode == old_mode and old_mode != checked:
+                self.edit_mode_btn.blockSignals(True)
+                self.edit_mode_btn.setChecked(old_mode)
+                self.edit_mode_btn.blockSignals(False)
+                return
+
+        # Режим успешно переключился – обновляем видимость чекбокс-столбца
         if hasattr(self, 'source_model'):
-            self.source_model.set_checkbox_column_visible(checked)
+            self.source_model.set_checkbox_column_visible(self.edit_mode)
 
 
     @AppLogger.get_instance(
@@ -2897,7 +2913,7 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_edit_mode(self, enable: bool) -> None:
+    def set_edit_mode(self, enable: bool) -> bool:
         """
         Включает или выключает режим редактирования.
 
@@ -2905,7 +2921,8 @@ class PaginatedListPage(
             enable: True – включить режим редактирования, False – выключить.
         """
         if hasattr(self, 'toggle_edit_mode'):
-            self.toggle_edit_mode(enable)
+            return self.toggle_edit_mode(enable)
+        return False
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

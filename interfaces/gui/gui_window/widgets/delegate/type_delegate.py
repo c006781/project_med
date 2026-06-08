@@ -764,6 +764,14 @@ class TextPopupDelegate(QStyledItemDelegate):
             cls._shared_button.hide()
         return cls._shared_button
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def __init__(
         self,
         parent=None,
@@ -781,6 +789,14 @@ class TextPopupDelegate(QStyledItemDelegate):
             parent.installEventFilter(self)
             self._install_global_hover_monitor(parent)
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _install_global_hover_monitor(self, table):
         """Устанавливает фильтр событий на viewport таблицы для отслеживания движения мыши."""
         if self.__class__._global_filter_installed:
@@ -789,6 +805,14 @@ class TextPopupDelegate(QStyledItemDelegate):
         viewport.installEventFilter(self)
         self.__class__._global_filter_installed = True
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _show_button(self, index):
         """Показывает кнопку над указанной ячейкой."""
         if not index.isValid():
@@ -824,6 +848,14 @@ class TextPopupDelegate(QStyledItemDelegate):
         self._current_col = index.column()
         self.__class__._current_delegate = self
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _hide_button(self):
         """Скрывает общую кнопку."""
         if self.__class__._shared_button is not None:
@@ -832,6 +864,14 @@ class TextPopupDelegate(QStyledItemDelegate):
         self._current_col = -1
         self.__class__._current_delegate = None
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _on_button_clicked(self):
         """Обработчик клика по кнопке."""
         if self._current_row >= 0 and self._current_col >= 0:
@@ -840,6 +880,14 @@ class TextPopupDelegate(QStyledItemDelegate):
             if idx.isValid():
                 self._open_popup(model, idx)
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def editorEvent(self, event, model, option, index):
         """Обрабатывает события мыши для показа/скрытия кнопки."""
         # Обработка движения мыши – обновляем hover и показываем кнопку
@@ -867,6 +915,14 @@ class TextPopupDelegate(QStyledItemDelegate):
 
         return super().editorEvent(event, model, option, index)
 
+    # @AppLogger.get_instance(
+    #     name='TextPopupDelegate',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def eventFilter(self, obj, event):
         # Обработка выхода мыши из таблицы
         if obj == self.parent() and event.type() == QEvent.Leave:
@@ -888,10 +944,26 @@ class TextPopupDelegate(QStyledItemDelegate):
 
         return super().eventFilter(obj, event)
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def paint(self, painter, option, index):
         """Стандартная отрисовка без рисования кнопки (кнопка – реальный виджет)."""
         super().paint(painter, option, index)
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def set_readonly(self, readonly):
         """Устанавливает режим только для просмотра."""
         self._readonly = readonly
@@ -912,6 +984,14 @@ class TextPopupDelegate(QStyledItemDelegate):
             if new_text != text:
                 model.setData(index, new_text, Qt.EditRole)
 
+    @AppLogger.get_instance(
+        name='TextPopupDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def createEditor(self, parent, option, index):
         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
         return None

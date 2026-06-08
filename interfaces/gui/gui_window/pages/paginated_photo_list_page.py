@@ -15,6 +15,7 @@ from app.dto.field_configs import PHOTO_CONFIG
 
 from interfaces.gui.gui_window.pages.paginated_list_page import PaginatedListPage
 
+from PySide6.QtWidgets import QFileDialog
 
 class PaginatedPhotoListPage(PaginatedListPage):
     """
@@ -157,3 +158,39 @@ class PaginatedPhotoListPage(PaginatedListPage):
         self._add_photo_from_file(file_path, photo_field)
 
         return True
+    
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def add_row(self) -> None:
+        """
+        Переопределяет метод добавления строки: открывает диалог выбора файлов
+        и создаёт новую строку с фото, вставляя её в позицию согласно правилам
+        (после выделенной строки или в начало).
+        """
+        if not self.edit_mode:
+            return
+
+        extensions = self._get_allowed_extensions_for_photo()
+        filter_str = f"Images (*{' *'.join(extensions)})"
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Выберите изображение",
+            "",
+            filter_str
+        )
+        if not file_path:
+            return
+
+        photo_field = self._get_photo_field_name_impl()
+        if photo_field is None:
+            self.logger.error("add_row: не найдено поле с фото")
+            return
+
+        self._add_photo_from_file_at_pos(file_path, photo_field)

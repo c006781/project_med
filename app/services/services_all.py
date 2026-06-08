@@ -1346,6 +1346,7 @@ class BaseService(
             item_id,
             options=self._get_eager_loading_options()
         )
+        0==0
 
         if item is None:
             raise class_err(item_id)

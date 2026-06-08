@@ -4,6 +4,8 @@
 Используется в новом фрейме с двумя таблицами (приёмы + фото).
 """
 
+from typing import Optional
+
 from app.utils.logger.logger import AppLogger
 
 from app.dependencies import get_appointment_service, get_photo_service
@@ -112,3 +114,21 @@ class PaginatedAppointmentListPage(PaginatedListPage):
         photos = self._photo_service.get_photos_for_appointment(parent_id)
         return [p.id for p in photos]
     
+    # def _get_child_service(self, child_name: str = None) -> Optional['BaseService']:
+    #     """
+    #     Возвращает сервис для дочерних сущностей (фото).
+    #     Переопределяет метод базового класса.
+
+    #     Args:
+    #         child_name: Имя дочерней сущности (не используется, так как у приёма только фото).
+
+    #     Returns:
+    #         PhotoService или None.
+    #     """
+    #     return self._photo_service
+    
+    def _get_child_relation_name(self, child_id: int) -> Optional[str]:
+        """
+        Для приёма дочерние сущности – фотографии, отношение 'photos'.
+        """
+        return 'photos'

@@ -317,6 +317,7 @@ from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from interfaces.gui.gui_window.utils.gui_helpers import get_visible_row_range
 from interfaces.gui.gui_window.widgets.paginated_table_model import PaginatedTableModel
+from interfaces.gui.gui_window.widgets.side_toolbar import SideToolbar
 from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
 
 from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
@@ -345,8 +346,10 @@ from PySide6.QtGui import QColor
 
 from PySide6.QtWidgets import (
     QDialog,
+    QHBoxLayout,
     QHeaderView,
     QMessageBox,
+    QVBoxLayout,
     # QHBoxLayout,
     # QPushButton,
     # QMessageBox,
@@ -511,7 +514,6 @@ class PaginatedListPage(
     def _current_filters(self, value):
         self.__current_filters = value
 
-
     @property
     def _current_order_by(self):
         try:
@@ -612,6 +614,7 @@ class PaginatedListPage(
         entity_type: str = "",
         shared_registry: Optional[DraftRegistry] = None, 
         show_controls: Optional[List[str]] = None, # 
+        side_toolbar_visible: bool = True,
     ):
         """
         Инициализирует страницу списка с пагинацией, фильтрацией и древовидными черновиками.
@@ -719,6 +722,10 @@ class PaginatedListPage(
 
         self._entity_type = entity_type
 
+
+        self.side_toolbar = None
+        self.side_toolbar_visible = side_toolbar_visible  # по умолчанию панель видна
+
         self._saved_state = {
             'filters': None,
             'column_filters': None,
@@ -748,6 +755,8 @@ class PaginatedListPage(
 
         # 2. Теперь вызываем setup_ui, который создаст таблицу и настроит её
         self.setup_ui()
+
+        self._setup_side_toolbar()
 
         # Подключаем сохранение ширины столбцов при изменении пользователем
         header = self.table_view.horizontalHeader()
@@ -788,6 +797,8 @@ class PaginatedListPage(
             selection_model.selectionChanged.connect(self._on_selection_changed_for_draft)
 
         self._affected_parents = set()   # ID родителей, чьи строки нужно обновить после сохранения
+
+
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
     # @AppLogger.get_instance(
@@ -822,6 +833,42 @@ class PaginatedListPage(
     #         header.filter_requested.connect(self.on_filter_requested)
     #         header.filter_clear_requested.connect(self.on_filter_clear)
 
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _setup_side_toolbar(self):
+        """
+        Создаёт боковую панель и перестраивает layout: панель слева, таблица и filter_bar – справа.
+        """
+        self.side_toolbar = SideToolbar(self, self)
+        self.side_toolbar.setVisible(self.side_toolbar_visible)
+
+        # Находим таблицу в основном layout и временно удаляем её
+        index = self.main_layout.indexOf(self.table_view)
+        if index != -1:
+            self.main_layout.takeAt(index)
+
+        # Находим filter_bar (если есть) и удаляем его
+        filter_index = self.main_layout.indexOf(self.filter_bar)
+        if filter_index != -1:
+            self.main_layout.takeAt(filter_index)
+
+        # Создаём горизонтальный layout (боковая панель + всё остальное)
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(self.side_toolbar)
+
+        # Вертикальный layout для filter_bar и таблицы
+        v_layout = QVBoxLayout()
+        if self.filter_bar:
+            v_layout.addWidget(self.filter_bar)
+        v_layout.addWidget(self.table_view)
+        h_layout.addLayout(v_layout, 1)
+
+        # Добавляем h_layout в main_layout (после верхней панели)
+        self.main_layout.addLayout(h_layout)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2777,6 +2824,8 @@ class PaginatedListPage(
         # Вызываем родительский метод (UIMixin), чтобы обновить базовые элементы
         super()._update_ui_for_edit_mode(edit_mode)
         
+        if self.side_toolbar:
+            self.side_toolbar.update_for_edit_mode(edit_mode)
         # --- Работа с чекбокс-столбцом ---
         # if hasattr(self, 'source_model'):
             # self.source_model.set_checkbox_column_visible(edit_mode)
@@ -4883,6 +4932,30 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _remove_row_by_id(self, entity_id: int) -> None:
+        """
+        Удаляет строку из модели таблицы по ID сущности.
+        Используется для отложенного удаления после коммита.
+
+        Args:
+            entity_id: ID сущности (реальный, положительный).
+        """
+        row = self._find_row_by_id(entity_id)
+        if row >= 0:
+            self.source_model.remove_row(row)
+            self.original_data.pop(row, None)
+            self.logger.debug(f"Строка с ID {entity_id} удалена из модели")
+        else:
+            self.logger.warning(f"Не найдена строка с ID {entity_id} для удаления из модели")
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _save_deleted_rows(
         self, 
         session: Optional[Session] = None
@@ -4963,6 +5036,7 @@ class PaginatedListPage(
         self, 
         entity_id: int, 
         session: Optional[Session] = None,
+        service: Optional[Any] = None,
     ) -> None:
         """
         Рекурсивно удаляет сущность и всех её потомков из БД, а также очищает реестр.
@@ -4988,7 +5062,10 @@ class PaginatedListPage(
         Args:
             entity_id: ID сущности (должен быть >= 0, т.е. существовать в БД).
             session: Сессия SQLAlchemy (опционально, для работы в одной транзакции).
+            service: Сервис для удаления текущей сущности. Если None, используется self.service.
         """
+        if service is None:
+            service = self.service
 
         # Рекурсивно удалить всех потомков
         for child_id in self._get_child_ids(entity_id):
@@ -4999,10 +5076,17 @@ class PaginatedListPage(
                 # # Увеличиваем счётчик родителя дочерней сущности (чтобы её родитель знал)
                 # self._update_parent_child_counter(child_id, 1) # причин удаления: Этот счётчик уже был увеличен ранее, когда child_id был помечен на удаление (в _delete_selected_rows или при каскадной пометке).
 
+
+            # Получаем имя отношения для дочерней сущности
+            relation_name = self._get_child_relation_name(child_id)
+
+            child_service = self._get_child_service(relation_name)
+
             # Рекурсивно удаляем ребёнка и его потомков
             self._delete_entity_and_children(
                 entity_id=child_id, 
                 session=session,
+                service=child_service,
             )
 
         # Очищаем временную папку для удаляемой сущности (отложенно после коммита)
@@ -5018,8 +5102,8 @@ class PaginatedListPage(
         self._draft_registry.discard(f"__counter__:{self._entity_type}:{entity_id}")
 
         # Удалить саму сущность из БД
-        self.service.delete(
-            entity_id=entity_id, 
+        service.delete(
+            entity_id, 
             session=session,
         )
 
@@ -6187,6 +6271,11 @@ class PaginatedListPage(
             self.logger.debug(f"_update_save_button_state: has_changes={has_changes}")
             self.save_changes_btn.setEnabled(has_changes)
 
+
+            if self.side_toolbar:
+                self.side_toolbar.set_save_enabled(has_changes)
+
+
     # ------------------------------------------------------------------
     # Обработка изменения выделения строки
     # ------------------------------------------------------------------
@@ -6247,9 +6336,13 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _get_child_service(self, child_name: str = None):
-        """Возвращает сервис для дочернего компонента (переопределяется в наследниках)."""
-
+    def _get_child_service(self, child_name: str = None) -> Optional[Any]:
+        """
+        Возвращает сервис для дочернего компонента (переопределяется в наследниках).
+        По умолчанию возвращает None (использовать self.service).
+        """
+        if child_name:
+            return self.service._get_child_service(child_name)
         return None
 
     @AppLogger.get_instance(
@@ -6284,6 +6377,7 @@ class PaginatedListPage(
             # 'multi_sort_specs': self._current_order_by,  # можно хранить то же, что и order_by # убрал поскольку _current_order_by уже хранит результат мульти-сортировки (строки order_by), отдельное сохранение multi_sort_specs избыточно и приводит к неиспользуемому ключу.
             'scroll_pos': self.table_view.verticalScrollBar().value(),
             'selected_id': self.selected_dto.id if self.selected_dto else None,
+            'side_toolbar_visible': self.side_toolbar.isVisible() if self.side_toolbar else True,
         }
 
         # Сбрасываем сохранённое выделение при уходе со страницы
@@ -6409,6 +6503,17 @@ class PaginatedListPage(
             self._refresh_filter_bar()
             super().on_enter(extra_data)
             self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
+
+        # Восстановить видимость боковой панели
+        side_visible = self._saved_state.get('side_toolbar_visible', True)
+        if self.side_toolbar:
+            self.side_toolbar.setVisible(side_visible)
+            if side_visible:
+                self.side_toolbar.toggle_btn.setText("◀")
+                self.side_toolbar.toggle_btn.setToolTip("Скрыть панель")
+            else:
+                self.side_toolbar.toggle_btn.setText("▶")
+                self.side_toolbar.toggle_btn.setToolTip("Показать панель")
 
         # После загрузки данных восстанавливаем прокрутку и выделение
         QTimer.singleShot(100, self._restore_scroll_and_selection)
@@ -7585,6 +7690,87 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _add_new_row_at_pos(self, dto: Any) -> None:
+        """
+        Вставляет новую строку в модель, определяя позицию на основе текущего выделения.
+        Регистрирует черновик, помечает изменения, выделяет новую строку и обновляет UI.
+
+        Args:
+            dto: DTO новой строки (с уже присвоенным временным ID).
+        """
+        temp_id = dto.id
+
+        # Сохраняем текущее выделение (если есть) до очистки таблицы
+        selected_dto = self.get_current_selected_dto()
+        if selected_dto is None:
+            selected_dto = self._last_selected_dto
+
+        # Определяем позицию вставки на основе сохранённого выделения
+        pos = self._get_insertion_pos(selected_dto)
+
+        # Снимаем выделение перед вставкой
+        self.table_view.clearSelection()
+
+        # Вставка в модель
+        self.source_model.insert_row_at(pos, dto)
+
+        # Регистрация в реестре и пометка изменений
+        self._finalize_new_row(dto, temp_id, pos)
+
+        # Выделение новой строки
+        self._select_row_by_id(temp_id)
+
+        self._update_save_button_state()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _add_photo_from_file_at_pos(self, file_path: str, photo_field: str) -> None:
+        """
+        Добавляет новую строку с фото из указанного файла, вставляя её
+        в позицию согласно правилам (после выделенной строки или в начало).
+
+        Args:
+            file_path (str): Абсолютный путь к исходному файлу изображения.
+            photo_field (str): Имя поля DTO, содержащего путь к фото
+                               (должно быть определено в field_configs).
+        """
+        # Генерируем временный ID для новой строки
+        temp_id = self._next_temp_id
+        self._next_temp_id -= 1
+
+        # Создаём временную папку для черновика (если ещё не создана)
+        temp_dir = self._ensure_temp_dir(temp_id)
+
+        # Копируем файл во временную папку с уникальным именем
+        ext = os.path.splitext(file_path)[1]
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        dest_path = os.path.join(temp_dir, unique_name)
+        shutil.copy2(file_path, dest_path)
+
+        # Создаём DTO с переопределением поля фото
+        overrides = {photo_field: unique_name}
+        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=False)
+        if dto is None:
+            return
+        dto.id = temp_id
+
+        # Вставляем строку с учётом позиции
+        self._add_new_row_at_pos(dto)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def _add_inline_row(self):
         """
         Добавляет новую пустую строку в таблицу (режим редактирования).
@@ -7633,31 +7819,33 @@ class PaginatedListPage(
         dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
         if dto is None:
             return
+        
+        self._add_new_row_at_pos(dto)
 
-        temp_id = dto.id
+        # temp_id = dto.id
 
-        # Сохраняем текущее выделение (если есть) до очистки таблицы
-        # Приоритет: текущее выделение -> последнее сохранённое выделение
-        selected_dto = self.get_current_selected_dto()
-        if selected_dto is None:
-            selected_dto = self._last_selected_dto
+        # # Сохраняем текущее выделение (если есть) до очистки таблицы
+        # # Приоритет: текущее выделение -> последнее сохранённое выделение
+        # selected_dto = self.get_current_selected_dto()
+        # if selected_dto is None:
+        #     selected_dto = self._last_selected_dto
 
-        # Определяем позицию вставки на основе сохранённого выделения
-        pos = self._get_insertion_pos(selected_dto)
+        # # Определяем позицию вставки на основе сохранённого выделения
+        # pos = self._get_insertion_pos(selected_dto)
 
-        # Снимаем выделение перед вставкой (после того как сохранили)
-        self.table_view.clearSelection()
+        # # Снимаем выделение перед вставкой (после того как сохранили)
+        # self.table_view.clearSelection()
 
-        # Вставка в модель
-        self.source_model.insert_row_at(pos, dto)
+        # # Вставка в модель
+        # self.source_model.insert_row_at(pos, dto)
 
-        # Регистрация в реестре и пометка изменений
-        self._finalize_new_row(dto, temp_id, pos)
+        # # Регистрация в реестре и пометка изменений
+        # self._finalize_new_row(dto, temp_id, pos)
 
-        # Выделение новой строки
-        self._select_row_by_id(temp_id)
+        # # Выделение новой строки
+        # self._select_row_by_id(temp_id)
 
-        self._update_save_button_state()
+        # self._update_save_button_state()
 
     # def _add_inline_row(self):
     #     """

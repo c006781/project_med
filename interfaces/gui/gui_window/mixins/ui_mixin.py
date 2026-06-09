@@ -217,7 +217,7 @@ class UIMixin:
                 "Добавить строку",
                 "Удалить строку",
                 "Отменить изменения",
-                # "Отменить все изменения",
+                "Отменить все изменения",
             ])
             self.inline_action_combo.model().item(0).setEnabled(False)
             self.inline_action_combo.setCurrentIndex(0)
@@ -550,6 +550,9 @@ class UIMixin:
 
         elif index == 3: # Отменить изменения
             self.cancel_selected_rows_changes()
+
+        elif index == 4: # Отменить все изменения
+            self.cancel_all_changes()
 
         self.inline_action_combo.setCurrentIndex(0)
 

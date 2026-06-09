@@ -399,7 +399,7 @@ class AppointmentPhotoFrame(BasePage):
         self.edit_appointment_btn = QPushButton()
         am.connect_button('edit_appointment', self.edit_appointment_btn)
         self.edit_appointment_btn.setText("Редактировать приём")
-
+        self.edit_appointment_btn.setVisible(False)
 
         self.toolbar_layout.addWidget(self.edit_mode_btn)
         self.toolbar_layout.addWidget(self.add_appointment_btn)

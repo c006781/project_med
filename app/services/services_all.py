@@ -1830,6 +1830,8 @@ class BaseService(
             old_value = getattr(model_obj, field_name, None)
 
             config = self._field_configs.get(field_name, {})
+
+            title = config.get('title', None)  or field_name
             
             # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
             if config.get('widget_type') == 'image_thumbnail':
@@ -1848,7 +1850,7 @@ class BaseService(
                     full_new_path = os.path.join(storage_path, new_value)
                     if not os.path.exists(full_new_path):
                         self.logger.warning(
-                            f"Новый файл для поля {field_name} не существует: {full_new_path}. "
+                            f"Новый файл для поля '{field_name}' не существует: {full_new_path}. "
                             "Обновление поля будет выполнено, но файл отсутствует."
                         )
                 
@@ -1902,7 +1904,7 @@ class BaseService(
                     # Вариант 1: пропустить (оставить старое значение)
                     # continue
                     # Вариант 2: выбросить исключение
-                    raise ValueError(f"Обязательное поле {field_name} не может быть пустым")
+                    raise ValueError(f"Обязательное поле '{title}' не может быть пустым")
                 else:
                     setattr(model_obj, field_name, None)
 

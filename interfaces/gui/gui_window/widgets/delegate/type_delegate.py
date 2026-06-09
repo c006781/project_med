@@ -1031,8 +1031,10 @@ class DatePickerDelegate(QStyledItemDelegate):
     )
     def createEditor(self, parent, option, index):
         widget = DateEditWidget(parent, config=self.config)
+        # Сохраняем исходное значение ячейки для возможного восстановления при неверном вводе
+        self._original_value = index.model().data(index, Qt.EditRole)
         # install_standard_context_menu(widget.line_edit)   # добавить
-        widget.dateChanged.connect(lambda: self.commitData.emit(widget))
+        # widget.dateChanged.connect(lambda: self.commitData.emit(widget))   # Не подключаем commitData к сигналу изменения – Qt сам вызовет setModelData при завершении редактирования
         return widget
 
     @AppLogger.get_instance(
@@ -1059,8 +1061,22 @@ class DatePickerDelegate(QStyledItemDelegate):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def setModelData(self, editor, model, index):
+        text = editor.line_edit.text().strip()
         val = editor.get_date()
-        model.setData(index, val, Qt.EditRole)
+
+        if val is None:
+            if text == "--":
+                # Пользователь намеренно очистил поле – разрешаем сохранить None
+                model.setData(index, None, Qt.EditRole)
+            else:
+                # Введена неверная дата – восстанавливаем исходное значение
+                if hasattr(self, '_original_value'):
+                    model.setData(index, self._original_value, Qt.EditRole)
+                else:
+                    # Запасной вариант: ничего не меняем
+                    pass
+        else:
+            model.setData(index, val, Qt.EditRole)
 
     @AppLogger.get_instance(
         name='DatePickerDelegate',

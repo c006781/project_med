@@ -120,7 +120,7 @@ class TableColumn:
 
         try:
             self._width_dict = with_to_dict(value).copy()
-            
+
         except TypeError  as e:
             err_text = f"{self.system_name} -> {str(e)}"
             self.logger.error(err_text)
@@ -200,9 +200,40 @@ class TableColumn:
         self.is_note = is_note
         self.source_attr = source_attr
 
-
-
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def set_fixed_width(self, new_width: Optional[int]) -> None:
+        """
+        Устанавливает фиксированную ширину столбца.
+        Если new_width is None, удаляет ключ 'fixed' из словаря.
+        Флаг 'stretch' сохраняется без изменений.
+        """
+        if new_width is None:
+            self._width_dict.pop('fixed', None)
+        else:
+            self._width_dict['fixed'] = new_width
     
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def set_stretch(self, stretch: bool) -> None:
+        if stretch:
+            self._width_dict['stretch'] = True
+        else:
+            self._width_dict.pop('stretch', None)
+
+
     @AppLogger.get_instance(
         name='TableColumn',
         # share_file_with = 'system',

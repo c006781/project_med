@@ -313,19 +313,22 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
         'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
 
-        'width'         : 80,               # принудительный размер ширены
+        # 'width'         : 80,               # принудительный размер ширены
+        'width'         : {
+            'fixed'         : 80,           # принудительный размер ширены
+        },              
         # 'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
         #     'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
         #     'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
         # },
         # 'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
 
-        'sql_compute': {                    # Вычисляем: количество через sql
-            'func': 'COUNT',
-            'relation': 'photos',
-            'result_type': 'int',
-            'extra_key': 'photo_count',  
-            'formatter': lambda count: f"{count} фото" if count > 0 else '❌'
+        'sql_compute'   : {                    # Вычисляем: количество через sql
+            'func'          : 'COUNT',
+            'relation'      : 'photos',
+            'result_type'   : 'int',
+            'extra_key'     : 'photo_count',  
+            'formatter'     : lambda count: f"{count} фото" if count > 0 else '❌'
         }
     },
 }
@@ -376,7 +379,10 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         # 'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'updatable'     : True,         # полее не должно обновляться автоматически
         'widget_type'   : 'textarea',   # Многострочный текстовый редактор.
-        'stretch'       : True,   # этот столбец будет занимать всё оставшееся место
+        # 'stretch'       : True,          # этот столбец будет занимать всё оставшееся место
+        'width'         : {
+            'stretch'       : True,     # этот столбец будет занимать всё оставшееся место
+        }, 
     },
 }
 

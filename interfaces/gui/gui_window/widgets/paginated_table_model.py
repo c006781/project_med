@@ -623,7 +623,6 @@ class PaginatedTableModel(BaseTableModel):
         width_config = width
         width_config = with_to_dict(width_config)
 
-
         if stretch:
             width_config['stretch'] = True
         
@@ -696,18 +695,27 @@ class PaginatedTableModel(BaseTableModel):
         self, 
         order: int = 0, 
         visible: bool = False,
-        width: int = 30,
+        width: Optional[Union[int, Dict[str, Any]]] = 30,
         delegate_class = None,
-        stretch: bool = False,
+        stretch: bool = False, # для старой версии
     ) -> bool:
         """Добавляет столбец чекбоксов."""
+
+       
+        width_config = width
+        width_config = with_to_dict(width)
+
+        if width:
+            width_config['stretch'] = True 
+
         return self.add_system_column(
             system_name='__checkbox__',
             title='',
             order=order,
             delegate_class=delegate_class,
             visible=visible,
-            width=width,
+            # width=width,
+            width=width_config,
             stretch=stretch,
         )
 
@@ -727,10 +735,17 @@ class PaginatedTableModel(BaseTableModel):
         order: Optional[int] = None,
         visible: bool = True,
         width: Optional[Union[int, Dict[str, Any]]] = 80,
-        stretch: bool = False,
+        stretch: bool = False, # для старой версии
     ) -> bool:
         """Добавляет столбец с кнопкой."""
         # from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
+
+        width_config = width
+        width_config = with_to_dict(width_config)
+
+        if stretch:
+            width_config['stretch'] = True
+
         return self.add_system_column(
             system_name=system_name,
             title=title,
@@ -738,8 +753,9 @@ class PaginatedTableModel(BaseTableModel):
             delegate_class=ButtonDelegate,
             delegate_args={'button_text': button_text},
             visible=visible,
-            width=width,
-            stretch=stretch,
+            # width=width,
+            width=width_config,
+            # stretch=stretch,
         )
 
     @AppLogger.get_instance(

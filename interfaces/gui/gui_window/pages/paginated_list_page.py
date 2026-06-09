@@ -2340,7 +2340,14 @@ class PaginatedListPage(
                 col = self.source_model.get_column_at_visible_index(visible_idx)
                 if col is not None:
                     # Обновляем сохранённую ширину актуальным значением из таблицы
-                    col.width = self.table_view.columnWidth(visible_idx)
+                    # col.width = self.table_view.columnWidth(visible_idx)
+
+                    # current_width = self.table_view.columnWidth(visible_idx)
+                    # new_width_dict = {'fixed': current_width}
+                    # if col.is_stretch():
+                    #     new_width_dict['stretch'] = True
+                    # col.width = new_width_dict
+                    col.set_fixed_width(self.table_view.columnWidth(visible_idx))
 
 
         # Вместо полного пересоздания делегатов обновляем их read-only
@@ -6564,8 +6571,17 @@ class PaginatedListPage(
         if col is None:
             return
         
-        if col.width != new_size:
-            col.width = new_size
+
+        # Проверяем, изменилась ли ширина
+        current_fixed = col.get_fixed_width()
+        
+        if current_fixed != new_size:
+            # new_width_dict = {'fixed': new_size}
+            # if col.is_stretch():
+            #     new_width_dict['stretch'] = True
+            # col.width = new_width_dict
+
+            col.set_fixed_width(new_size)
             self.logger.debug(
                 f"Ширина столбца '{col.system_name}' "
                 f"изменена с {old_size} на {new_size}"

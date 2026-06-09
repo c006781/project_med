@@ -53,3 +53,11 @@ class PatientListPage(PaginatedListPage):
                 'action_btn'
             ]
         )
+
+    #     self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
+
+    # def _on_selection_changed_for_button(self, dto):
+    #     """Активирует/деактивирует кнопку «Приёмы» при выборе строки."""
+    #     if hasattr(self, 'action_btn') and self.action_btn:
+    #         # dto может быть None (выделение снято) или PatientDTO
+    #         self.action_btn.setEnabled(dto is not None)

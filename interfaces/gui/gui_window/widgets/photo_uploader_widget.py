@@ -406,6 +406,7 @@ class TextEditDelegate(QStyledItemDelegate):
                 # Обычный Enter
 
                 return False # Возвращаем False, чтобы событие ушло в редактор
+            
         return super().eventFilter(editor, event)
 
 class PhotoUploaderWidget(QWidget):

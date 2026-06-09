@@ -57,6 +57,12 @@ class SideToolbar(QWidget):
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setAlignment(Qt.AlignTop)
 
+        # Кнопка редактирования (работает в обычном режиме)
+        self.edit_btn = QPushButton("✎")
+        self.edit_btn.setToolTip("Редактировать запись")
+        self.edit_btn.clicked.connect(controller._on_edit_clicked)  # временно, будет переназначено в странице
+        layout.addWidget(self.edit_btn)
+
         # Кнопка добавления строки
         self.add_btn = QPushButton("+")
         self.add_btn.setToolTip("Добавить строку")
@@ -79,13 +85,24 @@ class SideToolbar(QWidget):
         self.save_btn = QPushButton("💾")
         self.save_btn.setToolTip("Сохранить все изменения")
         self.save_btn.clicked.connect(controller.save_all_changes)
+        self.save_btn.setVisible(False)
         layout.addWidget(self.save_btn)
+
+        # Кнопка обновления
+        self.refresh_btn = QPushButton("⟳")
+        self.refresh_btn.setToolTip("Обновить данные")
+        self.refresh_btn.clicked.connect(controller.refresh_data)
+        layout.addWidget(self.refresh_btn)
 
         # Кнопка сворачивания/разворачивания панели
         self.toggle_btn = QPushButton("◀")
         self.toggle_btn.setToolTip("Скрыть панель")
         self.toggle_btn.clicked.connect(self._toggle_visibility)
+        self.toggle_btn.setVisible(False)
         layout.addWidget(self.toggle_btn)
+
+
+
 
         # Базовый стиль (можно переопределить в qss)
         self.setStyleSheet("""

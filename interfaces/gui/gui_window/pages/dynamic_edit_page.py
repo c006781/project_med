@@ -393,6 +393,7 @@ class DynamicEditPage(BasePage):
         scroll.setFrameShape(QFrame.NoFrame)  # чтобы не было лишней рамки
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
         # Устанавливаем политику размера, чтобы scroll area не диктовала минимальный размер
         scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 

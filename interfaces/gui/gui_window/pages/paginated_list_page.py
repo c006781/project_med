@@ -443,6 +443,9 @@ class PaginatedListPage(
     # Параметры: (entity_type: str, entity_id: int)
     parent_entity_updated = Signal(str, int)
 
+
+    selection_changed = Signal(object)   # передаёт выбранный DTO или None
+
     # ------------------------------------------------------------------
     # Ленивая инициализация атрибутов (без __init__)
     # ------------------------------------------------------------------
@@ -789,6 +792,19 @@ class PaginatedListPage(
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
+
+        self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_selection_changed(self, dto):
+        """Активирует/деактивирует кнопку «Приёмы» при выборе строки."""
+        if hasattr(self, 'action_btn') and self.action_btn:
+            self.action_btn.setEnabled(dto is not None)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -815,6 +831,9 @@ class PaginatedListPage(
         h_layout = QHBoxLayout()
         h_layout.addWidget(self.side_toolbar)
 
+        self.side_toolbar.edit_btn.clicked.disconnect()
+        self.side_toolbar.edit_btn.clicked.connect(self._on_edit_clicked)   
+
         # Вертикальный layout для filter_bar и таблицы
         v_layout = QVBoxLayout()
         if self.filter_bar:
@@ -824,6 +843,44 @@ class PaginatedListPage(
 
         # Добавляем h_layout в main_layout (после верхней панели)
         self.main_layout.addLayout(h_layout)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_edit_clicked(self):
+        """Открыть форму редактирования для выбранной строки (в не-режиме)."""
+        if not self.edit_mode:
+            dto = self.get_current_selected_dto()
+            if dto:
+                self.edit_requested.emit(dto)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def add_row(self) -> None:
+        """Добавить строку: в режиме редактирования – inline, иначе – открыть форму."""
+        if self.edit_mode:
+            super().add_row()  # вызывает _add_inline_row
+        else:
+            self.add_requested.emit()
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def delete_selected_rows(self) -> None:
+        """Удалить выбранные строки: в режиме редактирования – inline, иначе – через форму."""
+        if self.edit_mode:
+            super().delete_selected_rows()
+        else:
+            dto = self.get_current_selected_dto()
+            if dto:
+                self.delete_requested.emit(dto)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1042,6 +1099,16 @@ class PaginatedListPage(
             old_count = old_count if append else None
         )
 
+        # Принудительно обновляем состояние кнопки действия (Приёмы)
+        self._update_selection_state()
+
+    def _update_selection_state(self):
+        """Обновляет self.selected_dto на основе текущего выделения и испускает сигнал."""
+        # old_dto = self.selected_dto
+        self.selected_dto = self.get_current_selected_dto()
+        # if self.selected_dto != old_dto:
+        self.selection_changed.emit(self.selected_dto)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -1055,7 +1122,7 @@ class PaginatedListPage(
         новые строки не проходят фильтр – считается, что они не удовлетворяют условию.
         """
         if not new_dtos or not filters_tree:
-            return new_dtos
+            return new_dtos 
 
         def _matches(dto, node):
             if isinstance(node, dict):
@@ -2356,6 +2423,18 @@ class PaginatedListPage(
         # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
         self._reapply_delegates()  
 
+         # Управление кнопками боковой панели
+        if hasattr(self, 'side_toolbar'):
+            # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
+            self.side_toolbar.add_btn.setEnabled(True)  
+            self.side_toolbar.delete_btn.setEnabled(True)
+            self.side_toolbar.edit_btn.setEnabled(
+                not edit_mode and self.get_current_selected_dto() is not None
+            )
+            
+            self.side_toolbar.refresh_btn.setEnabled(not edit_mode) 
+            self.side_toolbar.cancel_btn.setEnabled(edit_mode)
+            self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())
 
         # # После переустановки делегатов пересчитываем высоту строк,
         # # так как ширина столбцов могла измениться (появился чекбокс-столбец)
@@ -2399,6 +2478,7 @@ class PaginatedListPage(
         # # self.table_view.horizontalHeader().update()
 
         self.logger.debug(f"Режим редактирования: {'включён' if edit_mode else 'выключен'}, UI обновлён")
+
 
 
     @AppLogger.get_instance(
@@ -5883,6 +5963,10 @@ class PaginatedListPage(
             row = self._find_row_by_id(new_dto.id)
             if row >= 0:
                 self._update_row_color(row)
+
+        
+        # ИСПУСКАЕМ СИГНАЛ выбранной строки (selected_dto может быть None (выделение снято), сигнал испускается с None.)
+        self._update_selection_state()   # вызывает сигнал, если изменилось
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

@@ -194,3 +194,20 @@ class PaginatedPhotoListPage(PaginatedListPage):
             return
 
         self._add_photo_from_file_at_pos(file_path, photo_field)
+
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _update_ui_for_edit_mode(self, edit_mode: bool):
+        super()._update_ui_for_edit_mode(edit_mode)
+        # Для таблицы фото в не-режиме редактирования отключаем кнопки добавления/удаления/редактирования
+        if hasattr(self, 'side_toolbar'):
+            self.side_toolbar.add_btn.setEnabled(True)
+            self.side_toolbar.delete_btn.setEnabled(True)
+            self.side_toolbar.edit_btn.setEnabled(edit_mode)   
+            self.side_toolbar.refresh_btn.setEnabled(not edit_mode)

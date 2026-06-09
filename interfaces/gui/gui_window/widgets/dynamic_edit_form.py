@@ -210,6 +210,7 @@ class DynamicEditForm(QWidget):
             w = QTextEdit()
             w.setReadOnly(not editable)
             w.setMaximumHeight(200)
+            
             return w
         elif widget_type == 'date':
             w = QDateEdit()

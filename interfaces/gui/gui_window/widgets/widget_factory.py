@@ -5,21 +5,31 @@
 Содержит статические методы, возвращающие готовые виджеты с заданными параметрами.
 """
 
-import datetime
+# import datetime
 from typing import Any, Dict
 
 from app.utils.logger.logger import AppLogger
-from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
-from interfaces.gui.gui_window.widgets.custom_date_time_widgets import CustomDateEdit, CustomTimeEdit, DateEditWidget, TimeEditWidget
 
-from .completer_edit import CompleterEdit
-from .photo_uploader_widget import PhotoUploaderWidget
+from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
+
+from interfaces.gui.gui_window.widgets.completer_edit import CompleterEdit
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import ( 
+    CustomDateEdit, CustomTimeEdit, DateEditWidget, TimeEditWidget
+)
+from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
+
+# from .completer_edit import CompleterEdit
+# from .photo_uploader_widget import PhotoUploaderWidget
 
 from PySide6.QtWidgets import (
-    QLineEdit, QTextEdit, QDateEdit, QTimeEdit,
+    QLineEdit, QTextEdit, 
+    # QDateEdit, QTimeEdit,
     QSpinBox, QCheckBox, QComboBox, QWidget
 )
 from PySide6.QtCore import QDate, QTime
+
+from PySide6.QtGui import QTextOption
+
 
 
 
@@ -138,6 +148,12 @@ class WidgetFactory:
             w = QTextEdit()
             install_standard_context_menu(w, menu_type='text')
             w.setMaximumHeight(200)   # ограничиваем высоту для многострочного поля
+
+            # Включаем перенос слов, чтобы отображать многострочный текст
+            # Настройка переноса слов (чтобы длинные слова переносились, а строки не обрезались)
+            w.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+            # Убедиться, что перенос строк включён (по умолчанию включён, но явно не помешает)
+            w.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         else:
             w = QLineEdit()
             if config and config.get('input_mask'):

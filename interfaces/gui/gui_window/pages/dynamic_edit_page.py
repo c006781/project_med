@@ -386,6 +386,7 @@ class DynamicEditPage(BasePage):
         """
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)  # убираем отступы для scroll area
+        
         # Создаём scroll area для формы
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

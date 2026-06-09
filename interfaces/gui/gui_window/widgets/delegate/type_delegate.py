@@ -1,6 +1,7 @@
 # interfaces/gui/gui_window/widgets/delegate/type_delegate.py
 
 from dataclasses import dataclass
+
 from datetime import (
     date, 
     time
@@ -35,7 +36,8 @@ from PySide6.QtCore import (
 )
 
 from PySide6.QtGui import (
-    QPainter, 
+    QPainter,
+    QTextOption, 
     # QMouseEvent
 )
 
@@ -66,6 +68,7 @@ class TextEditDialog(QDialog):
     )
     def __init__(self, parent, initial_text="", readonly=False, completion_list=None):
         super().__init__(parent)
+
         self.setWindowTitle("Редактирование текста")
         self.resize(600, 400)
         self.readonly = readonly
@@ -90,6 +93,13 @@ class TextEditDialog(QDialog):
 
         # Многострочное поле
         self.text_edit = QTextEdit()
+
+
+        # Настройка переноса слов (чтобы длинные слова переносились, а строки не обрезались)
+        self.text_edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        # Убедиться, что перенос строк включён (по умолчанию включён, но явно не помешает)
+        self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+
         self.text_edit.setPlainText(initial_text)
 
         if readonly:

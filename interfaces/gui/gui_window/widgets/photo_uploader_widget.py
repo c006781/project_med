@@ -256,10 +256,11 @@ class TextEditDelegate(QStyledItemDelegate):
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, parent=None, photo_widget=None):
+    def __init__(self, parent=None, photo_widget=None, readonly=False):
         super().__init__(parent)
 
         self.photo_widget = photo_widget 
+        self._readonly = readonly
         
         self.logger = AppLogger.get_instance(
             name='gui.TextEditDelegate',
@@ -269,6 +270,18 @@ class TextEditDelegate(QStyledItemDelegate):
         )
 
         self.logger.debug("TextEditDelegate инициализирован")
+    
+    @AppLogger.get_instance(
+        name = 'TextEditDelegate',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )
+    def set_readonly(self, readonly: bool):
+        self._readonly = readonly
+
 
     @AppLogger.get_instance(
         name = 'TextEditDelegate',
@@ -287,6 +300,20 @@ class TextEditDelegate(QStyledItemDelegate):
         editor.setMinimumHeight(80)
 
         install_standard_context_menu(editor)
+
+        editor.installEventFilter(self)  # для обработки Enter/Shift+Enter
+
+        # editor.setReadOnly(self._readonly)
+
+        # editor.setFocus()  # даём фокус редактору
+        
+        # БЕРЁМ АКТУАЛЬНОЕ ЗНАЧЕНИЕ ИЗ ВИДЖЕТА-ВЛАДЕЛЬЦА
+        readonly = self.photo_widget._readonly if self.photo_widget else self._readonly
+        editor.setReadOnly(not readonly)
+        if not readonly:
+            editor.setFocus()
+            # Добавляем подсказку о клавишах
+            editor.setToolTip("Shift+Enter — перенос строки, Enter — завершение редактирования")
 
         self.logger.debug(f"createEditor: создан QTextEdit для строки {index.row()}")
 
@@ -365,14 +392,20 @@ class TextEditDelegate(QStyledItemDelegate):
         """
         if event.type() == QEvent.KeyPress:
             if event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return:
-                if event.modifiers() == Qt.ShiftModifier:
-                    self.logger.debug("eventFilter: Shift+Enter — перенос строки")
-                    return False
-                else:
-                    self.logger.debug("eventFilter: Enter — завершение редактирования")
+                if event.modifiers() == Qt.ControlModifier: # Ctrl+Enter
+                    # Ctrl+Enter – завершаем редактирование
                     self.commitData.emit(editor)
                     self.closeEditor.emit(editor, QStyledItemDelegate.NoHint)
                     return True
+                
+                # if event.modifiers() == Qt.ShiftModifier: # Shift+Enter 
+                #     # Shift+Enter – вставляем перенос строки
+                #     self.logger.debug("eventFilter: Shift+Enter — перенос строки")
+                #     return False
+                
+                # Обычный Enter
+
+                return False # Возвращаем False, чтобы событие ушло в редактор
         return super().eventFilter(editor, event)
 
 class PhotoUploaderWidget(QWidget):
@@ -981,6 +1014,8 @@ class PhotoUploaderWidget(QWidget):
 
         # Таблица
         self.table = QTableWidget()
+        self.table.setWordWrap(True)
+
         self.table.verticalScrollBar().valueChanged.connect(self._on_scroll)
 
         add_copy_paste_to_table(self.table)
@@ -1005,10 +1040,16 @@ class PhotoUploaderWidget(QWidget):
 
         # Создаём делегат с автодополнением
         # Функция получения уникальных значений должна быть установлена извне
-        self.description_delegate = CompleterStringDelegate(
-            self.table,
-            get_unique_values_func=self._get_unique_values_for_description,
-            column=1
+        # self.description_delegate = CompleterStringDelegate(
+        #     self.table,
+        #     get_unique_values_func=self._get_unique_values_for_description,
+        #     column=1
+        # )
+
+        self.description_delegate = TextEditDelegate(
+            self.table, 
+            self, 
+            readonly=self._readonly
         )
         self.table.setItemDelegateForColumn(1, self.description_delegate)
 
@@ -1142,8 +1183,10 @@ class PhotoUploaderWidget(QWidget):
         self._unique_values_func = func
         # Обновим делегат, если он уже создан
         if hasattr(self, 'description_delegate'):
-            self.description_delegate._get_unique_values_func = lambda col: func()
-            self.description_delegate._cache.clear()
+            # Если делегат поддерживает автодополнение (CompleterStringDelegate)
+            if hasattr(self.description_delegate, '_cache'):
+                self.description_delegate._get_unique_values_func = lambda col: func()
+                self.description_delegate._cache.clear()
 
     @AppLogger.get_instance(
         name = 'PhotoUploaderWidget',
@@ -2192,6 +2235,12 @@ class PhotoUploaderWidget(QWidget):
 
         # обновить состояние пунктов (они станут неактивными,
         # если комбобокс выключен, но это не нужно, т.к. комбобокс отключён целиком)
+
+        
+        # Синхронизируем делегат
+        if hasattr(self, 'description_delegate') and hasattr(self.description_delegate, 'set_readonly'):
+            self.description_delegate.set_readonly(readonly)
+
         self._update_undo_actions_state()
 
     # ----------------------------------------------------------------------

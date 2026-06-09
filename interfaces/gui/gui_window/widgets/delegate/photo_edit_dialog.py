@@ -140,7 +140,7 @@ class PhotoEditDialog(QDialog):
         self, 
         parent=None, 
         current_path: Optional[str] = None,
-        description: str = "", 
+        # description: str = "", 
         allowed_extensions: List[str] = None,
         readonly: bool = False,
         parent_id: Optional[int] = None,
@@ -154,7 +154,7 @@ class PhotoEditDialog(QDialog):
         Args:
             parent: Родительский виджет.
             current_path: Абсолютный путь к текущему файлу (может быть None).
-            description: Текущее описание фото.
+            # description: Текущее описание фото.
             allowed_extensions: Список разрешённых расширений (по умолчанию стандартные).
             readonly: Режим "только просмотр" (запрещает изменения).
             parent_id: ID родительской сущности (для копирования файла).
@@ -173,14 +173,14 @@ class PhotoEditDialog(QDialog):
         self.resize(600, 500)
 
         self._current_path = current_path
-        self._description = description
+        # self._description = description
         self._allowed_extensions = allowed_extensions or ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']
         self._readonly = readonly
         self._parent_id = parent_id          # ID родителя (существующей сущности) или None
         self._storage_path = storage_path    # базовый путь к хранилищу
         
         self._new_path = current_path  # None
-        self._new_description = description  # None
+        # self._new_description = description  # None
 
         self._selected_files = []   # для multi-режима
 
@@ -654,14 +654,14 @@ class PhotoEditDialog(QDialog):
         btn_layout.addWidget(self.delete_btn)
         layout.addLayout(btn_layout)
 
-        # Поле для описания
-        self.desc_label = QLabel("Описание:")
-        layout.addWidget(self.desc_label)
-        self.desc_edit = QTextEdit()
-        self.desc_edit.setPlainText(self._description)
-        self.desc_edit.setReadOnly(self._readonly)
-        self.desc_edit.setMaximumHeight(100)
-        layout.addWidget(self.desc_edit)
+        # # Поле для описания
+        # self.desc_label = QLabel("Описание:")
+        # layout.addWidget(self.desc_label)
+        # self.desc_edit = QTextEdit()
+        # self.desc_edit.setPlainText(self._description)
+        # self.desc_edit.setReadOnly(self._readonly)
+        # self.desc_edit.setMaximumHeight(100)
+        # layout.addWidget(self.desc_edit)
 
         # Кнопки OK/Cancel
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -919,17 +919,19 @@ class PhotoEditDialog(QDialog):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def get_result(self) -> Tuple[Optional[str], Optional[str]]:
+    def get_result(self) -> Tuple[
+        Optional[str]
+    ]:
         """
         Возвращает результат редактирования после закрытия диалога.
 
         Возвращает:
-            Tuple[Optional[str], Optional[str]]: (новый_путь_к_файлу, новое_описание)
+            Optional[str]: новый_путь_к_файлу
 
             Правила возврата:
-                - Если в режиме 'single' было выбрано новое фото: (new_path, new_description)
-                - Если текущее фото было удалено: (None, None)
-                - Если изменений не было: (None, None)
+                - Если в режиме 'single' было выбрано новое фото: (new_path)
+                - Если текущее фото было удалено: (None)
+                - Если изменений не было: (None)
                 - В режиме 'multi' следует использовать get_selected_files().
 
         Примечание:
@@ -938,32 +940,32 @@ class PhotoEditDialog(QDialog):
             Вызывающий код должен обработать путь в соответствии с контекстом.
 
         Пример:
-            >>> new_path, new_desc = dialog.get_result()
+            >>> new_path = dialog.get_result()
             >>> if new_path is None:
             ...     # фото удалено
             ... elif new_path is not None:
             ...     # фото изменено
         """
 
-        new_desc = self.desc_edit.toPlainText()
+        # new_desc = self.desc_edit.toPlainText()
 
-        if (
-            (
-                new_desc is None 
-            )and(
-                (self._description is not None) and self._description == ''
-            )
-        ) or (
-            (
-                self._description is None
-            ) and (
-                (new_desc is not None) and new_desc == ''
-            )
-        ):
-            new_desc = self._description   
+        # if (
+        #     (
+        #         new_desc is None 
+        #     )and(
+        #         (self._description is not None) and self._description == ''
+        #     )
+        # ) or (
+        #     (
+        #         self._description is None
+        #     ) and (
+        #         (new_desc is not None) and new_desc == ''
+        #     )
+        # ):
+        #     new_desc = self._description   
 
         # if self._new_path is not None:
-        return self._new_path, new_desc
+        return self._new_path #, new_desc
         
         # if self._current_path is None:
         #     return None, None
@@ -971,7 +973,7 @@ class PhotoEditDialog(QDialog):
         # if new_desc != self._description:
         #     return self._current_path, new_desc
         
-        return None, None
+        # return None, None
 
     @AppLogger.get_instance(
         name='PhotoEditDialog',
@@ -986,8 +988,7 @@ class PhotoEditDialog(QDialog):
         Переопределяет QDialog.accept для сохранения результата перед закрытием.
 
         Алгоритм:
-            1. Сохраняет текущий текст описания в self._new_description.
-            2. Вызывает родительский QDialog.accept().
+            Вызывает родительский QDialog.accept().
 
         Примечание:
             Это необходимо, потому что в момент закрытия диалога виджеты
@@ -999,7 +1000,7 @@ class PhotoEditDialog(QDialog):
             None
         """
             
-        self._new_description = self.desc_edit.toPlainText()
+        # self._new_description = self.desc_edit.toPlainText()
 
         # После сохранения удаляем временную папку, если она пуста
         if self._temp_dir and os.path.exists(self._temp_dir):

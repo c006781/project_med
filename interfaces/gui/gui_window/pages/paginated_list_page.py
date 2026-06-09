@@ -2388,19 +2388,22 @@ class PaginatedListPage(
     def _show_photo_edit_dialog(
         self,
         current_full_path: Optional[str],
-        description: str,
+        # description: str,
         photo_field: str,
         entity_id: Optional[int]
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+    ) -> Tuple[
+        bool, 
+        Optional[str],
+        # Optional[str]
+    ]:
         """
         Открывает диалог редактирования фото.
-        Возвращает (new_path, new_description).
+        Возвращает new_path.
         new_path – относительный путь (имя файла) внутри временной папки,
-        new_description – новое описание (может быть None, если не изменилось).
         """
         # Сохраняем оригинальные значения
         original_path = current_full_path
-        original_description = description
+        # original_description = description
 
         # from interfaces.gui.gui_window.widgets.photo_edit_dialog import PhotoEditDialog
 
@@ -2416,7 +2419,7 @@ class PaginatedListPage(
         dialog = PhotoEditDialog(
             parent=self,
             current_path=current_full_path,
-            description=description,
+            # description=description,
             allowed_extensions=allowed_extensions,
             readonly=not self.edit_mode,
             parent_id=entity_id if entity_id is not None and entity_id > 0 else None,
@@ -2426,21 +2429,22 @@ class PaginatedListPage(
         )
 
         if dialog.exec() == QDialog.Accepted:
-            new_path, new_description = dialog.get_result()
+            new_path = dialog.get_result()
 
             # Определяем, были ли реальные изменения
             path_changed = (new_path != original_path) if new_path is not None or original_path is not None else False
-            desc_changed = (new_description != original_description)
+            # desc_changed = (new_description != original_description)
 
             # has_changes = (new_path is not None) or (new_description != description)
 
             # return has_changes, new_path, new_description
-            if path_changed or desc_changed:
-                return True, new_path, new_description
+            # if path_changed or desc_changed:
+            if path_changed :
+                return True, new_path
             else:
-                return False, None, None
+                return False, None
         
-        return False, None, None
+        return False, None
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2571,17 +2575,20 @@ class PaginatedListPage(
                 self._draft_registry.set(f"__new__:{self._entity_type}:{entity_id}", {"dto": dto})
                 self.mark_own_change(entity_id)
 
+        # Оригинальный относительный путь (хранится в DTO)
+        original_rel_path = getattr(dto, photo_field, None)
+
         # Текущий абсолютный путь
         current_full_path = self._get_current_photo_full_path(dto, photo_field, entity_id)
 
-        # Текущее описание
-        desc_field = self.field_configs.get(photo_field, {}).get('description_field')
-        current_description = getattr(dto, desc_field, "") if desc_field else ""
+        # # Текущее описание
+        # desc_field = self.field_configs.get(photo_field, {}).get('description_field')
+        # current_description = getattr(dto, desc_field, None) #if desc_field else ""
 
         # Открываем диалог
-        if_new, new_path, new_description = self.show_photo_edit_dialog(
+        if_new, new_path = self.show_photo_edit_dialog(
             current_full_path,
-            current_description,
+            # current_description,
             photo_field,
             entity_id
         )
@@ -2593,9 +2600,9 @@ class PaginatedListPage(
             return False  # изменений нет
 
         changed = False
-
+        
         # Удаление фото
-        if new_path is None and new_description is None:
+        if new_path is None : #and new_description is None:
             if getattr(dto, photo_field, None) is not None:
                 setattr(dto, photo_field, None)
                 changed = True
@@ -2606,16 +2613,17 @@ class PaginatedListPage(
                 setattr(dto, photo_field, new_path)
                 changed = True
 
-        # Изменение описания
-        if new_description is not None and desc_field:
-            if getattr(dto, desc_field, None) != new_description:
-                setattr(dto, desc_field, new_description)
-                changed = True
+        # # Изменение описания
+        # if new_description is not None and desc_field:
+        #     if getattr(dto, desc_field, None) != new_description:
+        #         setattr(dto, desc_field, new_description)
+        #         changed = True
 
         if changed:
             self.source_model.update_row(row, dto)
             if not is_new:
                 self.mark_own_change(entity_id)
+
             self._update_row_color(row)
             self._update_save_button_state()
             return True
@@ -8907,21 +8915,27 @@ class PaginatedListPage(
     def show_photo_edit_dialog(
         self,
         current_full_path: Optional[str],
-        description: str,
+        # description: str,
         photo_field: str,
         entity_id: Optional[int]
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+    ) -> Tuple[
+        bool, 
+        Optional[str], 
+        # Optional[str]
+    ]:
         """
         Открывает диалог редактирования фото и возвращает (новый_путь, новое_описание).
         Параметры:
             current_full_path – абсолютный путь к текущему фото (может быть None)
-            description – текущее описание
             photo_field – имя поля DTO, содержащего путь к фото
             entity_id – ID сущности (может быть временным отрицательным)
         """
         
         return self._show_photo_edit_dialog(
-            current_full_path, description, photo_field, entity_id
+            current_full_path, 
+            # description, 
+            photo_field, 
+            entity_id
         )
 
     # ------------------------------------------------------------------

@@ -58,8 +58,22 @@ class RobustRotatingFileHandler(RotatingFileHandler):
     Обработчик файла с поддержкой восстановления при удалении файла.
     Потокобезопасен, проверяет существование файла не чаще 1 раза в секунду
     """
-    def __init__(self, filename, mode='a', maxBytes=0, backupCount=0, encoding=None, delay=False):
-        super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
+    def __init__(
+        self,
+        filename,
+        mode='a',
+        maxBytes=0, backupCount=0,
+        encoding=None,
+        delay=False
+    ):
+        super().__init__(
+            filename,
+            mode,
+            maxBytes,
+            backupCount,
+            encoding,
+            delay
+        )
 
         self._lock = threading.RLock()
         self._last_check = 0
@@ -100,8 +114,10 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     if attempt == max_retries - 1:
                         self.handleError(record)
                         return
+                    print(f"подход {attempt} провал")
                     time.sleep(retry_delay)
                     with self._lock:
+
                         self._reopen()
 
                 except Exception:

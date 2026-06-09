@@ -70,7 +70,8 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         Переопределённый метод emit: перед записью проверяет существование файла.
         Если файл удалён, переоткрывает его.
         """
-        max_retries = 3
+        max_retries = 5
+        retry_delay = 0.2        # добавить задержку между попытками
         for attempt in range(max_retries):
             with self._lock:
                 try:
@@ -99,7 +100,7 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     if attempt == max_retries - 1:
                         self.handleError(record)
                         return
-                    
+                    time.sleep(retry_delay)
                     with self._lock:
                         self._reopen()
 
@@ -891,11 +892,14 @@ class BaseAppLogger:
         if _visited is None:
             _visited = set()
 
+        obj_id = id(self)
+
         if self.name in _visited:
             self.logger.error(f"Циклическая ссылка в effective_enable_file_logging для {self.name}")
             return self._enable_file_logging
         
-        _visited.add(self.name)
+        # _visited.add(self.name)
+        _visited.add(obj_id)
         
         if self._enable_file_logging_ref:
             # parent = self._instances.get(self._enable_file_logging_ref)
@@ -949,13 +953,14 @@ class BaseAppLogger:
     def effective_use_name_in_filename(self, _visited=None) -> bool:
         if _visited is None:
             _visited = set()
-
+        obj_id = id(self)
         if self.name in _visited:
             self.logger.error(f"Циклическая ссылка в effective_use_name_in_filename для {self.name}")
             # return self._enable_file_logging
             return self._use_name_in_filename
         
-        _visited.add(self.name)
+        _visited.add(obj_id)
+        # _visited.add(self.name)
 
         if self._use_name_in_filename_ref:
             # parent = self._instances.get(self._use_name_in_filename_ref)
@@ -1572,61 +1577,69 @@ class BaseAppLogger:
     def _update_file_handler_if_on (
         self,
     ):
-        with BaseAppLogger._share_lock:
-            master = self._master_logger
+        if getattr(self, '_updating_file_handler', False):
+            return
+        self._updating_file_handler = True
 
-            if not master or master.file_handler is None:
-                return
-            
-            # Если обработчик мастера существует, используем его
-            # Захватываем блокировку мастера и копируем его состояние
-            master_handler = None
-            with master._handler_lock:
-                master_handler = master.file_handler
+        try:
+            with BaseAppLogger._share_lock:
+                master = self._master_logger
 
-                if master_handler is None:
+                if not master or master.file_handler is None:
                     return
-                
-                # Теперь захватываем блокировку мастера, чтобы скопировать остальные параметры, не меняющиеся редко
-                # master_ = self._copy_master(master)  # состояние мастера копируем
-                
-                visited = set()
-                # Копируем все настройки мастера, которые могут измениться
-                # master_ =  {
-                #     'master_log_LEVEL': master.log_level,
-                #     'master_formatter': master.formatter,
-                #     'master_base_log_FILE': master.base_log_file,
-                #     'master_MAX_BYTES': master.log_max_bytes,
-                #     'master_BACKUP_COUNT': master.log_backup_count,
-                #     'master_timestamp': master.use_timestamp,
-                #     # 'master_file_enabled': master.effective_enable_file_logging(),
-                #     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                #     # 'master_use_name': master.effective_use_name_in_filename(),
-                #     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
-                #     'master_sync_full': master._sync_full_state,
-                #     'master_ARGS': master.log_args,
-                #     'master_show_depth': master._show_call_depth,
-                # }
-                master_ =  {
-                    'master_log_level': master.log_level,
-                    'master_formatter': master.formatter,
-                    'master_base_log_file': master.base_log_file,
-                    'master_max_bytes': master.log_max_bytes,
-                    'master_backup_count': master.log_backup_count,
-                    'master_timestamp': master.use_timestamp,
-                    'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                    'master_use_name': master.effective_use_name_in_filename(_visited=visited),
-                    'master_sync_full': master._sync_full_state,
-                    'master_args': master.log_args,
-                    'master_show_depth': master._show_call_depth,
-                }
 
-            # Захватываем свой лок перед изменением состояния
-            with self._handler_lock:
-                self._update_file_handler_if_on_and_not_shared_with_master_handler(
-                    master_handler,
-                    **master_,
-                )
+                # Если обработчик мастера существует, используем его
+                # Захватываем блокировку мастера и копируем его состояние
+                master_handler = None
+                with master._handler_lock:
+                    master_handler = master.file_handler
+
+                    if master_handler is None:
+                        return
+
+                    # Теперь захватываем блокировку мастера, чтобы скопировать остальные параметры, не меняющиеся редко
+                    # master_ = self._copy_master(master)  # состояние мастера копируем
+
+                    visited = set()
+                    # Копируем все настройки мастера, которые могут измениться
+                    # master_ =  {
+                    #     'master_log_LEVEL': master.log_level,
+                    #     'master_formatter': master.formatter,
+                    #     'master_base_log_FILE': master.base_log_file,
+                    #     'master_MAX_BYTES': master.log_max_bytes,
+                    #     'master_BACKUP_COUNT': master.log_backup_count,
+                    #     'master_timestamp': master.use_timestamp,
+                    #     # 'master_file_enabled': master.effective_enable_file_logging(),
+                    #     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                    #     # 'master_use_name': master.effective_use_name_in_filename(),
+                    #     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                    #     'master_sync_full': master._sync_full_state,
+                    #     'master_ARGS': master.log_args,
+                    #     'master_show_depth': master._show_call_depth,
+                    # }
+                    master_ =  {
+                        'master_log_level': master.log_level,
+                        'master_formatter': master.formatter,
+                        'master_base_log_file': master.base_log_file,
+                        'master_max_bytes': master.log_max_bytes,
+                        'master_backup_count': master.log_backup_count,
+                        'master_timestamp': master.use_timestamp,
+                        'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                        'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                        'master_sync_full': master._sync_full_state,
+                        'master_args': master.log_args,
+                        'master_show_depth': master._show_call_depth,
+                    }
+
+                # Захватываем свой лок перед изменением состояния
+                with self._handler_lock:
+                    self._update_file_handler_if_on_and_not_shared_with_master_handler(
+                        master_handler,
+                        **master_,
+                    )
+
+        finally:
+            self._updating_file_handler = False
 
     def _update_file_handler (
         self,
@@ -1946,6 +1959,10 @@ class BaseAppLogger:
         """
 
         if self is other:
+            return
+
+        # Если уже расшарены друг с другом – выходим
+        if self._master_logger is other or other._master_logger is self:
             return
 
         with BaseAppLogger._share_lock:

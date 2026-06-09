@@ -327,7 +327,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     CompleterStringDelegate,
     DatePickerDelegate,
     StringDelegate,
-    TextPopupDelegate,
+    # TextPopupDelegate,
     TextEditPopupDelegate,
     TimePickerDelegate,
     BoolDelegate,

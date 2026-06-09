@@ -197,7 +197,13 @@ class UIMixin:
         # ---- Выпадающий список действий (обычный режим) ----
         if 'action_combo' in show:
             self.action_combo = QComboBox()
-            self.action_combo.addItems(["▼ Действия с записями", "Добавить", "Редактировать", "Удалить", "Обновить"])
+            self.action_combo.addItems([
+                "▼ Действия с записями",
+                "Добавить",
+                "Редактировать",
+                "Удалить строку",
+                "Обновить",
+            ])
             self.action_combo.model().item(0).setEnabled(False)
             self.action_combo.setCurrentIndex(0)
             self.action_combo.currentIndexChanged.connect(self._on_action_selected)
@@ -206,7 +212,13 @@ class UIMixin:
         # ---- Выпадающий список inline-действий (режим редактирования) ----
         if 'inline_action_combo' in show:
             self.inline_action_combo = QComboBox()
-            self.inline_action_combo.addItems(["▼ Действия со строками", "Добавить строку", "Удалить строку", "Отменить изменения"])
+            self.inline_action_combo.addItems([
+                "▼ Действия со строками",
+                "Добавить строку",
+                "Удалить строку",
+                "Отменить изменения",
+                # "Отменить все изменения",
+            ])
             self.inline_action_combo.model().item(0).setEnabled(False)
             self.inline_action_combo.setCurrentIndex(0)
             self.inline_action_combo.currentIndexChanged.connect(self._on_inline_action_selected)

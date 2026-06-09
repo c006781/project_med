@@ -2,7 +2,7 @@
 
 
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from app.utils.logger.logger import AppLogger
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
@@ -15,6 +15,26 @@ class ColumnType(Enum):
     """Тип столбца: обычный (из БД) или системный (чекбокс, кнопка и т.д.)."""
     DATA = 1       # столбец данных (связан с полем DTO)
     SYSTEM = 2     # системный столбец (не связан с БД, например, чекбокс)
+
+def with_to_dict(value):
+    _width_dict = {}
+
+    if value is None:
+        pass
+
+    elif isinstance(value, int):
+        _width_dict = {
+            'fixed': value
+        }
+
+    elif isinstance(value, dict):
+        _width_dict = value
+
+    else:
+        err_text = f" width must be int, dict or None, got {type(value)}"
+        raise TypeError(err_text)
+
+    return _width_dict
 
 
 class TableColumn:
@@ -52,6 +72,60 @@ class TableColumn:
         source_attr (Optional[str]): Имя атрибута в ORM для подгрузки связанных данных.
     """
 
+
+    # ------------------------------------------------------------------
+    # Ленивая инициализация атрибутов (без __init__)
+    # ------------------------------------------------------------------
+
+    @property
+    def logger(self) -> AppLogger:
+        try:
+            return self._logger
+        except AttributeError as e:
+            self._logger = AppLogger.get_instance(
+                name='gui.TableColumn',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system'
+            )
+            return self._logger
+
+    @logger.setter
+    def logger(self, value):
+        self._logger = value
+        
+    @property
+    def system_name(self) -> str:
+        try:
+            return self._system_name
+        except AttributeError as e:
+            self._system_name : str = "no_system_name_column"
+            return self._system_name
+
+    @system_name.setter
+    def system_name(self, value:str):
+        self._system_name = value
+
+    @property
+    def width(self) -> Dict[str, Any]:
+        try:
+            return self._width
+        except AttributeError as e:
+            self._width = {}
+            return self._width
+
+    @width.setter
+    def width(self, value: Union[int, Dict[str, Any], None]):
+
+        # Нормализация width в словарь
+
+        try:
+            self._width_dict = with_to_dict(value).copy()
+            
+        except TypeError  as e:
+            err_text = f"{self.system_name} -> {str(e)}"
+            self.logger.error(err_text)
+            raise TypeError(err_text)
+
     @AppLogger.get_instance(
         name='TableColumn',
         # share_file_with = 'system',
@@ -70,7 +144,8 @@ class TableColumn:
         editable: bool = True,
         visible: bool = True,
         order: int = 0,
-        width: Optional[int] = None,
+        # width: Optional[int] = None,
+        width: Union[int, Dict[str, Any], None] = None,
         delegate_class: Optional[Type] = None,
         delegate_args: Optional[Dict[str, Any]] = None,
         input_mask: Optional[str] = None,
@@ -81,7 +156,32 @@ class TableColumn:
         is_note: Optional[str] = None,
         source_attr: Optional[str] = None,
     ):
-        self.system_name = system_name
+        
+        self.system_name = system_name # системное имя. должно быть уникальным, должно быть в самом начале для property
+
+        # Валидация
+        if column_type == ColumnType.DATA and not field_name:
+            err_text = f"{system_name} -> DATA-столбец должен иметь field_name"
+            self.logger.error(err_text)
+            raise ValueError(err_text)
+        
+        if column_type == ColumnType.SYSTEM and field_name:
+            err_text = f"{system_name} -> SYSTEM-столбец не должен иметь field_name"
+            self.logger.error(err_text)
+            raise ValueError(err_text)
+        
+        # # Нормализация width в словарь
+        # if width is None:
+        #     width = {}
+        # elif isinstance(width, int):
+        #     width = {'fixed': width}
+        # elif isinstance(width, dict):
+        #     width = width.copy()
+        # else:
+        #     err_text = f"{system_name} -> width must be int, dict or None, got {type(width)}"
+        #     self.logger.error(err_text)
+        #     raise TypeError(err_text)
+
         self.title = title
         self.column_type = column_type
         self.field_name = field_name
@@ -100,13 +200,33 @@ class TableColumn:
         self.is_note = is_note
         self.source_attr = source_attr
 
-        # Валидация
-        if column_type == ColumnType.DATA and not field_name:
-            raise ValueError("DATA-столбец должен иметь field_name")
-        
-        if column_type == ColumnType.SYSTEM and field_name:
-            raise ValueError("SYSTEM-столбец не должен иметь field_name")
+
+
     
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def get_fixed_width(self) -> Optional[int]:
+        """Возвращает фиксированную ширину столбца, если она задана."""
+        return self._width_dict.get('fixed')
+
+    @AppLogger.get_instance(
+        name='TableColumn',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def is_stretch(self) -> bool:
+        """Возвращает True, если столбец должен растягиваться."""
+        return self._width_dict.get('stretch', False)
+
     @AppLogger.get_instance(
         name='TableColumn',
         # share_file_with = 'system',
@@ -126,6 +246,7 @@ class TableColumn:
         """
         if self.delegate_class is None:
             return
+        
         delegate = self.delegate_class(table_view, **self.delegate_args)
         table_view.setItemDelegateForColumn(visible_index, delegate)
 

@@ -375,6 +375,8 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         'editable'      : True,         # редактируемый ли
         # 'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'updatable'     : True,         # полее не должно обновляться автоматически
+        'widget_type'   : 'textarea',   # Многострочный текстовый редактор.
+        'stretch'       : True,   # этот столбец будет занимать всё оставшееся место
     },
 }
 

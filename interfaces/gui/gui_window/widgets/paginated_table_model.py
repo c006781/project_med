@@ -74,7 +74,7 @@ from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.widgets.base_table_model import BaseTableModel
 from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
-from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn
+from interfaces.gui.gui_window.widgets.table_column import ColumnType, TableColumn, with_to_dict
 
 from PySide6.QtCore import (
     QModelIndex,  QThread,
@@ -585,7 +585,8 @@ class PaginatedTableModel(BaseTableModel):
         delegate_class: Optional[Type] = None,
         delegate_args: Optional[Dict] = None,
         visible: bool = True,
-        width: Optional[int] = None,
+        width: Optional[Union[int, Dict[str, Any]]] = None,
+        stretch: bool = False,   # новый параметр
     ) -> bool:
         """
         Добавляет системный столбец (не связанный с полем DTO) в модель.
@@ -619,6 +620,13 @@ class PaginatedTableModel(BaseTableModel):
         if order > len(self._columns):
             order = len(self._columns)
 
+        width_config = width
+        width_config = with_to_dict(width_config)
+
+
+        if stretch:
+            width_config['stretch'] = True
+        
         # Создаём объект столбца (системный, не DATA)
         col = TableColumn(
             system_name=system_name,
@@ -629,7 +637,8 @@ class PaginatedTableModel(BaseTableModel):
             order=order,                   # сохраняем желаемую позицию
             delegate_class=delegate_class,
             delegate_args=delegate_args or {},
-            width=width,
+            # width=width,
+            width = width_config if width_config else None,
             editable=False,                # системные столбцы обычно не редактируются
         )
 
@@ -688,7 +697,8 @@ class PaginatedTableModel(BaseTableModel):
         order: int = 0, 
         visible: bool = False,
         width: int = 30,
-        delegate_class = None
+        delegate_class = None,
+        stretch: bool = False,
     ) -> bool:
         """Добавляет столбец чекбоксов."""
         return self.add_system_column(
@@ -698,6 +708,7 @@ class PaginatedTableModel(BaseTableModel):
             delegate_class=delegate_class,
             visible=visible,
             width=width,
+            stretch=stretch,
         )
 
     @AppLogger.get_instance(
@@ -715,7 +726,8 @@ class PaginatedTableModel(BaseTableModel):
         button_text: str = "...",
         order: Optional[int] = None,
         visible: bool = True,
-        width: int = 80
+        width: Optional[Union[int, Dict[str, Any]]] = 80,
+        stretch: bool = False,
     ) -> bool:
         """Добавляет столбец с кнопкой."""
         # from interfaces.gui.gui_window.widgets.delegate.type_delegate import ButtonDelegate
@@ -727,6 +739,7 @@ class PaginatedTableModel(BaseTableModel):
             delegate_args={'button_text': button_text},
             visible=visible,
             width=width,
+            stretch=stretch,
         )
 
     @AppLogger.get_instance(

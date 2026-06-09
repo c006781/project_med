@@ -5,14 +5,19 @@ from datetime import (
     date, 
     time
 )
-from typing import Any, Dict, List, OrderedDict
+from typing import (
+    Any, Dict, List,
+    # OrderedDict
+)
 
 from app.utils.logger.logger import AppLogger
 
 from interfaces.gui.gui_window.utils.gui_helpers import install_standard_context_menu
 
 from PySide6.QtWidgets import (
-    QCompleter, QDateTimeEdit, QDialog, QDialogButtonBox, QHBoxLayout, QListWidget, QPushButton,
+    QCompleter, QDateTimeEdit, QDialog, 
+    # QDialogButtonBox, 
+    QHBoxLayout, QListWidget, QPushButton,
     QStyle, QStyledItemDelegate,  QLineEdit, 
     QCheckBox, QTextEdit, 
     QComboBox, 
@@ -34,7 +39,9 @@ from PySide6.QtGui import (
     # QMouseEvent
 )
 
-from interfaces.gui.gui_window.widgets.custom_date_time_widgets import DateEditWidget, TimeEditWidget
+from interfaces.gui.gui_window.widgets.custom_date_time_widgets import (
+    DateEditWidget, TimeEditWidget
+)
 
 
 @dataclass(frozen=True)  # frozen=True делает объект неизменяемым и хешируемым
@@ -44,7 +51,6 @@ class Point:
 
     def get_coords(self):
         return self.x, self.y
-
 
 # Добавьте новый класс перед определением TextPopupDelegate
 class TextEditDialog(QDialog):
@@ -165,584 +171,6 @@ class TextEditDialog(QDialog):
 
         return self.text_edit.toPlainText()
 
-# class TextPopupDelegate(QStyledItemDelegate):
-#     """
-#     Делегат для ячеек с многострочным текстом.
-#     При наведении мыши показывает маленькую кнопку,
-#     по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
-#     В режиме только для чтения диалог открывается без возможности редактирования.
-#     """
-#     # sawe_paint : dict = {}
-
-#     # _last_hovered_row = -1
-#     # _last_hovered_col = -1
-
-#     points_dict = OrderedDict()
-#     # btn_opt = OrderedDict()
-#     _button = None
-
-#     @AppLogger.get_instance(
-#         name='TextPopupDelegate',
-#         # share_file_with = 'system',
-#         enable_file_logging = 'system',
-#         use_name_in_filename = False, # 'system'
-#     ).log_execution_time(
-#         level=AppLogger._parse_log_level('DEBUG')
-#     )
-#     def __init__(
-#         self, 
-#         parent=None, 
-#         readonly=False, 
-#         get_completion_list=None,
-#     ):
-#         super().__init__(parent)
-#         self._readonly = readonly
-#         self._get_completion_list = get_completion_list   # функция, возвращающая список строк
-        
-#         self._hovered_row = -1
-#         self._hovered_col = -1
-
-#         self._button_rect = None
-#         # self._button = None
-
-#         self._current_row = -1
-#         self._current_col = -1
-
-#          # Устанавливаем фильтр событий на таблицу, чтобы ловить Leave
-#         if parent:
-#             # parent.installEventFilter(self)
-
-#             parent.setMouseTracking(True) 
-#             parent.installEventFilter(self)
-#             # Создаём кнопку один раз, скрытую
-#             TextPopupDelegate._button = QPushButton("...", parent.viewport())
-#             TextPopupDelegate._button.setFixedSize(20, 20)
-#             TextPopupDelegate._button.setCursor(Qt.PointingHandCursor)
-#             TextPopupDelegate._button.clicked.connect(self._on_button_clicked)
-#             TextPopupDelegate._button.hide()
-
-#     def _on_button_clicked(self):
-#         if self._current_row >= 0 and self._current_col >= 0:
-#             model = self.parent().model()
-#             idx = model.index(self._current_row, self._current_col)
-#             if idx.isValid():
-#                 self._open_popup(model, idx)
-    
-
-#     def _update_button_position(self, index):
-#         if not index.isValid() or not self.parent():
-#             return
-#         rect = self.parent().visualRect(index)  # уже в координатах viewport
-#         btn_rect = QRect(
-#             rect.right() - 22, 
-#             rect.top() + (rect.height() - 20) // 2, 
-#             20, 20
-#         )
-#         TextPopupDelegate._button.setGeometry(btn_rect)
-
-#     def _show_button(self, index):
-#         # if not self._readonly:
-#         self._update_button_position(index)
-#         TextPopupDelegate._button.show()
-#         self._current_row = index.row()
-#         self._current_col = index.column()
-
-#     def _hide_button(self):
-#         TextPopupDelegate._button.hide()
-#         self._current_row = -1
-#         self._current_col = -1
-    
-
-#     # @AppLogger.get_instance(
-#     #     name='TextPopupDelegate',
-#     #     # share_file_with = 'system',
-#     #     enable_file_logging = 'system',
-#     #     use_name_in_filename = False, # 'system'
-#     # ).log_execution_time(
-#     #     level=AppLogger._parse_log_level('DEBUG')
-#     # )
-#     def paint(self, painter, option, index):
-#         # Стандартная отрисовка содержимого ячейки
-#         super().paint(painter, option, index)
-#         # row, col = index.row(), index.column()
-        
-#         # key = Point(row, col)
-
-#         # # Если мышь над этой ячейкой – рисуем кнопку
-#         # print("paint 1 row, col", row, col)
-#         # if self._hovered_row == row and self._hovered_col == col:
-#         #     btn_rect = self._get_button_rect(option.rect)
-#         #     print("paint 2 row, col", row, col)
-#         #     if not btn_rect.isEmpty():
-#         #         print("paint 3 row, col", row, col)
-#         #         btn_opt = QStyleOptionButton()
-#         #         btn_opt.rect = btn_rect
-#         #         btn_opt.text = "..."
-#         #         btn_opt.state = QStyle.State_Enabled
-#         #         self._button_rect = btn_rect
-#         #         QApplication.style().drawControl(QStyle.CE_PushButton, btn_opt, painter)
-#         # #         TextPopupDelegate.points_dict[Point(row,col)] = (btn_opt, btn_rect)
-#         # # # Добавляем текущую позицию в словарь (перемещаем в конец, если уже есть)
-#         #         if key in TextPopupDelegate.points_dict:
-#         #             TextPopupDelegate.points_dict.move_to_end(key)
-#         #         else:
-#         #             TextPopupDelegate.points_dict[key] = None
-        
-#         # # Если в словаре накопилось больше 1 позиции, значит где-то залипла кнопка
-#         # # Удаляем самую старую и перерисовываем её ячейку
-#         # while len(TextPopupDelegate.points_dict) > 1:
-#         # # if len(TextPopupDelegate.points_dict) > 1:
-#         #     oldest_key = next(iter(TextPopupDelegate.points_dict))
-#         #     if oldest_key != key:  # не удаляем текущую
-#         #         oldest_idx = index.model().index(oldest_key.x, oldest_key.y)
-#         #         if oldest_idx.isValid():
-#         #             old_rect = self.parent().visualRect(oldest_idx)
-#         #             self.parent().viewport().update(old_rect)
-#         #         TextPopupDelegate.points_dict.popitem(last=False)
-
-                
-#         # self._update_del_()
-    
-#     # @AppLogger.get_instance(
-#     #     name='TextPopupDelegate',
-#     #     # share_file_with = 'system',
-#     #     enable_file_logging = 'system',
-#     #     use_name_in_filename = False, # 'system'
-#     # ).log_execution_time(
-#     #     level=AppLogger._parse_log_level('DEBUG')
-#     # )
-#     def _get_button_rect(self, cell_rect):
-#         """Возвращает прямоугольник кнопки в правой части ячейки."""
-#         btn_w = 20
-#         btn_h = 20
-#         x = cell_rect.right() - btn_w - 2
-#         y = cell_rect.top() + (cell_rect.height() - btn_h) // 2
-        
-#         temp = QRect(x, y, btn_w, btn_h)
-#         return temp
-    
-#     def _update_del_(
-#         self, 
-#     ):
-#         while len(TextPopupDelegate.points_dict) > 1:
- 
-#             # Получаем первый (самый старый) ключ в OrderedDict
-#             # first_key = next(iter(TextPopupDelegate.points_dict))
-#             first_key, tt = TextPopupDelegate.points_dict.popitem(last=False)
-#             btn_opt, btn_rect = tt
-#             del btn_opt
-#             del btn_rect
-#             idx = self.parent().model().index(
-#                 first_key.x, 
-#                 first_key.y
-#             )
-
-#             old_rect = self.parent().visualRect(idx)
-#             self.parent().viewport().update(old_rect)
-
-#             # if idx.isValid():
-#             #     self.parent().update(idx)
-#             # Удаляем его
-#             # del TextPopupDelegate.points_dict[first_key]    
-#         else:
-#             return True
-
-
-
-#     # @AppLogger.get_instance(
-#     #     name='TextPopupDelegate',
-#     #     # share_file_with = 'system',
-#     #     enable_file_logging = 'system',
-#     #     use_name_in_filename = False, # 'system'
-#     # ).log_execution_time(
-#     #     level=AppLogger._parse_log_level('DEBUG')
-#     # )
-#     def eventFilter(self, obj, event):
-#         """Перехватываем событие Leave на таблице, чтобы сбросить hover."""
-#         if obj == self.parent() and event.type() == QEvent.Leave:
-#             self._hide_button()
-#         return super().eventFilter(obj, event)
-
-#         # if obj == self.parent() and event.type() == QEvent.Leave:
-
-#         #     print("eventFilter 1", )
-#         #     # self._update_del_()
-#         #     if self._hovered_row != -1:
-#         #         # Запоминаем координаты, чтобы перерисовать
-#         #         old_row, old_col = self._hovered_row, self._hovered_col
-#         #         self._hovered_row = -1
-#         #         self._hovered_col = -1
-#         #         # Перерисовываем ячейку, где был hover
-#         #         idx = self.parent().model().index(old_row, old_col)
-
-#         #         print( " eventFilter 2 old_row, old_col" ,old_row, old_col)
-#         #         if idx.isValid():
-#         #             print( " eventFilter 3 old_row, old_col" ,old_row, old_col)
-#         #             # self.parent().update(idx)
-#         #             old_rect = self.parent().visualRect(idx)
-#         #             self.parent().viewport().update(old_rect)
-#         #     return False  # не блокируем дальнейшую обработку события
-#         # return super().eventFilter(obj, event)
-    
-#     def _update_del(self, model, row, col):
-#         if row != -1:
-#             old_idx = model.index(row, col)
-#             print( " _update_del 1 row, col" ,row, col)
-#             if old_idx.isValid():
-#                 print( " _update_del  2 row, col" ,row, col)
-#                 # Принудительно перерисовываем область старой ячейки
-#                 old_rect = self.parent().visualRect(old_idx)
-#                 self.parent().viewport().update(old_rect)
-
-#                 # # TextPopupDelegate.sawe_paint[(self._hovered_row, self._hovered_col)] = 
-#                 # self.parent().update(old_idx)
-        
-#     # @AppLogger.get_instance(
-#     #     name='TextPopupDelegate',
-#     #     # share_file_with = 'system',
-#     #     enable_file_logging = 'system',
-#     #     use_name_in_filename = False, # 'system'
-#     # ).log_execution_time(
-#     #     level=AppLogger._parse_log_level('DEBUG')
-#     # )
-#     def editorEvent(self, event, model, option, index):
-#         """
-#         Обрабатывает события мыши для ячейки с многострочным текстом.
-#         При наведении мыши показывает маленькую кнопку,
-#         по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
-#         """
-       
-#         # Обработка движения мыши – обновляем hover и перерисовываем старую/новую ячейки
-#         if event.type() == QEvent.MouseMove:
-#             if index.isValid():
-#                 if (index.row(), index.column()) != (self._current_row, self._current_col):
-#                     self._hide_button()
-#                     self._show_button(index)
-#             else:
-#                 self._hide_button()
-#             return False
-        
-#         if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
-#             # Если клик по кнопке – она обработает сама (через clicked)
-#             if TextPopupDelegate._button.isVisible() and TextPopupDelegate._button.geometry().contains(event.pos()):
-#                 return True  # событие не передаём дальше в таблицу
-#         return super().editorEvent(event, model, option, index)
-    
-#             # new_row, new_col = index.row(), index.column()
-#             # # TextPopupDelegate.points_dict[Point(new_row,new_col)] = None
-#             # # self._update_del_()
-            
-#             # print( " editorEvent 1 new_row, new_col" ,new_row, new_col)
-#             # if (new_row, new_col) != (self._hovered_row, self._hovered_col):
-#             #     old_row, old_col = self._hovered_row, self._hovered_col
-#             #     self._hovered_row, self._hovered_col = new_row, new_col
-
-#             #     print( " editorEvent  2 old_row, old_col" ,old_row, old_col)
-#             #     # Полная перерисовка таблицы гарантированно убирает старую кнопку
-#             #     # self.parent().viewport().update()
-
-#             #     # # # Перерисовываем старую ячейку
-#             #     # self._update_del(model, old_row, old_col)
-
-#             #     # Перерисовываем новую ячейку (кнопка появится в paint)
-#             #     new_rect = self.parent().visualRect(index)
-#             #     self.parent().viewport().update(new_rect)
-
-#             #     # # if (
-#             #     # #     TextPopupDelegate._last_hovered_row is not None
-#             #     # # ) and (
-#             #     # #     TextPopupDelegate._last_hovered_col is not None
-#             #     # # ):
-#             #     # if (
-#             #     #     TextPopupDelegate._last_hovered_row != index.row()
-#             #     # ) and (
-#             #     #     TextPopupDelegate._last_hovered_col != index.column()
-#             #     # ):
-#             #     #     self._update_del(
-#             #     #         model, 
-#             #     #         TextPopupDelegate._last_hovered_row, 
-#             #     #         TextPopupDelegate._last_hovered_col                        
-#             #     #     )
-                
-#             #     # else:
-#             #     #     0==0      
-#             #     # if old_row != -1:
-#             #     #     old_idx = model.index(old_row, old_col)
-#             #     #     if old_idx.isValid():
-#             #     #         # Принудительно перерисовываем область старой ячейки
-#             #     #         old_rect = self.parent().visualRect(old_idx)
-#             #     #         self.parent().viewport().update(old_rect)
-
-#             #             # # TextPopupDelegate.sawe_paint[(self._hovered_row, self._hovered_col)] = 
-#             #             # self.parent().update(old_idx)
-#             #     # if self.old_rect
-#             #     # TextPopupDelegate.points_dict[Point(new_row,new_col)] = None
-#             #     # TextPopupDelegate._last_hovered_row = new_row
-#             #     # TextPopupDelegate._last_hovered_col = new_col
-#             #     # self._update_del_()
-#             #     # Перерисовываем новую ячейку
-#             #     # new_rect = self.parent().visualRect(index)
-#             #     # self.parent().viewport().update(new_rect)
-
-#             #     # # Перерисовываем новую ячейку
-#             #     # self.parent().update(index)
-#             # return False
-
-#         # Обработка двойного клика – только в режиме редактирования
-#         if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
-#             if not self._readonly:
-#                 self._open_popup(model, index)
-#                 return True
-#             return False
-
-#         # Клик по кнопке (левой кнопкой)
-#         if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-#             if self._button_rect and self._button_rect.contains(event.pos()):
-#                 self._open_popup(model, index)
-#                 return True
-
-#         return super().editorEvent(event, model, option, index)
-    
-#     @AppLogger.get_instance(
-#         name='TextPopupDelegate',
-#         # share_file_with = 'system',
-#         enable_file_logging = 'system',
-#         use_name_in_filename = False, # 'system'
-#     ).log_execution_time(
-#         level=AppLogger._parse_log_level('DEBUG')
-#     )
-#     def _open_popup(self, model, index):
-#         """Открывает диалог просмотра/редактирования текста."""
-        
-#         value = model.data(index, Qt.EditRole)
-#         text = str(value) if value is not None else ""
-
-#         # Получаем список вариантов для автодополнения
-#         completion_list = self._get_completion_list() if self._get_completion_list else []
-
-#         dialog = TextEditDialog(self.parent(), text, self._readonly, completion_list)
-#         if dialog.exec() == QDialog.Accepted:
-#             new_text = dialog.get_text()
-#             if new_text != text:
-#                 model.setData(index, new_text, Qt.EditRole)
-
-#         # dialog = QDialog(self.parent())
-#         # dialog.setWindowTitle("Просмотр текста" if self._readonly else "Редактирование текста")
-
-#         # layout = QVBoxLayout(dialog)
-#         # text_edit = QTextEdit()
-#         # text_edit.setPlainText(text)
-#         # if self._readonly:
-#         #     text_edit.setReadOnly(True)
-
-#         # layout.addWidget(text_edit)
-
-#         # btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-#         # btn_box.accepted.connect(dialog.accept)
-#         # btn_box.rejected.connect(dialog.reject)
-#         # layout.addWidget(btn_box)
-
-#         # if dialog.exec() == QDialog.Accepted:
-#         #     new_text = text_edit.toPlainText()
-#         #     if new_text != text:
-#         #         model.setData(index, new_text, Qt.EditRole)
-    
-#     @AppLogger.get_instance(
-#         name='TextPopupDelegate',
-#         # share_file_with = 'system',
-#         enable_file_logging = 'system',
-#         use_name_in_filename = False, # 'system'
-#     ).log_execution_time(
-#         level=AppLogger._parse_log_level('DEBUG')
-#     )
-#     def set_readonly(self, readonly):
-#         """Устанавливает режим только для просмотра."""
-#         self._readonly = readonly
-#         if readonly:
-#             self._hide_button()
-    
-#     @AppLogger.get_instance(
-#         name='TextPopupDelegate',
-#         # share_file_with = 'system',
-#         enable_file_logging = 'system',
-#         use_name_in_filename = False, # 'system'
-#     ).log_execution_time(
-#         level=AppLogger._parse_log_level('DEBUG')
-#     )
-#     def createEditor(self, parent, option, index):
-#         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
-#         return None
-
-# class TextPopupDelegate(QStyledItemDelegate):
-#     """
-#     Делегат для ячеек с многострочным текстом.
-#     При наведении мыши показывает маленькую кнопку (один общий QPushButton на всю таблицу),
-#     по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
-#     В режиме только для чтения диалог открывается без возможности редактирования.
-#     """
-#     _shared_button = None        # одна кнопка на все экземпляры
-#     _current_delegate = None     # делегат, который сейчас показывает кнопку
-
-#     @classmethod
-#     def _get_shared_button(cls, parent):
-#         """Создаёт общую кнопку, если её ещё нет."""
-#         if cls._shared_button is None:
-#             cls._shared_button = QPushButton("...", parent)
-#             cls._shared_button.setFixedSize(20, 20)
-#             cls._shared_button.setCursor(Qt.PointingHandCursor)
-#             cls._shared_button.hide()
-#         return cls._shared_button
-
-#     def __init__(
-#         self,
-#         parent=None,
-#         readonly=False,
-#         get_completion_list=None,
-#     ):
-#         super().__init__(parent)
-#         self._readonly = readonly
-#         self._get_completion_list = get_completion_list
-#         self._current_row = -1
-#         self._current_col = -1
-
-#         if parent:
-#             parent.setMouseTracking(True)
-#             parent.installEventFilter(self)
-
-#     def _show_button(self, index):
-#         """Показывает кнопку над указанной ячейкой."""
-#         # if self._readonly or not index.isValid():
-#         if  not index.isValid():
-#             return
-
-#         viewport = self.parent().viewport()
-#         btn = self._get_shared_button(viewport)
-
-#         # Обновляем родителя (на случай, если viewport изменился)
-#         btn.setParent(viewport)
-
-#         # Позиционируем кнопку
-#         rect = self.parent().visualRect(index)
-#         btn_rect = QRect(
-#             rect.right() - 22,
-#             rect.top() + (rect.height() - 20) // 2,
-#             20, 20
-#         )
-#         btn.setGeometry(btn_rect)
-
-#         # Переназначаем сигнал (отключаем старые, чтобы не было дублей)
-#         try:
-#             btn.clicked.disconnect()
-#         except TypeError:
-#             pass
-#         btn.clicked.connect(self._on_button_clicked)
-
-#         btn.show()
-#         btn.raise_()
-
-#         self._current_row = index.row()
-#         self._current_col = index.column()
-#         self.__class__._current_delegate = self
-
-#     def _hide_button(self):
-#         """Скрывает общую кнопку."""
-#         if self.__class__._shared_button is not None:
-#             self.__class__._shared_button.hide()
-#         self._current_row = -1
-#         self._current_col = -1
-#         self.__class__._current_delegate = None
-
-#     def _on_button_clicked(self):
-#         """Обработчик клика по кнопке."""
-#         if self._current_row >= 0 and self._current_col >= 0:
-#             model = self.parent().model()
-#             idx = model.index(self._current_row, self._current_col)
-#             if idx.isValid():
-#                 self._open_popup(model, idx)
-
-#     def editorEvent(self, event, model, option, index):
-#         """Обрабатывает события мыши для показа/скрытия кнопки."""
-#         # Обработка движения мыши – обновляем hover и показываем кнопку
-#         if event.type() == QEvent.MouseMove:
-#             if index.isValid():
-#                 if (index.row(), index.column()) != (self._current_row, self._current_col):
-#                     # Скрываем кнопку (через класс, чтобы все делегаты видели)
-#                     if self.__class__._shared_button:
-#                         self.__class__._shared_button.hide()
-#                     self.__class__._current_delegate = None
-#                     self._current_row = -1
-#                     self._current_col = -1
-#                     # Показываем кнопку для новой ячейки
-#                     self._show_button(index)
-#             else:
-#                 self._hide_button()
-#             return False
-
-#         # Обработка двойного клика – открываем диалог (только в режиме редактирования)
-#         if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
-#             if not self._readonly:
-#                 self._open_popup(model, index)
-#                 return True
-#             return False
-
-#         # Клик по кнопке уже обработан отдельно через сигнал
-#         return super().editorEvent(event, model, option, index)
-
-#     def eventFilter(self, obj, event):
-
-#         # Обработка выхода мыши из таблицы
-#         if obj == self.parent() and event.type() == QEvent.Leave:
-#             self._hide_button()
-#             return False
-
-#         # Обработка движения мыши по таблице (для скрытия кнопки над чужими делегатами)
-#         if obj == self.parent() and event.type() == QEvent.MouseMove:
-#             # Если кнопка не видна, можно не проверять
-#             if self.__class__._shared_button and self.__class__._shared_button.isVisible():
-#                 pos = event.pos()
-#                 index = self.parent().indexAt(pos)
-#                 if index.isValid():
-#                     delegate = self.parent().itemDelegateForColumn(index.column())
-#                     if not isinstance(delegate, TextPopupDelegate):
-#                         self._hide_button()
-#                 else:
-#                     self._hide_button()
-#             return False
-
-#         return super().eventFilter(obj, event)
-#         # """При выходе мыши из таблицы скрываем кнопку."""
-#         # if obj == self.parent() and event.type() == QEvent.Leave:
-#         #     self._hide_button()
-#         # return super().eventFilter(obj, event)
-
-#     def paint(self, painter, option, index):
-#         """Стандартная отрисовка без рисования кнопки (кнопка – реальный виджет)."""
-#         super().paint(painter, option, index)
-
-#     def set_readonly(self, readonly):
-#         """Устанавливает режим только для просмотра."""
-#         self._readonly = readonly
-#         if readonly:
-#             self._hide_button()
-
-#     def _open_popup(self, model, index):
-#         """Открывает диалог просмотра/редактирования текста."""
-#         value = model.data(index, Qt.EditRole)
-#         text = str(value) if value is not None else ""
-
-#         # Получаем список вариантов для автодополнения
-#         completion_list = self._get_completion_list() if self._get_completion_list else []
-
-#         dialog = TextEditDialog(self.parent(), text, self._readonly, completion_list)
-#         if dialog.exec() == QDialog.Accepted:
-#             new_text = dialog.get_text()
-#             if new_text != text:
-#                 model.setData(index, new_text, Qt.EditRole)
-
-#     def createEditor(self, parent, option, index):
-#         # Не создаём редактор, вместо этого открываем попап (при двойном клике)
-#         return None
-
 class TextPopupDelegate(QStyledItemDelegate):
     """
     Делегат для ячеек с многострочным текстом.
@@ -750,6 +178,7 @@ class TextPopupDelegate(QStyledItemDelegate):
     по нажатию открывает диалог с QTextEdit для удобного редактирования с переносами строк.
     В режиме только для чтения диалог открывается без возможности редактирования.
     """
+
     _shared_button = None        # одна кнопка на все экземпляры
     _current_delegate = None     # делегат, который сейчас показывает кнопку
     _global_filter_installed = False  # флаг, что глобальный фильтр установлен
@@ -801,6 +230,7 @@ class TextPopupDelegate(QStyledItemDelegate):
         """Устанавливает фильтр событий на viewport таблицы для отслеживания движения мыши."""
         if self.__class__._global_filter_installed:
             return
+        
         viewport = table.viewport()
         viewport.installEventFilter(self)
         self.__class__._global_filter_installed = True
@@ -860,6 +290,7 @@ class TextPopupDelegate(QStyledItemDelegate):
         """Скрывает общую кнопку."""
         if self.__class__._shared_button is not None:
             self.__class__._shared_button.hide()
+
         self._current_row = -1
         self._current_col = -1
         self.__class__._current_delegate = None
@@ -897,13 +328,16 @@ class TextPopupDelegate(QStyledItemDelegate):
                     # Скрываем кнопку (через класс, чтобы все делегаты видели)
                     if self.__class__._shared_button:
                         self.__class__._shared_button.hide()
+
                     self.__class__._current_delegate = None
                     self._current_row = -1
                     self._current_col = -1
                     # Показываем кнопку для новой ячейки
                     self._show_button(index)
+
             else:
                 self._hide_button()
+
             return False
 
         # Обработка двойного клика – открываем диалог (только в режиме редактирования)
@@ -911,6 +345,7 @@ class TextPopupDelegate(QStyledItemDelegate):
             if not self._readonly:
                 self._open_popup(model, index)
                 return True
+            
             return False
 
         return super().editorEvent(event, model, option, index)
@@ -938,8 +373,10 @@ class TextPopupDelegate(QStyledItemDelegate):
                 # Если делегат под курсором не TextPopupDelegate – скрываем кнопку
                 if not isinstance(delegate, TextPopupDelegate):
                     self._hide_button()
+
             else:
                 self._hide_button()
+
             return False
 
         return super().eventFilter(obj, event)
@@ -1136,6 +573,7 @@ class DateDelegate(QStyledItemDelegate):
         # editor.setDate(QDate.currentDate())     # начальная дата (не обязательна, но для визуала)
         editor.setDateTime(QDateTime())                 # невалидная дата → будет показан specialValueText
         install_standard_context_menu(editor, menu_type='date')
+
         # Устанавливаем фильтр событий для перехвата клавиши Delete
         editor.installEventFilter(self)
 
@@ -1160,6 +598,7 @@ class DateDelegate(QStyledItemDelegate):
                 self.closeEditor.emit(obj, QStyledItemDelegate.NoHint)
 
                 return True
+            
         return super().eventFilter(obj, event)
     
     @AppLogger.get_instance(
@@ -1695,15 +1134,9 @@ class TimeStringDelegate(StringDelegate):
             except ValueError:
                 pass
 
-
-
-
-
 # """
 # Делегат для текстовых ячеек с автодополнением (QCompleter).
 # """
-
-
 
 class CompleterStringDelegate(QStyledItemDelegate):
     """

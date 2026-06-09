@@ -80,6 +80,8 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor
 
+from interfaces.gui.gui_window.widgets.table_column import ColumnType
+
 
 # def preserve_selection(func):
 #     """
@@ -2560,6 +2562,9 @@ class ListUIMixin:
         """
         Настраивает поведение заголовка: разрешает изменение размера столбцов,
         делает последний столбец растягивающимся.
+            - Столбец, помеченный в field_configs как stretch=True, получает режим Stretch.
+            - Все остальные столбцы – Interactive.
+            - Если нет ни одного stretch-столбца, последний столбец растягивается (старое поведение).
 
         Args:
             header (QHeaderView): Заголовок таблицы.
@@ -2575,9 +2580,27 @@ class ListUIMixin:
         header.setSectionsMovable(False)      # запрещаем перетаскивание столбцов (опционально)
         header.setSectionsClickable(True)     # кликабельность для сортировки
 
+        # Ищем индекс столбца, который должен растягиваться
+        stretch_col = None
+
+        if hasattr(self, 'source_model') and self.source_model is not None:
+            for visible_idx in range(self.source_model.columnCount()):
+
+                if not hasattr(self.source_model, 'get_column_at_visible_index'):  # для работы со старым типом ТБ
+                    break
+
+                col = self.source_model.get_column_at_visible_index(visible_idx)
+                # if col and col.column_type == ColumnType.DATA:
+                if col and col.is_stretch():
+                    field_name = col.field_name
+                    config = self.field_configs.get(field_name, {})
+                    if config.get('stretch', False):
+                        stretch_col = visible_idx
+                        break
+
         # Устанавливаем режим для каждого столбца
         for col in range(header.count()):
-            if col == header.count() - 1:
+            if col == stretch_col or (header.count() - 1):
                 # Последний столбец – растягиваемый
                 header.setSectionResizeMode(col, QHeaderView.Stretch)
             else:
@@ -2585,7 +2608,9 @@ class ListUIMixin:
                 header.setSectionResizeMode(col, QHeaderView.Interactive)
 
         # Растяжение последнего столбца (дополнительная гарантия)
-        header.setStretchLastSection(True)
+        header.setStretchLastSection(
+            stretch_col is None    # отключаем автоматическое растяжение последнего по условию
+        )
 
         # self.table_view.horizontalHeader().setVisible(True) # показываем заголовок
 

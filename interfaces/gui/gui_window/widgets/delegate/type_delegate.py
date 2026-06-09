@@ -181,6 +181,256 @@ class TextEditDialog(QDialog):
 
         return self.text_edit.toPlainText()
 
+
+class TextEditPopupDelegate(QStyledItemDelegate):
+    """
+    Универсальный делегат для многострочного текста.
+
+    Объединяет функциональность двух делегатов:
+        - TextPopupDelegate (кнопка с вызовом диалога)
+        - TextEditDelegate (inline-редактирование прямо в ячейке)
+
+    Поведение:
+        - При наведении мыши на ячейку отображается кнопка "…".
+        - По нажатию кнопки открывается диалог TextEditDialog.
+        - В режиме просмотра (readonly=True) диалог только для чтения.
+        - В режиме редактирования (readonly=False) диалог позволяет редактировать.
+        - Двойной клик по ячейке:
+            * В режиме просмотра: игнорируется (ничего не происходит).
+            * В режиме редактирования: если включён inline-режим (inline_enabled=True),
+              открывается QTextEdit прямо в ячейке; иначе ничего (только кнопка).
+
+    Параметры инициализации:
+        parent: Родительский виджет (обычно QTableView).
+        readonly: bool – режим только чтения (влияет на диалог и создание inline-редактора).
+        popup_enabled: bool – показывать кнопку и разрешить диалог (по умолч. True).
+        inline_enabled: bool – разрешить inline-редактирование при двойном клике (по умолч. False).
+        get_completion_list: callable – функция, возвращающая список строк для автодополнения.
+
+    Атрибуты класса:
+        _shared_button (QPushButton): Одна кнопка на все экземпляры.
+        _current_delegate (TextEditPopupDelegate): Делегат, показывающий кнопку.
+        _global_filter_installed (bool): Флаг установки глобального фильтра.
+
+    Атрибуты экземпляра:
+        _readonly (bool): Режим только чтения.
+        _popup_enabled (bool): Разрешена ли кнопка/диалог.
+        _inline_enabled (bool): Разрешено ли inline-редактирование.
+        _get_completion_list (callable): Функция автодополнения для диалога.
+        _current_row, _current_col (int): Координаты ячейки под курсором.
+    """
+
+    _shared_button = None
+    _current_delegate = None
+    _global_filter_installed = False
+
+    @classmethod
+    def _get_shared_button(cls, parent):
+        """Возвращает общую кнопку (создаёт при первом вызове)."""
+        if cls._shared_button is None:
+            cls._shared_button = QPushButton("...", parent)
+            cls._shared_button.setFixedSize(20, 20)
+            cls._shared_button.setCursor(Qt.PointingHandCursor)
+            cls._shared_button.hide()
+        return cls._shared_button
+
+    def __init__(self, parent=None, readonly=False, popup_enabled=True, inline_enabled=True,
+                 get_completion_list=None):
+        super().__init__(parent)
+        self._readonly = readonly
+        self._popup_enabled = popup_enabled
+        self._inline_enabled = inline_enabled
+        self._get_completion_list = get_completion_list
+        self._current_row = -1
+        self._current_col = -1
+
+        if parent:
+            parent.setMouseTracking(True)
+            parent.installEventFilter(self)
+            self._install_global_hover_monitor(parent)
+
+    # ------------------------------------------------------------------
+    # Глобальный фильтр событий
+    # ------------------------------------------------------------------
+
+    def _install_global_hover_monitor(self, table):
+        if self.__class__._global_filter_installed:
+            return
+        viewport = table.viewport()
+        viewport.installEventFilter(self)
+        self.__class__._global_filter_installed = True
+
+    # ------------------------------------------------------------------
+    # Управление кнопкой
+    # ------------------------------------------------------------------
+
+    def _show_button(self, index):
+        if not self._popup_enabled or not index.isValid():
+            return
+        viewport = self.parent().viewport()
+        btn = self._get_shared_button(viewport)
+        btn.setParent(viewport)
+
+        rect = self.parent().visualRect(index)
+        btn_rect = QRect(
+            rect.right() - 22,
+            rect.top() + (rect.height() - 20) // 2,
+            20, 20
+        )
+        btn.setGeometry(btn_rect)
+
+        try:
+            btn.clicked.disconnect()
+        except TypeError:
+            pass
+        btn.clicked.connect(self._on_button_clicked)
+
+        btn.show()
+        btn.raise_()
+
+        self._current_row = index.row()
+        self._current_col = index.column()
+        self.__class__._current_delegate = self
+
+    def _hide_button(self):
+        if self.__class__._shared_button is not None:
+            self.__class__._shared_button.hide()
+        self._current_row = -1
+        self._current_col = -1
+        self.__class__._current_delegate = None
+
+    def _on_button_clicked(self):
+        if self._current_row >= 0 and self._current_col >= 0:
+            model = self.parent().model()
+            idx = model.index(self._current_row, self._current_col)
+            if idx.isValid():
+                self._open_dialog(model, idx)
+
+    # ------------------------------------------------------------------
+    # Открытие диалога
+    # ------------------------------------------------------------------
+
+    def _open_dialog(self, model, index):
+        """Открывает диалог редактирования текста с учётом readonly."""
+        value = model.data(index, Qt.EditRole)
+        text = str(value) if value is not None else ""
+        completion = self._get_completion_list() if self._get_completion_list else []
+        dialog = TextEditDialog(self.parent(), text, self._readonly, completion)
+        if dialog.exec() == QDialog.Accepted and not self._readonly:
+            new_text = dialog.get_text()
+            if new_text != text:
+                model.setData(index, new_text, Qt.EditRole)
+
+    # ------------------------------------------------------------------
+    # Управление readonly
+    # ------------------------------------------------------------------
+
+    def set_readonly(self, readonly):
+        self._readonly = readonly
+        if readonly:
+            self._hide_button()
+
+    # ------------------------------------------------------------------
+    # Inline-редактор
+    # ------------------------------------------------------------------
+
+    def createEditor(self, parent, option, index):
+        """Создаёт QTextEdit для inline-редактирования, только если не readonly и включён inline."""
+        if not self._inline_enabled or self._readonly:
+            return None
+        editor = QTextEdit(parent)
+        editor.setAcceptRichText(False)
+        editor.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        editor.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        editor.setMinimumHeight(80)
+        install_standard_context_menu(editor)
+        editor.installEventFilter(self)
+        editor.setReadOnly(False)
+        editor.setFocus()
+        editor.setToolTip("Ctrl+Enter — завершить редактирование, Enter — перенос строки")
+        return editor
+
+    def setEditorData(self, editor, index):
+        value = index.model().data(index, Qt.EditRole)
+        if value is not None:
+            editor.setPlainText(str(value))
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.toPlainText(), Qt.EditRole)
+
+    def updateEditorGeometry(self, editor, option, index):
+        editor.setGeometry(option.rect)
+
+    # ------------------------------------------------------------------
+    # Фильтр событий (клавиши, выход мыши, движение)
+    # ------------------------------------------------------------------
+
+    def eventFilter(self, obj, event):
+        # Обработка клавиш в редакторе
+        if isinstance(obj, QTextEdit):
+            if event.type() == QEvent.KeyPress:
+                key = event.key()
+                if key == Qt.Key_Enter or key == Qt.Key_Return:
+                    if event.modifiers() == Qt.ControlModifier:
+                        self.commitData.emit(obj)
+                        self.closeEditor.emit(obj, QStyledItemDelegate.NoHint)
+                        return True
+                    else:
+                        return False
+            return False
+
+        # Выход мыши из таблицы
+        if obj == self.parent() and event.type() == QEvent.Leave:
+            self._hide_button()
+            return False
+
+        # Движение мыши по viewport – скрываем кнопку, если под курсором другой делегат
+        if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+            pos = event.pos()
+            index = self.parent().indexAt(pos)
+            if index.isValid():
+                delegate = self.parent().itemDelegateForColumn(index.column())
+                if not isinstance(delegate, TextEditPopupDelegate):
+                    self._hide_button()
+            else:
+                self._hide_button()
+            return False
+
+        return super().eventFilter(obj, event)
+
+    # ------------------------------------------------------------------
+    # Обработка событий мыши в ячейке
+    # ------------------------------------------------------------------
+
+    def editorEvent(self, event, model, option, index):
+        # Движение мыши – показ/скрытие кнопки
+        if event.type() == QEvent.MouseMove:
+            if index.isValid():
+                if (index.row(), index.column()) != (self._current_row, self._current_col):
+                    if self.__class__._shared_button:
+                        self.__class__._shared_button.hide()
+                    self.__class__._current_delegate = None
+                    self._current_row = -1
+                    self._current_col = -1
+                    self._show_button(index)
+            else:
+                self._hide_button()
+            return False
+
+        # Двойной клик – только в режиме редактирования и только если включён inline
+        if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+            if self._readonly:
+                return False
+            if self._inline_enabled:
+                self.parent().edit(index)
+                return True
+            return False
+
+        return False
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+
 class TextPopupDelegate(QStyledItemDelegate):
     """
     Делегат для ячеек с многострочным текстом.
@@ -240,7 +490,7 @@ class TextPopupDelegate(QStyledItemDelegate):
         """Устанавливает фильтр событий на viewport таблицы для отслеживания движения мыши."""
         if self.__class__._global_filter_installed:
             return
-        
+
         viewport = table.viewport()
         viewport.installEventFilter(self)
         self.__class__._global_filter_installed = True
@@ -272,7 +522,7 @@ class TextPopupDelegate(QStyledItemDelegate):
             20, 20
         )
         btn.setGeometry(btn_rect)
-        
+
         # Переназначаем сигнал (отключаем старые, чтобы не было дублей)
         try:
             btn.clicked.disconnect()
@@ -355,7 +605,7 @@ class TextPopupDelegate(QStyledItemDelegate):
             if not self._readonly:
                 self._open_popup(model, index)
                 return True
-            
+
             return False
 
         return super().editorEvent(event, model, option, index)

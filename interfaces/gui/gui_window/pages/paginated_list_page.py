@@ -328,6 +328,7 @@ from interfaces.gui.gui_window.widgets.delegate.type_delegate import (
     DatePickerDelegate,
     StringDelegate,
     TextPopupDelegate,
+    TextEditPopupDelegate,
     TimePickerDelegate,
     BoolDelegate,
     ComboBoxDelegate,
@@ -753,7 +754,7 @@ class PaginatedListPage(
         header = self.table_view.horizontalHeader()
         header.sectionResized.connect(self._on_section_resized)
 
-        # Настройка высоты строк для корректного отображения миниатюр
+        # На стройка высоты строк для корректного отображения миниатюр
         # from PySide6.QtWidgets import QHeaderView
         self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
 
@@ -2348,7 +2349,7 @@ class PaginatedListPage(
             delegate = self.table_view.itemDelegateForColumn(col)
             if delegate and hasattr(delegate, 'set_readonly'):
                 # Для ImageThumbnailDelegate и других делегатов с методом set_readonly
-                delegate.set_readonly(not self.edit_mode)
+                delegate.set_readonly( self.edit_mode)
 
 
     def _reapply_data_delegates(self) -> None:
@@ -6536,11 +6537,11 @@ class PaginatedListPage(
 
         # Многострочный текст
         if config.get('widget_type') == 'textarea':
-            return TextPopupDelegate, {'readonly': not self.edit_mode}
+            return TextEditPopupDelegate, {'readonly': not self.edit_mode}
 
         # Виртуальные поля-заметки (is_note) – тоже используем TextPopupDelegate
         if config.get('virtual', False) and config.get('is_note'):
-            return TextPopupDelegate, {'readonly': not self.edit_mode}
+            return TextEditPopupDelegate, {'readonly': not self.edit_mode}
 
         # Отображение миниатюры изображения
         if config.get('widget_type') == 'image_thumbnail':
@@ -6823,7 +6824,7 @@ class PaginatedListPage(
                 continue
 
             if 'readonly' in args:
-                args['readonly'] =not  self.edit_mode
+                args['readonly'] = not  self.edit_mode
 
             # Создаём экземпляр делегата
             delegate = col.delegate_class(self.table_view, **args)

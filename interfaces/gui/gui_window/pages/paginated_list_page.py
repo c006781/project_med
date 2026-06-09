@@ -790,11 +790,14 @@ class PaginatedListPage(
 
         self._affected_parents = set()   # ID родителей, чьи строки нужно обновить после сохранения
 
+        # Синхронизируем состояние кнопок с текущим режимом редактирования
+        self._update_ui_for_edit_mode(self.edit_mode)
 
         self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
 
-
         self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
+
+        self._update_edit_delete_buttons_state()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -803,8 +806,11 @@ class PaginatedListPage(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _on_selection_changed(self, dto):
         """Активирует/деактивирует кнопку «Приёмы» при выборе строки."""
+        # Дополнительная кнопка (например, «Приёмы»)
         if hasattr(self, 'action_btn') and self.action_btn:
             self.action_btn.setEnabled(dto is not None)
+        # Кнопки редактирования и удаления в боковой панели
+        self._update_edit_delete_buttons_state()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2428,7 +2434,9 @@ class PaginatedListPage(
         if hasattr(self, 'side_toolbar'):
             # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
             self.side_toolbar.add_btn.setEnabled(True)  
-            self.side_toolbar.delete_btn.setEnabled(True)
+            self.side_toolbar.delete_btn.setEnabled(
+                self.get_current_selected_dto() is not None
+            )
             self.side_toolbar.edit_btn.setEnabled(
                 not edit_mode and self.get_current_selected_dto() is not None
             )
@@ -2480,7 +2488,20 @@ class PaginatedListPage(
 
         self.logger.debug(f"Режим редактирования: {'включён' if edit_mode else 'выключен'}, UI обновлён")
 
-
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_edit_delete_buttons_state(self):
+        """Обновляет состояние кнопок редактирования и удаления в боковой панели."""
+        if not hasattr(self, 'side_toolbar'):
+            return
+        has_selection = self.get_current_selected_dto() is not None
+        # кнопки активны только при наличии выбранной строки
+        self.side_toolbar.delete_btn.setEnabled(has_selection)
+        # В не-режиме редактирования кнопки активны только при наличии выбранной строки
+        self.side_toolbar.edit_btn.setEnabled(not self.edit_mode and has_selection)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

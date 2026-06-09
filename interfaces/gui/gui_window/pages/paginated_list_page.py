@@ -2398,6 +2398,10 @@ class PaginatedListPage(
         new_path – относительный путь (имя файла) внутри временной папки,
         new_description – новое описание (может быть None, если не изменилось).
         """
+        # Сохраняем оригинальные значения
+        original_path = current_full_path
+        original_description = description
+
         # from interfaces.gui.gui_window.widgets.photo_edit_dialog import PhotoEditDialog
 
         # Подготавливаем временную папку для черновика (создаём, если нужно)
@@ -2423,9 +2427,20 @@ class PaginatedListPage(
 
         if dialog.exec() == QDialog.Accepted:
             new_path, new_description = dialog.get_result()
-            return True, new_path, new_description
+
+            # Определяем, были ли реальные изменения
+            path_changed = (new_path != original_path) if new_path is not None or original_path is not None else False
+            desc_changed = (new_description != original_description)
+
+            # has_changes = (new_path is not None) or (new_description != description)
+
+            # return has_changes, new_path, new_description
+            if path_changed or desc_changed:
+                return True, new_path, new_description
+            else:
+                return False, None, None
         
-        return (False, None, None)
+        return False, None, None
 
     @AppLogger.get_instance(
         name='PaginatedListPage',

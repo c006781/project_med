@@ -513,8 +513,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
 
         # Рисуем кнопку, если ячейка под курсором и режим редактирования
         if (
-            not self._readonly
-        ) and (
+        #     not self._readonly
+        # ) and (
             self._hovered_row == index.row()
         ) and (
             self._hovered_col == index.column()
@@ -843,14 +843,14 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
 
         # Двойной клик (только в режиме редактирования)
         if event.type() == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
-            if not self._readonly:
-                self._open_edit_dialog(model, index)
-                return True
-            return False
+            # if not self._readonly:
+            self._open_edit_dialog(model, index)
+            return True
+            # return False
 
         # Клик по кнопке
         if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
-            if self._button_rect and self._button_rect.contains(event.pos()):
+            if (self._button_rect) and (self._button_rect.contains(event.pos())):
                 self._open_edit_dialog(model, index)
                 return True
 
@@ -1046,8 +1046,8 @@ class ImageThumbnailDelegate(QStyledItemDelegate):
         """
 
         #  Режим только просмотра – ничего не делаем
-        if self._readonly:
-            return
+        # if self._readonly:
+        #     return
 
         #  Получаем ссылку на страницу (PaginatedListPage)
         page = self._page_ref() if hasattr(self, '_page_ref') else None

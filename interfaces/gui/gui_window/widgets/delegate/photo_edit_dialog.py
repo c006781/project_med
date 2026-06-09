@@ -178,8 +178,9 @@ class PhotoEditDialog(QDialog):
         self._readonly = readonly
         self._parent_id = parent_id          # ID родителя (существующей сущности) или None
         self._storage_path = storage_path    # базовый путь к хранилищу
-        self._new_path = None
-        self._new_description = None
+        
+        self._new_path = current_path  # None
+        self._new_description = description  # None
 
         self._selected_files = []   # для multi-режима
 
@@ -906,6 +907,7 @@ class PhotoEditDialog(QDialog):
 
         self._current_path = None
         self._new_path = None
+
         self.preview_label.setText("Нет фото")
         self.delete_btn.setEnabled(False)
     
@@ -945,14 +947,29 @@ class PhotoEditDialog(QDialog):
 
         new_desc = self.desc_edit.toPlainText()
 
-        if self._new_path is not None:
-            return self._new_path, new_desc
+        if (
+            (
+                new_desc is None 
+            )and(
+                (self._description is not None) and self._description == ''
+            )
+        ) or (
+            (
+                self._description is None
+            ) and (
+                (new_desc is not None) and new_desc == ''
+            )
+        ):
+            new_desc = self._description   
+
+        # if self._new_path is not None:
+        return self._new_path, new_desc
         
-        if self._current_path is None:
-            return None, None
+        # if self._current_path is None:
+        #     return None, None
         
-        if new_desc != self._description:
-            return self._current_path, new_desc
+        # if new_desc != self._description:
+        #     return self._current_path, new_desc
         
         return None, None
 

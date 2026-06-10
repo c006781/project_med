@@ -14,6 +14,7 @@ from app.dto.field_configs import PATIENT_CONFIG
 
 from app.draft.draft_registry import DraftRegistry
 
+from interfaces.gui.gui_window.mixins.ui_mixin import ToolbarComboMixin
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
@@ -21,7 +22,7 @@ from interfaces.gui.gui_window.pages.paginated_appointment_list_page import Pagi
 from interfaces.gui.gui_window.pages.paginated_photo_list_page import PaginatedPhotoListPage
 
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
+    QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
     QMessageBox, QPushButton,
     QVBoxLayout, QSplitter,
     QWidget, QScrollArea, QFrame,
@@ -30,7 +31,7 @@ from PySide6.QtCore import (
     Qt, 
 )
 
-class AppointmentPhotoFrame(BasePage):
+class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
     """
     Страница, объединяющая список приёмов и список фото выбранного приёма.
 
@@ -110,6 +111,11 @@ class AppointmentPhotoFrame(BasePage):
 
         # Подключаем сигнал обновления родительской сущности
         self.photo_page.parent_entity_updated.connect(self._on_parent_entity_updated)
+
+        # Подключаем сигналы изменения черновиков для обновления кнопки сохранения
+        self.appointment_page.draft_modified_changed.connect(self._update_save_button_state)
+        self.photo_page.draft_modified_changed.connect(self._update_save_button_state)
+
 
         # Создаём пустую панель инструментов (будет заполнена в set_main_window)
         self.toolbar_widget = QWidget()
@@ -250,6 +256,8 @@ class AppointmentPhotoFrame(BasePage):
             # Очищаем таблицу фото и сбрасываем контекст
             self.photo_page.source_model.clear()
             self.photo_page._context_params = {}
+            
+        self.photo_page._update_ui_for_edit_mode(self.photo_page.edit_mode)
 
     @AppLogger.get_instance(
         name='AppointmentPhotoPage',
@@ -315,6 +323,7 @@ class AppointmentPhotoFrame(BasePage):
             checkable=True, callback=self._toggle_edit_mode,
             parent=self, temporary=True
         )
+
         # Добавить приём
         am.register_action(
             'add_appointment', 'Добавить приём',
@@ -327,12 +336,21 @@ class AppointmentPhotoFrame(BasePage):
             callback=self._add_photo,
             parent=self, temporary=True
         )
+
         # Удалить выбранное
         am.register_action(
             'delete_selected', 'Удалить',
             callback=self._delete_selected,
             parent=self, temporary=True
         )
+
+        # Отменить все изменения
+        am.register_action(
+            'discard_all', 'Отменить все изменения',
+            callback=self._discard_all_changes,
+            parent=self, temporary=True
+        )
+
         # Сохранить все изменения
         am.register_action(
             'save_all', 'Сохранить',
@@ -371,6 +389,7 @@ class AppointmentPhotoFrame(BasePage):
                 item.widget().deleteLater()
 
         # Создаём кнопки и связываем с действиями
+        # Кнопка переключения режима редактирования
         self.edit_mode_btn = QPushButton()
         am.connect_button('edit_mode', self.edit_mode_btn)
         self.edit_mode_btn.setText("Режим редактирования") 
@@ -378,35 +397,77 @@ class AppointmentPhotoFrame(BasePage):
         self.add_appointment_btn = QPushButton()
         am.connect_button('add_appointment', self.add_appointment_btn)
         self.add_appointment_btn.setText("Добавить приём")
+        self.add_appointment_btn.setVisible(False)
 
         self.add_photo_btn = QPushButton()
         am.connect_button('add_photo', self.add_photo_btn)
         self.add_photo_btn.setText("Добавить фото")
+        self.add_photo_btn.setVisible(False)
 
         self.delete_btn = QPushButton()
         am.connect_button('delete_selected', self.delete_btn)
         self.delete_btn.setText("Удалить")
+        self.delete_btn.setVisible(False)
 
+        # Выпадающий список действий
+        self.action_combo = QComboBox()
+        # Словарь действий для action_combo
+        self.actions = {
+            "item_0": {"text": "▼ Действия с записями", "enabled": False},
+            "add_appointment": {
+                "text": "Добавить приём",
+                "func": self._add_appointment,
+                "args": (),
+                "kwargs": {}
+            },
+            "add_photo": {
+                "text": "Добавить фото",
+                "func": self._add_photo,
+                "args": (),
+                "kwargs": {}
+            },
+            "separator_1": {"separator": True},
+            "discard_all": {
+                "text": "Отменить все изменения",
+                "func": self._discard_all_changes,
+                "args": (),
+                "kwargs": {}
+            },
+        }
+        self._rebuild_combo(self.action_combo, self.actions)
+        self.action_combo.currentIndexChanged.connect(self._on_action_combo_selected)
+        # self.toolbar_layout.addWidget(self.action_combo)
+
+        # Кнопка сохранения
         self.save_btn = QPushButton()
         am.connect_button('save_all', self.save_btn)
-        self.save_btn.setText("Сохранить")
+        self.save_btn.setText("Сохранить все изменения")
+        self.save_btn.setEnabled(False)
 
+
+        # Кнопка информации о пациенте
         self.patient_info_btn = QPushButton()
         am.connect_button('patient_info', self.patient_info_btn)
         self.patient_info_btn.setText("Информация о пациенте")
 
-        # Создаём кнопку и связываем с действием
+        # Кнопка редактирования приёма
         self.edit_appointment_btn = QPushButton()
         am.connect_button('edit_appointment', self.edit_appointment_btn)
         self.edit_appointment_btn.setText("Редактировать приём")
         self.edit_appointment_btn.setVisible(False)
 
         self.toolbar_layout.addWidget(self.edit_mode_btn)
+
+        self.toolbar_layout.addWidget(self.action_combo)
+
         self.toolbar_layout.addWidget(self.add_appointment_btn)
         self.toolbar_layout.addWidget(self.add_photo_btn)
         self.toolbar_layout.addWidget(self.delete_btn)
+        
         self.toolbar_layout.addWidget(self.save_btn)
 
+        # Растяжка, чтобы следующие кнопки прижались к правому краю
+        self.toolbar_layout.addStretch()
         self.toolbar_layout.addWidget(self.patient_info_btn)
 
         # Добавляем в тулбар (например, после кнопки информации о пациенте)
@@ -749,3 +810,46 @@ class AppointmentPhotoFrame(BasePage):
             # 0==0
             self.appointment_page.refresh_row_by_id(parent_id, parent_entity_type)
             # 0==0
+    def _on_action_combo_selected(self, index):
+        """Обработчик выбора действия из action_combo."""
+        self._run_selected_combo_action(self.action_combo)
+        self.action_combo.setCurrentIndex(0)  # сброс на заглушку
+
+    def _discard_all_changes(self):
+        """Отменяет все несохранённые изменения в обеих таблицах."""
+        # Спрашиваем подтверждение
+        reply = QMessageBox.question(
+            self, "Отмена всех изменений",
+            "Все несохранённые изменения будут потеряны. Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Отменяем изменения в таблице фото
+        if hasattr(self.photo_page, '_discard_all_changes'):
+            self.photo_page._discard_all_changes()
+        # Отменяем изменения в таблице приёмов (если есть метод)
+        if hasattr(self.appointment_page, '_discard_all_changes'):
+            self.appointment_page._discard_all_changes()
+
+        # Обновляем состояние кнопок
+        self._update_buttons_state()
+        # self.save_btn.setEnabled(False)  # после отмены сохранение недоступно
+        self._update_save_button_state()
+
+        # self.delete_btn.setEnabled(False)  # удаление тоже (нет выделения)
+
+        self.logger.info("Все изменения отменены")
+
+    def _update_save_button_state(self):
+        """Обновляет активность кнопки сохранения на основе наличия несохранённых изменений."""
+        has_changes = False
+        if hasattr(self.appointment_page, '_has_unsaved_changes'):
+            has_changes = has_changes or self.appointment_page._has_unsaved_changes()
+        if hasattr(self.photo_page, '_has_unsaved_changes'):
+            has_changes = has_changes or self.photo_page._has_unsaved_changes()
+        
+        if hasattr(self, 'save_btn') and self.save_btn:
+            self.save_btn.setEnabled(has_changes)
+        

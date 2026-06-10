@@ -683,7 +683,7 @@ class DraftTreeMixin:
 
         # Обновляем счётчик в реестре
         new_count = self._draft_registry.inc_child_counter(
-            self._entity_type, parent_id, delta
+            self._entity_type, parent_id,  delta
         )
 
         # Проверка на отрицательное значение – выполняем принудительную коррекцию
@@ -759,31 +759,35 @@ class DraftTreeMixin:
         _entity_type = None 
     ) -> None:
         """Пересчитывает статус родителя на основе его собственных изменений и счётчика детей."""
+        _entity_type_original = self._entity_type
+        try:
+            if _entity_type is not None:
 
-        if _entity_type is not None:
-            self._entity_type = _entity_type
+                self._entity_type = _entity_type
 
-        own_status = self._draft_registry.get_entity_status(
-            _entity_type, parent_id
-        )
-        has_own = own_status in ('own', 'both')
-        child_count = self._draft_registry.get_child_counter(
-            _entity_type, parent_id
-        )
-        new_status = self._status_from_flags(has_own, child_count > 0)
+            own_status = self._draft_registry.get_entity_status(
+                _entity_type, parent_id
+            )
+            has_own = own_status in ('own', 'both')
+            child_count = self._draft_registry.get_child_counter(
+                _entity_type, parent_id
+            )
+            new_status = self._status_from_flags(has_own, child_count > 0)
 
-        old_status = self._get_cached_status(parent_id)
-        if new_status == old_status:
-            return
+            old_status = self._get_cached_status(parent_id)
+            if new_status == old_status:
+                return
 
-        self._set_cached_status(parent_id, new_status)
-        self._draft_registry.set_entity_status(
-            _entity_type, parent_id, new_status
-        )
-        self.entity_status_changed.emit(parent_id, new_status is not None)
+            self._set_cached_status(parent_id, new_status)
+            self._draft_registry.set_entity_status(
+                _entity_type, parent_id, new_status
+            )
+            self.entity_status_changed.emit(parent_id, new_status is not None)
 
-        # Распространяем дальше вверх
-        self._propagate_status_up(parent_id)
+            # Распространяем дальше вверх
+            self._propagate_status_up(parent_id)
+        finally:
+            self._entity_type = _entity_type_original 
 
     @AppLogger.get_instance(
         name='DraftTreeMixin',
@@ -1051,6 +1055,23 @@ class DraftTreeMixin:
             self._recompute_parent_status(parent_id)
 
     ################
+    
+    @AppLogger.get_instance(
+        name='DraftTreeMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _unmark_deleted_if_exists(self, entity_id: int) -> bool:
+        """
+        Снимает пометку на удаление с сущности, если она была помечена.
+        Возвращает True, если пометка была снята.
+        """
+        deleted_key = f"__deleted__:{self._entity_type}:{entity_id}"
+        if not self._draft_registry.has(deleted_key):
+            return False
+        self._unmark_deleted_row(entity_id)
+        return True
 
     @AppLogger.get_instance(
         name='DraftTreeMixin',

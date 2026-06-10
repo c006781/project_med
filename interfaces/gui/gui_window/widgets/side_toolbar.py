@@ -90,8 +90,9 @@ class SideToolbar(QWidget):
 
         # Кнопка обновления
         self.refresh_btn = QPushButton("⟳")
-        self.refresh_btn.setToolTip("Обновить данные")
-        self.refresh_btn.clicked.connect(controller.refresh_data)
+        self.refresh_btn.setToolTip("Обновить все данные в ТБ")
+        # self.refresh_btn.clicked.connect(controller.refresh_data)
+        self.refresh_btn.clicked.connect(controller.reload_data)
         layout.addWidget(self.refresh_btn)
 
         # Кнопка сворачивания/разворачивания панели

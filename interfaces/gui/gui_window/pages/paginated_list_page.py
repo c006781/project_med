@@ -7209,6 +7209,7 @@ class PaginatedListPage(
 
         # Вставляем строку с учётом позиции
         self._add_new_row_at_pos(dto)
+        0==0
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -7728,9 +7729,12 @@ class PaginatedListPage(
                 #     self.logger.debug(f"Снятие пометки на удаление для строки {entity_id}")
                 #     self._unmark_deleted_row(entity_id)
 
+             
                 for key in list(self._draft_registry.get_keys_by_prefix("__new__")):
                     data = self._draft_registry.get(key)
-                    if data and hasattr(data["dto"], 'parent_id') and data["dto"].parent_id == entity_id:
+                    if data and hasattr(data["dto"], 'parent_id') and (
+                        data["dto"].parent_id == entity_id
+                    ):
                         child_temp_id = int(key.split(':')[-1])
                         self._cancel_new_row(child_temp_id)   # рекурсивно удалит и внуков
                     
@@ -7753,6 +7757,10 @@ class PaginatedListPage(
                     # Были собственные изменения – отменяем всё поддерево (уменьшит счётчик дедушки)
                     self.discard_entity_subtree(entity_id)
                 else:
+                    # Нет собственных изменений – снимаем пометку на удаление, если она есть
+                    if self._unmark_deleted_if_exists(entity_id):
+                        self.logger.debug(f"Снята пометка на удаление для строки {entity_id}")
+
                     # Не было собственных изменений – удаляем только черновики, не трогая счётчик дедушки
                     self.clear_entity_drafts(entity_id)
 

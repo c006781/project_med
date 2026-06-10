@@ -52,9 +52,131 @@ from PySide6.QtCore import (
     # Signal
 )
 
+class ToolbarComboMixin:
+    """
+    Миксин для добавления значений в выпадающий списк
+    """
 
+    @AppLogger.get_instance(
+        name='ToolbarComboMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    def _rebuild_combo(self, combo, actions_dict:dict):
+        """
+        Заполняет combo  на основе словаря действий.
+        Порядок пунктов определяется порядком ключей в словаре (Python 3.7+ сохраняет порядок вставки).
+        """
 
-class UIMixin:
+        combo.blockSignals(True)
+        combo.clear()
+
+        any_enabled= False
+        index = -1
+        for k, v in actions_dict.items():
+            index +=1
+
+            actions_dict[k]["index"] = index
+            
+            text = v.get("text", None)
+            separator = v.get("separator", False) # Разделитель
+
+            func = v.get("func", None)
+            args = v.get("args", None)
+            kwargs = v.get("kwargs", None)
+
+            visible = v.get("visible", True)
+            enabled = v.get("enabled", True) and (func is not None)
+
+            userData = {
+                "name_sysem": k,
+                "func": func,
+                "args": args,
+                "kwargs": kwargs
+            }
+
+            # Пропускаем, если явно указано visible=False
+            if visible is False:
+                continue
+
+                  
+            # Разделитель
+            if separator:
+                combo.insertSeparator(combo.count())
+                continue  
+            
+            if text is None:
+                continue
+
+            combo.addItem(text , userData)
+
+            combo.model().item(index).setEnabled(enabled)
+
+            any_enabled = any_enabled or enabled
+
+        combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+        combo.setVisible(any_enabled)  # если ни один пункт не активен, скрываем комбобокс
+
+    @AppLogger.get_instance(
+        name='ToolbarComboMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    def _run_selected_combo_action(self,combo):
+        # Получить данные функции из текущего выбранного пункта и выполнить функцию
+        cfg = combo.currentData()
+        return self._run_func_dict(cfg)
+  
+    @AppLogger.get_instance(
+        name='ToolbarComboMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    def _set_combo_key_by_index(self,actions_dict:dict, index):
+        # Получить ключ по внутренему индексу
+        key = None
+        for k, v in actions_dict.items:
+            index_actions_dict = v.get("index", None)   
+            if index_actions_dict == index:
+                key = k  
+                break
+        return key
+    
+    @AppLogger.get_instance(
+        name='ToolbarComboMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    def _set_combo_config_by_key(self,actions_dict:dict, key):
+        # Получить данные функции по ключу и выполнить функцию
+        if not key:
+            return False , None 
+        cfg = actions_dict[key]
+        return self._run_func_dict(cfg)
+
+    @AppLogger.get_instance(
+        name='ToolbarComboMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
+    def _run_func_dict(self,cfg_func:dict):
+        # выполнить функцию по данным
+        func = cfg_func.get("func", None)
+        if func is not None:
+            return True, func(
+                *cfg_func.get("args", ()), 
+                **cfg_func.get("kwargs", {})
+            )
+        return False, None
+    
+class UIMixin(ToolbarComboMixin):
     """
     Миксин для построения пользовательского интерфейса страницы списка.
 
@@ -311,125 +433,6 @@ class UIMixin:
             top_layout.addWidget(self.search_edit)
 
         self.main_layout.addLayout(top_layout)
-
-    @AppLogger.get_instance(
-        name='UIMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
-    def _rebuild_combo(self, combo, actions_dict:dict):
-        """
-        Заполняет combo  на основе словаря действий.
-        Порядок пунктов определяется порядком ключей в словаре (Python 3.7+ сохраняет порядок вставки).
-        """
-
-        combo.blockSignals(True)
-        combo.clear()
-
-        any_enabled= False
-        index = -1
-        for k, v in actions_dict.items():
-            index +=1
-
-            actions_dict[k]["index"] = index
-            
-            text = v.get("text", None)
-            separator = v.get("separator", False) # Разделитель
-
-            func = v.get("func", None)
-            args = v.get("args", None)
-            kwargs = v.get("kwargs", None)
-
-            visible = v.get("visible", True)
-            enabled = v.get("enabled", True) and (func is not None)
-
-            userData = {
-                "name_sysem": k,
-                "func": func,
-                "args": args,
-                "kwargs": kwargs
-            }
-
-            # Пропускаем, если явно указано visible=False
-            if visible is False:
-                continue
-
-                  
-            # Разделитель
-            if separator:
-                combo.insertSeparator(combo.count())
-                continue  
-            
-            if text is None:
-                continue
-
-            combo.addItem(text , userData)
-
-            combo.model().item(index).setEnabled(enabled)
-
-            any_enabled = any_enabled or enabled
-
-        combo.setCurrentIndex(0)
-        combo.blockSignals(False)
-
-        combo.setVisible(any_enabled)  # если ни один пункт не активен, скрываем комбобокс
-
-    @AppLogger.get_instance(
-        name='UIMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
-    def _run_selected_combo_action(self,combo):
-        # Получить данные функции из текущего выбранного пункта и выполнить функцию
-        cfg = combo.currentData()
-        return self._run_func_dict(cfg)
-  
-    @AppLogger.get_instance(
-        name='UIMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
-    def _set_combo_key_by_index(self,actions_dict:dict, index):
-        # Получить ключ по внутренему индексу
-        key = None
-        for k, v in actions_dict.items:
-            index_actions_dict = v.get("index", None)   
-            if index_actions_dict == index:
-                key = k  
-                break
-        return key
-    
-    @AppLogger.get_instance(
-        name='UIMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
-    def _set_combo_config_by_key(self,actions_dict:dict, key):
-        # Получить данные функции по ключу и выполнить функцию
-        if not key:
-            return False , None 
-        cfg = actions_dict[key]
-        return self._run_func_dict(cfg)
-
-    @AppLogger.get_instance(
-        name='UIMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time( level=AppLogger._parse_log_level('DEBUG') )
-    def _run_func_dict(self,cfg_func:dict):
-        # выполнить функцию по данным
-        func = cfg_func.get("func", None)
-        if func is not None:
-            return True, func(
-                *cfg_func.get("args", ()), 
-                **cfg_func.get("kwargs", {})
-            )
-        return False, None
 
     @AppLogger.get_instance(
         name='UIMixin',

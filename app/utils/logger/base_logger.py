@@ -3937,58 +3937,97 @@ class BaseAppLogger:
                 # Создаём синхронную обёртку
                 @wraps(func)
                 def sync_wrapper(*args, **kwargs):
-
-                    if (
-                        (not logger_instance.logger.isEnabledFor(level))
-                        or (not logger_instance._enabled)
+                    thec = (
+                        (
+                            not logger_instance.logger.isEnabledFor(level)
+                         ) or (
+                            not logger_instance._enabled
+                        )
                     ) or (
                         type(logger_instance).is_disabled(logger_instance.name)
-                    ):
-                        # return func(*args, **kwargs)
-                        # Вызываем функцию
+                    )
+
+                    if not thec: 
+                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                            logger_instance._increase_depth()
+                    try:
+                        
+                        result = None
+                        err = None
+                        
+                        if not thec: 
+                            log_start(args, kwargs)
+                            start_time = time.time()
+
                         try:
                             result = func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise err
                             # 0==0
-                        
-                            # func_qualname
-                        return result
-
-
-                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
-                        logger_instance._increase_depth()
-                    try:
-
-                        log_start(args, kwargs)
-                        start_time = time.time()
-                        result = None
-                        error = None
-                        
-                        try:
-                            result = func(*args, **kwargs)
-                        except Exception as e:
-                            error = e
-                            # raise
                         finally:
-                            execution_time = time.time() - start_time
 
-                            log_end(execution_time, error, result)
+                            if not thec: 
+                                execution_time = time.time() - start_time
 
-                        if error:
-                            raise error
+                                log_end(execution_time, err, result)
 
-                        # if execution_time > 17:
-                        # if execution_time > 17.2:
-                        # if execution_time > 15.2:
-                        #     0 == 0
-
+                        if err:
+                            raise err
+                        
                         return result
                     
                     finally:
-                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
-                            logger_instance._decrease_depth()
+                        if not thec: 
+                            if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                                logger_instance._decrease_depth()
+
+
+                    # if thec:
+                    #     # return func(*args, **kwargs)
+                    #     # Вызываем функцию
+                    #     try:
+                    #         result = func(*args, **kwargs)
+                    #     except Exception as e:
+                    #         err = e
+                    #         raise err
+                    #         # 0==0
+                        
+                    #         # func_qualname
+                    #     return result
+
+
+                    # if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                    #     logger_instance._increase_depth()
+                    # try:
+
+                    #     log_start(args, kwargs)
+                    #     start_time = time.time()
+                    #     result = None
+                    #     error = None
+                        
+                    #     try:
+                    #         result = func(*args, **kwargs)
+                    #     except Exception as e:
+                    #         error = e
+                    #         # raise
+                    #     finally:
+                    #         execution_time = time.time() - start_time
+
+                    #         log_end(execution_time, error, result)
+
+                    #     if error:
+                    #         raise error
+
+                    #     # if execution_time > 17:
+                    #     # if execution_time > 17.2:
+                    #     # if execution_time > 15.2:
+                    #     #     0 == 0
+
+                    #     return result
+                    
+                    # finally:
+                    #     if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                    #         logger_instance._decrease_depth()
 
                 # Создаём асинхронную обёртку
                 @wraps(func)

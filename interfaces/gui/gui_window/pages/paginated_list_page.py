@@ -826,7 +826,13 @@ class PaginatedListPage(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _setup_side_toolbar(self):
         """
-        Создаёт боковую панель и перестраивает layout: панель слева, таблица и filter_bar – справа.
+        Создаёт боковую панель (SideToolbar) и перестраивает layout: панель слева, таблица и filter_bar – справа.
+
+        Панель содержит кнопки: редактирование, добавление, удаление, отмена, сохранение, обновление, свёртка.
+        Кнопки привязываются к методам контроллера (self). Видимость панели управляется флагом `self.side_toolbar_visible`.
+
+        Returns:
+            None
         """
         self.side_toolbar = SideToolbar(self, self)
         self.side_toolbar.setVisible(self.side_toolbar_visible)
@@ -918,6 +924,8 @@ class PaginatedListPage(
             real_id: Реальный ID сущности после сохранения в БД.
             temp_id: Временный ID (для новых строк). Если None, используется real_id.
             session: Сессия SQLAlchemy (опционально). Если передана, действия откладываются до коммита.
+        Returns:
+            None
         """
 
         ctx = ActionContext(session, ActionType.COMMIT) if session is not None else None
@@ -965,13 +973,13 @@ class PaginatedListPage(
             через `self._get_parent_id()` до тех пор, пока не достигнет None или ID <= 0.
             - Каждый встреченный ID добавляется в множество.
 
-        **Параметры:**
+        Args:
             entity_id (int): ID сущности, с которой начинается обход.
 
-        **Возвращает:**
+        Returns:
             Set[int]: Множество ID всех предков (включая переданный entity_id).
 
-        **Пример:**
+        Example:
             >>> # Для приёма с ID=100, у которого родитель-пациент ID=10,
             >>> # а у пациента нет родителя, вернёт {100, 10}
             >>> ancestors = self._collect_ancestors(100)
@@ -989,10 +997,19 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _refresh_parent_rows(self, parent_ids: Set[int], session: Optional[Session] = None) -> None:
+    def _refresh_parent_rows(
+        self, 
+        parent_ids: Set[int], 
+        session: Optional[Session] = None
+    ) -> None:
         """
         Загружает свежие DTO для указанных родительских ID и обновляет модель таблицы.
+
+        Args:
+            parent_ids (Set[int]): Множество ID родителей.
+            session (Optional[Session]): Опциональная сессия SQLAlchemy.
         """
+        
         self.logger.debug(f"_refresh_parent_rows: START для {parent_ids}")
         if not parent_ids:
             return
@@ -7175,7 +7192,7 @@ class PaginatedListPage(
         Returns:
             None
         """
-        
+
         temp_id = dto.id
 
         # Сохраняем текущее выделение (если есть) до очистки таблицы

@@ -337,4 +337,3 @@ class PaginatedPhotoListPage(PaginatedListPage):
         else:
             super().reload_data()
 
-    

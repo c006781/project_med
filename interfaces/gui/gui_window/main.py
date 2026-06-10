@@ -135,10 +135,6 @@ def main():
 
     # Создаём главное окно
 
-    from interfaces.gui.gui_window.main_window import MainWindow # тут, так как должно быть после создания QApplication
-    window = MainWindow()
-    window.show()
-
     # Логируем запуск
     logger = AppLogger.get_instance(
         name = 'gui',
@@ -146,6 +142,11 @@ def main():
         enable_file_logging = 'user',
         use_name_in_filename = False, # 'user',
     )
+    
+    from interfaces.gui.gui_window.main_window import MainWindow # тут, так как должно быть после создания QApplication
+    window = MainWindow()
+    window.show()
+
     logger.info("GUI приложение запущено")
 
     sys.exit(app.exec())

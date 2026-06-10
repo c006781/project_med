@@ -395,6 +395,7 @@ class ConnectionsMixin:
             - edit_requested → переход на страницу редактирования
             - delete_requested → вызов обработчика удаления
         """
+
         # Добавление нового приёма (если в extra_data есть patient_id, он будет передан)
         self.appointment_list_page.add_requested.connect(
             lambda: self.page_manager.switch_to(

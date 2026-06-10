@@ -6875,6 +6875,20 @@ class PaginatedListPage(
 
         self.reload_with_filters(self._current_filters)
 
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _load_data(self) -> None:
+        """Перезагружает данные текущей страницы с учётом активных фильтров."""
+
+        self.reload_with_filters(self._current_filters)
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',

@@ -756,7 +756,8 @@ class PaginatedListPage(
 
         # На стройка высоты строк для корректного отображения миниатюр
         # from PySide6.QtWidgets import QHeaderView
-        self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
 
         # 3. Пагинация и фильтрация
         self.setup_pagination(service, page_size=50, extra_rows=5)
@@ -2962,6 +2963,9 @@ class PaginatedListPage(
             self._save_draft_dto(dto.id, dto)
             self.logger.debug(f"Вызов mark_own_change для id={dto.id}")
             self.mark_own_change(dto.id)
+
+            #  Добавляем пересчёт высоты строки
+            self.table_view.refreshRow(row)
         else:
             self.logger.debug(f"dto={dto}, id={dto.id if dto else None} – пропуск")
 
@@ -7163,6 +7167,12 @@ class PaginatedListPage(
 
         # Регистрация в реестре и пометка изменений
         self._finalize_new_row(dto, temp_id, pos)
+
+        #  Пересчитываем высоту строки после вставки 
+        # Определяем актуальный индекс строки после возможной сортировки
+        actual_row = self._find_row_by_id(temp_id)
+        if actual_row >= 0:
+            self.table_view.resizeRowToContents(actual_row)
 
         # Выделение новой строки
         self._select_row_by_id(temp_id)

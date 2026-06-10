@@ -453,6 +453,15 @@ class FilterMixin:
                 if tree:
                     nodes.append(tree)
 
+        # Контекстные фильтры (например, patient_id, appointment_id)
+        context = getattr(self, '_context_params', {})
+        for key, value in context.items():
+            # Игнорируем служебные ключи (начинаются с __)
+            if key.startswith('__'):
+                continue
+            # Добавляем как условие "column = value"
+            nodes.append({'column': key, 'operator': 'eq', 'value': value})
+
         # Глобальный поиск
         if self._global_search_text:
             text_filters = []
@@ -479,6 +488,7 @@ class FilterMixin:
                 if text_filters:
                     nodes.append({'or': text_filters})
 
+        # Формируем дерево
         if not nodes:
             temp = None
 
@@ -489,7 +499,7 @@ class FilterMixin:
             temp = {'and': nodes}
         
         self._current_filters = temp
-        self.reload_with_filters(temp)    
+        self.reload_with_filters(self._current_filters)
 
     @AppLogger.get_instance(
         name='FilterMixin',
@@ -653,6 +663,9 @@ class FilterMixin:
         self._global_search_text = text
         self._apply_filters_and_refresh()
 
+        # if hasattr(self, 'save_btn') and self.save_btn:
+
+
         # if not text:
         #     self._current_filters = None
 
@@ -690,6 +703,27 @@ class FilterMixin:
 
         # # self._update_filter_bar()
         # self._refresh_filter_bar()
+
+    @AppLogger.get_instance(
+        name='FilterMixin',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _get_context_filters(self) -> List[Dict[str, Any]]:
+        """
+        Преобразует _context_params в список SQL-фильтров.
+        Параметры, начинающиеся с '__' (служебные), игнорируются.
+        """
+        filters = []
+        for key, value in self._context_params.items():
+            if key.startswith('__'):
+                continue
+            # Предполагаем, что значение может быть любого типа, и оператор 'eq'
+            filters.append({'column': key, 'operator': 'eq', 'value': value})
+        return filters
 
     @AppLogger.get_instance(
         name='FilterMixin',

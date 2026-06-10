@@ -4,6 +4,7 @@
 Содержит две таблицы: слева – приёмы, справа – фото выбранного приёма.
 Использует общий реестр черновиков для согласованного сохранения.
 """
+from PySide6.QtGui import QPalette
 
 from app.utils.logger.logger import AppLogger
 
@@ -25,7 +26,7 @@ from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
     QMessageBox, QPushButton,
     QVBoxLayout, QSplitter,
-    QWidget, QScrollArea, QFrame,
+    QWidget, QScrollArea, QFrame, QLineEdit,
 )
 from PySide6.QtCore import (
     Qt, 
@@ -109,13 +110,22 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
             show_controls=[],   # кнопки будут на уровне этой страницы
         )
 
-        # Подключаем сигнал обновления родительской сущности
-        self.photo_page.parent_entity_updated.connect(self._on_parent_entity_updated)
+        # Подключаем сигналы страницы приёмов к методам фрейма
+        self.appointment_page.add_requested.connect(self._add_appointment)
+        self.appointment_page.edit_requested.connect(self._edit_appointment)
+        self.appointment_page.delete_requested.connect(self._delete_selected)
+
+        # Подключаем сигналы страницы фото к методам фрейма
+        self.photo_page.add_requested.connect(self._add_photo)
+        self.photo_page.delete_requested.connect(self._delete_selected)
+        # self.photo_page.edit_requested.connect(self._edit_photo)  # опционально, для единообразия
 
         # Подключаем сигналы изменения черновиков для обновления кнопки сохранения
         self.appointment_page.draft_modified_changed.connect(self._update_save_button_state)
         self.photo_page.draft_modified_changed.connect(self._update_save_button_state)
 
+        # Подключаем сигнал обновления родительской сущности
+        self.photo_page.parent_entity_updated.connect(self._on_parent_entity_updated)
 
         # Создаём пустую панель инструментов (будет заполнена в set_main_window)
         self.toolbar_widget = QWidget()
@@ -127,6 +137,8 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
 
         # Размещение: панель сверху, сплиттер под ней
         main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         # main_layout.addWidget(self.toolbar_widget)
 
         # splitter = QSplitter(
@@ -143,11 +155,31 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         splitter.addWidget(self.appointment_page)
         splitter.addWidget(self.photo_page)
         splitter.setSizes([300, 500])
+        # Настройка внешнего вида разделителя (адаптивный к теме)
+        splitter.setHandleWidth(5)  # толщина разделителя
+
+        # Получаем базовый цвет фона окна
+        bg_color = self.palette().color(QPalette.Window)
+
+        # Делаем цвет разделителя на 10% темнее фона, а при наведении – на 15% темнее
+        handle_color = bg_color.darker(110)  # 10% темнее
+        handle_hover_color = bg_color.darker(115)  # 15% темнее
+
+        splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background-color: {handle_color.name()};
+            }}
+            QSplitter::handle:hover {{
+                background-color: {handle_hover_color.name()};
+            }}
+        """)
 
         # Оборачиваем сплиттер в QScrollArea, чтобы страницу можно было сжимать
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QFrame.NoFrame)
+
+        scroll_area.setContentsMargins(0, 0, 0, 0)  # убираем отступы у скролл-области
         scroll_area.setWidget(splitter)
 
         main_layout.addWidget(scroll_area)
@@ -444,6 +476,10 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         self.save_btn.setText("Сохранить все изменения")
         self.save_btn.setEnabled(False)
 
+        # Поле глобального поиска
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск...")
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
 
         # Кнопка информации о пациенте
         self.patient_info_btn = QPushButton()
@@ -468,12 +504,13 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
 
         # Растяжка, чтобы следующие кнопки прижались к правому краю
         self.toolbar_layout.addStretch()
+
+        self.toolbar_layout.addWidget(self.search_edit)
+
         self.toolbar_layout.addWidget(self.patient_info_btn)
 
         # Добавляем в тулбар (например, после кнопки информации о пациенте)
         self.toolbar_layout.insertWidget(self.toolbar_layout.count() - 1, self.edit_appointment_btn)
-
-        self.toolbar_layout.addStretch()
 
         self._update_buttons_state()
 
@@ -810,11 +847,22 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
             # 0==0
             self.appointment_page.refresh_row_by_id(parent_id, parent_entity_type)
             # 0==0
+
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _on_action_combo_selected(self, index):
         """Обработчик выбора действия из action_combo."""
         self._run_selected_combo_action(self.action_combo)
         self.action_combo.setCurrentIndex(0)  # сброс на заглушку
 
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _discard_all_changes(self):
         """Отменяет все несохранённые изменения в обеих таблицах."""
         # Спрашиваем подтверждение
@@ -842,14 +890,32 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
 
         self.logger.info("Все изменения отменены")
 
-    def _update_save_button_state(self):
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_save_button_state(self,has_changes: bool = False):
         """Обновляет активность кнопки сохранения на основе наличия несохранённых изменений."""
         has_changes = False
         if hasattr(self.appointment_page, '_has_unsaved_changes'):
             has_changes = has_changes or self.appointment_page._has_unsaved_changes()
+
         if hasattr(self.photo_page, '_has_unsaved_changes'):
             has_changes = has_changes or self.photo_page._has_unsaved_changes()
         
         if hasattr(self, 'save_btn') and self.save_btn:
             self.save_btn.setEnabled(has_changes)
-        
+
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _on_search_text_changed(self, text: str) -> None:
+        """Обработчик изменения текста глобального поиска."""
+
+        # Сбрасываем выделение в таблице приёмов – это автоматически очистит правую панель (фото)
+        self.appointment_page.table_view.clearSelection()
+
+        self.appointment_page.set_global_search(text)

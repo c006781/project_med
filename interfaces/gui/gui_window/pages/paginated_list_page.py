@@ -748,6 +748,12 @@ class PaginatedListPage(
         # 2. Теперь вызываем setup_ui, который создаст таблицу и настроит её
         self.setup_ui()
 
+        # Включаем отображение вертикального заголовка с номерами строк
+        vheader = self.table_view.verticalHeader()
+        vheader.setVisible(True)
+        vheader.setMinimumWidth(30)          # чтобы номера строк помещались
+        # vheader.setDefaultSectionSize(20)    # начальная высота
+
         self._setup_side_toolbar()
 
         # Подключаем сохранение ширины столбцов при изменении пользователем

@@ -2419,34 +2419,32 @@ class PaginatedTableModel(BaseTableModel):
             Заголовок столбца или None.
         """
 
-        # self.logger.debug(
-        #     f"orientation != Qt.Horizontal = {orientation != Qt.Horizontal} "
-        # )
-        if orientation != Qt.Horizontal:
+        # if orientation != Qt.Horizontal:
+        #     return None
+
+
+        # if role != Qt.DisplayRole:
+        #     return None
+
+        # Горизонтальные заголовки (как было)
+        if orientation == Qt.Horizontal:
+            if role == Qt.DisplayRole:
+                target_col = self._column_appears_for_index(section)
+                return None if target_col is None else target_col.title
             return None
-
-        # self.logger.debug(
-        #     f"role != Qt.DisplayRole = {role != Qt.DisplayRole} "
-        # )
-        if role != Qt.DisplayRole:
-            return None
-
-        # visible_idx = 0
-        # for col in self._columns:
-        #     if col.visible:
-        #         if visible_idx == section:
-        #             return col.title
-                
-        #         visible_idx += 1
-
-        # return None    
+        
+        # Вертикальные заголовки – номера строк
+        if orientation == Qt.Vertical:
+            if role == Qt.DisplayRole:
+                # section – индекс строки в модели (0-based)
+                return section + 1          # 1, 2, 3, ...
+            if role == Qt.TextAlignmentRole:
+                return Qt.AlignRight | Qt.AlignVCenter   # выравнивание номера
+        return None
 
         # Находим столбец по видимому индексу
         target_col = self._column_appears_for_index(section)
 
-        # self.logger.debug(
-        #     f"target_col is None = {target_col is None} "
-        # )
         return None if target_col is None else target_col.title
 
     @AppLogger.get_instance(

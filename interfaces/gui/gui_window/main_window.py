@@ -16,10 +16,13 @@ import tempfile
 from typing import List
 # import sys
 
-from app.config import APP_VERSION, GITHUB_REPO_SLUG
-
+from app.config import (
+    APP_VERSION, 
+    # GITHUB_REPO_SLUG
+)
 
 from app.utils.logger.logger import AppLogger
+
 from app.updater import AppUpdater
 
 from app.config.config_manager.manager import AppConfigManager
@@ -39,14 +42,20 @@ from app.dto.field_configs import (
     APPOINTMENT_CONFIG, NOTE_CONFIG, 
     PATIENT_CONFIG, PHOTO_CONFIG
 )
+from interfaces.gui.gui_window.controllers.action_manager import ActionManager
 
 from interfaces.gui.gui_window.dialogs.instructions_dialog import InstructionsDialog
 
 from interfaces.gui.gui_window.controllers.page_manager import PageManager
+
+from interfaces.gui.gui_window.frames.appointment_photo_frame import AppointmentPhotoFrame
+
 from interfaces.gui.gui_window.pages.appointment_list_page import AppointmentListPage
 from interfaces.gui.gui_window.pages.dynamic_edit_page import DynamicEditPage
 from interfaces.gui.gui_window.pages.dynamic_list_page import DynamicListPage
+from interfaces.gui.gui_window.pages.patient_list_page import PatientListPage
 from interfaces.gui.gui_window.pages.settings_page import SettingsPage
+
 from interfaces.gui.gui_window.widgets.log_viewer import LogViewer, LogViewerHandler
 from interfaces.gui.gui_window.widgets.photo_uploader_widget import PhotoUploaderWidget
 
@@ -88,15 +97,20 @@ class PagesCreationMixin:
             - self.patient_edit_page (DynamicEditPage)
         """
         # Страница со списком пациентов
-        self.patient_list_page = DynamicListPage(
-            service=get_patient_service(),
-            loader_func=self.load_patients,          # функция загрузки данных
-            dto_class=PatientDTO,
-            field_configs=PATIENT_CONFIG,
-            page_title="Пациенты",
-            add_action_text="Добавить пациента",
-            action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
-            # save_directly=True,   
+        # self.patient_list_page = DynamicListPage(
+        #     service=get_patient_service(),
+        #     loader_func=self.load_patients,          # функция загрузки данных
+        #     dto_class=PatientDTO,
+        #     field_configs=PATIENT_CONFIG,
+        #     page_title="Пациенты",
+        #     add_action_text="Добавить пациента",
+        #     action_button_text="Приёмы",              # дополнительная кнопка для просмотра приёмов пациента
+        #     # save_directly=True,   
+        # )
+
+        self.patient_list_page = PatientListPage(
+            parent=self,
+            shared_registry=None   # можно оставить None, будет создан локальный реестр
         )
 
         # Страница редактирования пациента
@@ -247,6 +261,12 @@ class PagesCreationMixin:
         # Страница настроек (создаётся отдельно, так как она не использует динамические шаблоны)
         self.settings_page = SettingsPage(page_title="Настройки")
 
+        # Создаём новую страницу "Приёмы и фото"
+        self.appointment_photo_page = AppointmentPhotoFrame(
+            parent=self,
+            shared_registry=None   # или self._shared_draft_registry, если используется глобальный
+        )
+
         # Словарь всех страниц с их идентификаторами
         pages = {
             'patient_list': self.patient_list_page,
@@ -258,6 +278,8 @@ class PagesCreationMixin:
             'photo_list': self.photo_list_page,
             'photo_edit': self.photo_edit_page,
             'settings': self.settings_page,
+
+            'appointment_photo': self.appointment_photo_page,  
         }
 
         # Добавляем каждую страницу в стековый виджет
@@ -373,6 +395,7 @@ class ConnectionsMixin:
             - edit_requested → переход на страницу редактирования
             - delete_requested → вызов обработчика удаления
         """
+
         # Добавление нового приёма (если в extra_data есть patient_id, он будет передан)
         self.appointment_list_page.add_requested.connect(
             lambda: self.page_manager.switch_to(
@@ -679,7 +702,8 @@ class NavigationMixin:
         Передаётся patient_id в extra_data для фильтрации списка.
         """
         self.page_manager.switch_to(
-            'appointment_list',
+            # 'appointment_list',
+            'appointment_photo',
             extra_data={'patient_id': patient_dto.id}
         )
 
@@ -1325,6 +1349,7 @@ class ParsingProgressDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Импорт данных из Word")
         self.setMinimumWidth(600)
+
         self.setModal(True)
         layout = QVBoxLayout(self)
 
@@ -1492,7 +1517,11 @@ class MainWindow(
 
         # Настройки окна
         self.setWindowTitle("Медицинское приложение")
-        self.resize(1200, 800)
+        self.setMinimumSize(400, 300)
+        self.resize(800, 600)  # желаемый начальный размер
+        # Опционально: можно сбросить минимальный размер, чтобы окно можно было сжимать ещё сильнее,
+        # но лучше оставить как есть, чтобы не ломать интерфейс
+        # self.setMinimumSize(400, 300)  # уже установлен
 
         # Логгер для данного класса (используется во всех миксинах через self.logger)
         self.logger = AppLogger.get_instance(
@@ -1508,6 +1537,9 @@ class MainWindow(
 
         # Построение интерфейса
         self._setup_ui()
+
+        # Создаём менеджер действий
+        self.action_manager = ActionManager(self)  
 
         # Подключение обработчика логов к виджету LogViewer
         self._setup_log_viewer()
@@ -1888,6 +1920,16 @@ class MainWindow(
         self.show_log_btn.toggled.connect(self.log_viewer.setVisible)
         self.header_layout.addWidget(self.show_log_btn)
 
+        # # ДЕБАГ КНОПКА. ВЫВОД РАЗМЕРОВ ОБЬЕКТОВ В КОНСОЛЬ!
+        # self.dump_sizes_btn = QPushButton("Dump sizes")
+        # self.dump_sizes_btn.clicked.connect(self._dump_layout_sizes)
+        # self.header_layout.addWidget(self.dump_sizes_btn)
+
+        # #  кнопка для дампа ячеек таблицы фото
+        # self.dump_photo_cells_btn = QPushButton("Dump photo cells")
+        # self.dump_photo_cells_btn.clicked.connect(self._dump_photo_cell_sizes)
+        # self.header_layout.addWidget(self.dump_photo_cells_btn)
+
     @AppLogger.get_instance(
         name='MainWindow',
         # share_file_with = 'system',
@@ -1992,3 +2034,105 @@ class MainWindow(
         for child in self.findChildren(PhotoUploaderWidget):
             result.append(child)
         return result
+
+
+# ----------- методы для отладки расположения виджетов
+    def _dump_layout_sizes(self):
+        """Выводит в консоль дерево размеров всех виджетов окна."""
+        print("\n=== DUMP LAYOUT SIZES ===")
+        self._dump_widget_info(self, indent=0)
+        print("=== END DUMP ===\n")
+
+    def _dump_widget_info(self, widget, indent=0):
+        """Рекурсивно выводит информацию о виджете и его дочерних элементах."""
+        prefix = "  " * indent
+        try:
+            min_hint = widget.minimumSizeHint()
+            min_size = widget.minimumSize()
+            size = widget.size()
+            print(f"{prefix}{widget.__class__.__name__}: size={size.width()}x{size.height()}, "
+                  f"minSize={min_size.width()}x{min_size.height()}, "
+                  f"minSizeHint={min_hint.width()}x{min_hint.height()}, "
+                  f"visible={widget.isVisible()}")
+        except Exception as e:
+            print(f"{prefix}{widget.__class__.__name__}: error getting size info - {e}")
+
+        for child in widget.findChildren(QWidget):
+            # Проверяем, что родитель именно этот виджет, а не вложенный глубже
+            if child.parent() == widget:
+                self._dump_widget_info(child, indent + 1)
+
+    def _dump_photo_cell_sizes(self):
+        """Выводит в консоль размеры ячеек таблицы фото (для отладки)."""
+        current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
+        if not current_page:
+            print("Текущая страница не найдена")
+            return
+
+        # Проверяем, является ли текущая страница AppointmentPhotoFrame
+        if hasattr(current_page, 'photo_page') and hasattr(current_page.photo_page, 'table_view'):
+            table = current_page.photo_page.table_view
+            model = table.model()
+            if not model:
+                print("Нет модели у таблицы фото")
+                return
+
+            # Находим индекс столбца с фото (первый DATA-столбец с ImageThumbnailDelegate)
+            photo_col = -1
+            for col in range(model.columnCount()):
+                delegate = table.itemDelegateForColumn(col)
+                if delegate and delegate.__class__.__name__ == 'ImageThumbnailDelegate':
+                    photo_col = col
+                    break
+
+            if photo_col == -1:
+                print("Столбец с фото не найден")
+                return
+
+            source_model = current_page.photo_page.source_model
+            if source_model is None:
+                print("Нет source_model")
+                return
+
+            # Импортируем ImageThumbnailDelegate для доступа к кэшу (локальный импорт)
+            from interfaces.gui.gui_window.widgets.delegate.image_delegate import ImageThumbnailDelegate
+
+            print("\n=== DUMP PHOTO CELL SIZES ===")
+            for row in range(source_model.rowCount()):
+                # Получаем DTO и ID сущности
+                dto = source_model.get_item_at_row(row)
+                entity_id = getattr(dto, 'id', None) if dto else None
+
+                # Получаем индекс в таблице (через прокси-модель, если есть)
+                proxy_model = table.model()
+                if proxy_model and hasattr(proxy_model, 'mapFromSource'):
+                    source_idx = source_model.index(row, photo_col)
+                    proxy_idx = proxy_model.mapFromSource(source_idx)
+                else:
+                    proxy_idx = source_model.index(row, photo_col)
+
+                if not proxy_idx.isValid():
+                    continue
+
+                rect = table.visualRect(proxy_idx)
+                row_height = table.rowHeight(proxy_idx.row())  # используем индекс после прокси
+
+                # Путь к файлу (из source_model через UserRole)
+                file_path = source_model.data(source_model.index(row, photo_col), Qt.UserRole)
+                full_path = file_path
+                if file_path and not os.path.isabs(file_path):
+                    storage_path = current_page.photo_page._get_photo_storage_path()
+                    full_path = os.path.join(storage_path, file_path)
+
+                # Размер миниатюры из кэша (глобальный кэш делегата)
+                cache_info = ""
+                if full_path in ImageThumbnailDelegate._cache:
+                    pixmap = ImageThumbnailDelegate._cache[full_path]
+                    cache_info = f", cached_size={pixmap.width()}x{pixmap.height()}"
+
+                print(f"Row {row} (id={entity_id}): rect={rect.width()}x{rect.height()} at ({rect.x()},{rect.y()}), "
+                    f"rowHeight={row_height}{cache_info}, path={file_path}")
+
+            print("=== END DUMP ===\n")
+        else:
+            print("Текущая страница не содержит таблицу фото или не является AppointmentPhotoFrame")

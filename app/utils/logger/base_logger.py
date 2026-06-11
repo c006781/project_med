@@ -58,8 +58,22 @@ class RobustRotatingFileHandler(RotatingFileHandler):
     Обработчик файла с поддержкой восстановления при удалении файла.
     Потокобезопасен, проверяет существование файла не чаще 1 раза в секунду
     """
-    def __init__(self, filename, mode='a', maxBytes=0, backupCount=0, encoding=None, delay=False):
-        super().__init__(filename, mode, maxBytes, backupCount, encoding, delay)
+    def __init__(
+        self,
+        filename,
+        mode='a',
+        maxBytes=0, backupCount=0,
+        encoding=None,
+        delay=False
+    ):
+        super().__init__(
+            filename,
+            mode,
+            maxBytes,
+            backupCount,
+            encoding,
+            delay
+        )
 
         self._lock = threading.RLock()
         self._last_check = 0
@@ -70,7 +84,8 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         Переопределённый метод emit: перед записью проверяет существование файла.
         Если файл удалён, переоткрывает его.
         """
-        max_retries = 3
+        max_retries = 5
+        retry_delay = 0.2        # добавить задержку между попытками
         for attempt in range(max_retries):
             with self._lock:
                 try:
@@ -99,8 +114,10 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     if attempt == max_retries - 1:
                         self.handleError(record)
                         return
-                    
+                    print(f"подход {attempt} провал")
+                    time.sleep(retry_delay)
                     with self._lock:
+
                         self._reopen()
 
                 except Exception:
@@ -198,6 +215,58 @@ class BaseAppLogger:
 
     _watchdog_started = False
     _watchdog_started_lock = threading.Lock()
+    #
+    # @property
+    # def list_stop_loger(self) -> List[str]:
+    #     if not hasattr(BaseAppLogger, '_list_stop_loger'):
+    #         BaseAppLogger._list_stop_loger:List[str] = []
+    #     return BaseAppLogger._list_stop_loger
+    #
+    # @list_stop_loger.setter
+    # def list_stop_loger(self, value: List[str]):
+    #     BaseAppLogger._list_stop_loger = value
+
+
+    _show_call_depth_global = False
+
+    # Вместо свойства list_stop_loger используем обычный классовый атрибут
+    _disabled_loggers: List[str] = []
+
+    @classmethod
+    def on_show_call_depth_global(cls):
+        cls._show_call_depth_global = True
+
+    @classmethod
+    def off_show_call_depth_global(cls):
+        cls._show_call_depth_global = False
+
+
+    @classmethod
+    def status_show_call_depth_global(cls):
+        return cls._show_call_depth_global
+
+
+    @classmethod
+    def add_disabled_logger(cls, name: str):
+        """Добавляет имя логгера в список отключённых."""
+        if name not in cls._disabled_loggers:
+            cls._disabled_loggers.append(name)
+
+    @classmethod
+    def remove_disabled_logger(cls, name: str):
+        """Удаляет имя из списка отключённых."""
+        if name in cls._disabled_loggers:
+            cls._disabled_loggers.remove(name)
+
+    @classmethod
+    def clear_disabled_loggers(cls):
+        """Очищает список отключённых логгеров."""
+        cls._disabled_loggers.clear()
+
+    @classmethod
+    def is_disabled(cls, name: str) -> bool:
+        """Проверяет, отключён ли логгер с указанным именем."""
+        return name in cls._disabled_loggers
 
     @classmethod
     def disable_exact(cls, name: str):
@@ -435,8 +504,9 @@ class BaseAppLogger:
         config: Optional[Union[str,Dict[str, Any]]] = None,
         enable_file_logging: Union[str,bool] = False,
         use_name_in_filename: Union[str,bool] = False, # 
-        show_call_depth: bool = False,
-        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения 
+        # show_call_depth: bool = False,
+        show_call_depth: bool = True,
+        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения
     ): 
         """
         Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
@@ -838,11 +908,14 @@ class BaseAppLogger:
         if _visited is None:
             _visited = set()
 
+        obj_id = id(self)
+
         if self.name in _visited:
             self.logger.error(f"Циклическая ссылка в effective_enable_file_logging для {self.name}")
             return self._enable_file_logging
         
-        _visited.add(self.name)
+        # _visited.add(self.name)
+        _visited.add(obj_id)
         
         if self._enable_file_logging_ref:
             # parent = self._instances.get(self._enable_file_logging_ref)
@@ -896,13 +969,14 @@ class BaseAppLogger:
     def effective_use_name_in_filename(self, _visited=None) -> bool:
         if _visited is None:
             _visited = set()
-
+        obj_id = id(self)
         if self.name in _visited:
             self.logger.error(f"Циклическая ссылка в effective_use_name_in_filename для {self.name}")
             # return self._enable_file_logging
             return self._use_name_in_filename
         
-        _visited.add(self.name)
+        _visited.add(obj_id)
+        # _visited.add(self.name)
 
         if self._use_name_in_filename_ref:
             # parent = self._instances.get(self._use_name_in_filename_ref)
@@ -1519,61 +1593,69 @@ class BaseAppLogger:
     def _update_file_handler_if_on (
         self,
     ):
-        with BaseAppLogger._share_lock:
-            master = self._master_logger
+        if getattr(self, '_updating_file_handler', False):
+            return
+        self._updating_file_handler = True
 
-            if not master or master.file_handler is None:
-                return
-            
-            # Если обработчик мастера существует, используем его
-            # Захватываем блокировку мастера и копируем его состояние
-            master_handler = None
-            with master._handler_lock:
-                master_handler = master.file_handler
+        try:
+            with BaseAppLogger._share_lock:
+                master = self._master_logger
 
-                if master_handler is None:
+                if not master or master.file_handler is None:
                     return
-                
-                # Теперь захватываем блокировку мастера, чтобы скопировать остальные параметры, не меняющиеся редко
-                # master_ = self._copy_master(master)  # состояние мастера копируем
-                
-                visited = set()
-                # Копируем все настройки мастера, которые могут измениться
-                # master_ =  {
-                #     'master_log_LEVEL': master.log_level,
-                #     'master_formatter': master.formatter,
-                #     'master_base_log_FILE': master.base_log_file,
-                #     'master_MAX_BYTES': master.log_max_bytes,
-                #     'master_BACKUP_COUNT': master.log_backup_count,
-                #     'master_timestamp': master.use_timestamp,
-                #     # 'master_file_enabled': master.effective_enable_file_logging(),
-                #     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                #     # 'master_use_name': master.effective_use_name_in_filename(),
-                #     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
-                #     'master_sync_full': master._sync_full_state,
-                #     'master_ARGS': master.log_args,
-                #     'master_show_depth': master._show_call_depth,
-                # }
-                master_ =  {
-                    'master_log_level': master.log_level,
-                    'master_formatter': master.formatter,
-                    'master_base_log_file': master.base_log_file,
-                    'master_max_bytes': master.log_max_bytes,
-                    'master_backup_count': master.log_backup_count,
-                    'master_timestamp': master.use_timestamp,
-                    'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                    'master_use_name': master.effective_use_name_in_filename(_visited=visited),
-                    'master_sync_full': master._sync_full_state,
-                    'master_args': master.log_args,
-                    'master_show_depth': master._show_call_depth,
-                }
 
-            # Захватываем свой лок перед изменением состояния
-            with self._handler_lock:
-                self._update_file_handler_if_on_and_not_shared_with_master_handler(
-                    master_handler,
-                    **master_,
-                )
+                # Если обработчик мастера существует, используем его
+                # Захватываем блокировку мастера и копируем его состояние
+                master_handler = None
+                with master._handler_lock:
+                    master_handler = master.file_handler
+
+                    if master_handler is None:
+                        return
+
+                    # Теперь захватываем блокировку мастера, чтобы скопировать остальные параметры, не меняющиеся редко
+                    # master_ = self._copy_master(master)  # состояние мастера копируем
+
+                    visited = set()
+                    # Копируем все настройки мастера, которые могут измениться
+                    # master_ =  {
+                    #     'master_log_LEVEL': master.log_level,
+                    #     'master_formatter': master.formatter,
+                    #     'master_base_log_FILE': master.base_log_file,
+                    #     'master_MAX_BYTES': master.log_max_bytes,
+                    #     'master_BACKUP_COUNT': master.log_backup_count,
+                    #     'master_timestamp': master.use_timestamp,
+                    #     # 'master_file_enabled': master.effective_enable_file_logging(),
+                    #     'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                    #     # 'master_use_name': master.effective_use_name_in_filename(),
+                    #     'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                    #     'master_sync_full': master._sync_full_state,
+                    #     'master_ARGS': master.log_args,
+                    #     'master_show_depth': master._show_call_depth,
+                    # }
+                    master_ =  {
+                        'master_log_level': master.log_level,
+                        'master_formatter': master.formatter,
+                        'master_base_log_file': master.base_log_file,
+                        'master_max_bytes': master.log_max_bytes,
+                        'master_backup_count': master.log_backup_count,
+                        'master_timestamp': master.use_timestamp,
+                        'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                        'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                        'master_sync_full': master._sync_full_state,
+                        'master_args': master.log_args,
+                        'master_show_depth': master._show_call_depth,
+                    }
+
+                # Захватываем свой лок перед изменением состояния
+                with self._handler_lock:
+                    self._update_file_handler_if_on_and_not_shared_with_master_handler(
+                        master_handler,
+                        **master_,
+                    )
+
+        finally:
+            self._updating_file_handler = False
 
     def _update_file_handler (
         self,
@@ -1893,6 +1975,10 @@ class BaseAppLogger:
         """
 
         if self is other:
+            return
+
+        # Если уже расшарены друг с другом – выходим
+        if self._master_logger is other or other._master_logger is self:
             return
 
         with BaseAppLogger._share_lock:
@@ -3578,7 +3664,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.debug(
@@ -3599,7 +3685,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.info(
@@ -3662,7 +3748,7 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.critical(
@@ -3685,7 +3771,7 @@ class BaseAppLogger:
         exc_info - флаг, указывающий, нужно ли добавлять информацию об ошибке
         """
 
-        if not self._enabled:
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return message
     
         self.logger.error(
@@ -3705,8 +3791,10 @@ class BaseAppLogger:
         description: str = "", 
         level: int = logging.DEBUG,
         log_args: Optional[bool] = None,
+        # log_args: Optional[bool] = True,
         log_return: bool = False,
-        show_depth: bool = False, 
+        show_depth: bool = False,
+        # show_depth: bool = True,
     ) -> Callable:
         """
         Декоратор для логирования времени выполнения функции или метода.
@@ -3777,7 +3865,7 @@ class BaseAppLogger:
                 desc_part = f"{description} " if description else ""
 
                 # Определяем, нужно ли показывать глубину
-                _show_depth = show_depth
+                _show_depth = show_depth#  or type(logger_instance).status_show_call_depth_global()
 
                 # Определяем, нужно ли логировать аргументы
                 effective_log_args = log_args
@@ -3805,7 +3893,8 @@ class BaseAppLogger:
                     args_part = format_args(args, kwargs)
                     start_msg = f"{desc_part}[Начало]{args_part}"
 
-                    if _show_depth:
+                    # Определяем, нужно ли показывать глубину
+                    if _show_depth:# or type(logger_instance).status_show_call_depth_global():
                         depth = logger_instance._get_current_depth()
                         formatted = logger_instance._format_message(caller_info, start_msg, depth)
                     else:
@@ -3833,7 +3922,7 @@ class BaseAppLogger:
                         #     ret_str = ret_str[:197] + "..."
                         end_msg += f" -> {ret_str}"
 
-                    if _show_depth:
+                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                         depth = logger_instance._get_current_depth()
                         formatted = logger_instance._format_message(caller_info, end_msg, depth)
                     else:
@@ -3848,56 +3937,97 @@ class BaseAppLogger:
                 # Создаём синхронную обёртку
                 @wraps(func)
                 def sync_wrapper(*args, **kwargs):
-                    
-                    if (
-                        (not logger_instance.logger.isEnabledFor(level))
-                        or (not logger_instance._enabled)
-                    ):
-                        # return func(*args, **kwargs)
-                        # Вызываем функцию
+                    thec = (
+                        (
+                            not logger_instance.logger.isEnabledFor(level)
+                         ) or (
+                            not logger_instance._enabled
+                        )
+                    ) or (
+                        type(logger_instance).is_disabled(logger_instance.name)
+                    )
+
+                    if not thec: 
+                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                            logger_instance._increase_depth()
+                    try:
+                        
+                        result = None
+                        err = None
+                        
+                        if not thec: 
+                            log_start(args, kwargs)
+                            start_time = time.time()
+
                         try:
                             result = func(*args, **kwargs)
                         except Exception as e:
                             err = e
-                            raise err
                             # 0==0
-                        
-                            # func_qualname
-                        return result
-
-
-                    if _show_depth:
-                        logger_instance._increase_depth()
-                    try:
-
-                        log_start(args, kwargs)
-                        start_time = time.time()
-                        result = None
-                        error = None
-                        
-                        try:
-                            result = func(*args, **kwargs)
-                        except Exception as e:
-                            error = e
-                            # raise
                         finally:
-                            execution_time = time.time() - start_time
 
-                            log_end(execution_time, error, result)
+                            if not thec: 
+                                execution_time = time.time() - start_time
 
-                        if error:
-                            raise error
+                                log_end(execution_time, err, result)
 
-                        # if execution_time > 17:
-                        # if execution_time > 17.2:
-                        # if execution_time > 15.2:
-                        #     0 == 0
-
+                        if err:
+                            raise err
+                        
                         return result
                     
                     finally:
-                        if _show_depth:
-                            logger_instance._decrease_depth()
+                        if not thec: 
+                            if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                                logger_instance._decrease_depth()
+
+
+                    # if thec:
+                    #     # return func(*args, **kwargs)
+                    #     # Вызываем функцию
+                    #     try:
+                    #         result = func(*args, **kwargs)
+                    #     except Exception as e:
+                    #         err = e
+                    #         raise err
+                    #         # 0==0
+                        
+                    #         # func_qualname
+                    #     return result
+
+
+                    # if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                    #     logger_instance._increase_depth()
+                    # try:
+
+                    #     log_start(args, kwargs)
+                    #     start_time = time.time()
+                    #     result = None
+                    #     error = None
+                        
+                    #     try:
+                    #         result = func(*args, **kwargs)
+                    #     except Exception as e:
+                    #         error = e
+                    #         # raise
+                    #     finally:
+                    #         execution_time = time.time() - start_time
+
+                    #         log_end(execution_time, error, result)
+
+                    #     if error:
+                    #         raise error
+
+                    #     # if execution_time > 17:
+                    #     # if execution_time > 17.2:
+                    #     # if execution_time > 15.2:
+                    #     #     0 == 0
+
+                    #     return result
+                    
+                    # finally:
+                    #     if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
+                    #         logger_instance._decrease_depth()
 
                 # Создаём асинхронную обёртку
                 @wraps(func)
@@ -3906,6 +4036,8 @@ class BaseAppLogger:
                     if (
                         (not logger_instance.logger.isEnabledFor(level))
                         or (not logger_instance._enabled)
+                    ) or (
+                        type(logger_instance).is_disabled(logger_instance.name)
                     ):
                         # return func(*args, **kwargs)
                         # Вызываем функцию
@@ -3921,7 +4053,7 @@ class BaseAppLogger:
                     # if not logger_instance._enabled:
                     #     return await func(*args, **kwargs)
                     
-                    if _show_depth:
+                    if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                         logger_instance._increase_depth()
 
                     try:
@@ -3946,7 +4078,7 @@ class BaseAppLogger:
                         return result
                     
                     finally:
-                        if _show_depth:
+                        if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
                             logger_instance._decrease_depth()
                 
                 return async_wrapper if is_async else sync_wrapper

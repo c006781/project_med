@@ -26,17 +26,24 @@
     >>> model = DynamicTableModel(patients, columns)
     >>> tableView.setModel(model)
 """
-
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
-from PySide6.QtGui import QColor
+ 
 from typing import List, Dict, Any, Optional, Callable, Union, get_args, get_origin
 # from datetime import date, time
 import datetime
 
 from app.utils.logger.logger import AppLogger
 
+# from interfaces.gui.gui_window.widgets.base_table_model import BaseTableModel
 
-class DynamicTableModel(QAbstractTableModel):
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtGui import QColor
+
+
+
+class DynamicTableModel(
+    QAbstractTableModel
+    # BaseTableModel
+):
     """
     Модель таблицы, работающая со списком DTO-объектов.
 
@@ -129,7 +136,41 @@ class DynamicTableModel(QAbstractTableModel):
 
         self._field_by_column = {}          # номер колонки -> имя поля
         self._update_column_mapping()
-      
+
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )  
+    def can_fetch_more(self) -> bool:
+        return False
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )  
+    def append_page(self, data: List[Any]) -> None:
+        pass
+
+    @AppLogger.get_instance(
+        name = 'DynamicTableModel',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system',
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG')
+    )  
+    def set_total_count(self, total: int) -> None:
+        pass
+
     @AppLogger.get_instance(
         name = 'DynamicTableModel',
         # share_file_with = 'system',

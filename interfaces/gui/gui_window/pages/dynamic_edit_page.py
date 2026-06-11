@@ -25,10 +25,10 @@ from pydantic import BaseModel
 
 from PySide6.QtWidgets import (
     QApplication,
-    QVBoxLayout, 
-    QHBoxLayout, 
-    QPushButton, 
-    QMessageBox,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QMessageBox, QSizePolicy, QFrame, QScrollArea,
     # QMenu, 
     # QLineEdit, 
     # QSpinBox,
@@ -385,7 +385,23 @@ class DynamicEditPage(BasePage):
         Создаёт кнопки "Сохранить", "Отмена" и "Удалить" и добавляет их в нижнюю часть интерфейса.
         """
         main_layout = QVBoxLayout(self)
-        main_layout.addWidget(self.form)   # добавляем существующую форму
+        main_layout.setContentsMargins(0, 0, 0, 0)  # убираем отступы для scroll area
+        
+        # Создаём scroll area для формы
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)  # чтобы не было лишней рамки
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Устанавливаем политику размера, чтобы scroll area не диктовала минимальный размер
+        scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Внутрь scroll area помещаем форму
+        scroll.setWidget(self.form)
+
+        main_layout.addWidget(scroll)
+        # main_layout.addWidget(self.form)   # добавляем существующую форму
 
         # # Создаем форму редактирования
         # self.form = DynamicEditForm(
@@ -398,6 +414,7 @@ class DynamicEditPage(BasePage):
 
         # Создаем кнопки "Сохранить", "Отмена" и "Удалить"
         btn_layout = QHBoxLayout()
+        btn_layout.setContentsMargins(9, 9, 9, 9)  # небольшие отступы
 
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.clicked.connect(self._save)  # при нажатии на кнопку вызывается метод _save

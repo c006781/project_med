@@ -325,6 +325,8 @@ class UIMixin(ToolbarComboMixin):
         """
 
         self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
 
         # self._create_top_panel()  # ← старый метод, создающий все элементы безусловно
         self._setup_top_panel()  # ← условное создание элементов
@@ -378,6 +380,8 @@ class UIMixin(ToolbarComboMixin):
             return
         
         top_layout = QHBoxLayout()
+        top_layout.setContentsMargins(5, 5, 5, 5)  # маленькие отступы
+        top_layout.setSpacing(10)                 # небольшое расстояние между элементами
 
         # ---- Кнопка переключения режима редактирования ----
         if 'edit_mode_btn' in show:

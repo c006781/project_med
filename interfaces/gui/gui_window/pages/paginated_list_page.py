@@ -1068,7 +1068,12 @@ class PaginatedListPage(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _on_page_loaded(self, page: List[Any], total: int, append: bool) -> None:
+    def _on_page_loaded(
+        self,
+        page: List[Any],
+        total: int,
+        append: bool
+    ) -> None:
         """
         Переопределяет метод из PaginationMixin для применения черновиков к загруженной странице.
 
@@ -1132,6 +1137,14 @@ class PaginatedListPage(
 
         # Принудительно обновляем состояние кнопки действия (Приёмы)
         self._update_selection_state()
+
+        # Пересчёт высоты строк после загрузки страницы
+        if not append:
+            # При загрузке первой страницы делаем отложенный вызов, чтобы таблица успела отрисоваться
+            QTimer.singleShot(0, lambda: self._adjust_visible_row_heights())
+        else:
+            # При добавлении следующих страниц пересчитываем высоту немедленно
+            self._adjust_visible_row_heights()
 
     def _update_selection_state(self):
         """Обновляет self.selected_dto на основе текущего выделения и испускает сигнал."""
@@ -1708,6 +1721,9 @@ class PaginatedListPage(
             self._update_row_color(row)
 
         self._update_save_button_state()
+
+        # Пересчёт высоты строк (дополнительная страховка)
+        self._adjust_visible_row_heights()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2474,14 +2490,15 @@ class PaginatedListPage(
         # # и миниатюры должны масштабироваться к новой ширине.
         # self.table_view.resizeRowsToContents()
         
-        # Оптимизированный пересчёт высоты строк (только видимые + запас)
-        first, last = get_visible_row_range(self.table_view)
-        if first >= 0:
-            start = max(0, first - 5)
-            end = min(self.source_model.rowCount() - 1, last + 5)
-            for row in range(start, end + 1):
-                self.table_view.resizeRowToContents(row)
-        
+        # # Оптимизированный пересчёт высоты строк (только видимые + запас)
+        # first, last = get_visible_row_range(self.table_view)
+        # if first >= 0:
+        #     start = max(0, first - 5)
+        #     end = min(self.source_model.rowCount() - 1, last + 5)
+        #     for row in range(start, end + 1):
+        #         self.table_view.resizeRowToContents(row)
+        # Пересчёт высоты видимых строк
+        self._adjust_visible_row_heights(extra_rows=5)
         # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
         # но оставляем для обратной совместимости)
         # --- Обновление read-only для TextPopupDыelegate (если есть) ---
@@ -2561,6 +2578,10 @@ class PaginatedListPage(
         Args:
             text: Строка поиска (подстрока, регистронезависимая).
         """
+        # Сбрасываем выделение в таблице (на случай, если после поиска строка исчезнет)
+        self.table_view.clearSelection()
+
+        # Вызываем родительский метод из FilterMixin (он обновит фильтры и перезагрузит данные)
         super().set_global_search(text)
 
     @AppLogger.get_instance(
@@ -6174,6 +6195,7 @@ class PaginatedListPage(
         # Если передан специальный флаг "reset_state", сбрасываем сохранённое состояние
         reset = extra_data.get('reset_state', False) if extra_data else False
 
+        # Сохраняем контекстные параметры (все, кроме служебных)
         self._context_params = {}
         if extra_data:
             for key, value in extra_data.items():
@@ -6220,6 +6242,10 @@ class PaginatedListPage(
             self._refresh_filter_bar()
             super().on_enter(extra_data)
             self.reload_with_filters(None) # Загружаем первую страницу данных (через пагинацию)
+
+        # Это гарантирует, что контекстные фильтры (например, patient_id, appointment_id)
+        # будут добавлены в дерево фильтров после загрузки данных.
+        self._rebuild_filters_tree()
 
         # Восстановить видимость боковой панели
         side_visible = self._saved_state.get('side_toolbar_visible', True)
@@ -7223,6 +7249,9 @@ class PaginatedListPage(
 
         self._update_save_button_state()
 
+        # Пересчёт высоты строк, чтобы новая строка отобразилась корректно
+        self._adjust_visible_row_heights()
+
     @AppLogger.get_instance(
         name='PaginatedListPage',
         # share_file_with = 'system',
@@ -8207,6 +8236,30 @@ class PaginatedListPage(
                 result.append(dto)
         return result
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _adjust_visible_row_heights(self, extra_rows: int = 5) -> None:
+        """
+        Пересчитывает высоту строк, находящихся в видимой области, плюс указанное количество запасных.
+
+        Args:
+            extra_rows (int): Количество дополнительных строк над и под видимой областью,
+                              которые также будут пересчитаны. По умолчанию 5.
+        """
+        if not self.table_view or not self.source_model:
+            return
+
+        first, last = get_visible_row_range(self.table_view)
+        if first < 0:
+            return
+
+        start = max(0, first - extra_rows)
+        end = min(self.source_model.rowCount() - 1, last + extra_rows)
+        for row in range(start, end + 1):
+            self.table_view.resizeRowToContents(row)
 
     # ------------------------------------------------------------------
 

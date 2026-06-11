@@ -318,7 +318,14 @@ class PaginatedPhotoListPage(PaginatedListPage):
             has_appointment = bool(self._context_params.get('appointment_id'))
             self.side_toolbar.refresh_btn.setEnabled(not edit_mode and has_appointment)
 
-
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
     def reload_data(self) -> None:
         appointment_id = self._context_params.get('appointment_id')
         if appointment_id:
@@ -329,3 +336,4 @@ class PaginatedPhotoListPage(PaginatedListPage):
             })
         else:
             super().reload_data()
+

@@ -623,8 +623,12 @@ class PaginatedTableModel(BaseTableModel):
         width_config = width
         width_config = with_to_dict(width_config)
 
-        if stretch:
-            width_config['stretch'] = True
+        # if stretch:
+        #     width_config['stretch'] = True
+        if width and (
+            width_config.get('stretch', None) is None
+        ):
+            width_config['stretch'] = stretch
         
         # Создаём объект столбца (системный, не DATA)
         col = TableColumn(
@@ -703,10 +707,12 @@ class PaginatedTableModel(BaseTableModel):
 
        
         width_config = width
-        width_config = with_to_dict(width)
+        width_config = with_to_dict(width_config)
 
-        if width:
-            width_config['stretch'] = True 
+        if width and (
+            width_config.get('stretch',None) is None
+        ):
+            width_config['stretch'] = stretch
 
         return self.add_system_column(
             system_name='__checkbox__',
@@ -743,8 +749,10 @@ class PaginatedTableModel(BaseTableModel):
         width_config = width
         width_config = with_to_dict(width_config)
 
-        if stretch:
-            width_config['stretch'] = True
+        if width and (
+            width_config.get('stretch',None) is None
+        ):
+            width_config['stretch'] = stretch
 
         return self.add_system_column(
             system_name=system_name,

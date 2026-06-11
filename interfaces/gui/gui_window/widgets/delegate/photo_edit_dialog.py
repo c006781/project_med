@@ -34,6 +34,8 @@ Args:
 
 import os
 import shutil
+import subprocess
+import platform
 from typing import List, Optional, Tuple
 import uuid
 
@@ -43,15 +45,15 @@ from app.utils.file_deletions import resolve_photo_path, schedule_deletion
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget,
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFileDialog, QMessageBox, QTextEdit,
+    QFileDialog, QMessageBox,
+    # QTextEdit,
     # QScrollArea
 )
 from PySide6.QtCore import (
-    Qt,
+    Qt, QUrl,
     # Signal
 )
-from PySide6.QtGui import QPixmap
-
+from PySide6.QtGui import QPixmap, QDesktopServices
 
 
 class PhotoEditDialog(QDialog):
@@ -643,6 +645,13 @@ class PhotoEditDialog(QDialog):
 
         # Кнопки выбора файла и удаления
         btn_layout = QHBoxLayout()
+
+        # Кнопка открытия папки с текущим фото
+        self.open_folder_btn = QPushButton("Открыть папку")
+        self.open_folder_btn.clicked.connect(self._open_photo_folder)
+        self.open_folder_btn.setEnabled(self._readonly)
+        btn_layout.addWidget(self.open_folder_btn)
+
         self.select_btn = QPushButton("Выбрать файл")
         self.select_btn.clicked.connect(self._select_file)
         self.select_btn.setEnabled(not self._readonly)
@@ -1014,3 +1023,36 @@ class PhotoEditDialog(QDialog):
                 )
 
         super().accept()
+
+    @AppLogger.get_instance(
+        name='PhotoEditDialog',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _open_photo_folder(self):
+        """Открывает в проводнике папку, содержащую текущее фото."""
+        if not self._current_path:
+            QMessageBox.warning(self, "Нет фото", "Нет выбранного фото.")
+            return
+
+        full_path = self._get_full_path(self._current_path)
+        if not full_path or not os.path.exists(full_path):
+            QMessageBox.warning(self, "Файл не найден", f"Файл не найден: {full_path}")
+            return
+
+        # Используем импортированный модуль platform через его полное имя
+        system_name = platform.system()
+
+        if system_name == "Windows":
+            subprocess.Popen(f'explorer /select, "{full_path}"')
+        elif system_name == "Darwin":  # macOS
+            subprocess.Popen(["open", "-R", full_path])
+        else:  # Linux и другие Unix
+            folder = os.path.dirname(full_path)
+            if os.path.exists(folder):
+                from PySide6.QtGui import QDesktopServices
+                from PySide6.QtCore import QUrl
+                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))

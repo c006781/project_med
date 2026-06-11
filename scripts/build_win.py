@@ -50,11 +50,33 @@ def main():
         'dotenv', 'requests',
         'msgpack',
         'click',
-        # Ваши внутренние модули (на всякий случай)
+        
+        # внутренние модули (на всякий случай)
         'app.utils.logger.logger',
         'app.config.config_manager.manager',
         'app.database.database',
         'interfaces.gui.gui_window.main',
+
+        'app.utils.deferred_actions',
+        'app.utils.file_deletions',
+        'app.draft.draft_registry',
+        'app.draft.editable_component',
+        'app.draft.ihierarchical_editable',
+        'app.utils.colors',
+        'app.dependencies',
+        'app.dto.field_configs',
+        'app.dto.compute_fields',
+        'app.utils.virtual_fields',
+        'app.utils.filtering.filtering',
+        'app.repositories.repositories_all',
+        'app.services.services_all',
+        'app.services.sync_service',
+        'app.network.thread_network',
+        'app.network.ya_dop',
+        'parsers.word_importer',
+        'interfaces.gui.gui_window.widgets.delegate.image_delegate',
+        'interfaces.gui.gui_window.widgets.delegate.photo_edit_dialog',
+        'interfaces.gui.gui_window.widgets.photo_uploader_widget',
     ]
     for module in hidden:
         cmd.extend(['--hidden-import', module])

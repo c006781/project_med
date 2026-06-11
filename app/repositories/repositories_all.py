@@ -197,7 +197,9 @@ class BaseRepository(Generic[ModelType], ABC):
         if options:
             query = query.options(*options)
 
-        return query.filter(self.model_class.id == entity_id).first()
+        rezult = query.filter(self.model_class.id == entity_id).first()
+
+        return rezult
     
     @AppLogger.get_instance(
         name = 'BaseRepository',

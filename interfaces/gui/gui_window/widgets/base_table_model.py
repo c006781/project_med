@@ -1,0 +1,276 @@
+# interfaces/gui/gui_window/widgets/base_table_model.py
+"""
+Абстрактный базовый класс для всех табличных моделей приложения.
+
+Определяет единый интерфейс, который должны реализовывать все модели таблиц
+(DynamicTableModel, PaginatedTableModel и т.д.). Это позволяет использовать
+их в DynamicListPage без привязки к конкретной реализации.
+
+Поддерживаемые возможности:
+    - Доступ к данным (get_item_at_row, get_all_data)
+    - Редактирование строк (update_row, add_row, remove_row, clear)
+    - Чекбоксы (set_checkbox_column_visible, set_checkbox_state)
+    - Цвета строк (set_row_color, clear_row_colors)
+    - Пагинация (can_fetch_more, append_page, set_total_count) – для моделей,
+      поддерживающих ленивую загрузку.
+
+Все наследники должны реализовать помеченные @abstractmethod методы.
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any, List, Optional
+
+from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
+from interfaces.gui.gui_window.widgets.table_column import TableColumn
+
+from PySide6.QtCore import QAbstractTableModel, Signal, QModelIndex, Qt
+from PySide6.QtGui import QColor
+
+
+
+class BaseTableModel(QAbstractTableModel, ABC, metaclass=QABCMeta): 
+    """
+    Абстрактный базовый класс для табличных моделей.
+
+    Сигналы:
+        row_modified(int): Испускается при изменении данных в строке.
+            Передаётся индекс строки в модели.
+
+    Атрибуты (должны быть определены в наследниках):
+        _data (List[Any]): Список DTO (загруженные строки).
+        _checkbox_column_enabled (bool): Флаг видимости столбца чекбоксов.
+        _checkbox_states (Dict[int, bool]): Состояния чекбоксов для строк.
+        _row_colors (Dict[int, QColor]): Цвета фона строк.
+
+    Методы для работы с чекбоксами:
+        set_checkbox_state(row, checked) – установить состояние чекбокса.
+        get_checkbox_state(row) – получить состояние чекбокса (базовая реализация – False).
+
+    Методы для работы с динамическими столбцами:
+        get_field_name_at_visible_column(visible_index) – вернуть имя поля DTO
+        для видимого столбца, или None для системного столбца (базовая реализация – None).
+     
+
+    Note:
+        Все методы, работающие с индексами строк, используют "сырые" индексы
+        модели (без учёта прокси). Предполагается, что прокси-модели (если есть)
+        занимаются пересчётом индексов самостоятельно.
+    """
+
+    row_modified = Signal(int)
+
+    @abstractmethod
+    def get_columns(self) -> List['TableColumn']:
+        """
+        Возвращает список всех столбцов модели (включая скрытые).
+
+        Returns:
+            List[TableColumn]: Список объектов TableColumn.
+        """
+        pass
+
+    # ----------------------------------------------------------------------
+    # Пагинация (для моделей, поддерживающих ленивую загрузку)
+    # ----------------------------------------------------------------------
+
+    def can_fetch_more(self) -> bool:
+        """
+        Определяет, может ли модель загрузить ещё данные.
+
+        Базовая реализация возвращает False (непагинированная модель).
+        Наследники, поддерживающие пагинацию, должны переопределить этот метод.
+
+        Returns:
+            True, если есть ещё незагруженные страницы, иначе False.
+        """
+
+        return False
+
+    def append_page(self, data: List[Any]) -> None:
+        """
+        Добавляет очередную страницу данных в конец модели.
+
+        Базовая реализация ничего не делает.
+        Наследники, поддерживающие пагинацию, должны переопределить метод.
+
+        """
+
+        pass
+
+    def set_total_count(self, total: int) -> None:
+        """
+        Устанавливает общее количество записей в БД (с учётом фильтров).
+
+        Базовая реализация ничего не делает.
+        Наследники, поддерживающие пагинацию, должны переопределить метод.
+
+        """
+
+        pass
+
+    # ----------------------------------------------------------------------
+    # Доступ к данным
+    # ----------------------------------------------------------------------
+
+    @abstractmethod
+    def get_item_at_row(self, row: int) -> Optional[Any]:
+        """
+        Возвращает DTO для указанной строки.
+
+        Args:
+            row: Индекс строки в модели (0-based).
+
+        Returns:
+            DTO или None, если строка не существует.
+        """
+        pass
+
+    @abstractmethod
+    def get_all_data(self) -> List[Any]:
+        """
+        Возвращает копию списка всех загруженных DTO.
+
+        Returns:
+            Список DTO (копия, не ссылка на внутренний список).
+        """
+        pass
+
+    @abstractmethod
+    def update_row(self, row: int, new_dto: Any) -> None:
+        """
+        Заменяет DTO в указанной строке на новый.
+
+        После замены должен испускаться сигнал dataChanged для всей строки.
+
+        Args:
+            row: Индекс строки.
+            new_dto: Новый DTO.
+        """
+        pass
+
+    @abstractmethod
+    def add_row(self, dto: Any) -> int:
+        """
+        Добавляет новую строку в конец модели.
+
+        Args:
+            dto: DTO новой записи.
+
+        Returns:
+            Индекс добавленной строки.
+        """
+        pass
+
+    @abstractmethod
+    def remove_row(self, row: int) -> Optional[Any]:
+        """
+        Удаляет строку из модели.
+
+        Args:
+            row: Индекс удаляемой строки.
+
+        Returns:
+            Удалённый DTO или None, если строка не существовала.
+        """
+        pass
+
+    @abstractmethod
+    def clear(self) -> None:
+        """
+        Полностью очищает модель: удаляет все данные, сбрасывает чекбоксы и цвета.
+        """
+        pass
+
+    # # ----------------------------------------------------------------------
+    # # Чекбоксы - убираем, так как у нас вся информация есть в столбце 
+    # # ----------------------------------------------------------------------
+
+    # @abstractmethod
+    # def set_checkbox_column_visible(self, visible: bool) -> None:
+    #     """
+    #     Показывает или скрывает столбец чекбоксов (первый столбец).
+
+    #     Args:
+    #         visible: True – показать, False – скрыть.
+    #     """
+    #     pass
+
+    # @abstractmethod
+    # def set_checkbox_state(self, row: int, checked: bool) -> None:
+    #     """
+    #     Устанавливает состояние чекбокса для строки.
+
+    #     Args:
+    #         row: Индекс строки.
+    #         checked: True – выбран, False – не выбран.
+    #     """
+    #     pass
+
+    # ----------------------------------------------------------------------
+    # Цвета строк
+    # ----------------------------------------------------------------------
+
+    @abstractmethod
+    def set_row_color(self, entity_id: int, color: QColor) -> None:
+        """
+        Устанавливает цвет фона для строки.
+
+        Args:
+            entity_id: ID сущности (из DTO). Может быть отрицательным для новых строк.
+            color: Цвет фона.
+        """
+        pass
+
+    @abstractmethod
+    def clear_row_colors(self) -> None:
+        """
+        Сбрасывает все установленные цвета строк.
+        """
+        pass
+
+    # # ----------------------------------------------------------------------
+    # # Вспомогательные методы (необязательные для переопределения)
+    # # ----------------------------------------------------------------------
+
+    # def has_checkbox_column(self) -> bool:
+    #     """
+    #     Возвращает, виден ли в данный момент столбец чекбоксов.
+
+    #     Returns:
+    #         True, если столбец чекбоксов показан, иначе False.
+    #     """
+    #     col = self.get_column_by_system_name('__checkbox__')
+    #     return col is not None and col.visible
+
+    def get_checkbox_state(self, row: int) -> bool:
+        """
+        Возвращает состояние чекбокса для строки (если модель поддерживает чекбоксы).
+
+        Базовая реализация возвращает False (чекбокс не установлен).
+        Наследники, поддерживающие чекбоксы, должны переопределить этот метод.
+
+        Args:
+            row: Индекс строки.
+
+        Returns:
+            True, если чекбокс установлен, иначе False.
+        """
+
+        return False
+    
+    def get_field_name_at_visible_column(self, visible_index: int) -> Optional[str]:
+        """
+        Возвращает имя поля DTO для видимого столбца по его индексу.
+        Для системных столбцов (например, чекбокс) возвращает None.
+
+        Базовая реализация возвращает None.
+        Наследники, поддерживающие динамические столбцы, должны переопределить этот метод.
+
+        Args:
+            visible_index: Индекс видимого столбца (0-based).
+
+        Returns:
+            Имя поля или None.
+        """
+        
+        return None   

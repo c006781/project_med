@@ -51,12 +51,11 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-
 import shutil
 import uuid
 
 from typing import (
-    Type, TypeVar, Generic, 
+    Callable, Type, TypeVar, Generic, 
     List, Optional, Dict, 
     Any, Tuple, Union
 )
@@ -67,13 +66,12 @@ import time as time_module
 
 from contextlib import contextmanager
 
-from sqlalchemy import func, inspect, or_
-
+from app.utils.logger import AppLogger
 
 # from app.dependencies import get_appointment_service
 # from app.dependencies import clear_services_cache
 # from app.dependencies import _NOTE_USAGE_MODELS
-from app.utils.logger import AppLogger
+
 
 # Импорты модулей
 # def _add_package_name(
@@ -171,8 +169,12 @@ from app.database.database_shema.clinic import (
 
 # try:
 from app.repositories.repositories_all import (
-    BaseRepository, PatientRepository, AppointmentRepository, 
-    PatientRepository, AppointmentNoteRepository, PhotoRepository
+    BaseRepository,
+    # PatientRepository,
+    AppointmentRepository,
+    PatientRepository,
+    AppointmentNoteRepository,
+    PhotoRepository
 )
 # except ImportError as e:
 #     try:
@@ -185,7 +187,8 @@ from app.repositories.repositories_all import (
 
 # try:
 from app.dto import (
-    PatientDTO, AppointmentDTO, AppointmentNoteDTO, PhotoDTO
+    PatientDTO, AppointmentDTO,
+    AppointmentNoteDTO, PhotoDTO
 )
 # except ImportError as e:
 #     try:
@@ -212,8 +215,17 @@ from app.exceptions import (
 #         AppLogger.get_instance(name='system').critical("Ошибка from exceptions import")
 #         pass #  raise # e # pass
 
+
+from app.utils.file_deletions import (
+    schedule_deletion, DeletionContext,
+    DeletionType
+)
+
 # try:
-from app.utils.filtering.filtering import apply_filters, apply_post_filters
+from app.utils.filtering.filtering import (
+    # _build_filter_condition, 
+    apply_filters, apply_post_filters
+)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -229,9 +241,18 @@ from app.utils.virtual_fields import enrich_dto_with_computed_fields
 
 # Сторонние библиотеки
 
-from sqlalchemy.orm import Query, Session
-from sqlalchemy.orm import joinedload
-from sqlalchemy.orm import selectinload
+from sqlalchemy import func as sa_func, select
+from sqlalchemy import (
+    func, or_, #inspect
+)
+
+from sqlalchemy.orm import (
+    Query, Session,
+    joinedload, selectinload
+)
+# from sqlalchemy.orm import Query, Session
+# from sqlalchemy.orm import joinedload
+# from sqlalchemy.orm import selectinload
 
 
 
@@ -426,6 +447,424 @@ class BaseService(
         # Подписываемся на изменения конфигурации
         AppConfigManager.add_change_listener(self._on_config_changed)
 
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _new_file_field(
+        self,
+        dest_dir: str,
+        source_path: Optional[str] = None,
+        naming_func: Optional[Callable[[], str]] = None,
+        session: Optional[Session] = None
+    ) -> Union[str, None]:
+        """
+        Копирует новый файл в хранилище и возвращает относительный путь.
+        При откате транзакции (rollback) скопированный файл будет удалён.
+
+        Args:
+            source_path: к исходному файлу (временный черновик).
+            dest_dir: к директории назначения.
+            naming_func: Функция, возвращающая имя файла (без пути). Если None – генерируется UUID.
+            session: Сессия SQLAlchemy (для создания контекста ROLLBACK).
+
+        Returns:
+            Union[str, None]: Относительный путь от dest_dir до скопированного файла.
+        """
+
+        if source_path is None:
+            return None
+        
+        if not os.path.exists(source_path):
+            raise FileNotFoundError(f"Исходный файл не найден: {source_path}")
+
+        os.makedirs(dest_dir, exist_ok=True)
+        if naming_func is None:
+            ext = os.path.splitext(source_path)[1]
+            name = f"{uuid.uuid4().hex}{ext}"
+        else:
+            name = naming_func()
+
+        dest_path = os.path.join(dest_dir, name)
+        shutil.copy2(source_path, dest_path)
+        self.logger.debug(f"Файл скопирован: {source_path} -> {dest_path}")
+
+        # При откате транзакции нужно удалить только что скопированный файл
+        ctx_rollback = DeletionContext(session, DeletionType.ROLLBACK) 
+        self._del_file_ctx(
+            file_path=os.path.abspath(dest_path),
+            ctx=ctx_rollback, 
+            if_delete_parent_dir=False, 
+        )
+
+        return os.path.relpath(dest_path, dest_dir)
+    
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _delete_file_field(
+        self,
+        file_path: Optional[str],
+        dest_dir: str,
+        session: Optional[Session] = None
+    ) -> None:
+        """
+        Помечает файл на удаление при успешном коммите.
+        """
+        if file_path:
+            ctx_commit = DeletionContext(session, DeletionType.COMMIT) 
+            self._del_file_ctx(
+                file_path=os.path.abspath(
+                    os.path.join(dest_dir, file_path)   
+                ),
+                ctx=ctx_commit, 
+                if_delete_parent_dir=True
+            )
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_file_field(
+        self,
+        old_path: Optional[str],
+        new_source_path: Optional[str],
+        dest_dir: str,
+        naming_func: Optional[Callable[[], str]] = None,
+        session: Optional[Session] = None
+    ) -> Optional[str]:
+        """
+        Обновляет файловое поле: копирует новый файл и помечает старый на удаление при коммите.
+
+        Args:
+            old_path:  к старому файлу (None, если не было).
+            new_source_path:  к новому файлу (None, если удаляем).
+            dest_dir: директория назначения.
+            naming_func: Функция генерации имени (если None – UUID).
+            session: Сессия SQLAlchemy.
+
+        Returns:
+            Новый относительный путь или None, если файл удалён.
+        """
+        # Удаляем старый файл при коммите
+        self._delete_file_field(
+            file_path=old_path,
+            dest_dir=dest_dir,
+            session=session
+        )
+        # Копируем новый файл (при rollback удалится)
+        return self._new_file_field(
+            source_path=new_source_path,
+            dest_dir=dest_dir,
+            naming_func=naming_func,
+            session=session
+        )
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _del_file_ctx(
+        self,
+        file_path: str,
+        ctx: Optional[DeletionContext] = None,
+        if_delete_parent_dir: bool = False,
+    ) -> Optional[str]:
+        """
+        Удаляет файл с использованием явного контекста отложенного удаления.
+        Если ctx is None – удаляет немедленно.
+        Если ctx передан – добавляет файл в список отложенных удалений соответствующего типа.
+
+        Args:
+            ctx: Контекст отложенного удаления (сессия + тип) или None для немедленного удаления.
+            file_path: Абсолютный путь к файлу.
+            if_delete_parent_dir: Удалить ли родительскую папку, если она станет пустой.
+
+        Returns:
+            None при успехе, иначе текст ошибки (если немедленное удаление не удалось).
+        """
+        
+        # from app.utils.file_deletions import schedule_deletion
+        _, err = schedule_deletion(
+            path=file_path,
+            remove_parent_if_empty=if_delete_parent_dir,
+            ctx=ctx,
+            logger=self.logger
+        )
+        return err
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _del_file(
+        self,
+        file_path: str,
+        session: Optional[Session] = None,
+        if_delete_parent_dir: bool = False
+    ):
+        """
+        Удаляет физический файл, предпочтительно отложенно (после коммита сессии).
+
+        **Алгоритм:**
+            1. Если передан `session` и у него есть атрибут `_pending_deletions` (устанавливается в `Database.session_scope`),
+            то файл **не удаляется сразу**, а добавляется в список отложенных удалений сессии.
+            Фактическое удаление произойдёт после успешного коммита (обработчик `after_commit`).
+            2. Если сессия не поддерживает отложенное удаление (или `session is None`), файл удаляется **немедленно**.
+            3. Если `if_delete_parent_dir = True`, после удаления файла проверяется родительская папка:
+            если она стала пустой, она также удаляется.
+
+        **Важные замечания:**
+            - Метод **не выбрасывает исключение** при ошибках удаления – только логирует их.
+            Это сделано потому, что удаление файла не должно прерывать транзакцию БД.
+            - При отложенном удалении ошибки логируются в обработчике `after_commit` (см. `Database.__init__`).
+            - **НЕ вызывайте этот метод повторно** для одного и того же файла в рамках одной транзакции.
+            Два вызова приведут к добавлению файла в `_pending_deletions` дважды, но `after_commit` удалит его один раз
+            (без ошибки). Однако это нерационально и может маскировать логические ошибки.
+            - **НЕ используйте этот метод для файлов, которые ещё не были скопированы в основное хранилище** (например,
+            для абсолютных путей во временной папке черновика). Такие файлы удаляются автоматически при очистке
+            временной папки (см. `PaginatedListPage._cleanup_temp_dir`).
+
+        **Параметры:**
+            file_path (str): Полный абсолютный путь к файлу.
+            session (Optional[Session]): Сессия SQLAlchemy, в контексте которой выполняется удаление.
+                Если передана и поддерживает отложенное удаление, файл будет удалён после коммита.
+                Если `None` или не поддерживает, удаление происходит немедленно.
+            if_delete_parent_dir (bool): Если `True`, после удаления файла (успешного) пытается удалить
+                родительскую папку, если она стала пустой. Ошибки при удалении папки логируются, но не прерывают выполнение.
+
+        **Возвращает:**
+            None
+
+        **Исключения:**
+            Никаких исключений не выбрасывает. При ошибках немедленного удаления логирует предупреждение.
+
+        **Примеры использования:**
+            >>> # Отложенное удаление в рамках транзакции
+            >>> with db.session_scope() as session:
+            ...     self._del_file("/path/to/file.jpg", session=session)
+            ...     # файл будет удалён после session.commit()
+
+            >>> # Немедленное удаление без сессии
+            >>> self._del_file("/path/to/file.jpg")
+
+            >>> # Удалить файл и, если папка опустела, удалить её
+            >>> self._del_file("/path/to/file.jpg", session=session, if_delete_parent_dir=True)
+
+        **Примечания:**
+            - Для поддержки отложенного удаления сессия должна иметь атрибут `_pending_deletions`, который создаётся
+            в `Database.session_scope`. Не используйте этот метод с сессиями, созданными вручную без этого атрибута.
+            - Если файл не существует, метод ничего не делает (только логирует отладочное сообщение).
+        """
+        ctx = DeletionContext.create(session, DeletionType.COMMIT)
+        # err = schedule_deletion(
+        #     # session = session,
+        #     ctx=ctx,
+        #     path = file_path,
+        #     remove_parent_if_empty = if_delete_parent_dir,
+        # )
+        err = self._del_file_ctx(
+            file_path = file_path,
+            ctx=ctx,
+            if_delete_parent_dir = if_delete_parent_dir,
+        )
+        return err
+    
+        # if (session is not None) and hasattr(session, '_pending_deletions'):
+        #     session._pending_deletions.append(
+        #         {
+        #             'path': file_path,
+        #             'remove_parent': if_delete_parent_dir,
+        #         }
+        #     )
+        #     self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+
+        #     return None
+
+        # if os.path.exists(file_path):
+        #     # Fallback – удаляем немедленно, но с предупреждением
+        #     self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+        #     try:
+        #         os.remove(file_path)
+        #         self.logger.debug(f"Удалён отложенный файл: {file_path}")
+
+        #     except OSError as e:
+        #         self.logger.warning(f"Не удалось удалить {file_path}: {e}")
+        #         return e
+        #         # raise PhotoFileError(file_path, "удаление", str(e))
+        # else:
+        #     self.logger.debug(f"Файл {file_path} не существует")
+
+        # if not if_delete_parent_dir:
+        #     return None
+        
+        # # удаление род папки при её пустоте
+        # try:
+        #     # Проверяем, не стала ли родительская папка пустой
+        #     parent_dir = os.path.dirname(file_path)
+        #     if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+        #         try:
+        #             os.rmdir(parent_dir)
+        #             self.logger.debug(f"Удалена пустая папка: {parent_dir}")
+
+        #         except OSError as e:
+        #             self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+
+        # except OSError as e:
+        #     self.logger.warning(f"Не удалось удалить {parent_dir}: {e}")
+        #     return e
+
+        # return None
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_sql_compute_fields(self) -> Dict[str, Dict[str, Any]]:
+        """Возвращает поля, у которых в конфигурации есть ключ 'sql_compute'."""
+        return {
+            field_name: config['sql_compute']
+            for field_name, config in self._field_configs.items()
+            if 'sql_compute' in config
+        }
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _build_sql_compute_subquery(self, field_name: str, config: Dict[str, Any]):
+        """
+        Строит подзапрос для SQL-вычисления.
+
+        Параметры config:
+            - func (str): агрегатная функция ('COUNT', 'SUM', 'AVG', 'MAX', 'MIN')
+            - relation (str): имя отношения в модели (например, 'photos')
+            - column (str, optional): столбец для SUM/AVG (если не указан, для SUM/AVG ошибка)
+            - filter (dict, optional): дополнительные фильтры для дочерних записей
+            - result_type (str): 'int', 'float', 'str' (для приведения)
+            - formatter (callable, optional): функция форматирования результата
+
+        Returns:
+            SQLAlchemy scalar subquery или None при ошибке.
+        """
+        # from sqlalchemy import func as sa_func
+
+        relation_name = config.get('relation')
+        if not relation_name:
+            self.logger.warning(f"sql_compute для {field_name}: отсутствует 'relation'")
+            return None
+
+        relation_attr = getattr(self._model_class, relation_name, None)
+        if relation_attr is None:
+            self.logger.warning(f"sql_compute для {field_name}: отношение '{relation_name}' не найдено")
+            return None
+
+        try:
+            primaryjoin = relation_attr.property.primaryjoin
+        except Exception as e:
+            self.logger.warning(f"sql_compute для {field_name}: не удалось получить primaryjoin: {e}")
+            return None
+
+        child_model = relation_attr.property.mapper.class_
+        func_name = config.get('func', 'COUNT').upper()
+
+        if func_name == 'COUNT':
+            agg = sa_func.count()
+        elif func_name in ('SUM', 'AVG'):
+            column_name = config.get('column')
+            if not column_name:
+                self.logger.warning(f"sql_compute для {field_name}: для {func_name} требуется 'column'")
+                return None
+            col = getattr(child_model, column_name, None)
+            if col is None:
+                self.logger.warning(f"sql_compute для {field_name}: столбец '{column_name}' не найден")
+                return None
+            agg = sa_func.sum(col) if func_name == 'SUM' else sa_func.avg(col)
+        else:
+            agg = getattr(sa_func, func_name.lower(), None)
+            if agg is None:
+                self.logger.warning(f"sql_compute для {field_name}: неизвестная функция '{func_name}'")
+                return None
+
+        query = select(agg).select_from(child_model).where(primaryjoin)
+
+        extra_filter = config.get('filter')
+        if extra_filter:
+            for col_name, val in extra_filter.items():
+                col = getattr(child_model, col_name, None)
+                if col is not None:
+                    query = query.where(col == val)
+
+        return query.scalar_subquery()
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _add_sql_compute_columns_to_query(self, query):
+        """
+        Добавляет в запрос подзапросы для полей sql_compute.
+        Возвращает кортеж (query, extra_columns), где extra_columns – список добавленных колонок.
+        """
+        compute_fields = self._get_sql_compute_fields()
+        extra_columns = []
+        for field_name, config in compute_fields.items():
+            subq = self._build_sql_compute_subquery(field_name, config)
+            if subq is not None:
+                extra_columns.append(subq.label(f"__sql_compute_{field_name}"))
+        if extra_columns:
+            query = query.add_columns(*extra_columns)
+        return query, extra_columns
+
+
+    @AppLogger.get_instance(
+        name='BaseService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _get_note_field_mappings_dict(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Возвращает словарь для быстрого доступа к информации о полях-заметках.
+
+        Используется в фильтрации для построения подзапросов EXISTS.
+        Структура словаря:
+            {
+                'reason_text': {
+                    'foreign_key': 'reason_id',     # имя колонки внешнего ключа в модели
+                    'note_model': AppointmentNote,  # класс модели заметки
+                    'text_column': 'text'           # имя колонки с текстом заметки
+                },
+                ...
+            }
+
+        Returns:
+            Dict[str, Dict[str, Any]]: Словарь, где ключ – имя поля DTO (например, 'reason_text'),
+                                    значение – метаданные для построения подзапроса.
+        """
+            
+        # from app.database.database_shema.clinic import AppointmentNote
+
+        mappings = {}
+        for mapping in self._get_note_field_mappings():
+            dto_field = mapping['dto_field']
+            mappings[dto_field] = {
+                'foreign_key': mapping['orm_id_field'],
+                'note_model': AppointmentNote,
+                'text_column': 'text'   # поле в AppointmentNote, содержащее текст
+            }
+        return mappings
+
     @AppLogger.get_instance(
         name='BaseService',
         enable_file_logging='system',
@@ -440,18 +879,35 @@ class BaseService(
         """
         Применяет список фильтров к запросу и возвращает кортеж (query, post_filters).
 
+        Этот метод оборачивает вызов внешней функции `apply_filters` из модуля filtering,
+        передавая ей предварительно сформированный словарь `note_mappings` (для поддержки
+        поиска по полям-заметкам).
+
         Args:
             query (Query): Исходный запрос SQLAlchemy.
-            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
-            fuzzy_threshold (int): Порог для нечёткого поиска.
+            filters (Optional[List[Dict[str, Any]]]): Список фильтров  (каждый словарь с ключами column, operator, value).
+            fuzzy_threshold (int): Порог схожести для нечёткого поиска..
 
         Returns:
             Tuple[Query, List[Tuple]]: Модифицированный запрос и список пост-фильтров.
         """
+        
         if not filters:
             return query, []
+        
+        # # from app.utils.filtering.filtering import apply_filters
+        # return apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+        note_mappings = self._get_note_field_mappings_dict()
         # from app.utils.filtering.filtering import apply_filters
-        return apply_filters(query, self._model_class, filters, fuzzy_threshold)
+
+        return apply_filters(
+            query,
+            self._model_class,
+            filters,
+            fuzzy_threshold,
+            note_mappings=note_mappings
+        )
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -507,14 +963,32 @@ class BaseService(
         Returns:
             int: Количество записей, удовлетворяющих фильтрам.
         """
+        
         with self._session_scope(session) as sess:
-            # repo = self._get_repo(sess)
-            # return repo.count(filters=filters)
+            query = sess.query(self._model_class)
+            # if filters:
+            #     # from app.utils.filtering.filtering import _build_filter_condition
+            #     condition = _build_filter_condition(filters, self._model_class)
+            #     if condition is not True:
+            #         query = query.filter(condition)
+                    
+            # return query.count()
 
             query = sess.query(self._model_class)
-            query, post_filters = self._apply_filters_to_query(query, filters)
-            # post_filters не влияют на количество (только на выборку после загрузки)
-            return query.count()
+
+            # Применяем фильтры (включая заметки), игнорируем пост-фильтры (fuzzy), так как они не влияют на количество
+            filtered_query, _ = self._apply_filters_to_query(query, filters)
+
+            return filtered_query.count()
+        
+        # with self._session_scope(session) as sess:
+        #     # repo = self._get_repo(sess)
+        #     # return repo.count(filters=filters)
+
+        #     query = sess.query(self._model_class)
+        #     query, post_filters = self._apply_filters_to_query(query, filters)
+        #     # post_filters не влияют на количество (только на выборку после загрузки)
+        #     return query.count()
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -563,8 +1037,61 @@ class BaseService(
             # Применяем жадную подгрузку
             loaded_query = self._apply_eager_loading(ordered_query, relations)
 
+            # Добавляем SQL-вычисления
+            compute_fields = self._get_sql_compute_fields()
+            self.logger.debug(f"[DEBUG] compute_fields: {compute_fields}")
+            extra_columns = []
+            for field_name, config in compute_fields.items():
+                subq = self._build_sql_compute_subquery(field_name, config)
+                self.logger.debug(f"[DEBUG] subquery for {field_name}: {subq}")
+                if subq is not None:
+                    extra_columns.append(subq.label(f"__sql_compute_{field_name}"))
+            if extra_columns:
+                loaded_query = loaded_query.add_columns(*extra_columns)
+
             # Пагинация
-            items = loaded_query.offset(offset).limit(limit).all()
+            results = loaded_query.offset(offset).limit(limit).all()
+
+            if extra_columns:
+                self.logger.debug(f"[DEBUG] First result type: {type(results[0])}, len: {len(results[0]) if hasattr(results[0], '__len__') else 'N/A'}")
+                self.logger.debug(f"[DEBUG] First result: {results[0]}")
+
+            # Извлекаем модели и сохраняем вычисленные значения как временные атрибуты
+            items = []
+            # if extra_columns:
+            #     for row in results:
+            #         if isinstance(row, tuple):
+            #             obj = row[0]
+            #             for idx, field_name in enumerate(compute_fields.keys()):
+            #                 value = row[idx + 1]
+            #                 setattr(obj, f"__sql_compute_{field_name}", value)
+            #             items.append(obj)
+            #         else:
+            #             items.append(row)
+            # else:
+            #     items = results
+
+            if extra_columns:
+                field_names = list(compute_fields.keys())  # фиксируем порядок
+                items = []
+                for row in results:
+                    # Проверяем, является ли элемент последовательностью (кортеж, список, Row)
+                    if hasattr(row, '__len__') and not isinstance(row, self._model_class):
+                        # Предполагаем, что первым элементом всегда идёт объект модели
+                        obj = row[0]
+                        # Для каждого вычисленного поля устанавливаем временный атрибут
+                        for idx, field_name in enumerate(field_names):
+                            if idx + 1 < len(row):
+                                value = row[idx + 1]
+                                setattr(obj, f"__sql_compute_{field_name}", value)
+                                self.logger.debug(f"[DEBUG] Set __sql_compute_{field_name} = {value} for obj {obj.id}")
+                            else:
+                                setattr(obj, f"__sql_compute_{field_name}", None)
+                        items.append(obj)
+                    else:
+                        items.append(row)
+            else:
+                items = results
 
             # Пост-фильтры (например, нечёткий поиск) применяем уже к загруженным объектам
             if post_filters:
@@ -576,6 +1103,7 @@ class BaseService(
 
             # Преобразование в DTO
             dtos = self.get_dtos(items)
+
             return dtos, total
 
     @AppLogger.get_instance(
@@ -818,6 +1346,7 @@ class BaseService(
             item_id,
             options=self._get_eager_loading_options()
         )
+        0==0
 
         if item is None:
             raise class_err(item_id)
@@ -1042,8 +1571,13 @@ class BaseService(
             repo = self._get_repo(sess)
             repo.add(entity)
             sess.flush()
+
+            # Пост-обработка для добавления временных атрибутов (например, _count_photos)
+            items = self._post_process_items([entity], sess)
+            processed_entity = items[0] if items else entity
             
-            return self.get_dto_out(entity)
+            # return self.get_dto_out(entity)
+            return self.get_dto_out(processed_entity)
 
 
     @AppLogger.get_instance(
@@ -1094,13 +1628,18 @@ class BaseService(
             note_repo = AppointmentNoteRepository(sess)
             
             # Обновляем заметки
-            new_note_ids = self._apply_note_updates(dto, sess, note_repo, model_obj=entity)
+            new_note_ids = self._apply_note_updates(
+                dto,
+                sess,
+                note_repo,
+                model_obj=entity
+            )
             for orm_field, value in new_note_ids.items():
                 setattr(entity, orm_field, value)
             
             # Обновляем простые поля
-            self._apply_simple_updates(entity, dto)
-            
+            self._apply_simple_updates(entity, dto, session = sess)
+
             sess.flush()
             return self.get_dto_out(entity)
 
@@ -1117,6 +1656,8 @@ class BaseService(
     ) -> None:
         """
         Универсальный метод удаления записи с очисткой связанных заметок.
+
+        НЕ УДАЛЯЕТ физические файлы! Удаление файлов должно происходить в delete() или в наследниках.
 
         Алгоритм:
             1. Загружает запись с подгрузкой всех связей (согласно конфигурации).
@@ -1178,27 +1719,41 @@ class BaseService(
             - 'editable': разрешено ли редактирование (по умолчанию True)
         """
         updatable = []
+
+        # Получаем словарь полей DTO (Pydantic v2)
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             # Пропускаем ID (первичный ключ)
             if field_name == 'id':
+                self.logger.debug(f"Поле {field_name} пропущено (id)")
                 continue
 
             # Пропускаем виртуальные поля и заметки
             if config.get('virtual', False) or config.get('is_note'):
+                self.logger.debug(f"Поле {field_name} пропущено (virtual/is_note)")
                 continue
 
             # Пропускаем явно отмеченные как не updatable
             if config.get('updatable') is False:
+                self.logger.debug(f"Поле {field_name} пропущено (updatable=False)")
                 continue
 
-            # Проверяем, существует ли поле в DTO (безопасность)
-            if not hasattr(self._dto_class, field_name):
-                continue
+            # # Проверяем, существует ли поле в DTO (безопасность)
+            # if not hasattr(self._dto_class, field_name):
+            #     self.logger.debug(f"Поле {field_name} отсутствует в DTO")
+            #     continue
 
+            # Проверяем наличие поля в DTO через model_fields (не через hasattr)
+            if field_name not in dto_fields:
+                self.logger.debug(f"Поле {field_name} отсутствует в DTO (не найдено в model_fields)")
+                continue
+            
             updatable.append({
                 'name': field_name,
                 'editable': config.get('editable', True) # для UI, но в сервисе не используется
             })
+            self.logger.debug(f"Поле {field_name} добавлено в updatable")
 
         return updatable
 
@@ -1207,10 +1762,63 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _apply_simple_updates(self, model_obj: ModelType, dto: DTOType) -> None:
+    def _apply_simple_updates(
+        self,
+        model_obj: ModelType,
+        dto: DTOType,
+        session: Optional[Session] = None
+    ) -> None:
         """
         Обновляет простые поля модели из DTO согласно field_configs.
-        """
+
+        **Назначение:**
+            Применяет изменения к существующему ORM-объекту, полученному из БД,
+            на основе данных из DTO. Метод вызывается внутри `_update_entity` при
+            сохранении изменений.
+
+        **Алгоритм:**
+            1. Перебирает поля, возвращённые `_get_simple_updatable_fields()`.
+            2. Для каждого поля проверяет, изменилось ли значение (сравнивая старое
+               из модели с новым из DTO).
+            3. **Специальная обработка для полей с фото (`widget_type='image_thumbnail'`):**
+               - Если значение изменилось, старый путь относительный и файл существует
+                 в основном хранилище – удаляет физический файл (логгирует успех/ошибку).
+               - Абсолютные пути (временные файлы черновиков) не удаляются.
+            4. Обновляет поле модели новым значением (или None, если поле необязательное
+               и в DTO передано None).
+
+        **Специальная обработка для полей с фото (`widget_type='image_thumbnail'`):**
+            - Если значение изменилось и старый путь относительный (файл в хранилище),
+              вызывает `self._del_file` для отложенного удаления старого файла.
+            - Абсолютные пути (временные файлы черновиков) не удаляются.
+
+        **Параметры:**
+            model_obj (ModelType): ORM-объект (уже загружен из БД, с текущими значениями).
+            dto (DTOType): DTO, содержащий новые значения полей.
+            session  (Optional[Session]): Сессия SQLAlchemy, необходимая для доступа
+                к списку отложенных удалений. Должна быть передана из вызывающего метода.
+
+        **Возвращает:**
+            None
+
+        **Примечания:**
+            - Метод предполагает, что все поля, попадающие в `_get_simple_updatable_fields()`,
+              являются обычными столбцами БД (не виртуальными, не `is_note`, не `updatable=False`).
+            - Для обязательных полей (`required=True`) попытка установить None вызывает
+              `ValueError` с сообщением.
+            - Удаление старого файла происходит только при изменении значения и только
+              для относительных путей. Это предотвращает случайное удаление файлов,
+              которые ещё не были скопированы в основное хранилище (например, во время
+              редактирования новой строки до сохранения).
+
+        **Пример:**
+            >>> # Внутри _update_entity
+            >>> self._apply_simple_updates(entity, dto, session)
+            >>> # Теперь entity.last_name обновлён, и если photo_path изменился,
+            >>> # старый файл удалён с диска.
+        """        
+        # tt = self._get_simple_updatable_fields()
+        # for field_info in tt:
         for field_info in self._get_simple_updatable_fields():
 
             if not field_info.get('editable', True) or field_info.get('updatable') is False:
@@ -1219,18 +1827,84 @@ class BaseService(
             field_name = field_info['name']
             # if field_info['editable']:
             new_value = getattr(dto, field_name, None)
+            old_value = getattr(model_obj, field_name, None)
+
+            config = self._field_configs.get(field_name, {})
+
+            title = config.get('title', None)  or field_name
+            
+            # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
+            if config.get('widget_type') == 'image_thumbnail':
+                
+                storage_path = AppConfigManager.get_instance().get(
+                    'PHOTOS_STORAGE_PATH',
+                    os.path.join('.', 'photos')
+                )
+                
+                # 1. Проверка существования нового файла (если путь относительный)
+                if (
+                    new_value is not None
+                ) and (
+                    not os.path.isabs(new_value)
+                ):
+                    full_new_path = os.path.join(storage_path, new_value)
+                    if not os.path.exists(full_new_path):
+                        self.logger.warning(
+                            f"Новый файл для поля '{field_name}' не существует: {full_new_path}. "
+                            "Обновление поля будет выполнено, но файл отсутствует."
+                        )
+                
+                # Если значение изменилось, старое не пустое и не абсолютный путь (значит файл уже в хранилище)
+                if (
+                    old_value != new_value
+                ) and (
+                    old_value is not None
+                ) and (
+                    not os.path.isabs(old_value)
+                ):
+                    full_old_path = os.path.join(storage_path, old_value)
+                    
+                    # Удаляем файл
+                    self._del_file(
+                        full_old_path, 
+                        session = session, 
+                        if_delete_parent_dir=True, 
+                    )
+
+                    # if os.path.exists(full_old_path):
+                    #     if (session is not None) and hasattr(session, '_pending_deletions'):
+                    #         session._pending_deletions.append(full_old_path)
+                    #         self.logger.debug(f"Добавлен файл в отложенное удаление: {full_old_path}")
+                    #     else:
+                    #         # fallback – удаляем сразу, но с предупреждением
+                    #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+                    #
+                    #         try:
+                    #             os.remove(full_old_path)
+                    #             self.logger.debug(f"Удалён старый файл: {full_old_path}")
+                    #         except OSError as e:
+                    #             self.logger.warning(f"Не удалось удалить {full_old_path}: {e}")
+                    # else:
+                    #     self.logger.debug(f"Старый файл {full_old_path} не существует, пропуск удаления")
+
             if new_value is not None:
-                setattr(model_obj, field_name, new_value)
+                # setattr(model_obj, field_name, new_value)
+                if old_value != new_value:
+                    self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    setattr(model_obj, field_name, new_value)
+                else:
+                    self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+
             else:
                 # Проверяем, является ли поле обязательным
-                config = self._field_configs.get(field_name, {})
+                # config = self._field_configs.get(field_name, {})
                 if config.get('required', False):
                     # Если поле обязательно, не разрешаем устанавливать None
                     self.logger.warning(f"Попытка установить None в обязательное поле {field_name}")
                     # Вариант 1: пропустить (оставить старое значение)
                     # continue
                     # Вариант 2: выбросить исключение
-                    raise ValueError(f"Обязательное поле {field_name} не может быть пустым")
+                    raise ValueError(f"Обязательное поле '{title}' не может быть пустым")
                 else:
                     setattr(model_obj, field_name, None)
 
@@ -1291,7 +1965,10 @@ class BaseService(
             - не являются заметками (is_none)
             - не являются ID самой модели (поле 'id' пропускаем)
         """
+
         kwargs = {}
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             # Пропускаем ID
             if field_name == 'id':
@@ -1307,6 +1984,11 @@ class BaseService(
 
             # if config.get('updatable') is False: # убрал, так как проблема с patient_id у APPOINTMENT
             #     continue
+
+            # Проверяем наличие поля в DTO через model_fields
+            if field_name not in dto_fields:
+                self.logger.debug(f"Поле {field_name} отсутствует в DTO, пропускаем")
+                continue
 
             # Берём значение из DTO, если оно не None
             value = getattr(dto, field_name, None)
@@ -1333,16 +2015,23 @@ class BaseService(
         Исключения: поля с is_note и virtual пропускаются (они не хранятся в БД напрямую).
         """
         missing = []
+        dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
+
         for field_name, config in self._field_configs.items():
             if not config.get('required', False):
                 continue
             # Пропускаем виртуальные поля и заметки – они не являются столбцами БД
             if config.get('virtual', False) or config.get('is_note'):
                 continue
+
+            if field_name not in dto_fields:
+                # Поле не существует в DTO – пропускаем (не должно быть, но на всякий случай)
+                continue
             
             value = getattr(dto, field_name, None)
             if value is None:
                 missing.append(field_name)
+                
             elif isinstance(value, str) and not value.strip():
                 missing.append(field_name)
         
@@ -1609,15 +2298,39 @@ class BaseService(
     def _prepare_extra_data(self, obj: ModelType) -> Dict[str, Any]:
         """
         Подготавливает словарь extra_data для enrich_dto_with_computed_fields.
-        Собирает все временные атрибуты, созданные в _post_process_items.
+        Собирает все временные атрибуты, созданные в _post_process_items (counts),
+        а также значения из sql_compute (подзапросы).
         """
         extra = {}
+        # 1. Старые count-поля
         for mapping in self._get_count_mappings().values():
             attr_name = mapping['attr_name']
             extra_key = mapping['extra_key']
             if hasattr(obj, attr_name):
                 extra[extra_key] = getattr(obj, attr_name)
 
+        # 2. Новые sql_compute-поля
+        # Добавляем значения sql_compute
+        compute_fields = self._get_sql_compute_fields()
+        for field_name, config in compute_fields.items():
+            temp_attr = f"__sql_compute_{field_name}"
+            if hasattr(obj, temp_attr):
+                value = getattr(obj, temp_attr)
+
+                # Применяем форматтер, только если значение не None
+                formatter = config.get('formatter')
+                if formatter and callable(formatter):
+                    value = formatter(value)
+
+                # Кладём результат под именем поля (для виртуального поля)
+                extra[field_name] = value
+
+                # Если в конфигурации указан extra_key – дублируем значение под этим ключом
+                extra_key = config.get('extra_key')
+                if extra_key:
+                    
+                    # Для числовых значений можно оставить как есть, для строк – передаём как есть
+                    extra[extra_key] = value
         return extra
 
     @AppLogger.get_instance(
@@ -1708,6 +2421,7 @@ class BaseService(
                 if source_attr and source_attr not in relations:
                     extra_rels.append(source_attr)
 
+        self.logger.debug(f"_get_extra_rels: extra_rels={extra_rels if extra_rels else 'None'}")
         return extra_rels
 
     @AppLogger.get_instance(
@@ -1735,8 +2449,11 @@ class BaseService(
 
         # Создаем сессию для работы с БД (если не указана, то используем сессию из self._db)
         with self._session_scope(session) as sess:
-            # Создаем репозиторий с переданной сессией
-            repo = self._get_repo(sess)
+            # Строим базовый запрос
+            query = sess.query(self._model_class).filter(self._model_class.id == entity_id)
+
+            # # Создаем репозиторий с переданной сессией
+            # repo = self._get_repo(sess)
 
             # Получаем список отношений для подгрузки
             relations = self._get_relations_for_eager_loading()
@@ -1747,17 +2464,43 @@ class BaseService(
             if extra_rels:
                 relations = relations + extra_rels          # добавляем к общему списку
 
-            if relations:
-                item = repo.get_with_relations(entity_id, relations)
+            query = self._apply_eager_loading(query, relations)
+
+            # Добавляем подзапросы для sql_compute
+            query, extra_columns = self._add_sql_compute_columns_to_query(query)    
+
+            # Выполняем запрос
+            result = query.first()
+            
+            # # Если запись не найдена, то возвращаем исключение
+            if result is None:
+                raise self._not_found_exception(entity_id)
+            
+            # Извлекаем объект модели и временные атрибуты
+            if extra_columns:
+                # Если есть дополнительные колонки, результат будет кортежем (модель, ...)
+                if isinstance(result, (tuple, list)) or hasattr(result, '__len__'):
+                    item = result[0]
+                    compute_fields = self._get_sql_compute_fields()
+                    for idx, field_name in enumerate(compute_fields.keys()):
+                        value = result[idx + 1]
+                        setattr(item, f"__sql_compute_{field_name}", value)
+                else:
+                    item = result
             else:
-                item = repo.get_by_id(entity_id)
+                item = result
+
+            # if relations:
+            #     item = repo.get_with_relations(entity_id, relations)
+            # else:
+            #     item = repo.get_by_id(entity_id)
 
             # # Получаем запись по ID
             # item = repo.get_by_id(entity_id)
 
-            # Если запись не найдена, то возвращаем исключение
-            if item is None:
-                raise self._not_found_exception(entity_id)
+            # # Если запись не найдена, то возвращаем исключение
+            # if item is None:
+            #     raise self._not_found_exception(entity_id)
 
             # Применяем пост-обработку (добавление временных атрибутов для подсчётов)
             items = self._post_process_items([item], sess)
@@ -1839,7 +2582,21 @@ class BaseService(
         :param session: сессия для работы с БД (необязательна)
         :raises: self._not_found_exception, если запись не найдена
         :return: None
+
+        **Важно:**
+            Если у сущности есть поля с widget_type='image_thumbnail' (фото, хранящиеся
+            как строковые пути в БД, а не как отдельные записи в таблице photos), то физические
+            файлы на диске НЕ УДАЛЯЮТСЯ автоматически при вызове этого метода.
+            Для удаления таких файлов необходимо обрабатывать их отдельно на уровне GUI
+            (например, в PaginatedListPage._delete_entity_and_children) или в переопределённом
+            методе delete соответствующего сервиса.
+
+        **ВНИМАНИЕ:**
+            Не переносите логику удаления файлов в `_delete_entity` – это нарушит
+            работу других сервисов, где файлы не должны удаляться автоматически.
         """
+
+
         self.logger.debug(f"Удаление {self._model_class.__name__} с id={entity_id}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
@@ -1848,6 +2605,69 @@ class BaseService(
             if item is None:
                 raise self._not_found_exception(entity_id)
             
+            # Удаление файлов для полей с фото (widget_type='image_thumbnail')
+            # ВНИМАНИЕ: Эта часть НЕ дублируется в _delete_entity, поэтому необходимо
+            # вызывать _del_file до _delete_entity. Не переносите этот блок в _delete_entity,
+            # иначе при вызове _delete_entity из других мест (например, из PhotoService.delete_photo)
+            # файлы будут удаляться повторно.
+
+            # ВНИМАНИЕ: Этот блок удаляет физические файлы, связанные с удаляемой записью.
+            # Предполагается, что на файл нет других ссылок в БД (уникальная связь).
+            # Для сущностей, где фото может быть переиспользовано, необходимо переопределить delete
+            # и не вызывать super().delete (или удалять файлы вручную после проверки использования).
+            storage_path = None
+            for field_name, config in self._field_configs.items():
+                if config.get('widget_type') != 'image_thumbnail':
+                    continue
+                
+                # Получаем значение поля (относительный путь к файлу)
+                rel_path = getattr(item, field_name, None)
+                if not rel_path or not isinstance(rel_path, str):
+                    continue
+
+                # Если путь абсолютный - пропускаем (такие файлы ещё не скопированы в хранилище) # требуеется проверить на нужность!!!
+                if os.path.isabs(rel_path):
+                    self.logger.debug(f"Поле {field_name} содержит абсолютный путь {rel_path}, пропуск удаления")
+                    continue
+
+                # Получаем базовый путь к хранилищу (лениво)
+                if storage_path is None:
+                    storage_path = AppConfigManager.get_instance().get(
+                        'PHOTOS_STORAGE_PATH',
+                        os.path.join('.', 'photos')
+                    )
+
+                full_path = os.path.join(storage_path, rel_path)
+
+                # Удаляем файл
+                self._del_file(
+                    full_path,
+                    session = sess,
+                    if_delete_parent_dir = True,
+                )
+
+                # if os.path.exists(full_path):
+                #     # Добавляем в список отложенного удаления сессии
+                #     if hasattr(sess, '_pending_deletions'):
+                #         sess._pending_deletions.append(full_path)
+                #         self.logger.debug(f"Добавлен файл в отложенное удаление: {full_path}")
+                #     else:
+                #         try:
+                #             os.remove(full_path)
+                #             self.logger.info(f"Удалён файл фото: {full_path}")
+                #             # Проверяем, не стала ли родительская папка пустой
+                #             parent_dir = os.path.dirname(full_path)
+                #             if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                #                 try:
+                #                     os.rmdir(parent_dir)
+                #                     self.logger.info(f"Удалена пустая папка: {parent_dir}")
+                #                 except OSError as e:
+                #                     self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+                #         except OSError as e:
+                #             self.logger.warning(f"Не удалось удалить файл {full_path}: {e}")
+                # else:
+                #     self.logger.debug(f"Файл {full_path} не существует, пропуск")
+
             repo.delete(item)
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
 
@@ -1881,8 +2701,8 @@ class BaseService(
     )
     def get_dtos(
         self, 
-        item_s:Union[List, Any]  # список объектов или один объект
-    )-> Union[List, Any] : 
+        item_s: Union[List, Any]  # список объектов или один объект
+    ) -> Union[List, Any]:
         """
         Возвращает список DTO из списка объектов или один DTO из объекта.
         Если получен список объектов, то для каждого объекта пытается создать DTO.
@@ -1913,6 +2733,7 @@ class BaseService(
         if self._field_configs:
 
             extra_data = self._prepare_extra_data(item_s)
+            self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
 
             dto = enrich_dto_with_computed_fields(
                 dto, 
@@ -2558,7 +3379,9 @@ class PatientService(
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
 
         self.logger.debug(
-            f"Обновление пациента id={patient_dto.id}"
+            f"Обновление пациента id={patient_dto.id} "
+            f"данные: last_name={patient_dto.last_name} "
+
         )
         return self._update_entity(patient_dto, patient_dto.id, session)
 
@@ -3539,9 +4362,21 @@ class NoteService(
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_unique_note_texts(self, session: Optional[Session] = None) -> List[str]:
+        """
+        Возвращает все уникальные тексты заметок из таблицы AppointmentNote.
+
+        Примечание: 
+            Для виртуальных полей-заметок (reason_text, procedure_text и т.д.)
+            этот метод возвращает все существующие тексты, а не только относящиеся
+            к конкретному полю. Это допустимо для автодополнения, так как
+            пользователь может использовать любой текст, а сервис при сохранении
+            либо создаст новую заметку, либо найдёт существующую по точному
+            совпадению текста (см. get_or_create_note).
+        """
         with self._session_scope(session) as sess:
             # Получаем все уникальные тексты заметок
             distinct_texts = sess.query(self._model_class.text).distinct().all()
+            
             return [t[0] for t in distinct_texts if t[0]]
 
 class AppointmentService(
@@ -4990,6 +5825,108 @@ class PhotoService(
         # Создаем директорию для хранения фотографий, если она не существует
         self._ensure_storage_exists()
 
+
+        # В __init__ уже есть self._storage_path
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def create(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+        """
+        Создаёт фото. file_path – копирует в хранилище.
+        """
+        if dto.file_path and os.path.isabs(dto.file_path):
+            # Определяем целевую директорию: self._storage_path/app_{appointment_id}
+            app_id = dto.appointment_id
+            if not app_id:
+                raise ValueError("Для фото необходимо указать appointment_id")
+            
+            dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
+
+            # Копируем файл (при rollback удалится)
+            rel_path = self._new_file_field(
+                source_path=dto.file_path,
+                dest_dir=dest_dir,
+                naming_func=None,  # UUID
+                session=session
+            )
+            dto.file_path =  os.path.join(f"app_{app_id}",rel_path)
+
+        # Сохраняем в БД
+        return self._create_entity(dto, session=session)
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def update(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+
+        if dto.id is None:
+            raise ValueError("ID фото не указан")
+
+        # Загружаем старую запись, чтобы получить старый путь
+        repo = self._get_repo(session)
+        old_photo = repo.get_by_id(dto.id)
+        if not old_photo:
+            raise PhotoNotFoundError(dto.id)
+
+        old_path = old_photo.file_path
+        new_path = dto.file_path
+
+        dest_dir = os.path.join(self._storage_path, f"app_{dto.appointment_id}")
+
+        # Обрабатываем файл
+        if new_path and os.path.isabs(new_path):
+            # Новый временный файл – копируем, старый удалим при коммите
+            rel_path = self._update_file_field(
+                old_path=old_path,
+                new_source_path=new_path,
+                dest_dir=dest_dir,
+                naming_func=None,
+                session=session
+            )
+            dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
+        elif new_path is None and old_path:
+            # Файл удалён – помечаем старый на удаление при коммите
+            self._delete_file_field(old_path, dest_dir, session)
+            dto.file_path = None
+        # else: путь не изменился – ничего не делаем
+
+        return self._update_entity(dto, dto.id, session=session)
+
+    @AppLogger.get_instance(
+        name='PhotoService',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def delete(self, photo_id: int, session: Optional[Session] = None) -> None:
+
+        self.logger.debug(f"Удаление фото id={photo_id}")
+        
+        # Загружаем фото, получаем путь
+        with self._session_scope(session) as sess:
+            repo = self._get_repo(sess)
+            photo = repo.get_by_id(photo_id)
+            if not photo:
+                raise PhotoNotFoundError(photo_id)
+
+            # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
+            # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
+            # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
+            # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
+            # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
+            # через _delete_entity (который не трогает файл). Это корректно и атомарн
+
+            dest_dir = os.path.join(self._storage_path, f"app_{photo.appointment_id}")
+            # Помечаем файл на удаление при коммите
+            self._delete_file_field(photo.file_path, dest_dir, sess)
+
+            # Удаляем запись из БД
+            self._delete_entity(photo_id, sess)
+
     @AppLogger.get_instance(
         name = 'PhotoService',
         # share_file_with = 'system',
@@ -5314,7 +6251,7 @@ class PhotoService(
             )
 
             return dtos
-    
+
     @AppLogger.get_instance(
         name = 'PhotoService',
         # share_file_with = 'system',
@@ -5329,78 +6266,145 @@ class PhotoService(
         session: Optional[Session] = None
     ) -> None:
         """
-        Удаляет фото:
-        1. Удаляет запись из БД.
-        2. После успешного удаления записи пытается удалить файл.
-        Если файл не удалился, только логирует ошибку (данные уже консистентны).
+        Удаляет фотографию: физический файл + запись в БД + связанные заметки (если есть).
+
+        **Алгоритм:**
+            1. Загружает запись `Photo` по `photo_id`.
+            2. Определяет полный путь к файлу (`storage_path + относительный путь`).
+            3. Удаляет физический файл через `self._del_file` (с поддержкой отложенного удаления).
+            4. Удаляет запись из БД и очищает заметки (через `self._delete_entity`).
+
+        **Важное предупреждение (для разработчиков!):**
+            - **НИ В КОЕМ СЛУЧАЕ НЕ ЗАМЕНЯЙТЕ ТЕКУЩУЮ РЕАЛИЗАЦИЮ НА ВЫЗОВ `self.delete(photo_id, session)`!**
+            - Причина: базовый метод `BaseService.delete` **уже содержит логику удаления файлов** для полей
+            с `widget_type='image_thumbnail'` (к которым относится `file_path`). Если вызвать `self.delete` здесь,
+            файл будет удалён **дважды**: один раз в `self._del_file` (см. код ниже) и ещё раз внутри `self.delete`.
+            Это приведёт к ошибке при попытке удалить уже несуществующий файл.
+            - Текущая реализация корректна: файл удаляется **один раз**, затем запись удаляется отдельно.
+            - **Не переносите логику удаления файлов в `_delete_entity`** – это нарушит работу всех других сервисов,
+            которые полагаются на то, что `_delete_entity` не трогает дисковые файлы.
+
+        **Параметры:**
+            photo_id (int): ID фотографии в БД.
+            session (Optional[Session]): Опциональная сессия SQLAlchemy для работы в рамках внешней транзакции.
+                Если не передана, создаётся новая сессия.
+
+        **Возвращает:**
+            None
+
+        **Исключения:**
+            PhotoNotFoundError: Если фото с указанным `photo_id` не существует.
+            PhotoFileError: Если не удалось удалить физический файл (при немедленном удалении).
+                При отложенном удалении ошибка не выбрасывается, а логируется в `after_commit`.
+
+        **Пример использования:**
+            >>> photo_service = get_photo_service()
+            >>> try:
+            ...     photo_service.delete_photo(123)
+            ...     print("Фото удалено")
+            ... except PhotoNotFoundError:
+            ...     print("Фото не найдено")
+            ... except PhotoFileError as e:
+            ...     print(f"Ошибка удаления файла: {e}")
+
+        **Примечания:**
+            - Физический файл удаляется **до** удаления записи из БД. Это предотвращает ситуацию,
+            когда запись удалена, а файл остался (из-за ошибки удаления файла транзакция откатится).
+            - Благодаря использованию `_del_file`, при наличии активной сессии с поддержкой отложенного удаления,
+            файл будет удалён только после успешного коммита, что сохраняет атомарность.
+            - Если файл уже отсутствует на диске, метод всё равно удалит запись из БД (файл не мешает).
         """
-        self.logger.debug(f"Удаление фото id={photo_id}")
 
-        # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
-        with self._session_scope(session) as sess:
+        return self.delete(photo_id, session)
+        # self.logger.debug(f"Удаление фото id={photo_id}")
 
-            repo = self._get_repo(sess)
-            photo = repo.get_by_id(photo_id)
-            if photo is None:
-                raise PhotoNotFoundError(photo_id)
+        # # 1. Создаём сессию SQLAlchemy (если не указана, то создаем новую)
+        # with self._session_scope(session) as sess:
+
+        #     repo = self._get_repo(sess)
+        #     photo = repo.get_by_id(photo_id)
+
+        #     if photo is None:
+        #         raise PhotoNotFoundError(photo_id)
+
+        #     # ВНИМАНИЕ! НЕ ЗАМЕНЯТЬ СЛЕДУЮЩИЙ БЛОК НА ВЫЗОВ self.delete()!
+        #     # Причина: self.delete() (базовый метод) уже содержит удаление файла для полей с фото
+        #     # и вызов _delete_entity. Если вызвать self.delete() здесь, файл будет удалён дважды
+        #     # (один раз здесь, другой внутри self.delete), что вызовет ошибку.
+        #     # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
+        #     # через _delete_entity (который не трогает файл). Это корректно и атомарно.
+
             
-           
-            # Удаляем файл
-            file_path = os.path.join(self._storage_path, photo.file_path)
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except OSError as e:
-                    raise PhotoFileError(file_path, "удаление", str(e))
+        #     file_path = os.path.join(self._storage_path, photo.file_path)
+        #     # Удаляем физический файл (или добавляем в отложенное удаление)
+        #     err_text = self._del_file(
+        #         file_path, 
+        #         session = sess,
+        #         if_delete_parent_dir = True,
+        #     )
+        #     if err_text is not None:
+        #         raise PhotoFileError(file_path, "удаление", str(err_text))
 
-            # # Удаляем запись через базовый метод
-            # self._delete_entity(photo_id, sess)
+        #     # if os.path.exists(file_path):
+        #     #     if (sess is not None) and hasattr(sess, '_pending_deletions'):
+        #     #         sess._pending_deletions.append(file_path)
+        #     #         self.logger.debug(f"Добавлен файл в отложенное удаление: {file_path}")
+        #     #     else:
+        #     #         # Fallback – удаляем немедленно, но с предупреждением
+        #     #         self.logger.warning("Сессия не поддерживает отложенное удаление, удаляю немедленно")
+        #     #
+        #     #         try:
+        #     #             os.remove(file_path)
+        #     #         except OSError as e:
+        #     #             raise PhotoFileError(file_path, "удаление", str(e))
+        #     # # Удаляем запись через базовый метод
+        #     # self._delete_entity(photo_id, sess)
 
-            # # удаляем запись
-            # repo.delete(photo)
+        #     # # удаляем запись
+        #     # repo.delete(photo)
 
-             # После удаления файла вызываем базовый метод для удаления записи
-            # Важно: передаём ту же сессию, чтобы операция была атомарной
-            self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
+        #     # После удаления файла вызываем базовый метод для удаления записи
+        #     # Важно: передаём ту же сессию, чтобы операция была атомарной
+        #     self._delete_entity(photo_id, session=sess) # для повышения согласованности, упрощения будущие изменения и следует принципу единой ответственности в иерархии сервисов
  
-            # # 2. Получаем репозиторий фотографий
-            # repo = self._get_repo(sess)
+        #     # # 2. Получаем репозиторий фотографий
+        #     # repo = self._get_repo(sess)
             
-            # # 3. Получаем фотографию по ID
-            # photo = repo.get_by_id(photo_id)
-            # if photo is None:
-            #     err_ = PhotoNotFoundError(photo_id)
-            #     self.logger.exception(err_.message)
+        #     # # 3. Получаем фотографию по ID
+        #     # photo = repo.get_by_id(photo_id)
+        #     # if photo is None:
+        #     #     err_ = PhotoNotFoundError(photo_id)
+        #     #     self.logger.exception(err_.message)
 
-            #     raise err_
+        #     #     raise err_
 
-            # # 4. Запоминаем путь к файлу до удаления записи
-            # file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
+        #     # # 4. Запоминаем путь к файлу до удаления записи
+        #     # file_path_to_delete = os.path.join(self._storage_path, photo.file_path)
 
-            # # 5. Пытаемся удалить файл
-            # try:
-            #     if os.path.exists(file_path_to_delete):
-            #         os.remove(file_path_to_delete)
-            #         self.logger.debug(f"Удалён файл {file_path_to_delete}")
+        #     # # 5. Пытаемся удалить файл
+        #     # try:
+        #     #     if os.path.exists(file_path_to_delete):
+        #     #         os.remove(file_path_to_delete)
+        #     #         self.logger.debug(f"Удалён файл {file_path_to_delete}")
 
-            #         # попытка уделения папки для хранения фото от удалённого приёма
-            #         # Проверяем, не стала ли родительская папка пустой
-            #         parent_dir = os.path.dirname(file_path_to_delete)
-            #         if os.path.exists(parent_dir) and not os.listdir(parent_dir):
-            #             try:
-            #                 os.rmdir(parent_dir)
-            #                 self.logger.debug(f"Удалена пустая папка {parent_dir}")
+        #     #         # попытка уделения папки для хранения фото от удалённого приёма
+        #     #         # Проверяем, не стала ли родительская папка пустой
+        #     #         parent_dir = os.path.dirname(file_path_to_delete)
+        #     #         if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+        #     #             try:
+        #     #                 os.rmdir(parent_dir)
+        #     #                 self.logger.debug(f"Удалена пустая папка {parent_dir}")
 
-            #             except OSError as e:
-            #                 self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
+        #     #             except OSError as e:
+        #     #                 self.logger.warning(f"Не удалось удалить папку {parent_dir}: {e}")
                             
-            # except Exception as e:
-            #     self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
-            #     raise PhotoFileError(file_path_to_delete, "удаление", str(e))
+        #     # except Exception as e:
+        #     #     self.logger.exception(f"Не удалось удалить файл {file_path_to_delete}: {e}")
+        #     #     raise PhotoFileError(file_path_to_delete, "удаление", str(e))
 
-            # # 6. Если файл успешно удалён (или не существовал), удаляем запись
-            # repo.delete(photo)  # Удаляем запись
-            # self.logger.info(f"Удалена запись фото id={photo_id}")
+        #     # # 6. Если файл успешно удалён (или не существовал), удаляем запись
+        #     # repo.delete(photo)  # Удаляем запись
+        #     # self.logger.info(f"Удалена запись фото id={photo_id}")
 
     # ----------------------------------------------------------------------
     # Вспомогательные методы (не требуют сессии)
@@ -5466,7 +6470,7 @@ class PhotoService(
         os.makedirs(self._storage_path, exist_ok=True)
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         # share_file_with = 'system',
         enable_file_logging = 'system',
         use_name_in_filename = False, # 'system',
@@ -5506,7 +6510,7 @@ class PhotoService(
     # внутри класса PhotoService, после метода __init__ или в любом месте
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
@@ -5529,7 +6533,7 @@ class PhotoService(
         self.logger.info(f"Путь к фото обновлён: {self._storage_path}")
 
     @AppLogger.get_instance(
-        name='PhotoService',
+        name = 'PhotoService',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))

@@ -26,10 +26,9 @@
 вызовов или расширять сервис. Пока оставляем AND.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 from app.utils.logger.logger import AppLogger
-
 
 @AppLogger.get_instance(
     name = 'filter_converter.py',

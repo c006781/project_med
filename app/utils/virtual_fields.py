@@ -38,7 +38,7 @@ def compute_virtual_fields(
     """
     result = data.copy() # копируем исходный словарь
     logger =  AppLogger.get_instance(
-        name='api',
+        name='api.virtual_fields.py',
         enable_file_logging = 'user',
         use_name_in_filename = False,
     )
@@ -121,7 +121,7 @@ def enrich_dto_with_computed_fields(
     # )
 
     logger =  AppLogger.get_instance(
-        name='api',
+        name='api.virtual_fields.py',
         enable_file_logging = 'user',
         use_name_in_filename = False,
     )
@@ -159,6 +159,14 @@ def enrich_dto_with_computed_fields(
         field_configs, 
         extra_data
     )
+
+    # Дополнительно: переносим значения из extra_data для виртуальных полей,
+    # которые имеют sql_compute (или просто присутствуют в extra_data и не были вычислены)
+    for field_name, config in field_configs.items():
+        if config.get('virtual', False) and field_name not in computed:
+            if extra_data and field_name in extra_data:
+                computed[field_name] = extra_data[field_name]
+                logger.debug(f"Поле {field_name} взято из extra_data: {extra_data[field_name]}")
 
     # Применяем к DTO
     for field_name, value in computed.items():

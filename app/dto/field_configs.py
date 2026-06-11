@@ -62,6 +62,8 @@ from typing import Dict, Any, List
 #     'date' — используется как подсказка, чтобы создать QDateEdit (хотя тип поля datetime.date сам по себе ведёт к этому, но widget_type может явно указать виджет даты).
 #     'time' — создаёт QTimeEdit для времени.
 #     **'completer', 'completer_with_create', 'completer_with_edit'** — создают составной виджет CompleterEdit, состоящий из QLineEditс автодополнением и опциональной кнопки...`, которая открывает отдельное окно для создания/редактирования связанной сущности (например, заметки).
+#     'image_thumbnail' — отображение миниатюры изображения в ячейке таблицы
+#                        (используется для полей file_path в таблице фото).
 #     По умолчанию (widget_type не задан или 'text') создаётся QLineEdit для обычной строки.
 
 
@@ -137,7 +139,7 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'order'         : 6,            # Порядковый номер колонки.
         'source_attr'   : 'description_note',   # Имя атрибута в ORM-объекте, по которому можно получить связанную заметку.
         'compute'       : {             # Настройка вычисления значения виртуального поля.
-            'func'  : lambda note: note.text if note else None, # Функция: берёт текст из заметки.
+            'func'      : lambda note: note.text if note else None, # Функция: берёт текст из заметки.
             'args'  : ['description_note'],     # Аргументы функции: имя атрибута, который будет передан в функцию.
         },
         'is_note'       : 'description_id',     # Метка, что это виртуальное поле, ссылающееся на заметку + ID заметки.
@@ -310,11 +312,24 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'order'         : 0,                # Делаем эту колонку самой левой (необязательно).
         'source_attr'   : 'photos',         # Атрибут ORM, содержащий список фото.
         'eager_load'    : False,            # Не надо подгружать вместе с другими полями.
-        'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
-            'func'  : lambda photo_count: f"{photo_count} фото" if photo_count > 0 else '❌',
-            'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно).
-        },
-        'counts': 'photos',                # явная метка – отношение для подсчёта
+
+        # 'width'         : 80,               # принудительный размер ширены
+        'width'         : {
+            'fixed'         : 80,           # принудительный размер ширены
+        },              
+        # 'compute'       : {                 # Вычисляем: возвращает текст "3 фото" или "❌".
+        #     'func'  : lambda photo_count: f"{photo_count} фото" if (photo_count is not None) and (photo_count > 0)   else '❌',
+        #     'args'  : ['photo_count'],      # Аргумент – количество фото (подставляется отдельно). # имя ключа в extra_data
+        # },
+        # 'counts': 'photos',                 # указывает, что нужно подсчитать количество связанных записей
+
+        'sql_compute'   : {                    # Вычисляем: количество через sql
+            'func'          : 'COUNT',
+            'relation'      : 'photos',
+            'result_type'   : 'int',
+            'extra_key'     : 'photo_count',  
+            'formatter'     : lambda count: f"{count} фото" if count > 0 else '❌'
+        }
     },
 }
 
@@ -351,16 +366,23 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         'updatable'     : False,        # полее не должно обновляться автоматически
     },
     'file_path'     : {
-        'title'         : 'Файл',   # заголовок колонки
-        'editable'      : False,    # редактируемый ли
-        'required'      : True,     # Поле обязательно для заполнения (валидация на стороне сервиса).
-        'updatable'     : False,    # полее не должно обновляться автоматически
+        'title'         : 'Файл',               # заголовок колонки
+        # 'editable'      : False,                # редактируемый ли
+        'required'      : True,                 # Поле обязательно для заполнения (валидация на стороне сервиса).
+        # 'updatable'     : False,                # полее не должно обновляться автоматически
+        'widget_type'   : 'image_thumbnail',    # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать
+        'description_field' : 'description',    # имя поля в DTO, где хранится описание
     },
     'description'   : {
         'title'         : 'Описание',   # заголовок колонки
         'editable'      : True,         # редактируемый ли
-        'autocomplete'  : True,         # включает автодополнение в таблице и форме
+        # 'autocomplete'  : True,         # включает автодополнение в таблице и форме
         'updatable'     : True,         # полее не должно обновляться автоматически
+        'widget_type'   : 'textarea',   # Многострочный текстовый редактор.
+        # 'stretch'       : True,          # этот столбец будет занимать всё оставшееся место
+        'width'         : {
+            'stretch'       : True,     # этот столбец будет занимать всё оставшееся место
+        }, 
     },
 }
 

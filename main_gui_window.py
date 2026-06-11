@@ -12,12 +12,14 @@ def handle_rename_argument():
     # Работает только в собранном exe
     if not getattr(sys, 'frozen', False):
         return
+    
     # Ищем аргумент --rename-to
     rename_to = None
     for i, arg in enumerate(sys.argv):
         if arg == '--rename-to' and i + 1 < len(sys.argv):
             rename_to = sys.argv[i + 1]
             break
+
     if not rename_to:
         return
 
@@ -27,6 +29,7 @@ def handle_rename_argument():
         # Удаляем старый файл, если он существует (обычно он уже удалён скриптом, но на всякий случай)
         if os.path.exists(target_exe):
             os.remove(target_exe)
+            
         # Переименовываем текущий exe
         os.rename(current_exe, target_exe)
 
@@ -38,6 +41,7 @@ def handle_rename_argument():
         # Запускаем переименованный exe
         subprocess.Popen([target_exe])
         sys.exit(0)
+
     except Exception as e:
         # Если не удалось переименовать, лучше показать ошибку и продолжить работу со старым именем
         # import traceback

@@ -200,7 +200,10 @@ class UpdateChecker(QThread):
 
         try:
             token = self._get_token()
-            self.logger.debug(f"Token length = {len(token)}, first 5 chars = {token[:5] if token else 'EMPTY'}")
+            self.logger.debug(
+                f"Token length = {len(token)}, "
+                f"first 5 chars = {token[:5] if token else 'EMPTY'}"
+            )
 
             req = self._build_request(token)
             self.logger.debug(f"Request URL: {req.full_url}")

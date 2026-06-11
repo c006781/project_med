@@ -317,6 +317,11 @@ class DateEditWidget(QWidget):
         text = self.line_edit.text().strip()
         if not text:
             return None
+        
+        # # Если текст состоит только из пробелов, дефисов и/или подчёркиваний (неполная дата)
+        # if all(c in ' -_' for c in text):
+        #     return None
+
         try:
             return datetime.date.fromisoformat(text)
         except ValueError:

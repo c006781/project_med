@@ -111,20 +111,21 @@ from datetime import (
 )
 
 # Сторонние библиотеки
+# from sqlalchemy import (
+#     # event,
+# )
+
 from sqlalchemy import (
     create_engine, Column,
     Integer, String, Date,
     DateTime, ForeignKey,
-    Text, Time
+    Text, Index,
+    # Time, func,
 )
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import (
     declarative_base, relationship,
     # sessionmaker
-)
-from sqlalchemy import (
-    # event,
-    Index, func,
 )
 
 Base = declarative_base()
@@ -239,6 +240,14 @@ class Patient(Base):
         }
     )
     
+    # @AppLogger.get_instance(
+    #     name = 'Patient', 
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def __repr__(self):
         """
         Возвращает строковое представление объекта Patient.
@@ -255,13 +264,19 @@ class Patient(Base):
                 self.first_name,
                 self.middle_name   
             ]).strip()
-            return f"<Patient(id={self.id}, name={temp})>"
+
+            id_val = getattr(self, 'id', None)
+
+            rezult = f"<Patient(id={id_val}, "
+            f"name={temp})>"
+
+            return rezult
         
         except Exception as e:
             # tt = str(e)
             AppLogger.get_instance(
-                name='Patient',
-                enable_file_logging = 'system',
+                name='api.Patient',
+                enable_file_logging = 'user',
                 use_name_in_filename = False, # 'system',
             ).exception(f'Err: {str(e)}')
             raise e
@@ -421,6 +436,14 @@ class Appointment(Base):
         }
     )
 
+    # @AppLogger.get_instance(
+    #     name = 'Appointment',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def __repr__(self):
         """
         Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
@@ -428,13 +451,21 @@ class Appointment(Base):
         # return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
     
         try:
-            return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+            id_val = getattr(self, 'id', None)
+            patient_id_val = getattr(self, 'patient_id', None)
+            date_val = getattr(self, 'date', None)
+
+            rezult = f"<Appointment(id={id_val}, "
+            f"patient_id={patient_id_val}, "
+            f"date={date_val})>"
+
+            return rezult
         
         except Exception as e:
             # tt = str(e)
             AppLogger.get_instance(
-                name='Appointment',
-                enable_file_logging = 'system',
+                name='api.Appointment',
+                enable_file_logging = 'user',
                 use_name_in_filename = False, # 'system',
             ).exception(f'Err: {str(e)}')
             raise e
@@ -512,12 +543,46 @@ class Photo(Base):
         }
     )
 
+    # @AppLogger.get_instance(
+    #     name = 'AppoinPhototment',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def __repr__(self):
         """
         Возвращает строку-representation объекта Photo в виде "<Photo(id=1, appointment_id=1, file=photo.jpg)>"
         """
-        return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
+        # return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
+    
 
+        try:
+            id_val = getattr(self, 'id', None)
+            appointment_id_val = getattr(self, 'appointment_id', None)
+            file_path_val = getattr(self, 'file_path', None)
+
+            rezult = f"<Photo(id={id_val}, "
+            f"appointment_id={appointment_id_val}, "
+            f"file={file_path_val})>"
+
+            return rezult
+        
+        except Exception as e:
+            # tt = str(e)
+            AppLogger.get_instance(
+                name='api.Photo',
+                enable_file_logging = 'user',
+                use_name_in_filename = False, # 'system',
+            ).exception(f'Err: {str(e)}')
+            raise e     
+
+            rezult = f"<Note(id={id_val}, "
+            f"text_preview={text_val[:30]}...)>"
+            return text_val
+    
+     
 
 class AppointmentNote(Base):
     """
@@ -573,26 +638,43 @@ class AppointmentNote(Base):
         }
     )
 
+    # @AppLogger.get_instance(
+    #     name = 'AppointmentNote', 
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system',
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
     def __repr__(self):
         """
         Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
         """
 
         try:
-            return f"<Note(id={self.id}, text_preview={self.text[:30]}...)>"
+            id_val = getattr(self, 'id', None)
+            text_val = getattr(self, 'text', None)
+
+            rezult = f"<Note(id={id_val}, "
+            f"text_preview={text_val[:30]}...)>"
+            return text_val
     
         except Exception as e:
             # tt = str(e)
             AppLogger.get_instance(
-                name='AppointmentNote',
-                enable_file_logging = 'system',
+                name='api.AppointmentNote',
+                enable_file_logging = 'user',
                 use_name_in_filename = False, # 'system',
             ).exception(f'Err: {str(e)}')
             raise e
 
 # Функция для инициализации БД и создания тестовых данных
+
 @AppLogger.get_instance(
-    name = 'system',
+    name = 'clinic.py', 
+    # share_file_with = 'system',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, # 'system',
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
@@ -622,7 +704,7 @@ def create_db(
     """
 
     logger = AppLogger.get_instance(
-        name = 'db',
+        name = 'api.clinic.py',
         # share_file_with = 'user',
         enable_file_logging = 'user',
         use_name_in_filename = False, # 'user',
@@ -666,10 +748,13 @@ def create_db(
 
     return engine
 
+
 @AppLogger.get_instance(
-    name = 'system',
+    name = 'clinic.py', 
+    # share_file_with = 'system',
+    enable_file_logging = 'system',
+    use_name_in_filename = False, # 'system',
 ).log_execution_time(
-    # description="Содание и заполнение БД",
     level=AppLogger._parse_log_level('DEBUG')
 )
 def init_db(

@@ -711,7 +711,7 @@ class PaginatedListPage(
 
         # уточнения:
         #   loader_func – это пережиток старой архитектуры. В новой версии данные загружаются через сервис с пагинацией, поэтому loader_func не нужен и должен быть удалён. Вся логика загрузки данных теперь сосредоточена в PaginationMixin.
-
+        
         super().__init__(parent)
 
         self.service = service
@@ -1009,7 +1009,7 @@ class PaginatedListPage(
             parent_ids (Set[int]): Множество ID родителей.
             session (Optional[Session]): Опциональная сессия SQLAlchemy.
         """
-        
+
         self.logger.debug(f"_refresh_parent_rows: START для {parent_ids}")
         if not parent_ids:
             return
@@ -2439,15 +2439,41 @@ class PaginatedListPage(
             - В наследниках (например, в AppointmentListPage) может быть переопределён
             для дополнительной кастомизации, но обязательно должен вызывать super().
         """
+        # 1. Переключение чекбокс-столбца и пересчёт ширины
+        self._toggle_checkbox_column_visibility(edit_mode)
 
         # Вызываем родительский метод (UIMixin), чтобы обновить базовые элементы
         super()._update_ui_for_edit_mode(edit_mode)
         
-        if self.side_toolbar:
-            self.side_toolbar.update_for_edit_mode(edit_mode)
-        # --- Работа с чекбокс-столбцом ---
-        # if hasattr(self, 'source_model'):
-            # self.source_model.set_checkbox_column_visible(edit_mode)
+        # if self.side_toolbar:
+        #     self.side_toolbar.update_for_edit_mode(edit_mode)
+        # # --- Работа с чекбокс-столбцом ---
+        # # if hasattr(self, 'source_model'):
+        #     # self.source_model.set_checkbox_column_visible(edit_mode)
+
+        # if hasattr(self, 'source_model') and self.source_model is not None:
+        #     for visible_idx in range(self.source_model.columnCount()):
+        #         col = self.source_model.get_column_at_visible_index(visible_idx)
+        #         if col is not None:
+        #             # Обновляем сохранённую ширину актуальным значением из таблицы
+        #             # col.width = self.table_view.columnWidth(visible_idx)
+
+        #             # current_width = self.table_view.columnWidth(visible_idx)
+        #             # new_width_dict = {'fixed': current_width}
+        #             # if col.is_stretch():
+        #             #     new_width_dict['stretch'] = True
+        #             # col.width = new_width_dict
+        #             col.set_fixed_width(self.table_view.columnWidth(visible_idx))
+
+
+        # Вместо полного пересоздания делегатов обновляем их read-only
+        self._update_delegates_readonly()
+
+        # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
+        self._reapply_delegates()  
+
+
+        # Сохранение текущих ширин всех столбцов (после переключения)
 
         if hasattr(self, 'source_model') and self.source_model is not None:
             for visible_idx in range(self.source_model.columnCount()):
@@ -2464,26 +2490,23 @@ class PaginatedListPage(
                     col.set_fixed_width(self.table_view.columnWidth(visible_idx))
 
 
-        # Вместо полного пересоздания делегатов обновляем их read-only
-        self._update_delegates_readonly()
+        # Боковая панель
+        self._update_side_toolbar_buttons(edit_mode)
 
-        # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
-        self._reapply_delegates()  
-
-         # Управление кнопками боковой панели
-        if hasattr(self, 'side_toolbar'):
-            # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
-            self.side_toolbar.add_btn.setEnabled(True)  
-            self.side_toolbar.delete_btn.setEnabled(
-                self.get_current_selected_dto() is not None
-            )
-            self.side_toolbar.edit_btn.setEnabled(
-                not edit_mode and self.get_current_selected_dto() is not None
-            )
+        #  # Управление кнопками боковой панели
+        # if hasattr(self, 'side_toolbar'):
+        #     # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
+        #     self.side_toolbar.add_btn.setEnabled(True)  
+        #     self.side_toolbar.delete_btn.setEnabled(
+        #         self.get_current_selected_dto() is not None
+        #     )
+        #     self.side_toolbar.edit_btn.setEnabled(
+        #         not edit_mode and self.get_current_selected_dto() is not None
+        #     )
             
-            self.side_toolbar.refresh_btn.setEnabled(not edit_mode) 
-            self.side_toolbar.cancel_btn.setEnabled(edit_mode)
-            self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())
+        #     self.side_toolbar.refresh_btn.setEnabled(not edit_mode) 
+        #     self.side_toolbar.cancel_btn.setEnabled(edit_mode)
+        #     self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())
 
         # # После переустановки делегатов пересчитываем высоту строк,
         # # так как ширина столбцов могла измениться (появился чекбокс-столбец)
@@ -2497,8 +2520,10 @@ class PaginatedListPage(
         #     end = min(self.source_model.rowCount() - 1, last + 5)
         #     for row in range(start, end + 1):
         #         self.table_view.resizeRowToContents(row)
+
         # Пересчёт высоты видимых строк
         self._adjust_visible_row_heights(extra_rows=5)
+
         # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
         # но оставляем для обратной совместимости)
         # --- Обновление read-only для TextPopupDыelegate (если есть) ---
@@ -2520,7 +2545,7 @@ class PaginatedListPage(
         if hasattr(self, 'multi_photo_btn'):
             self.multi_photo_btn.setVisible(edit_mode)
 
-        # --- Дополнительная синхронизация кнопки "Сохранить" ---
+        # Дополнительная синхронизация кнопки "Сохранить"
         self._update_save_button_state()
 
         # # Принудительная перерисовка, чтобы убрать артефакты
@@ -6702,7 +6727,11 @@ class PaginatedListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _apply_column_widths(self) -> None:
-        """Устанавливает ширину столбцов таблицы из конфигурации (TableColumn.width)."""
+        """
+        Устанавливает ширину столбцов таблицы из конфигурации (TableColumn.width).
+        Если у столбца ширина ещё не сохранена, использует текущую ширину из таблицы
+        и сохраняет её как фиксированную (инициализация).
+        """
         if not hasattr(self, 'source_model') or self.source_model is None:
             return
         
@@ -6711,6 +6740,16 @@ class PaginatedListPage(
             if col is not None:
                 
                 fixed_width = col.get_fixed_width()   
+
+                if fixed_width is None:
+                    # Ширина ещё не задана – берём текущую из таблицы
+                    current_width = self.table_view.columnWidth(visible_idx)
+                    if current_width > 0:
+                        col.set_fixed_width(current_width)
+                        self.logger.debug(
+                            f"Инициализирована ширина для столбца {col.system_name} = {current_width}"
+                        )
+                        fixed_width = current_width
 
                 if (
                     fixed_width is not None
@@ -8263,6 +8302,199 @@ class PaginatedListPage(
 
     # ------------------------------------------------------------------
 
-    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_column_width_by_name(self, system_name: str, width: int) -> None:
+        """
+        Устанавливает ширину столбца по его системному имени и сохраняет значение в TableColumn.
+
+        Args:
+            system_name (str): Уникальное системное имя столбца (например, '__checkbox__').
+            width (int): Новая ширина столбца в пикселях.
+
+        Note:
+            Если столбец в данный момент видим, ширина применяется к таблице.
+            В любом случае значение сохраняется в объекте TableColumn через set_fixed_width(),
+            чтобы оно не потерялось при последующих перестройках модели.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        # Ищем столбец среди видимых
+        for idx in range(self.source_model.columnCount()):
+            col = self.source_model.get_column_at_visible_index(idx)
+            if col and col.system_name == system_name:
+                self.table_view.setColumnWidth(idx, width)
+                col.set_fixed_width(width)
+                return
+
+        # Если столбец не видим, но мы хотим сохранить ширину для будущего
+        col = self.source_model.get_column_by_system_name(system_name)
+        if col:
+            col.set_fixed_width(width)
 
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _resize_columns_on_column_toggle(
+        self,
+        changed_column_system_name: str,
+        new_width: int,
+        old_width: int = 0
+    ) -> None:
+        """
+        Пересчитывает ширину столбцов при добавлении или удалении системного столбца (например, чекбокс).
+
+        Алгоритм:
+            1. Собирает текущие ширины всех видимых столбцов.
+            2. Вычисляет дельту (new_width - old_width).
+            3. Находит компенсирующий столбец: сначала с атрибутом stretch, затем последний видимый (кроме изменяемого).
+            4. Устанавливает новую ширину изменяемому столбцу (если new_width > 0).
+            5. Корректирует ширину компенсирующего столбца: new_comp = max(30, current_comp - delta).
+            6. Сохраняет новые ширины в TableColumn.
+
+        Args:
+            changed_column_system_name (str): Системное имя столбца, который появился или исчез.
+            new_width (int): Новая ширина этого столбца (для добавляемого – фиксированная, для удаляемого – 0).
+            old_width (int): Старая ширина столбца (если он был видим). По умолчанию 0.
+
+        Returns:
+            None
+
+        Note:
+            Минимальная ширина любого столбца – 30 пикселей.
+            Если компенсирующий столбец не найден, таблица может получить горизонтальную прокрутку.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        # 1. Текущие ширины всех видимых столбцов
+        visible_widths = {}
+        for idx in range(self.source_model.columnCount()):
+            col = self.source_model.get_column_at_visible_index(idx)
+            if col is not None:
+                visible_widths[col.system_name] = self.table_view.columnWidth(idx)
+
+        delta = new_width - old_width
+        if delta == 0:
+            return
+
+        # 2. Поиск компенсирующего столбца
+        compensator_name = None
+        # Сначала ищем stretch-столбец
+        for col in reversed(self.source_model.get_columns()):
+            if col.visible and col.system_name != changed_column_system_name:
+                if col.is_stretch():
+                    compensator_name = col.system_name
+                    break
+        # Если нет stretch, берём последний видимый (кроме изменяемого)
+        if compensator_name is None:
+            for col in reversed(self.source_model.get_columns()):
+                if col.visible and col.system_name != changed_column_system_name:
+                    compensator_name = col.system_name
+                    break
+
+        if compensator_name is None:
+            # Нечего компенсировать – просто устанавливаем новую ширину (если столбец видим)
+            if new_width > 0:
+                self._set_column_width_by_name(changed_column_system_name, new_width)
+            return
+
+        # 3. Ширина компенсатора
+        current_comp_width = visible_widths.get(compensator_name, 30)
+
+        # 4. Новая ширина компенсатора (не менее 30)
+        new_comp_width = max(30, current_comp_width - delta)
+
+        # 5. Устанавливаем новую ширину изменяемому столбцу (если он видим)
+        if new_width > 0:
+            self._set_column_width_by_name(changed_column_system_name, new_width)
+
+        # 6. Устанавливаем новую ширину компенсатору
+        self._set_column_width_by_name(compensator_name, new_comp_width)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _toggle_checkbox_column_visibility(self, edit_mode: bool) -> None:
+        """
+        Переключает видимость чекбокс-столбца и пересчитывает ширину всех столбцов.
+
+        Args:
+            edit_mode (bool): True – чекбокс-столбец должен стать видимым,
+                            False – должен быть скрыт.
+
+        Note:
+            Метод вызывается из `_update_ui_for_edit_mode` перед родительским обновлением.
+            Он самостоятельно определяет старую и новую ширину столбца, переключает видимость
+            через модель и вызывает `_resize_columns_on_column_toggle` для пересчёта.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        checkbox_col = self.source_model.get_column_by_system_name('__checkbox__')
+        if checkbox_col is None:
+            return
+
+        was_visible = checkbox_col.visible
+        will_be_visible = edit_mode
+
+        if was_visible == will_be_visible:
+            return
+
+        # Старая ширина (если был видим)
+        old_width = 0
+        if was_visible:
+            for idx in range(self.source_model.columnCount()):
+                col = self.source_model.get_column_at_visible_index(idx)
+                if col and col.system_name == '__checkbox__':
+                    old_width = self.table_view.columnWidth(idx)
+                    break
+
+        # Новая ширина (из конфигурации или 30 по умолчанию)
+        new_width = checkbox_col.get_fixed_width()
+        if new_width is None or new_width <= 0:
+            new_width = 30
+
+        # Переключаем видимость через модель
+        self.source_model.set_checkbox_column_visible(edit_mode)
+
+        # Пересчитываем ширину столбцов
+        self._resize_columns_on_column_toggle('__checkbox__', new_width, old_width)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_side_toolbar_buttons(self, edit_mode: bool) -> None:
+        """
+        Обновляет состояние кнопок боковой панели (SideToolbar) в зависимости от режима редактирования.
+
+        Args:
+            edit_mode (bool): True – режим редактирования включён, False – выключен.
+
+        Note:
+            Кнопка добавления всегда активна в режиме редактирования.
+            Кнопка удаления активна только если есть выбранная строка.
+            Кнопка редактирования активна только в обычном режиме и при наличии выбранной строки.
+            Кнопка обновления активна только в обычном режиме.
+            Кнопка отмены и сохранения активны только в режиме редактирования (сохранение – при наличии изменений).
+        """
+        if not hasattr(self, 'side_toolbar') or self.side_toolbar is None:
+            return
+
+        self.side_toolbar.add_btn.setEnabled(True)
+        self.side_toolbar.delete_btn.setEnabled(self.get_current_selected_dto() is not None)
+        self.side_toolbar.edit_btn.setEnabled(not edit_mode and self.get_current_selected_dto() is not None)
+        self.side_toolbar.refresh_btn.setEnabled(not edit_mode)
+        self.side_toolbar.cancel_btn.setEnabled(edit_mode)
+        self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())

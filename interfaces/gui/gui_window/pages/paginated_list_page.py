@@ -826,7 +826,7 @@ class PaginatedListPage(
         """Активирует/деактивирует кнопку «Приёмы» при выборе строки."""
         # Дополнительная кнопка (например, «Приёмы»)
         if hasattr(self, 'action_btn') and self.action_btn:
-            self.action_btn.setEnabled(dto is not None)
+            self.action_btn.setEnabled(dto is not None and not self.edit_mode)
         # Кнопки редактирования и удаления в боковой панели
         self._update_edit_delete_buttons_state()
 
@@ -8460,6 +8460,9 @@ class PaginatedListPage(
         """
         if not hasattr(self, 'side_toolbar') or self.side_toolbar is None:
             return
+        
+        if hasattr(self, 'action_btn') and self.action_btn:
+            self.action_btn.setEnabled(not edit_mode and self.get_current_selected_dto() is not None)
 
         self.side_toolbar.add_btn.setEnabled(True)
         self.side_toolbar.delete_btn.setEnabled(self.get_current_selected_dto() is not None)

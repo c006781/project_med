@@ -4150,7 +4150,12 @@ class DynamicListPage(
 
         # Обновляем состояние дополнительной кнопки, если она есть
         if hasattr(self, 'action_btn') and self.action_btn:
-            self.action_btn.setEnabled(self.selected_dto is not None)
+
+            enb = not self.edit_mode    
+            if hasattr(self, 'get_current_selected_dto'):
+                enb = enb and self.get_current_selected_dto() is not None
+            self.action_btn.setEnabled(enb)
+            # self.action_btn.setEnabled(self.selected_dto is not None)
         
         # # Управляем кнопкой «Отменить текущую»
         # if hasattr(self, 'cancel_current_btn'):

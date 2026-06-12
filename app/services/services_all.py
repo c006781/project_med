@@ -949,10 +949,18 @@ class BaseService(
         for field_spec in order_by:
             if field_spec.startswith('-'):
                 field_name = field_spec[1:]
-                order_clauses.append(getattr(self._model_class, field_name).desc())
+                # order_clauses.append(getattr(self._model_class, field_name).desc())
+                if hasattr(self._model_class, field_name):
+                    order_clauses.append(getattr(self._model_class, field_name).desc())
+        
             else:
-                order_clauses.append(getattr(self._model_class, field_spec).asc())
-        return query.order_by(*order_clauses)
+                # order_clauses.append(getattr(self._model_class, field_spec).asc())
+                if hasattr(self._model_class, field_spec):
+                    order_clauses.append(getattr(self._model_class, field_spec).asc())
+        if order_clauses:
+            query = query.order_by(*order_clauses)
+
+        return query
 
 
     @AppLogger.get_instance(

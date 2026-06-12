@@ -108,10 +108,10 @@ class TableColumn:
     @property
     def width(self) -> Dict[str, Any]:
         try:
-            return self._width
+            return self._width_dict
         except AttributeError as e:
-            self._width = {}
-            return self._width
+            self._width_dict = {}
+            return self._width_dict
 
     @width.setter
     def width(self, value: Union[int, Dict[str, Any], None]):
@@ -161,6 +161,7 @@ class TableColumn:
 
         # if self.system_name == 'file_path':
         #     0==0
+
         # Валидация
         if column_type == ColumnType.DATA and not field_name:
             err_text = f"{system_name} -> DATA-столбец должен иметь field_name"
@@ -216,8 +217,8 @@ class TableColumn:
         Если new_width is None, удаляет ключ 'fixed' из словаря.
         Флаг 'stretch' сохраняется без изменений.
         """
-        if self.system_name == 'file_path':
-            0==0
+        # if self.system_name == 'file_path':
+        #     0==0
 
         if new_width is None:
             self._width_dict.pop('fixed', None)

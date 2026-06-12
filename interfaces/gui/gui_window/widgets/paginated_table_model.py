@@ -1537,6 +1537,7 @@ class PaginatedTableModel(BaseTableModel):
         if col is None or col.visible == visible:
             return
         
+        # visible_old = col.visible
         col.visible = visible
         self.layoutChanged.emit()   # перестроит всю модель (но данные останутся)
 
@@ -1993,7 +1994,7 @@ class PaginatedTableModel(BaseTableModel):
                     return col if not if_return_visible_idx else visible_idx
                     
                 visible_idx += 1
-
+        
         return None
 
     # @AppLogger.get_instance(

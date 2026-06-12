@@ -712,6 +712,10 @@ class PaginatedListPage(
         # уточнения:
         #   loader_func – это пережиток старой архитектуры. В новой версии данные загружаются через сервис с пагинацией, поэтому loader_func не нужен и должен быть удалён. Вся логика загрузки данных теперь сосредоточена в PaginationMixin.
         
+
+        # Блокировка сохранение ширины на время перестройки таблицы (для системных вызовов)
+        self._suppress_section_resized_save = False
+
         super().__init__(parent)
 
         self.service = service
@@ -758,7 +762,7 @@ class PaginatedListPage(
 
         # Подключаем сохранение ширины столбцов при изменении пользователем
         header = self.table_view.horizontalHeader()
-        header.sectionResized.connect(self._on_section_resized)
+        header.sectionResized.connect(self._on_section_resized_wrapper)
 
         # На стройка высоты строк для корректного отображения миниатюр
         # from PySide6.QtWidgets import QHeaderView
@@ -805,6 +809,13 @@ class PaginatedListPage(
         self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
 
         self._update_edit_delete_buttons_state()
+
+    def _on_section_resized_wrapper(self, *args, **kwargs):
+
+         # Если идёт программное изменение видимости столбцов – не сохраняем ширину
+        if getattr(self, '_suppress_section_resized_save', False):
+            return
+        self._on_section_resized(*args, **kwargs)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2372,9 +2383,9 @@ class PaginatedListPage(
                 self.edit_mode_btn.blockSignals(False)
                 return
 
-        # Режим успешно переключился – обновляем видимость чекбокс-столбца
-        if hasattr(self, 'source_model'):
-            self.source_model.set_checkbox_column_visible(self.edit_mode)
+        # # Режим успешно переключился – обновляем видимость чекбокс-столбца
+        # if hasattr(self, 'source_model'):
+        #     self.source_model.set_checkbox_column_visible(self.edit_mode)
 
 
     @AppLogger.get_instance(
@@ -2473,21 +2484,24 @@ class PaginatedListPage(
         self._reapply_delegates()  
 
 
-        # Сохранение текущих ширин всех столбцов (после переключения)
+        # # Сохранение текущих ширин всех столбцов (после переключения)
 
-        if hasattr(self, 'source_model') and self.source_model is not None:
-            for visible_idx in range(self.source_model.columnCount()):
-                col = self.source_model.get_column_at_visible_index(visible_idx)
-                if col is not None:
-                    # Обновляем сохранённую ширину актуальным значением из таблицы
-                    # col.width = self.table_view.columnWidth(visible_idx)
+        # if hasattr(self, 'source_model') and self.source_model is not None:
+        #     for visible_idx in range(self.source_model.columnCount()):
+        #         col = self.source_model.get_column_at_visible_index(visible_idx)
+        #         if col is not None:
+        #             # Обновляем сохранённую ширину актуальным значением из таблицы
+        #             # col.width = self.table_view.columnWidth(visible_idx)
 
-                    # current_width = self.table_view.columnWidth(visible_idx)
-                    # new_width_dict = {'fixed': current_width}
-                    # if col.is_stretch():
-                    #     new_width_dict['stretch'] = True
-                    # col.width = new_width_dict
-                    col.set_fixed_width(self.table_view.columnWidth(visible_idx))
+        #             if col.system_name == 'file_path':
+        #                 0==0
+        #             current_width = self.table_view.columnWidth(visible_idx)
+        #             # new_width_dict = {'fixed': current_width}
+        #             # if col.is_stretch():
+        #             #     new_width_dict['stretch'] = True
+        #             # col.width = new_width_dict
+                    
+        #             col.set_fixed_width(current_width)
 
 
         # Боковая панель
@@ -3059,11 +3073,24 @@ class PaginatedListPage(
         # Перекрашиваем только видимые строки, чтобы ускорить
         if not self.table_view or not self.table_view.isVisible():
             return
+        
+        cols = self.source_model.columnCount()
+        # widths = {}
+        # old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        # try:
+        #     self._suppress_section_resized_save = True
+        #     for idx in range(cols):
+
+        #         widths[idx] = self.table_view.columnWidth(idx)
+        # finally:
+        #     self._suppress_section_resized_save = old_suppress_section_resized_save
+    
+
         first, last = get_visible_row_range(self.table_view)
         if first < 0:
             first = 0
-        if last >= self.source_model.rowCount():
-            last = self.source_model.rowCount() - 1
+        if last >= cols:
+            last = cols - 1
         for row in range(first, last + 1):
             self._update_row_color(row)
 
@@ -6735,28 +6762,36 @@ class PaginatedListPage(
         if not hasattr(self, 'source_model') or self.source_model is None:
             return
         
-        for visible_idx in range(self.source_model.columnCount()):
-            col = self.source_model.get_column_at_visible_index(visible_idx)
-            if col is not None:
-                
-                fixed_width = col.get_fixed_width()   
+        old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        try:
+            self._suppress_section_resized_save = True
+            for visible_idx in range(self.source_model.columnCount()):
+                col = self.source_model.get_column_at_visible_index(visible_idx)
+                if col is not None:
+                    
+                    fixed_width = col.get_fixed_width()   
 
-                if fixed_width is None:
-                    # Ширина ещё не задана – берём текущую из таблицы
-                    current_width = self.table_view.columnWidth(visible_idx)
-                    if current_width > 0:
-                        col.set_fixed_width(current_width)
-                        self.logger.debug(
-                            f"Инициализирована ширина для столбца {col.system_name} = {current_width}"
-                        )
-                        fixed_width = current_width
+                    if fixed_width is None:
+                        # Ширина ещё не задана – берём текущую из таблицы
+                        current_width = self.table_view.columnWidth(visible_idx)
+                        if current_width > 0:
+                            col.set_fixed_width(current_width)
+                            self.logger.debug(
+                                f"Инициализирована ширина для столбца {col.system_name} = {current_width}"
+                            )
+                            fixed_width = current_width
 
-                if (
-                    fixed_width is not None
-                # ) and (
-                #     fixed_width > 0  # Проверка fixed_width > 0 предотвращает установку нулевой ширины
-                ):
-                    self.table_view.setColumnWidth(visible_idx, fixed_width)
+                    if (
+                        fixed_width is not None
+                    # ) and (
+                    #     fixed_width > 0  # Проверка fixed_width > 0 предотвращает установку нулевой ширины
+                    ):
+                        
+                        # if col.system_name == 'file_path':
+                        #     0==0
+                        self.table_view.setColumnWidth(visible_idx, fixed_width)
+        finally:
+            self._suppress_section_resized_save = old_suppress_section_resized_save
 
     @AppLogger.get_instance(
         name = 'PaginatedListPage',
@@ -6775,6 +6810,11 @@ class PaginatedListPage(
             old_size: Предыдущая ширина (не используется).
             new_size: Новая ширина, установленная пользователем.
         """
+
+        #  # Если идёт программное изменение видимости столбцов – не сохраняем ширину
+        # if getattr(self, '_suppress_section_resized_save', False):
+        #     return
+
         
         if not hasattr(self, 'source_model') or self.source_model is None:
             return
@@ -6783,6 +6823,8 @@ class PaginatedListPage(
         if col is None:
             return
         
+        # if col.system_name == 'file_path':
+        #     0==0
 
         # Проверяем, изменилась ли ширина
         current_fixed = col.get_fixed_width()
@@ -8464,8 +8506,15 @@ class PaginatedListPage(
         if new_width is None or new_width <= 0:
             new_width = 30
 
-        # Переключаем видимость через модель
-        self.source_model.set_checkbox_column_visible(edit_mode)
+        # Блокируем сохранение ширины на время перестройки таблицы
+        old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        try:
+            self._suppress_section_resized_save = True
+            # Переключаем видимость через модель
+            self.source_model.set_checkbox_column_visible(edit_mode)
+
+        finally:
+            self._suppress_section_resized_save = old_suppress_section_resized_save
 
         # Пересчитываем ширину столбцов
         self._resize_columns_on_column_toggle('__checkbox__', new_width, old_width)

@@ -877,6 +877,7 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         # Отменяем изменения в таблице фото
         if hasattr(self.photo_page, '_discard_all_changes'):
             self.photo_page._discard_all_changes()
+
         # Отменяем изменения в таблице приёмов (если есть метод)
         if hasattr(self.appointment_page, '_discard_all_changes'):
             self.appointment_page._discard_all_changes()

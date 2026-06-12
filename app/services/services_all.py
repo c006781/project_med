@@ -217,7 +217,7 @@ from app.exceptions import (
 
 
 from app.utils.file_deletions import (
-    schedule_deletion, DeletionContext,
+    copy_file_to_temp_dir, schedule_deletion, DeletionContext,
     DeletionType
 )
 
@@ -447,7 +447,6 @@ class BaseService(
         # Подписываемся на изменения конфигурации
         AppConfigManager.add_change_listener(self._on_config_changed)
 
-
     @AppLogger.get_instance(
         name='BaseService',
         enable_file_logging='system',
@@ -487,12 +486,25 @@ class BaseService(
         else:
             name = naming_func()
 
-        dest_path = os.path.join(dest_dir, name)
-        shutil.copy2(source_path, dest_path)
-        self.logger.debug(f"Файл скопирован: {source_path} -> {dest_path}")
-
         # При откате транзакции нужно удалить только что скопированный файл
         ctx_rollback = DeletionContext(session, DeletionType.ROLLBACK) 
+
+        # dest_path = os.path.join(dest_dir, name)
+        # shutil.copy2(source_path, dest_path)
+        # self.logger.debug(f"Файл скопирован: {source_path} -> {dest_path}")
+
+        unique_name = copy_file_to_temp_dir(
+            source_path=source_path,
+            target_dir=dest_dir,
+            unique_name=name,
+            logger=self.logger,
+            delete_on_error=True,
+            ctx=ctx_rollback,  # передаётся только для обработки ошибки, но не для отложенного удаления при успехе
+            remove_parent_if_empty=False   # для файла – не удалять родителя
+        )
+
+        dest_path = os.path.join(dest_dir, unique_name) 
+        
         self._del_file_ctx(
             file_path=os.path.abspath(dest_path),
             ctx=ctx_rollback, 

@@ -40,7 +40,7 @@ from typing import List, Optional, Tuple
 import uuid
 
 from app.utils.logger.logger import AppLogger
-from app.utils.file_deletions import resolve_photo_path, schedule_deletion
+from app.utils.file_deletions import copy_file_to_temp_dir, resolve_photo_path, schedule_deletion
 
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QListWidget,
@@ -359,11 +359,18 @@ class PhotoEditDialog(QDialog):
                 "Убедитесь, что диалог получил temp_dir из делегата."
             )
         
-        os.makedirs(self._temp_dir, exist_ok=True)
-        ext = os.path.splitext(source_path)[1]
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(self._temp_dir, unique_name)
-        shutil.copy2(source_path, dest_path)
+        # os.makedirs(self._temp_dir, exist_ok=True)
+        # ext = os.path.splitext(source_path)[1]
+        # unique_name = f"{uuid.uuid4().hex}{ext}"
+        # dest_path = os.path.join(self._temp_dir, unique_name)
+        # shutil.copy2(source_path, dest_path)
+            
+        unique_name = copy_file_to_temp_dir(
+            source_path=source_path,
+            target_dir=self._temp_dir,
+            logger=self.logger,
+            delete_on_error=True
+        )
 
         return unique_name
     

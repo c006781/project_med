@@ -55,6 +55,7 @@
 """
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from app.utils.logger.logger import AppLogger
 
@@ -219,7 +220,11 @@ class EditModeMixin(ABC):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def toggle_edit_mode(self, enable: bool) -> bool:
+    def toggle_edit_mode(
+        self, 
+        enable: bool, 
+        forced_button: Optional[QMessageBox.StandardButton] = None,
+    ) -> bool:
         """
         Включает или выключает режим редактирования.
 
@@ -249,27 +254,37 @@ class EditModeMixin(ABC):
 
         if enable == self.edit_mode:
             return False
+        
         # ее = self._has_unsaved_changes()
-        if not enable and self._has_unsaved_changes():
+        if not (not enable and self._has_unsaved_changes()):
+            self._set_edit_mode(enable)
+            return self.edit_mode
+
+        reply = forced_button
+        
+        if reply is None:
             reply = QMessageBox.question(
                 self, "Несохранённые изменения",
                 "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
             )
 
-            if reply == QMessageBox.StandardButton.Yes:
-                if not self._save_all_changes_impl():
-                    return True
-                
-            elif reply == QMessageBox.StandardButton.No:
-                self._discard_all_changes()
+        if reply == QMessageBox.StandardButton.Cancel:
+            return self.edit_mode
 
-            else:
-                return False
+        if reply == QMessageBox.StandardButton.Yes:
+            if not self._save_all_changes_impl():
+                return self.edit_mode
+            
+        elif reply == QMessageBox.StandardButton.No:
+            self._discard_all_changes()
+
+        # else:
+        #     return False
             
         self._set_edit_mode(enable)
 
-        return True
+        return self.edit_mode
     
     @AppLogger.get_instance(
         name='EditModeMixin',
@@ -406,12 +421,18 @@ class EditModeMixin(ABC):
         self.logger.debug(f"_set_edit_mode: enable={enable}")
         if self.edit_mode != enable:
             self.edit_mode = enable
+            # Блокируем сохранение ширины на время перестройки таблицы и восстановления
+            old_suppress = getattr(self, '_suppress_section_resized_save', False)
+            self._suppress_section_resized_save = True
+            try:
+                # Переключаем видимость через модель
+                if hasattr(self, 'source_model'):
+                    self.source_model.set_checkbox_column_visible(enable)
 
-            if hasattr(self, 'source_model'):
-                self.source_model.set_checkbox_column_visible(enable)
-
-            if hasattr(self, '_update_ui_for_edit_mode'):
-                self._update_ui_for_edit_mode(enable)
+                if hasattr(self, '_update_ui_for_edit_mode'):
+                    self._update_ui_for_edit_mode(enable)
+            finally:
+                self._suppress_section_resized_save = old_suppress
 
     # def _set_edit_mode(self, enable: bool):
     #     self.edit_mode = enable

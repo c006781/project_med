@@ -223,7 +223,7 @@
 
     **Массовое добавление фото (опционально):**
         Страница предоставляет методы `_has_photo_column()`, `_get_allowed_extensions_for_photo()`,
-        `_add_photo_from_file(file_path, photo_field)`. Для интеграции с ActionManager
+        `_add_photo_from_file_at_pos(file_path, photo_field)`. Для интеграции с ActionManager
         зарегистрируйте действие с именем `'multi_photo_add'` и привяжите к нему кнопку.
         Пример регистрации смотрите в разделе «Добавление кнопок через ActionManager».   
 
@@ -293,7 +293,7 @@ from app.utils.deferred_actions import (
 from app.config.config_manager.manager import AppConfigManager
 
 from app.utils.file_deletions import (
-    resolve_photo_path, schedule_deletion, DeletionContext,
+    copy_file_to_temp_dir, resolve_photo_path, schedule_deletion, DeletionContext,
     DeletionType
     # , delete_file_safely
 )
@@ -1611,7 +1611,7 @@ class PaginatedListPage(
         if dialog.exec() == QDialog.Accepted:
             file_paths = dialog.get_selected_files()
             for file_path in file_paths:
-                self._add_photo_from_file(file_path, photo_field)
+                self._add_photo_from_file_at_pos(file_path, photo_field)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1735,154 +1735,6 @@ class PaginatedListPage(
 
         # Пересчёт высоты строк (дополнительная страховка)
         self._adjust_visible_row_heights()
-
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _add_photo_from_file(
-        self, 
-        file_path: str,
-        photo_field: str
-    ) -> None:
-        """
-        Создаёт новую строку с предзаполненным путём к фото.
-        Используется для массового добавления фото (через диалог).
-
-        Копирует исходный файл во временную папку новой строки,
-        сохраняет в DTO только имя файла, добавляет строку в модель и помечает как новую.
-
-        Args:
-            file_path (str): Абсолютный путь к исходному файлу.
-            photo_field (str): Имя поля DTO, содержащего путь к фото.
-        """
-
-        try:
-            # Создаём временную папку для этой новой строки
-            temp_dir = self._ensure_temp_dir(self._next_temp_id)
-
-            # Копируем файл во временную папку
-            ext = os.path.splitext(file_path)[1]
-            unique_name = f"{uuid.uuid4().hex}{ext}"
-            dest_path = os.path.join(temp_dir, unique_name)
-            shutil.copy2(file_path, dest_path)
-
-            # В DTO сохраняем только имя файла
-            rel_path_in_temp = unique_name
-
-        except Exception as e:
-            self.logger.error(f"Не удалось скопировать файл {file_path} во временную папку: {e}")
-            return
-
-        # Создаём DTO с переопределением photo_field
-        overrides = {photo_field: rel_path_in_temp}
-        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
-        if dto is None:
-            return
-
-        temp_id = dto.id
-
-        # Добавляем в модель
-        row = self.source_model.add_row(dto)
-
-        self._finalize_new_row(dto, temp_id, row)
-
-        # # Сохраняем в реестр как новую строку
-        # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
-
-        # # Добавляем в модель
-        # row = self.source_model.add_row(dto)
-
-        # # Помечаем как имеющую собственные изменения (новая строка)
-        # self.mark_own_change(temp_id)
-
-        # # Уведомляем родителя о появлении нового потомка
-        # self._register_new_row_parent_balance(dto, temp_id)
-
-        # # После возможной сортировки нужно найти актуальную строку по temp_id
-        # actual_row = self._find_row_by_id(temp_id)
-
-        # self.logger.debug(f"actual_row = {actual_row}")
-        # if actual_row >= 0:
-        #     self._update_row_color(actual_row)
-        # else:
-        #     self._update_row_color(row)
-
-        # self._update_save_button_state()
-
-        # # --- Универсальное создание DTO с учётом всех полей и контекста ---
-        # # 1. Создаём словарь со значениями по умолчанию для ВСЕХ полей DTO (включая скрытые)
-        # defaults = {}
-        # all_dto_fields = self.dto_class.model_fields.keys()
-        # for field_name in all_dto_fields:
-        #     defaults[field_name] = None
-
-        # # 2. Заполняем из контекстных параметров (приоритет выше)
-        # if hasattr(self, '_context_params'):
-        #     for key, value in self._context_params.items():
-        #         if key in defaults:
-        #             defaults[key] = value
-
-        # # 3. Устанавливаем путь к фото (переопределяем, если нужно)
-        # defaults[photo_field] = rel_path_in_temp
-
-        # # 4. Проверяем наличие обязательных полей (согласно field_configs)
-        # missing_required = []
-        # for field_name, config in self.field_configs.items():
-        #     if config.get('required', False) and defaults.get(field_name) is None:
-        #         missing_required.append(field_name)
-
-        # if missing_required:
-        #     self.logger.error(
-        #         f"Не удалось создать новую строку: отсутствуют обязательные поля {missing_required}. "
-        #         f"Контекстные параметры: {self._context_params}"
-        #     )
-        #     return
-
-        # try:
-        #     dto = self.dto_class(**defaults)
-        # except Exception as e:
-        #     self.logger.error(f"Ошибка создания DTO: {e}, defaults={defaults}")
-        #     return
-
-        # # --- Регистрация новой строки ---
-        # temp_id = self._next_temp_id
-        # self._next_temp_id -= 1
-        # dto.id = temp_id
-
-        # # defaults = {}
-        # # for col in self.columns:
-        # #     if col.column_type == ColumnType.DATA:
-        # #         defaults[col.field_name] = None
-
-        # # # Копируем контекстные параметры
-        # # if hasattr(self, '_context_params'):
-        # #     for key, value in self._context_params.items():
-        # #         if key in defaults:
-        # #             defaults[key] = value
-
-        # # # defaults[photo_field] = file_path
-        # # defaults[photo_field] = rel_path_in_temp
-        # # dto = self.dto_class(**defaults)
-        # # # temp_id = self._next_temp_id
-        # # dto.id = self._next_temp_id
-        # # self._next_temp_id -= 1
-
-        # # # dto.id = temp_id
-
-        # # #  # создаём временную папку для этой новой строки (черновик)
-        # # # self._ensure_temp_dir(temp_id)
-
-        # # Сохраняем в реестр черновиков как новую строку
-        # self._draft_registry.set(
-        #     f"__new__:{self._entity_type}:{dto.id}", {"dto": dto}
-        # )
-        # row = self.source_model.add_row(dto)
-        # self.mark_own_change(dto.id)
-        # self._register_new_row_parent_balance(dto, dto.id)
-        # self._update_row_color(row)
-        # self._update_save_button_state()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2097,27 +1949,60 @@ class PaginatedListPage(
                     self.mark_own_change(entity_id)
 
         # Временная папка для черновика
-        temp_dir = self._ensure_temp_dir(entity_id)
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(temp_dir, unique_name)
+        # temp_dir = self._ensure_temp_dir(entity_id)
+        # unique_name = f"{uuid.uuid4().hex}{ext}"
+        # dest_path = os.path.join(temp_dir, unique_name)
+
+        # try:
+        #     shutil.copy2(file_path, dest_path)
+        # except Exception as e:
+        #     self.logger.exception(f"_add_photo_to_row_impl: копирование файла {file_path} не удалось: {e}")
+        #     return False
 
         try:
-            shutil.copy2(file_path, dest_path)
+            temp_dir = self._ensure_temp_dir(entity_id) # Временная папка для черновика
+
+            unique_name = copy_file_to_temp_dir(
+                source_path=file_path,
+                target_dir=temp_dir,
+                logger=self.logger,
+                delete_on_error=False   # не удаляем автоматически, мы сами удалим в except
+            )
+            
+            dest_path = os.path.join(temp_dir, unique_name)
+
+            # Обновляем DTO
+            setattr(dto, photo_field, unique_name)
+            self.source_model.update_row(row, dto)
+
+            if not is_new:
+                self.mark_own_change(entity_id)
+
+            self._update_row_color(row)
+            self._update_save_button_state()
+            return True    
+
         except Exception as e:
-            self.logger.exception(f"_add_photo_to_row_impl: копирование файла {file_path} не удалось: {e}")
+            # Удаляем временные файлы/папки при ошибке
+            if dest_path and os.path.exists(dest_path):
+                schedule_deletion(
+                    path=dest_path,
+                    ctx=None,
+                    remove_parent_if_empty=True,
+                    force=False,
+                    logger=self.logger
+                )
+            elif temp_dir and os.path.exists(temp_dir):
+                schedule_deletion(
+                    path=temp_dir,
+                    ctx=None,
+                    remove_parent_if_empty=False,
+                    force=False,
+                    logger=self.logger
+                )
+            self.logger.exception(f"Error adding photo to row {row}: {e}")
             return False
-
-        # Обновляем DTO
-        setattr(dto, photo_field, unique_name)
-        self.source_model.update_row(row, dto)
-
-        if not is_new:
-            self.mark_own_change(entity_id)
-
-        self._update_row_color(row)
-        self._update_save_button_state()
-        return True    
-
+    
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -2591,7 +2476,11 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_edit_mode(self, enable: bool) -> bool:
+    def set_edit_mode(
+        self, 
+        enable: bool, 
+        forced_button: Optional[QMessageBox.StandardButton] = None,
+    ) -> bool:
         """
         Включает или выключает режим редактирования.
 
@@ -2599,8 +2488,11 @@ class PaginatedListPage(
             enable: True – включить режим редактирования, False – выключить.
         """
         if hasattr(self, 'toggle_edit_mode'):
-            return self.toggle_edit_mode(enable)
-        return False
+            return self.toggle_edit_mode(
+                enable = enable,
+                forced_button = forced_button,
+            )
+        return self.edit_mode
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -7355,25 +7247,53 @@ class PaginatedListPage(
         temp_id = self._next_temp_id
         self._next_temp_id -= 1
 
-        # Создаём временную папку для черновика (если ещё не создана)
-        temp_dir = self._ensure_temp_dir(temp_id)
+        temp_dir = None
+        dest_path  = None
+        try:
+            # Создаём временную папку для черновика (если ещё не создана)
+            temp_dir = self._ensure_temp_dir(temp_id)
 
-        # Копируем файл во временную папку с уникальным именем
-        ext = os.path.splitext(file_path)[1]
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(temp_dir, unique_name)
-        shutil.copy2(file_path, dest_path)
+            unique_name = copy_file_to_temp_dir(
+                source_path=file_path,
+                target_dir=temp_dir,
+                unique_name=None,  # генерируется автоматически
+                logger=self.logger,
+                delete_on_error=True
+            )
+            # # Копируем файл во временную папку с уникальным именем
+            # ext = os.path.splitext(file_path)[1]
+            # unique_name = f"{uuid.uuid4().hex}{ext}"
+            # dest_path = os.path.join(temp_dir, unique_name)
+            # shutil.copy2(file_path, dest_path)
 
-        # Создаём DTO с переопределением поля фото
-        overrides = {photo_field: unique_name}
-        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=False)
-        if dto is None:
-            return
-        dto.id = temp_id
+            dest_path = os.path.join(temp_dir, unique_name)
 
-        # Вставляем строку с учётом позиции
-        self._add_new_row_at_pos(dto)
-        0==0
+            # Создаём DTO с переопределением поля фото
+            overrides = {photo_field: unique_name}
+            dto = self._prepare_new_dto(
+                overrides=overrides, 
+                assign_temp_id=False
+            )
+
+            if dto is None:
+                return
+            
+            dto.id = temp_id
+
+            # Вставляем строку с учётом позиции
+            self._add_new_row_at_pos(dto)
+            0==0
+        except Exception as e:
+            if dest_path or temp_dir:
+                # Немедленное рекурсивное удаление временной папки
+                schedule_deletion(
+                    path=dest_path or temp_dir,
+                    ctx=None,
+                    remove_parent_if_empty=(dest_path is not None),
+                    force=False,
+                    logger=self.logger
+                )
+            self.logger.exception(f"Error adding photo {file_path}: {e}")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -8142,7 +8062,7 @@ class PaginatedListPage(
             if photo_field is None:
                 self.logger.error("add_photo_from_file: не найдено поле с фото")
                 return False
-        self._add_photo_from_file(file_path, photo_field)
+        self._add_photo_from_file_at_pos(file_path, photo_field)
         return True
 
     @AppLogger.get_instance(

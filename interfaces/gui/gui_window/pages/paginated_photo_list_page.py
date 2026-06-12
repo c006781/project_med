@@ -156,7 +156,7 @@ class PaginatedPhotoListPage(PaginatedListPage):
         if not photo_field:
             return False
         
-        self._add_photo_from_file(file_path, photo_field)
+        self._add_photo_from_file_at_pos(file_path, photo_field)
 
         return True
     

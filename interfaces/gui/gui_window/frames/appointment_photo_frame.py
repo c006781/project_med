@@ -193,7 +193,8 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         self.appointment_page.table_view.selectionModel().selectionChanged.connect(
             self._on_appointment_selected
         )
-
+        # Подключаем сигнал загрузки страницы для синхронизации таблицы фото
+        self.appointment_page.page_loaded.connect(self.on_appointment_selected)
 
         # Подключаем сигналы изменения выделения для обновления состояния кнопки удаления
         self.appointment_page.table_view.selectionModel().selectionChanged.connect(
@@ -291,6 +292,11 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
 
         # Получаем выбранный DTO приёма
         dto = self.appointment_page.get_current_selected_dto()
+
+        current_appointment_id = self.photo_page._context_params.get('appointment_id')
+        if dto and dto.id == current_appointment_id:
+            return  # уже загружены для этого приёма
+        
         if dto:
 
             # Устанавливаем контекстный параметр для таблицы фото
@@ -307,6 +313,9 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
             # Очищаем таблицу фото и сбрасываем контекст
             self.photo_page.source_model.clear()
             self.photo_page._context_params = {}
+            # Отменяем текущую загрузку (если она идёт)
+            self.photo_page.cancel_loading()
+            
             
         self.photo_page._update_ui_for_edit_mode(self.photo_page.edit_mode)
 
@@ -344,6 +353,8 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         # Очищаем таблицу фото (будет заполнена при выборе приёма)
         self.photo_page.source_model.clear()
         self.photo_page._context_params = {}
+        # Отменяем текущую загрузку (если она идёт)
+        self.photo_page.cancel_loading()
 
     @AppLogger.get_instance(
         name='AppointmentPhotoPage',

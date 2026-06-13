@@ -253,7 +253,7 @@ class EditModeMixin(ABC):
         """
 
         if enable == self.edit_mode:
-            return False
+            return self.edit_mode
         
         # ее = self._has_unsaved_changes()
         if not (not enable and self._has_unsaved_changes()):
@@ -273,6 +273,7 @@ class EditModeMixin(ABC):
             return self.edit_mode
 
         if reply == QMessageBox.StandardButton.Yes:
+            # сохраняем данные. если ошибка - выход без смены статуса режима
             if not self._save_all_changes_impl():
                 return self.edit_mode
             

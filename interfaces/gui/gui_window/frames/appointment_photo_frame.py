@@ -89,6 +89,8 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
                 Если не передан, создаётся локальный реестр.
         """
 
+        self.action_manager_dict = {}
+
         super().__init__(parent)
 
         self.page_title = "Приёмы и фото"
@@ -202,9 +204,14 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
             self._update_buttons_state
         )
 
-        # Подключаем сигналы изменения режима редактирования для синхронизации кнопки
-        self.appointment_page.edit_mode_changed.connect(self._on_edit_mode_changed)
-        self.photo_page.edit_mode_changed.connect(self._on_edit_mode_changed)
+        # self.appointment_page.page_loaded.connect(self.on_appointment_selected)  # Подключаем сигнал загрузки страницы
+        # self.photo_page.page_loaded.connect(self.on_appointment_selected)
+        # self.appointment_page.page_loaded.connect(self.on_appointment_selected)  # Подключаем сигнал загрузки страницы
+        # self.photo_page.page_loaded.connect(self.on_appointment_selected)
+
+        # # Подключаем сигналы изменения режима редактирования для синхронизации кнопки
+        # self.appointment_page.edit_mode_changed.connect(self._on_edit_mode_changed)
+        # self.photo_page.edit_mode_changed.connect(self._on_edit_mode_changed)
 
         # self.photo_page.action_requested.connect( #  оно не нужно, потому что делегат сам откроет диалог
         #     self._on_photo_action_requested
@@ -256,6 +263,18 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
             self.toolbar_widget.setVisible(True)
             self._actions_setup = True
 
+        
+    @AppLogger.get_instance(
+        name='AppointmentPhotoFrame',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def on_appointment_selected(self, selected = None, deselected = None):
+        return self._on_appointment_selected(selected, deselected)
+    
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',
         # share_file_with = 'system',
@@ -350,55 +369,56 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         am = self.main_window.action_manager
 
         # Режим редактирования (переключатель)
-        am.register_action(
+        self.action_manager_dict['edit_mode'] = am.register_action(
             'edit_mode', 'Режим редактирования',
             checkable=True, callback=self._toggle_edit_mode,
             parent=self, temporary=True
         )
+        
 
         # Добавить приём
-        am.register_action(
+        self.action_manager_dict['edit_mode'] = am.register_action(
             'add_appointment', 'Добавить приём',
             callback=self._add_appointment,
             parent=self, temporary=True
         )
         # Добавить фото
-        am.register_action(
+        self.action_manager_dict['add_photo'] = am.register_action(
             'add_photo', 'Добавить фото',
             callback=self._add_photo,
             parent=self, temporary=True
         )
 
         # Удалить выбранное
-        am.register_action(
+        self.action_manager_dict['delete_selected'] = am.register_action(
             'delete_selected', 'Удалить',
             callback=self._delete_selected,
             parent=self, temporary=True
         )
 
         # Отменить все изменения
-        am.register_action(
+        self.action_manager_dict['discard_all'] = am.register_action(
             'discard_all', 'Отменить все изменения',
             callback=self._discard_all_changes,
             parent=self, temporary=True
         )
 
         # Сохранить все изменения
-        am.register_action(
+        self.action_manager_dict['save_all'] = am.register_action(
             'save_all', 'Сохранить',
             callback=self._save_all,
             parent=self, temporary=True
         )
 
         # Кнопка информации о пациенте
-        am.register_action(
+        self.action_manager_dict['patient_info'] = am.register_action(
             'patient_info', 'Информация о пациенте',
             callback=self._show_patient_info,
             parent=self, temporary=True
         )
 
         # Редактировать приём
-        am.register_action(
+        self.action_manager_dict['edit_appointment'] = am.register_action(
             'edit_appointment', 'Редактировать приём',
             callback=self._edit_appointment,
             parent=self, temporary=True
@@ -421,10 +441,14 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
                 item.widget().deleteLater()
 
         # Создаём кнопки и связываем с действиями
-        # Кнопка переключения режима редактирования
-        self.edit_mode_btn = QPushButton()
-        am.connect_button('edit_mode', self.edit_mode_btn)
-        self.edit_mode_btn.setText("Режим редактирования") 
+        # # Кнопка переключения режима редактирования
+        # self.edit_mode_btn = QPushButton()
+        # am.connect_button('edit_mode', self.edit_mode_btn)
+        # self.edit_mode_btn.setText("Режим редактирования") 
+
+        self.edit_mode_btn = QPushButton("Режим редактирования") # сделал отдельно, так как проблема в цикличных сигналах
+        self.edit_mode_btn.setCheckable(True)
+        self.edit_mode_btn.toggled.connect(self._toggle_edit_mode)
 
         self.add_appointment_btn = QPushButton()
         am.connect_button('add_appointment', self.add_appointment_btn)
@@ -613,12 +637,16 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
     def _on_edit_mode_changed(self, enabled: bool) -> bool:
         """Синхронизирует состояние действия 'edit_mode' в ActionManager."""
         rezult = (
-            hasattr(self, 'main_window'
-        ) and self.main_window) and hasattr(self.main_window, 'action_manager')
+            hasattr(self, 'main_window') and self.main_window
+        ) and hasattr(self.main_window, 'action_manager')
         
-        if rezult:
-            # Используем существующий метод для обновления действия
-            self.main_window.action_manager.set_action_checked('edit_mode', enabled)
+        # if rezult:
+        #     # Используем существующий метод для обновления действия
+        #     self.main_window.action_manager.set_action_checked('edit_mode', enabled)
+
+        # return rezult
+
+        self._sync_edit_mode_button(enabled)
         
         return rezult
 
@@ -636,9 +664,30 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         Args:
             enable: True – включить режим редактирования, False – выключить.
         """
-        if not self._on_edit_mode_changed(enable):
+        # if not self._on_edit_mode_changed(enable):
             # fallback на случай, если ActionManager недоступен
-            self._toggle_edit_mode(enable)
+        self._toggle_edit_mode(enable)
+
+    def _sync_edit_mode_button(self, mode: bool):
+        """Синхронизирует состояние action и локальной кнопки с режимом mode без генерации сигналов."""
+        # self.action_manager_dict['edit_mode'].blockSignals(True)
+        am = self.main_window.action_manager
+        action = am.get_action('edit_mode')
+        rezult = False
+        if action and action.isChecked() != mode:
+            action.blockSignals(True)
+            action.setChecked(mode)
+            action.blockSignals(False) 
+            rezult = True
+        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn.isChecked() != mode:
+            self.edit_mode_btn.blockSignals(True)
+            self.edit_mode_btn.setChecked(mode)
+            self.edit_mode_btn.blockSignals(False)
+            rezult = True
+        # self.action_manager_dict['edit_mode'].blockSignals(False)
+
+        return rezult
+
 
     @AppLogger.get_instance(
         name='AppointmentPhotoFrame',
@@ -648,24 +697,43 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _toggle_edit_mode(self, checked: bool):
         """Переключает режим редактирования для обеих таблиц."""
+
         # # Переключаем режим у страниц
-        temp = self.appointment_page.set_edit_mode(checked)
-        
-        # self.photo_page.set_edit_mode(checked)
-        # self.photo_page.set_edit_mode(self.appointment_page.edit_mode)
+        # Запоминаем текущее состояние
+        appointment_page_edit_mode = self.appointment_page.edit_mode  # статус попытки смены 
 
-        # if self.appointment_page.edit_mode != checked:
-        if not temp:
-            action = self.main_window.action_manager.get_action('edit_mode')
-            if action:
-                action.blockSignals(True)
-                action.setChecked(self.appointment_page.edit_mode)
-                action.blockSignals(False)
+        reply = None
 
-            return
+        # Проверяем, есть ли изменения при выключении
+        if not checked and (
+            self.appointment_page._has_unsaved_changes() or self.photo_page._has_unsaved_changes()
+        ):
+        # if checked < appointment_page_edit_mode:
+            reply = QMessageBox.question(
+                self, "Несохранённые изменения",
+                "Есть несохранённые изменения. Сохранить перед выходом из режима редактирования?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                # Отмена: возвращаем кнопку в исходное состояние, не переключая режим
+                self._sync_edit_mode_button(appointment_page_edit_mode)
+                return
 
-        self.photo_page.set_edit_mode(checked)
+        # if checked != appointment_page_edit_mode:
+        appointment_page_edit_mode = self.appointment_page.set_edit_mode(
+            enable=checked,
+            forced_button=reply,
+        )
+
+        photo_page_edit_mode = self.photo_page.set_edit_mode(
+            enable=appointment_page_edit_mode,
+            forced_button=reply,
+        )
+
+        # Синхронизируем кнопки с новым состоянием
+        self._sync_edit_mode_button(appointment_page_edit_mode)
         self._update_buttons_state()
+        0==0
         
         # #  Сначала пытаемся переключить режим у основной страницы (приёмы)
         # self.appointment_page.set_edit_mode(checked)

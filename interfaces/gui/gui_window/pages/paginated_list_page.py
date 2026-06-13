@@ -440,6 +440,9 @@ class PaginatedListPage(
     # Сигнал, испускаемый при изменении режима редактирования
     edit_mode_changed = Signal(bool)
 
+    # Сигнал, испускаемый при загрузке страницы
+    page_loaded = Signal()
+
     # Сигнал, испускаемый при изменении родительской сущности (например, после добавления/удаления фото)
     # Параметры: (entity_type: str, entity_id: int)
     parent_entity_updated = Signal(str, int)
@@ -808,6 +811,9 @@ class PaginatedListPage(
 
         self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
 
+
+        self.edit_mode_changed.connect(self._sync_edit_mode_button)
+
         self._update_edit_delete_buttons_state()
 
     def _on_section_resized_wrapper(self, *args, **kwargs):
@@ -1156,6 +1162,8 @@ class PaginatedListPage(
         else:
             # При добавлении следующих страниц пересчитываем высоту немедленно
             self._adjust_visible_row_heights()
+
+        self.page_loaded.emit()
 
     def _update_selection_state(self):
         """Обновляет self.selected_dto на основе текущего выделения и испускает сигнал."""
@@ -2185,14 +2193,29 @@ class PaginatedListPage(
         """
         super()._set_edit_mode(enable)
 
-        # Синхронизируем состояние кнопки, если она существует (локальная кнопка)
-        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
-            self.edit_mode_btn.blockSignals(True)
-            self.edit_mode_btn.setChecked(enable)
-            self.edit_mode_btn.blockSignals(False)
+        # # Синхронизируем состояние кнопки, если она существует (локальная кнопка)
+        # if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
+        #     self.edit_mode_btn.blockSignals(True)
+        #     self.edit_mode_btn.setChecked(enable)
+        #     self.edit_mode_btn.blockSignals(False)
 
+        # self._sync_edit_mode_button(old_mode)
         # Испускаем сигнал для внешних подписчиков (например, родительского фрейма)
         self.edit_mode_changed.emit(enable)
+
+
+    def _sync_edit_mode_button(self, mode: bool):
+        """Синхронизирует состояние action и локальной кнопки с режимом mode без генерации сигналов."""
+        # self.action_manager_dict['edit_mode'].blockSignals(True)
+        rezult = False
+        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
+            self.edit_mode_btn.blockSignals(True)
+            self.edit_mode_btn.setChecked(mode)
+            self.edit_mode_btn.blockSignals(False)
+            rezult = True
+        # self.action_manager_dict['edit_mode'].blockSignals(False)
+
+        return rezult
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2259,14 +2282,15 @@ class PaginatedListPage(
         old_mode = self.edit_mode
 
         if self.edit_mode != checked  :  
-            self.set_edit_mode(checked)
+            set_edit_mode = self.set_edit_mode(checked)
 
             # Если режим не изменился (например, из-за Cancel), восстанавливаем кнопку и не трогаем чекбоксы
-            if self.edit_mode == old_mode and old_mode != checked:
-                self.edit_mode_btn.blockSignals(True)
-                self.edit_mode_btn.setChecked(old_mode)
-                self.edit_mode_btn.blockSignals(False)
-                return
+            # if self.edit_mode == old_mode and old_mode != checked:
+            #     self.edit_mode_btn.blockSignals(True)
+            #     self.edit_mode_btn.setChecked(old_mode)
+            #     self.edit_mode_btn.blockSignals(False)
+            self._sync_edit_mode_button(set_edit_mode)
+            return
 
         # # Режим успешно переключился – обновляем видимость чекбокс-столбца
         # if hasattr(self, 'source_model'):

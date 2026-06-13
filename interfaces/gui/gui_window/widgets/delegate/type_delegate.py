@@ -384,16 +384,20 @@ class TextEditPopupDelegate(QStyledItemDelegate):
             self._hide_button()
             return False
 
-        # Движение мыши по viewport – скрываем кнопку, если под курсором другой делегат
-        if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
-            pos = event.pos()
-            index = self.parent().indexAt(pos)
-            if index.isValid():
-                delegate = self.parent().itemDelegateForColumn(index.column())
-                if not isinstance(delegate, TextEditPopupDelegate):
+        try:
+            # Движение мыши по viewport – скрываем кнопку, если под курсором другой делегат
+            if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+                pos = event.pos()
+                index = self.parent().indexAt(pos)
+                if index.isValid():
+                    delegate = self.parent().itemDelegateForColumn(index.column())
+                    if not isinstance(delegate, TextEditPopupDelegate):
+                        self._hide_button()
+                else:
                     self._hide_button()
-            else:
-                self._hide_button()
+                return False
+        except Exception as e:
+            self.logger.exception(f"Ошибка : {e}")
             return False
 
         return super().eventFilter(obj, event)

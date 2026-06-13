@@ -3,11 +3,12 @@
 Цветовые константы для отображения статусов строк в таблицах.
 """
 
-from PySide6.QtGui import QColor
-from alembic.environment import Optional
-
+# from alembic.environment import Optional
+from typing import Optional
 from app.utils.logger.logger import AppLogger
 
+
+from PySide6.QtGui import QColor
 
 class RowStatusColor:
     """Цвета строк в зависимости от статуса сущности."""

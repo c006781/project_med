@@ -210,9 +210,25 @@ class ActionManager(QObject):
                 action.toggled.connect(callback)
             else:
                 action.triggered.connect(callback)
-
+            
             # Сигнал action_changed всегда подключаем (даже без callback)
             action.toggled.connect(lambda checked: self.action_changed.emit(name, checked))
+
+            # # Сигнал action_changed с защитой от реентерабельности
+            # def guarded_emit(checked):
+            #     if not hasattr(self, f'_guard_{name}'):
+            #         setattr(self, f'_guard_{name}', 0)
+            #     guard = getattr(self, f'_guard_{name}')
+            #     if guard > 0:
+            #         return
+            #     setattr(self, f'_guard_{name}', guard + 1)
+            #     try:
+            #         self.action_changed.emit(name, checked)
+            #     finally:
+            #         setattr(self, f'_guard_{name}', guard)
+            #         0==0
+
+            # action.toggled.connect(guarded_emit)
 
         self._actions[name] = action
 

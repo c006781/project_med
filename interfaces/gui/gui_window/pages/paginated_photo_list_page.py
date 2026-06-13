@@ -156,7 +156,7 @@ class PaginatedPhotoListPage(PaginatedListPage):
         if not photo_field:
             return False
         
-        self._add_photo_from_file(file_path, photo_field)
+        self._add_photo_from_file_at_pos(file_path, photo_field)
 
         return True
     
@@ -244,6 +244,9 @@ class PaginatedPhotoListPage(PaginatedListPage):
         """
         if not self.edit_mode:
             return
+        if not getattr(self, '_has_valid_context', True):
+            QMessageBox.warning(self, "Нет приёма", "Сначала выберите приём в левой таблице.")
+            return
 
         # extensions = self._get_allowed_extensions_for_photo()
         # filter_str = f"Images (*{' *'.join(extensions)})"
@@ -303,20 +306,22 @@ class PaginatedPhotoListPage(PaginatedListPage):
         super()._update_ui_for_edit_mode(edit_mode)
         # Для таблицы фото в не-режиме редактирования отключаем кнопки добавления/удаления/редактирования
         if hasattr(self, 'side_toolbar'):
-
+            has_context = getattr(self, '_has_valid_context', True)
+            
             # has_selection = self.get_current_selected_dto() is not None
             # # кнопки активны только при наличии выбранной строки
             # self.side_toolbar.delete_btn.setEnabled(has_selection)
             # # В не-режиме редактирования кнопки активны только при наличии выбранной строки
             # self.side_toolbar.edit_btn.setEnabled(not self.edit_mode and has_selection)
 
-            self.side_toolbar.add_btn.setEnabled(True)
-            self.side_toolbar.delete_btn.setEnabled(True)
-            self.side_toolbar.edit_btn.setEnabled(edit_mode)   
+            # В режиме редактирования кнопки активны только если есть контекст (выбран приём)
+            self.side_toolbar.add_btn.setEnabled(True and has_context)
+            self.side_toolbar.delete_btn.setEnabled(True and has_context)
+            self.side_toolbar.edit_btn.setEnabled(edit_mode and has_context)   
 
             #  Кнопка обновления активна: вне режима редактирования И есть выбранный приём
             has_appointment = bool(self._context_params.get('appointment_id'))
-            self.side_toolbar.refresh_btn.setEnabled(not edit_mode and has_appointment)
+            self.side_toolbar.refresh_btn.setEnabled(not edit_mode and has_appointment and has_context)
 
     @AppLogger.get_instance(
         name='PaginatedPhotoListPage',
@@ -337,3 +342,50 @@ class PaginatedPhotoListPage(PaginatedListPage):
         else:
             super().reload_data()
 
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _maybe_load_more(self):
+        """Переопределяем: не загружать следующую страницу, если нет контекста (appointment_id)."""
+        if not self._context_params.get('appointment_id'):
+            # Если контекста нет, но в модели есть строки – очищаем их
+            if self.source_model.rowCount() > 0:
+                self.source_model.clear()
+            return
+        super()._maybe_load_more()
+
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_with_filters(self, filters_tree):
+        """Переопределяем: если нет appointment_id, очищаем модель и не загружаем."""
+        if not self._context_params.get('appointment_id'):
+            self.source_model.clear()
+            return
+        super().reload_with_filters(filters_tree)
+
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def reload_data(self):
+        """Переопределяем: если нет appointment_id, очищаем модель и не загружаем."""
+        if not self._context_params.get('appointment_id'):
+            self.source_model.clear()
+            return
+        super().reload_data()
+
+    @AppLogger.get_instance(
+        name='PaginatedPhotoListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _load_next_page(self):
+        if not self._context_params.get('appointment_id'):
+            return
+        super()._load_next_page()

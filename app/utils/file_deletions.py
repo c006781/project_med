@@ -7,6 +7,7 @@ import os
 import shutil
 from enum import Enum
 from typing import Optional, Tuple, List
+import uuid
 
 from app.utils.logger.logger import AppLogger
 
@@ -529,3 +530,72 @@ def resolve_photo_path(
             return cand
     
     return None
+
+
+
+@AppLogger.get_instance(
+    name='file_deletions.py',
+    enable_file_logging='system',
+    use_name_in_filename=False,
+).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+def copy_file_to_temp_dir(
+    source_path: str,
+    target_dir: str,
+    remove_parent_if_empty: bool = False,
+    unique_name: Optional[str] = None,
+    logger: Optional[AppLogger] = None,
+    delete_on_error: bool = True,
+    ctx: Optional[DeletionContext] = None
+) -> str:
+    """
+    Копирует файл в указанную папку (обычно временную) с возможностью генерации уникального имени.
+    При ошибке копирования удаляет созданные файлы и папку, если она стала пустой.
+
+    Args:
+        source_path: Абсолютный путь к исходному файлу.
+        target_dir: Целевая папка (должна существовать или будет создана).
+        unique_name: Желаемое имя файла в целевой папке. Если None, генерируется UUID + расширение.
+        logger: Опциональный логгер для записи ошибок.
+        delete_on_error: Если True, при ошибке копирования удаляет целевой файл и, если папка стала пустой, саму папку.
+
+    Returns:
+        Относительный путь к скопированному файлу (только имя, если target_dir — временная папка, или полный путь по желанию).
+
+    Raises:
+        OSError, IOError: если копирование не удалось.
+    """
+    if logger is None:
+        logger = AppLogger.get_instance(
+            name = 'file_deletions',
+            # share_file_with = 'system',
+            enable_file_logging = 'user',
+            use_name_in_filename = False,  # 'system',
+        )
+
+    if not target_dir:
+        raise RuntimeError(
+            "Для копирования файла необходима папка (target_dir). "
+        )
+
+    if unique_name is None:
+        ext = os.path.splitext(source_path)[1]
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+
+    dest_path = os.path.join(target_dir, unique_name)
+
+    try:
+        shutil.copy2(source_path, dest_path)
+        return unique_name  # возвращаем только имя файла
+    
+    except Exception as e:
+        if delete_on_error:
+            schedule_deletion(
+                path=dest_path or target_dir,
+                ctx=ctx,
+                remove_parent_if_empty=(dest_path is not None) and remove_parent_if_empty ,
+                force=False,
+                logger=logger
+            )
+
+        logger.exception(f"Ошибка копирования файла {source_path} в {dest_path}: {e}")
+        raise

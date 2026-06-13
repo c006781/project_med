@@ -223,7 +223,7 @@
 
     **Массовое добавление фото (опционально):**
         Страница предоставляет методы `_has_photo_column()`, `_get_allowed_extensions_for_photo()`,
-        `_add_photo_from_file(file_path, photo_field)`. Для интеграции с ActionManager
+        `_add_photo_from_file_at_pos(file_path, photo_field)`. Для интеграции с ActionManager
         зарегистрируйте действие с именем `'multi_photo_add'` и привяжите к нему кнопку.
         Пример регистрации смотрите в разделе «Добавление кнопок через ActionManager».   
 
@@ -293,7 +293,7 @@ from app.utils.deferred_actions import (
 from app.config.config_manager.manager import AppConfigManager
 
 from app.utils.file_deletions import (
-    resolve_photo_path, schedule_deletion, DeletionContext,
+    copy_file_to_temp_dir, resolve_photo_path, schedule_deletion, DeletionContext,
     DeletionType
     # , delete_file_safely
 )
@@ -439,6 +439,9 @@ class PaginatedListPage(
 
     # Сигнал, испускаемый при изменении режима редактирования
     edit_mode_changed = Signal(bool)
+
+    # Сигнал, испускаемый при загрузке страницы
+    page_loaded = Signal()
 
     # Сигнал, испускаемый при изменении родительской сущности (например, после добавления/удаления фото)
     # Параметры: (entity_type: str, entity_id: int)
@@ -711,6 +714,10 @@ class PaginatedListPage(
 
         # уточнения:
         #   loader_func – это пережиток старой архитектуры. В новой версии данные загружаются через сервис с пагинацией, поэтому loader_func не нужен и должен быть удалён. Вся логика загрузки данных теперь сосредоточена в PaginationMixin.
+        
+
+        # Блокировка сохранение ширины на время перестройки таблицы (для системных вызовов)
+        self._suppress_section_resized_save = False
 
         super().__init__(parent)
 
@@ -758,7 +765,7 @@ class PaginatedListPage(
 
         # Подключаем сохранение ширины столбцов при изменении пользователем
         header = self.table_view.horizontalHeader()
-        header.sectionResized.connect(self._on_section_resized)
+        header.sectionResized.connect(self._on_section_resized_wrapper)
 
         # На стройка высоты строк для корректного отображения миниатюр
         # from PySide6.QtWidgets import QHeaderView
@@ -804,7 +811,17 @@ class PaginatedListPage(
 
         self.selection_changed.connect(self._on_selection_changed)  # Подключаем сигнал на выыбранали строка в ТБ
 
+
+        self.edit_mode_changed.connect(self._sync_edit_mode_button)
+
         self._update_edit_delete_buttons_state()
+
+    def _on_section_resized_wrapper(self, *args, **kwargs):
+
+         # Если идёт программное изменение видимости столбцов – не сохраняем ширину
+        if getattr(self, '_suppress_section_resized_save', False):
+            return
+        self._on_section_resized(*args, **kwargs)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -815,7 +832,7 @@ class PaginatedListPage(
         """Активирует/деактивирует кнопку «Приёмы» при выборе строки."""
         # Дополнительная кнопка (например, «Приёмы»)
         if hasattr(self, 'action_btn') and self.action_btn:
-            self.action_btn.setEnabled(dto is not None)
+            self.action_btn.setEnabled(dto is not None and not self.edit_mode)
         # Кнопки редактирования и удаления в боковой панели
         self._update_edit_delete_buttons_state()
 
@@ -1009,7 +1026,7 @@ class PaginatedListPage(
             parent_ids (Set[int]): Множество ID родителей.
             session (Optional[Session]): Опциональная сессия SQLAlchemy.
         """
-        
+
         self.logger.debug(f"_refresh_parent_rows: START для {parent_ids}")
         if not parent_ids:
             return
@@ -1145,6 +1162,8 @@ class PaginatedListPage(
         else:
             # При добавлении следующих страниц пересчитываем высоту немедленно
             self._adjust_visible_row_heights()
+
+        self.page_loaded.emit()
 
     def _update_selection_state(self):
         """Обновляет self.selected_dto на основе текущего выделения и испускает сигнал."""
@@ -1600,7 +1619,7 @@ class PaginatedListPage(
         if dialog.exec() == QDialog.Accepted:
             file_paths = dialog.get_selected_files()
             for file_path in file_paths:
-                self._add_photo_from_file(file_path, photo_field)
+                self._add_photo_from_file_at_pos(file_path, photo_field)
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -1724,154 +1743,6 @@ class PaginatedListPage(
 
         # Пересчёт высоты строк (дополнительная страховка)
         self._adjust_visible_row_heights()
-
-    @AppLogger.get_instance(
-        name='PaginatedListPage',
-        enable_file_logging='system',
-        use_name_in_filename=False,
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _add_photo_from_file(
-        self, 
-        file_path: str,
-        photo_field: str
-    ) -> None:
-        """
-        Создаёт новую строку с предзаполненным путём к фото.
-        Используется для массового добавления фото (через диалог).
-
-        Копирует исходный файл во временную папку новой строки,
-        сохраняет в DTO только имя файла, добавляет строку в модель и помечает как новую.
-
-        Args:
-            file_path (str): Абсолютный путь к исходному файлу.
-            photo_field (str): Имя поля DTO, содержащего путь к фото.
-        """
-
-        try:
-            # Создаём временную папку для этой новой строки
-            temp_dir = self._ensure_temp_dir(self._next_temp_id)
-
-            # Копируем файл во временную папку
-            ext = os.path.splitext(file_path)[1]
-            unique_name = f"{uuid.uuid4().hex}{ext}"
-            dest_path = os.path.join(temp_dir, unique_name)
-            shutil.copy2(file_path, dest_path)
-
-            # В DTO сохраняем только имя файла
-            rel_path_in_temp = unique_name
-
-        except Exception as e:
-            self.logger.error(f"Не удалось скопировать файл {file_path} во временную папку: {e}")
-            return
-
-        # Создаём DTO с переопределением photo_field
-        overrides = {photo_field: rel_path_in_temp}
-        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=True)
-        if dto is None:
-            return
-
-        temp_id = dto.id
-
-        # Добавляем в модель
-        row = self.source_model.add_row(dto)
-
-        self._finalize_new_row(dto, temp_id, row)
-
-        # # Сохраняем в реестр как новую строку
-        # self._draft_registry.set(f"__new__:{self._entity_type}:{temp_id}", {"dto": dto})
-
-        # # Добавляем в модель
-        # row = self.source_model.add_row(dto)
-
-        # # Помечаем как имеющую собственные изменения (новая строка)
-        # self.mark_own_change(temp_id)
-
-        # # Уведомляем родителя о появлении нового потомка
-        # self._register_new_row_parent_balance(dto, temp_id)
-
-        # # После возможной сортировки нужно найти актуальную строку по temp_id
-        # actual_row = self._find_row_by_id(temp_id)
-
-        # self.logger.debug(f"actual_row = {actual_row}")
-        # if actual_row >= 0:
-        #     self._update_row_color(actual_row)
-        # else:
-        #     self._update_row_color(row)
-
-        # self._update_save_button_state()
-
-        # # --- Универсальное создание DTO с учётом всех полей и контекста ---
-        # # 1. Создаём словарь со значениями по умолчанию для ВСЕХ полей DTO (включая скрытые)
-        # defaults = {}
-        # all_dto_fields = self.dto_class.model_fields.keys()
-        # for field_name in all_dto_fields:
-        #     defaults[field_name] = None
-
-        # # 2. Заполняем из контекстных параметров (приоритет выше)
-        # if hasattr(self, '_context_params'):
-        #     for key, value in self._context_params.items():
-        #         if key in defaults:
-        #             defaults[key] = value
-
-        # # 3. Устанавливаем путь к фото (переопределяем, если нужно)
-        # defaults[photo_field] = rel_path_in_temp
-
-        # # 4. Проверяем наличие обязательных полей (согласно field_configs)
-        # missing_required = []
-        # for field_name, config in self.field_configs.items():
-        #     if config.get('required', False) and defaults.get(field_name) is None:
-        #         missing_required.append(field_name)
-
-        # if missing_required:
-        #     self.logger.error(
-        #         f"Не удалось создать новую строку: отсутствуют обязательные поля {missing_required}. "
-        #         f"Контекстные параметры: {self._context_params}"
-        #     )
-        #     return
-
-        # try:
-        #     dto = self.dto_class(**defaults)
-        # except Exception as e:
-        #     self.logger.error(f"Ошибка создания DTO: {e}, defaults={defaults}")
-        #     return
-
-        # # --- Регистрация новой строки ---
-        # temp_id = self._next_temp_id
-        # self._next_temp_id -= 1
-        # dto.id = temp_id
-
-        # # defaults = {}
-        # # for col in self.columns:
-        # #     if col.column_type == ColumnType.DATA:
-        # #         defaults[col.field_name] = None
-
-        # # # Копируем контекстные параметры
-        # # if hasattr(self, '_context_params'):
-        # #     for key, value in self._context_params.items():
-        # #         if key in defaults:
-        # #             defaults[key] = value
-
-        # # # defaults[photo_field] = file_path
-        # # defaults[photo_field] = rel_path_in_temp
-        # # dto = self.dto_class(**defaults)
-        # # # temp_id = self._next_temp_id
-        # # dto.id = self._next_temp_id
-        # # self._next_temp_id -= 1
-
-        # # # dto.id = temp_id
-
-        # # #  # создаём временную папку для этой новой строки (черновик)
-        # # # self._ensure_temp_dir(temp_id)
-
-        # # Сохраняем в реестр черновиков как новую строку
-        # self._draft_registry.set(
-        #     f"__new__:{self._entity_type}:{dto.id}", {"dto": dto}
-        # )
-        # row = self.source_model.add_row(dto)
-        # self.mark_own_change(dto.id)
-        # self._register_new_row_parent_balance(dto, dto.id)
-        # self._update_row_color(row)
-        # self._update_save_button_state()
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2086,27 +1957,60 @@ class PaginatedListPage(
                     self.mark_own_change(entity_id)
 
         # Временная папка для черновика
-        temp_dir = self._ensure_temp_dir(entity_id)
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(temp_dir, unique_name)
+        # temp_dir = self._ensure_temp_dir(entity_id)
+        # unique_name = f"{uuid.uuid4().hex}{ext}"
+        # dest_path = os.path.join(temp_dir, unique_name)
+
+        # try:
+        #     shutil.copy2(file_path, dest_path)
+        # except Exception as e:
+        #     self.logger.exception(f"_add_photo_to_row_impl: копирование файла {file_path} не удалось: {e}")
+        #     return False
 
         try:
-            shutil.copy2(file_path, dest_path)
+            temp_dir = self._ensure_temp_dir(entity_id) # Временная папка для черновика
+
+            unique_name = copy_file_to_temp_dir(
+                source_path=file_path,
+                target_dir=temp_dir,
+                logger=self.logger,
+                delete_on_error=False   # не удаляем автоматически, мы сами удалим в except
+            )
+            
+            dest_path = os.path.join(temp_dir, unique_name)
+
+            # Обновляем DTO
+            setattr(dto, photo_field, unique_name)
+            self.source_model.update_row(row, dto)
+
+            if not is_new:
+                self.mark_own_change(entity_id)
+
+            self._update_row_color(row)
+            self._update_save_button_state()
+            return True    
+
         except Exception as e:
-            self.logger.exception(f"_add_photo_to_row_impl: копирование файла {file_path} не удалось: {e}")
+            # Удаляем временные файлы/папки при ошибке
+            if dest_path and os.path.exists(dest_path):
+                schedule_deletion(
+                    path=dest_path,
+                    ctx=None,
+                    remove_parent_if_empty=True,
+                    force=False,
+                    logger=self.logger
+                )
+            elif temp_dir and os.path.exists(temp_dir):
+                schedule_deletion(
+                    path=temp_dir,
+                    ctx=None,
+                    remove_parent_if_empty=False,
+                    force=False,
+                    logger=self.logger
+                )
+            self.logger.exception(f"Error adding photo to row {row}: {e}")
             return False
-
-        # Обновляем DTO
-        setattr(dto, photo_field, unique_name)
-        self.source_model.update_row(row, dto)
-
-        if not is_new:
-            self.mark_own_change(entity_id)
-
-        self._update_row_color(row)
-        self._update_save_button_state()
-        return True    
-
+    
     @AppLogger.get_instance(
         name='PaginatedListPage',
         enable_file_logging='system',
@@ -2289,14 +2193,29 @@ class PaginatedListPage(
         """
         super()._set_edit_mode(enable)
 
-        # Синхронизируем состояние кнопки, если она существует (локальная кнопка)
-        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
-            self.edit_mode_btn.blockSignals(True)
-            self.edit_mode_btn.setChecked(enable)
-            self.edit_mode_btn.blockSignals(False)
+        # # Синхронизируем состояние кнопки, если она существует (локальная кнопка)
+        # if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
+        #     self.edit_mode_btn.blockSignals(True)
+        #     self.edit_mode_btn.setChecked(enable)
+        #     self.edit_mode_btn.blockSignals(False)
 
+        # self._sync_edit_mode_button(old_mode)
         # Испускаем сигнал для внешних подписчиков (например, родительского фрейма)
         self.edit_mode_changed.emit(enable)
+
+
+    def _sync_edit_mode_button(self, mode: bool):
+        """Синхронизирует состояние action и локальной кнопки с режимом mode без генерации сигналов."""
+        # self.action_manager_dict['edit_mode'].blockSignals(True)
+        rezult = False
+        if hasattr(self, 'edit_mode_btn') and self.edit_mode_btn:
+            self.edit_mode_btn.blockSignals(True)
+            self.edit_mode_btn.setChecked(mode)
+            self.edit_mode_btn.blockSignals(False)
+            rezult = True
+        # self.action_manager_dict['edit_mode'].blockSignals(False)
+
+        return rezult
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -2363,18 +2282,19 @@ class PaginatedListPage(
         old_mode = self.edit_mode
 
         if self.edit_mode != checked  :  
-            self.set_edit_mode(checked)
+            set_edit_mode = self.set_edit_mode(checked)
 
             # Если режим не изменился (например, из-за Cancel), восстанавливаем кнопку и не трогаем чекбоксы
-            if self.edit_mode == old_mode and old_mode != checked:
-                self.edit_mode_btn.blockSignals(True)
-                self.edit_mode_btn.setChecked(old_mode)
-                self.edit_mode_btn.blockSignals(False)
-                return
+            # if self.edit_mode == old_mode and old_mode != checked:
+            #     self.edit_mode_btn.blockSignals(True)
+            #     self.edit_mode_btn.setChecked(old_mode)
+            #     self.edit_mode_btn.blockSignals(False)
+            self._sync_edit_mode_button(set_edit_mode)
+            return
 
-        # Режим успешно переключился – обновляем видимость чекбокс-столбца
-        if hasattr(self, 'source_model'):
-            self.source_model.set_checkbox_column_visible(self.edit_mode)
+        # # Режим успешно переключился – обновляем видимость чекбокс-столбца
+        # if hasattr(self, 'source_model'):
+        #     self.source_model.set_checkbox_column_visible(self.edit_mode)
 
 
     @AppLogger.get_instance(
@@ -2439,29 +2359,31 @@ class PaginatedListPage(
             - В наследниках (например, в AppointmentListPage) может быть переопределён
             для дополнительной кастомизации, но обязательно должен вызывать super().
         """
+        # 1. Переключение чекбокс-столбца и пересчёт ширины
+        self._toggle_checkbox_column_visibility(edit_mode)
 
         # Вызываем родительский метод (UIMixin), чтобы обновить базовые элементы
         super()._update_ui_for_edit_mode(edit_mode)
         
-        if self.side_toolbar:
-            self.side_toolbar.update_for_edit_mode(edit_mode)
-        # --- Работа с чекбокс-столбцом ---
-        # if hasattr(self, 'source_model'):
-            # self.source_model.set_checkbox_column_visible(edit_mode)
+        # if self.side_toolbar:
+        #     self.side_toolbar.update_for_edit_mode(edit_mode)
+        # # --- Работа с чекбокс-столбцом ---
+        # # if hasattr(self, 'source_model'):
+        #     # self.source_model.set_checkbox_column_visible(edit_mode)
 
-        if hasattr(self, 'source_model') and self.source_model is not None:
-            for visible_idx in range(self.source_model.columnCount()):
-                col = self.source_model.get_column_at_visible_index(visible_idx)
-                if col is not None:
-                    # Обновляем сохранённую ширину актуальным значением из таблицы
-                    # col.width = self.table_view.columnWidth(visible_idx)
+        # if hasattr(self, 'source_model') and self.source_model is not None:
+        #     for visible_idx in range(self.source_model.columnCount()):
+        #         col = self.source_model.get_column_at_visible_index(visible_idx)
+        #         if col is not None:
+        #             # Обновляем сохранённую ширину актуальным значением из таблицы
+        #             # col.width = self.table_view.columnWidth(visible_idx)
 
-                    # current_width = self.table_view.columnWidth(visible_idx)
-                    # new_width_dict = {'fixed': current_width}
-                    # if col.is_stretch():
-                    #     new_width_dict['stretch'] = True
-                    # col.width = new_width_dict
-                    col.set_fixed_width(self.table_view.columnWidth(visible_idx))
+        #             # current_width = self.table_view.columnWidth(visible_idx)
+        #             # new_width_dict = {'fixed': current_width}
+        #             # if col.is_stretch():
+        #             #     new_width_dict['stretch'] = True
+        #             # col.width = new_width_dict
+        #             col.set_fixed_width(self.table_view.columnWidth(visible_idx))
 
 
         # Вместо полного пересоздания делегатов обновляем их read-only
@@ -2470,20 +2392,44 @@ class PaginatedListPage(
         # --- Переустановка делегатов (чтобы обновить read-only для фото и текстов) ---
         self._reapply_delegates()  
 
-         # Управление кнопками боковой панели
-        if hasattr(self, 'side_toolbar'):
-            # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
-            self.side_toolbar.add_btn.setEnabled(True)  
-            self.side_toolbar.delete_btn.setEnabled(
-                self.get_current_selected_dto() is not None
-            )
-            self.side_toolbar.edit_btn.setEnabled(
-                not edit_mode and self.get_current_selected_dto() is not None
-            )
+
+        # # Сохранение текущих ширин всех столбцов (после переключения)
+
+        # if hasattr(self, 'source_model') and self.source_model is not None:
+        #     for visible_idx in range(self.source_model.columnCount()):
+        #         col = self.source_model.get_column_at_visible_index(visible_idx)
+        #         if col is not None:
+        #             # Обновляем сохранённую ширину актуальным значением из таблицы
+        #             # col.width = self.table_view.columnWidth(visible_idx)
+
+        #             if col.system_name == 'file_path':
+        #                 0==0
+        #             current_width = self.table_view.columnWidth(visible_idx)
+        #             # new_width_dict = {'fixed': current_width}
+        #             # if col.is_stretch():
+        #             #     new_width_dict['stretch'] = True
+        #             # col.width = new_width_dict
+                    
+        #             col.set_fixed_width(current_width)
+
+
+        # Боковая панель
+        self._update_side_toolbar_buttons(edit_mode)
+
+        #  # Управление кнопками боковой панели
+        # if hasattr(self, 'side_toolbar'):
+        #     # В не-режиме: add_btn и delete_btn активны (если есть выбранная строка для удаления)
+        #     self.side_toolbar.add_btn.setEnabled(True)  
+        #     self.side_toolbar.delete_btn.setEnabled(
+        #         self.get_current_selected_dto() is not None
+        #     )
+        #     self.side_toolbar.edit_btn.setEnabled(
+        #         not edit_mode and self.get_current_selected_dto() is not None
+        #     )
             
-            self.side_toolbar.refresh_btn.setEnabled(not edit_mode) 
-            self.side_toolbar.cancel_btn.setEnabled(edit_mode)
-            self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())
+        #     self.side_toolbar.refresh_btn.setEnabled(not edit_mode) 
+        #     self.side_toolbar.cancel_btn.setEnabled(edit_mode)
+        #     self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())
 
         # # После переустановки делегатов пересчитываем высоту строк,
         # # так как ширина столбцов могла измениться (появился чекбокс-столбец)
@@ -2497,8 +2443,10 @@ class PaginatedListPage(
         #     end = min(self.source_model.rowCount() - 1, last + 5)
         #     for row in range(start, end + 1):
         #         self.table_view.resizeRowToContents(row)
+
         # Пересчёт высоты видимых строк
         self._adjust_visible_row_heights(extra_rows=5)
+
         # Отдельно для TextPopupDelegate (хотя метод set_readonly уже вызывает _update_delegates_readonly,
         # но оставляем для обратной совместимости)
         # --- Обновление read-only для TextPopupDыelegate (если есть) ---
@@ -2520,7 +2468,7 @@ class PaginatedListPage(
         if hasattr(self, 'multi_photo_btn'):
             self.multi_photo_btn.setVisible(edit_mode)
 
-        # --- Дополнительная синхронизация кнопки "Сохранить" ---
+        # Дополнительная синхронизация кнопки "Сохранить"
         self._update_save_button_state()
 
         # # Принудительная перерисовка, чтобы убрать артефакты
@@ -2552,7 +2500,11 @@ class PaginatedListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_edit_mode(self, enable: bool) -> bool:
+    def set_edit_mode(
+        self, 
+        enable: bool, 
+        forced_button: Optional[QMessageBox.StandardButton] = None,
+    ) -> bool:
         """
         Включает или выключает режим редактирования.
 
@@ -2560,8 +2512,11 @@ class PaginatedListPage(
             enable: True – включить режим редактирования, False – выключить.
         """
         if hasattr(self, 'toggle_edit_mode'):
-            return self.toggle_edit_mode(enable)
-        return False
+            return self.toggle_edit_mode(
+                enable = enable,
+                forced_button = forced_button,
+            )
+        return self.edit_mode
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -3034,11 +2989,24 @@ class PaginatedListPage(
         # Перекрашиваем только видимые строки, чтобы ускорить
         if not self.table_view or not self.table_view.isVisible():
             return
+        
+        cols = self.source_model.columnCount()
+        # widths = {}
+        # old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        # try:
+        #     self._suppress_section_resized_save = True
+        #     for idx in range(cols):
+
+        #         widths[idx] = self.table_view.columnWidth(idx)
+        # finally:
+        #     self._suppress_section_resized_save = old_suppress_section_resized_save
+    
+
         first, last = get_visible_row_range(self.table_view)
         if first < 0:
             first = 0
-        if last >= self.source_model.rowCount():
-            last = self.source_model.rowCount() - 1
+        if last >= cols:
+            last = cols - 1
         for row in range(first, last + 1):
             self._update_row_color(row)
 
@@ -6702,22 +6670,44 @@ class PaginatedListPage(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _apply_column_widths(self) -> None:
-        """Устанавливает ширину столбцов таблицы из конфигурации (TableColumn.width)."""
+        """
+        Устанавливает ширину столбцов таблицы из конфигурации (TableColumn.width).
+        Если у столбца ширина ещё не сохранена, использует текущую ширину из таблицы
+        и сохраняет её как фиксированную (инициализация).
+        """
         if not hasattr(self, 'source_model') or self.source_model is None:
             return
         
-        for visible_idx in range(self.source_model.columnCount()):
-            col = self.source_model.get_column_at_visible_index(visible_idx)
-            if col is not None:
-                
-                fixed_width = col.get_fixed_width()   
+        old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        try:
+            self._suppress_section_resized_save = True
+            for visible_idx in range(self.source_model.columnCount()):
+                col = self.source_model.get_column_at_visible_index(visible_idx)
+                if col is not None:
+                    
+                    fixed_width = col.get_fixed_width()   
 
-                if (
-                    fixed_width is not None
-                # ) and (
-                #     fixed_width > 0  # Проверка fixed_width > 0 предотвращает установку нулевой ширины
-                ):
-                    self.table_view.setColumnWidth(visible_idx, fixed_width)
+                    if fixed_width is None:
+                        # Ширина ещё не задана – берём текущую из таблицы
+                        current_width = self.table_view.columnWidth(visible_idx)
+                        if current_width > 0:
+                            col.set_fixed_width(current_width)
+                            self.logger.debug(
+                                f"Инициализирована ширина для столбца {col.system_name} = {current_width}"
+                            )
+                            fixed_width = current_width
+
+                    if (
+                        fixed_width is not None
+                    # ) and (
+                    #     fixed_width > 0  # Проверка fixed_width > 0 предотвращает установку нулевой ширины
+                    ):
+                        
+                        # if col.system_name == 'file_path':
+                        #     0==0
+                        self.table_view.setColumnWidth(visible_idx, fixed_width)
+        finally:
+            self._suppress_section_resized_save = old_suppress_section_resized_save
 
     @AppLogger.get_instance(
         name = 'PaginatedListPage',
@@ -6736,6 +6726,11 @@ class PaginatedListPage(
             old_size: Предыдущая ширина (не используется).
             new_size: Новая ширина, установленная пользователем.
         """
+
+        #  # Если идёт программное изменение видимости столбцов – не сохраняем ширину
+        # if getattr(self, '_suppress_section_resized_save', False):
+        #     return
+
         
         if not hasattr(self, 'source_model') or self.source_model is None:
             return
@@ -6744,6 +6739,8 @@ class PaginatedListPage(
         if col is None:
             return
         
+        # if col.system_name == 'file_path':
+        #     0==0
 
         # Проверяем, изменилась ли ширина
         current_fixed = col.get_fixed_width()
@@ -7274,25 +7271,53 @@ class PaginatedListPage(
         temp_id = self._next_temp_id
         self._next_temp_id -= 1
 
-        # Создаём временную папку для черновика (если ещё не создана)
-        temp_dir = self._ensure_temp_dir(temp_id)
+        temp_dir = None
+        dest_path  = None
+        try:
+            # Создаём временную папку для черновика (если ещё не создана)
+            temp_dir = self._ensure_temp_dir(temp_id)
 
-        # Копируем файл во временную папку с уникальным именем
-        ext = os.path.splitext(file_path)[1]
-        unique_name = f"{uuid.uuid4().hex}{ext}"
-        dest_path = os.path.join(temp_dir, unique_name)
-        shutil.copy2(file_path, dest_path)
+            unique_name = copy_file_to_temp_dir(
+                source_path=file_path,
+                target_dir=temp_dir,
+                unique_name=None,  # генерируется автоматически
+                logger=self.logger,
+                delete_on_error=True
+            )
+            # # Копируем файл во временную папку с уникальным именем
+            # ext = os.path.splitext(file_path)[1]
+            # unique_name = f"{uuid.uuid4().hex}{ext}"
+            # dest_path = os.path.join(temp_dir, unique_name)
+            # shutil.copy2(file_path, dest_path)
 
-        # Создаём DTO с переопределением поля фото
-        overrides = {photo_field: unique_name}
-        dto = self._prepare_new_dto(overrides=overrides, assign_temp_id=False)
-        if dto is None:
-            return
-        dto.id = temp_id
+            dest_path = os.path.join(temp_dir, unique_name)
 
-        # Вставляем строку с учётом позиции
-        self._add_new_row_at_pos(dto)
-        0==0
+            # Создаём DTO с переопределением поля фото
+            overrides = {photo_field: unique_name}
+            dto = self._prepare_new_dto(
+                overrides=overrides, 
+                assign_temp_id=False
+            )
+
+            if dto is None:
+                return
+            
+            dto.id = temp_id
+
+            # Вставляем строку с учётом позиции
+            self._add_new_row_at_pos(dto)
+            0==0
+        except Exception as e:
+            if dest_path or temp_dir:
+                # Немедленное рекурсивное удаление временной папки
+                schedule_deletion(
+                    path=dest_path or temp_dir,
+                    ctx=None,
+                    remove_parent_if_empty=(dest_path is not None),
+                    force=False,
+                    logger=self.logger
+                )
+            self.logger.exception(f"Error adding photo {file_path}: {e}")
 
     @AppLogger.get_instance(
         name='PaginatedListPage',
@@ -8061,7 +8086,7 @@ class PaginatedListPage(
             if photo_field is None:
                 self.logger.error("add_photo_from_file: не найдено поле с фото")
                 return False
-        self._add_photo_from_file(file_path, photo_field)
+        self._add_photo_from_file_at_pos(file_path, photo_field)
         return True
 
     @AppLogger.get_instance(
@@ -8263,6 +8288,209 @@ class PaginatedListPage(
 
     # ------------------------------------------------------------------
 
-    
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _set_column_width_by_name(self, system_name: str, width: int) -> None:
+        """
+        Устанавливает ширину столбца по его системному имени и сохраняет значение в TableColumn.
+
+        Args:
+            system_name (str): Уникальное системное имя столбца (например, '__checkbox__').
+            width (int): Новая ширина столбца в пикселях.
+
+        Note:
+            Если столбец в данный момент видим, ширина применяется к таблице.
+            В любом случае значение сохраняется в объекте TableColumn через set_fixed_width(),
+            чтобы оно не потерялось при последующих перестройках модели.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        # Ищем столбец среди видимых
+        for idx in range(self.source_model.columnCount()):
+            col = self.source_model.get_column_at_visible_index(idx)
+            if col and col.system_name == system_name:
+                self.table_view.setColumnWidth(idx, width)
+                col.set_fixed_width(width)
+                return
+
+        # Если столбец не видим, но мы хотим сохранить ширину для будущего
+        col = self.source_model.get_column_by_system_name(system_name)
+        if col:
+            col.set_fixed_width(width)
 
 
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _resize_columns_on_column_toggle(
+        self,
+        changed_column_system_name: str,
+        new_width: int,
+        old_width: int = 0
+    ) -> None:
+        """
+        Пересчитывает ширину столбцов при добавлении или удалении системного столбца (например, чекбокс).
+
+        Алгоритм:
+            1. Собирает текущие ширины всех видимых столбцов.
+            2. Вычисляет дельту (new_width - old_width).
+            3. Находит компенсирующий столбец: сначала с атрибутом stretch, затем последний видимый (кроме изменяемого).
+            4. Устанавливает новую ширину изменяемому столбцу (если new_width > 0).
+            5. Корректирует ширину компенсирующего столбца: new_comp = max(30, current_comp - delta).
+            6. Сохраняет новые ширины в TableColumn.
+
+        Args:
+            changed_column_system_name (str): Системное имя столбца, который появился или исчез.
+            new_width (int): Новая ширина этого столбца (для добавляемого – фиксированная, для удаляемого – 0).
+            old_width (int): Старая ширина столбца (если он был видим). По умолчанию 0.
+
+        Returns:
+            None
+
+        Note:
+            Минимальная ширина любого столбца – 30 пикселей.
+            Если компенсирующий столбец не найден, таблица может получить горизонтальную прокрутку.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        # 1. Текущие ширины всех видимых столбцов
+        visible_widths = {}
+        for idx in range(self.source_model.columnCount()):
+            col = self.source_model.get_column_at_visible_index(idx)
+            if col is not None:
+                visible_widths[col.system_name] = self.table_view.columnWidth(idx)
+
+        delta = new_width - old_width
+        if delta == 0:
+            return
+
+        # 2. Поиск компенсирующего столбца
+        compensator_name = None
+        # Сначала ищем stretch-столбец
+        for col in reversed(self.source_model.get_columns()):
+            if col.visible and col.system_name != changed_column_system_name:
+                if col.is_stretch():
+                    compensator_name = col.system_name
+                    break
+        # Если нет stretch, берём последний видимый (кроме изменяемого)
+        if compensator_name is None:
+            for col in reversed(self.source_model.get_columns()):
+                if col.visible and col.system_name != changed_column_system_name:
+                    compensator_name = col.system_name
+                    break
+
+        if compensator_name is None:
+            # Нечего компенсировать – просто устанавливаем новую ширину (если столбец видим)
+            if new_width > 0:
+                self._set_column_width_by_name(changed_column_system_name, new_width)
+            return
+
+        # 3. Ширина компенсатора
+        current_comp_width = visible_widths.get(compensator_name, 30)
+
+        # 4. Новая ширина компенсатора (не менее 30)
+        new_comp_width = max(30, current_comp_width - delta)
+
+        # 5. Устанавливаем новую ширину изменяемому столбцу (если он видим)
+        if new_width > 0:
+            self._set_column_width_by_name(changed_column_system_name, new_width)
+
+        # 6. Устанавливаем новую ширину компенсатору
+        self._set_column_width_by_name(compensator_name, new_comp_width)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _toggle_checkbox_column_visibility(self, edit_mode: bool) -> None:
+        """
+        Переключает видимость чекбокс-столбца и пересчитывает ширину всех столбцов.
+
+        Args:
+            edit_mode (bool): True – чекбокс-столбец должен стать видимым,
+                            False – должен быть скрыт.
+
+        Note:
+            Метод вызывается из `_update_ui_for_edit_mode` перед родительским обновлением.
+            Он самостоятельно определяет старую и новую ширину столбца, переключает видимость
+            через модель и вызывает `_resize_columns_on_column_toggle` для пересчёта.
+        """
+        if not hasattr(self, 'source_model') or self.source_model is None:
+            return
+
+        checkbox_col = self.source_model.get_column_by_system_name('__checkbox__')
+        if checkbox_col is None:
+            return
+
+        was_visible = checkbox_col.visible
+        will_be_visible = edit_mode
+
+        if was_visible == will_be_visible:
+            return
+
+        # Старая ширина (если был видим)
+        old_width = 0
+        if was_visible:
+            for idx in range(self.source_model.columnCount()):
+                col = self.source_model.get_column_at_visible_index(idx)
+                if col and col.system_name == '__checkbox__':
+                    old_width = self.table_view.columnWidth(idx)
+                    break
+
+        # Новая ширина (из конфигурации или 30 по умолчанию)
+        new_width = checkbox_col.get_fixed_width()
+        if new_width is None or new_width <= 0:
+            new_width = 30
+
+        # Блокируем сохранение ширины на время перестройки таблицы
+        old_suppress_section_resized_save = getattr(self, '_suppress_section_resized_save', False)
+        try:
+            self._suppress_section_resized_save = True
+            # Переключаем видимость через модель
+            self.source_model.set_checkbox_column_visible(edit_mode)
+
+        finally:
+            self._suppress_section_resized_save = old_suppress_section_resized_save
+
+        # Пересчитываем ширину столбцов
+        self._resize_columns_on_column_toggle('__checkbox__', new_width, old_width)
+
+    @AppLogger.get_instance(
+        name='PaginatedListPage',
+        enable_file_logging='system',
+        use_name_in_filename=False,
+    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    def _update_side_toolbar_buttons(self, edit_mode: bool) -> None:
+        """
+        Обновляет состояние кнопок боковой панели (SideToolbar) в зависимости от режима редактирования.
+
+        Args:
+            edit_mode (bool): True – режим редактирования включён, False – выключен.
+
+        Note:
+            Кнопка добавления всегда активна в режиме редактирования.
+            Кнопка удаления активна только если есть выбранная строка.
+            Кнопка редактирования активна только в обычном режиме и при наличии выбранной строки.
+            Кнопка обновления активна только в обычном режиме.
+            Кнопка отмены и сохранения активны только в режиме редактирования (сохранение – при наличии изменений).
+        """
+        if not hasattr(self, 'side_toolbar') or self.side_toolbar is None:
+            return
+        
+        if hasattr(self, 'action_btn') and self.action_btn:
+            self.action_btn.setEnabled(not edit_mode and self.get_current_selected_dto() is not None)
+
+        self.side_toolbar.add_btn.setEnabled(True)
+        self.side_toolbar.delete_btn.setEnabled(self.get_current_selected_dto() is not None)
+        self.side_toolbar.edit_btn.setEnabled(not edit_mode and self.get_current_selected_dto() is not None)
+        self.side_toolbar.refresh_btn.setEnabled(not edit_mode)
+        self.side_toolbar.cancel_btn.setEnabled(edit_mode)
+        self.side_toolbar.save_btn.setEnabled(edit_mode and self._has_unsaved_changes())

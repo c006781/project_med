@@ -524,13 +524,20 @@ def get_visible_row_range(table: QTableView) -> tuple[int, int]:
     if table.model() is None:
         return -1, -1
     viewport = table.viewport()
-    top_left = viewport.mapToGlobal(viewport.rect().topLeft())
-    bottom_right = viewport.mapToGlobal(viewport.rect().bottomRight())
+
+    viewport_top_left = viewport.rect().topLeft()
+    viewport_bottom_right = viewport.rect().bottomRight()
+
+    top_left = viewport.mapToGlobal(viewport_top_left)
+    bottom_right = viewport.mapToGlobal(viewport_bottom_right)
+
     # более простой способ: использовать indexAt
-    first_idx = table.indexAt(viewport.rect().topLeft())
-    last_idx = table.indexAt(viewport.rect().bottomRight())
+    first_idx = table.indexAt(viewport_top_left)
+    last_idx = table.indexAt(viewport_bottom_right)
+
     if not first_idx.isValid():
         return -1, -1
+    
     return first_idx.row(), last_idx.row() if last_idx.isValid() else first_idx.row()
 
 @AppLogger.get_instance(

@@ -194,6 +194,21 @@ class FilterMixin:
             
             return
 
+        filtered_specs = []
+        for col_idx, order in specs:
+            # Получаем имя поля DTO для видимого столбца
+            col_name = self._get_column_name_by_visible_index(col_idx)
+            if col_name:
+                config = self.field_configs.get(col_name, {})
+                # Пропускаем виртуальные поля и поля, вычисляемые через SQL
+                if config.get('virtual', False) or config.get('sql_compute'):
+                    continue
+            filtered_specs.append((col_idx, order))
+
+        if not filtered_specs:
+            # Если после фильтрации не осталось столбцов, ничего не делаем
+            return
+        
         # Серверная сортировка: преобразуем в список строк
         order_by = []
         for col_idx, order in specs:

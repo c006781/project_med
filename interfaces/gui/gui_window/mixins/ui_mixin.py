@@ -786,7 +786,10 @@ class UIMixin(ToolbarComboMixin):
             self.cancel_parent_btn.setVisible(edit_mode) 
 
         if hasattr(self, 'action_btn') and self.action_btn:
-            self.action_btn.setEnabled(not edit_mode)
+            enb = not edit_mode    
+            if hasattr(self, 'get_current_selected_dto'):
+                enb = enb and self.get_current_selected_dto() is not None
+            self.action_btn.setEnabled(enb)
 
         # self.table_view.setEditTriggers(self.table_view.DoubleClicked if edit_mode else self.table_view.NoEditTriggers)
         self.table_view.setEditTriggers(

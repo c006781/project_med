@@ -3933,19 +3933,33 @@ class BaseAppLogger:
                     # if 'PhotoUploaderWidget.set_existing_photos' in formatted:
                     #     0==0
                     # 0==0
-
-                # Создаём синхронную обёртку
-                @wraps(func)
-                def sync_wrapper(*args, **kwargs):
-                    thec = (
+                def _thec(tp, level):
+                    return (
                         (
                             not logger_instance.logger.isEnabledFor(level)
                          ) or (
                             not logger_instance._enabled
                         )
                     ) or (
-                        type(logger_instance).is_disabled(logger_instance.name)
+                        tp.is_disabled(logger_instance.name)
                     )
+
+                # Создаём синхронную обёртку
+                @wraps(func)
+                def sync_wrapper(*args, **kwargs):
+
+
+                    # thec = (
+                    #     (
+                    #         not logger_instance.logger.isEnabledFor(level)
+                    #      ) or (
+                    #         not logger_instance._enabled
+                    #     )
+                    # ) or (
+                    #     type(logger_instance).is_disabled(logger_instance.name)
+                    # )
+
+                    thec = _thec(type(logger_instance), level)
 
                     if not thec: 
                         if _show_depth:#  or type(logger_instance).status_show_call_depth_global():
@@ -3967,9 +3981,13 @@ class BaseAppLogger:
                         finally:
 
                             if not thec: 
-                                execution_time = time.time() - start_time
+                                # execution_time = time.time() - start_time
 
-                                log_end(execution_time, err, result)
+                                log_end(
+                                    time.time() - start_time, 
+                                    err, 
+                                    result
+                                )
 
                         if err:
                             raise err

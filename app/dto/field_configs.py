@@ -372,6 +372,9 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = {
         # 'updatable'     : False,                # полее не должно обновляться автоматически
         'widget_type'   : 'image_thumbnail',    # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать
         'description_field' : 'description',    # имя поля в DTO, где хранится описание
+        # 'width'         : {
+        #     'fixed'         : 180,           # принудительный размер ширены
+        # },  
     },
     'description'   : {
         'title'         : 'Описание',   # заголовок колонки

@@ -818,7 +818,7 @@ class AppointmentPhotoFrame(BasePage, ToolbarComboMixin):
         # Проверяем, выбран ли приём
         appointment_dto = self.appointment_page.get_current_selected_dto()
         if not appointment_dto:
-            QMessageBox.warning(self, "Нет приёма", "Сначала выберите приём в левой таблице.")
+            QMessageBox.warning(self, "Нет приёма", "Сначала выберите приём.")
             return
 
         # Открываем диалог выбора файла

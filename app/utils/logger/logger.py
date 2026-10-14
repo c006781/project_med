@@ -378,6 +378,27 @@ class AppLogger(BaseAppLogger):
         return cls._app_config is not None
 
     @classmethod
+    def current_app_config(cls) -> Dict[str, Any]:
+        """
+        Конфиг приложения, с которым логгеры настроены сейчас (копия).
+
+        Нужен, чтобы понять, изменились ли настройки логирования относительно того,
+        что логгеры уже применили, — а не относительно файла конфигурации, который к
+        моменту проверки может быть уже перезаписан (так было в ConfigApplier, R1).
+
+        Returns:
+            Копия последнего конфига из ``configure()``; до первого вызова —
+            копия ``UNCONFIGURED_APP_CONFIG``.
+
+        Пример:
+            >>> AppLogger.configure({'system_LEVEL': 'DEBUG'})
+            >>> AppLogger.current_app_config()['system_LEVEL']
+            'DEBUG'
+            >>> AppLogger.current_app_config()['system_LEVEL'] = 'ERROR'  # не влияет на логгеры
+        """
+        return dict(cls._current_app_config())
+
+    @classmethod
     def configure(cls, app_config: Mapping[str, Any]) -> None:
         """
         Передаёт логгерам конфиг приложения и применяет его ко всем существующим.

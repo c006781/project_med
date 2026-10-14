@@ -295,6 +295,48 @@ def test_reopen_all_files_recreates_deleted_file(logger_cls, make_logger, log_di
     assert 'после' in read(path)
 
 
+def test_reopen_missing_files_touches_only_missing(logger_cls, make_logger, log_dir):
+    """Watchdog: файлы на месте не переоткрываются (раньше — все каждые 5 с)."""
+    a = make_logger(name='wa', enable_file_logging=True)
+    b = make_logger(name='wb', enable_file_logging=True, use_name_in_filename=True)
+    shared = make_logger(name='wc', enable_file_logging='wa')
+    a.info('x'); b.info('y')
+    stream_a, stream_b = a.file_handler.stream, b.file_handler.stream
+    assert shared.file_handler is a.file_handler
+
+    assert logger_cls.reopen_missing_files() == 0
+    assert a.file_handler.stream is stream_a and b.file_handler.stream is stream_b
+
+    b.file_handler.stream.close()
+    b.file_handler.stream = None
+    os.remove(os.path.join(log_dir, 'wb.log'))
+    assert logger_cls.reopen_missing_files() == 1      # общий обработчик a/wc — один раз
+    assert a.file_handler.stream is stream_a
+    b.info('снова')
+    assert 'снова' in read(os.path.join(log_dir, 'wb.log'))
+
+
+def test_watchdog_loop_calls_reopen_missing(logger_cls, monkeypatch):
+    from app.utils.logger.base_logger import BaseAppLogger
+    calls, started = [], []
+
+    class StopLoop(Exception):
+        pass
+
+    def fake_sleep(sec):
+        if calls:
+            raise StopLoop
+    monkeypatch.setattr(BaseAppLogger, '_watchdog_started', False)
+    monkeypatch.setattr(logger_cls, '_watchdog_started', False, raising=False)
+    monkeypatch.setattr('time.sleep', fake_sleep)
+    monkeypatch.setattr(logger_cls, 'reopen_missing_files', classmethod(lambda cls: calls.append(1) or 0))
+    monkeypatch.setattr('threading.Thread.start', lambda self: started.append(self))
+    logger_cls.start_file_watchdog(interval_sec=0)
+    with pytest.raises(StopLoop):
+        started[0]._target()
+    assert calls == [1]
+
+
 def test_watchdog_started_once(logger_cls, make_logger, monkeypatch):
     from app.utils.logger.base_logger import BaseAppLogger
     started = []

@@ -191,13 +191,28 @@ class RobustRotatingFileHandler(RotatingFileHandler):
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True) 
 
-            self._open() # открывает файл заново (определён в базовом классе)
+            # self._open() # открывает файл заново (определён в базовом классе)
+            # ↑ до 2026-10-14 результат выбрасывался: файл открывался, сразу закрывался
+            #   сборщиком мусора и открывался ещё раз при следующей записи.
+            self.stream = self._open()
 
-    def reopen_if_needed(self):
-        """Принудительно проверяет и переоткрывает файл, если он отсутствует."""
+    def reopen_if_needed(self) -> bool:
+        """
+        Переоткрывает файл, только если его нет на диске.
+
+        Returns:
+            ``True``, если файл пришлось пересоздать.
+
+        Пример:
+            >>> os.remove(handler.baseFilename)
+            >>> handler.reopen_if_needed()
+            True
+        """
         with self._lock:
             if not os.path.exists(self.baseFilename):
                 self._reopen()
+                return True
+        return False
 
     def force_reopen(self):
         """Принудительно закрывает и переоткрывает файл."""
@@ -638,11 +653,49 @@ class BaseAppLogger:
 
         def watch():
             while True:
-                time.sleep(interval_sec)  
-                cls.reopen_all_files()  # внутри есть блокировка
+                time.sleep(interval_sec)
+                # cls.reopen_all_files()  # внутри есть блокировка
+                # ↑ до 2026-10-14: каждые interval_sec ВСЕ файловые обработчики
+                #   закрывались и открывались заново, даже если файл на месте.
+                #   Теперь переоткрываются только файлы, которых нет на диске.
+                cls.reopen_missing_files()
 
         thread = threading.Thread(target=watch, daemon=True, name="LoggerWatchdog")
         thread.start()
+
+    @classmethod
+    def reopen_missing_files(cls) -> int:
+        """
+        Переоткрывает файлы логов, которые удалили с диска во время работы.
+
+        Вызывается фоновым потоком ``LoggerWatchdog`` (``start_file_watchdog``). Общий
+        обработчик проверяется один раз, сколько бы логгеров через него ни писало.
+        Файлы, которые на месте, не трогаются.
+
+        Returns:
+            Сколько файлов пришлось пересоздать.
+
+        Пример:
+            >>> os.remove('logs/app.log')
+            >>> AppLogger.reopen_missing_files()
+            1
+        """
+        with cls._instances_lock:
+            handlers = {
+                id(inst.file_handler): inst.file_handler
+                for inst in cls._instances.values()
+                if inst.file_handler is not None and hasattr(inst.file_handler, 'reopen_if_needed')
+            }
+
+        reopened = 0
+        for handler in handlers.values():
+            try:
+                if handler.reopen_if_needed():
+                    reopened += 1
+            except Exception:
+                # Например, нет прав на папку — об ошибке сообщит следующая запись
+                pass
+        return reopened
 
     @classmethod
     def reopen_all_files(cls):

@@ -136,12 +136,30 @@ class RobustRotatingFileHandler(RotatingFileHandler):
 
     def __init__(
         self,
-        filename,
-        mode='a',
-        maxBytes=0, backupCount=0,
-        encoding=None,
-        delay=False
-    ):
+        filename: str,
+        mode: str = 'a',
+        maxBytes: int = 0, backupCount: int = 0,
+        encoding: Optional[str] = None,
+        delay: bool = False
+    ) -> None:
+        """
+        Создаёт обработчик; аргументы те же, что у ``RotatingFileHandler``.
+
+        Args:
+            filename: Путь к файлу лога.
+            mode: Режим открытия файла (``'a'`` — дописывать).
+            maxBytes: Размер файла, после которого происходит ротация; 0 — без ротации.
+            backupCount: Сколько старых файлов хранить (``app.log.1`` … ``app.log.N``).
+            encoding: Кодировка файла (логгер передаёт ``'utf-8'``).
+            delay: ``True`` — открыть файл при первой записи, а не сразу.
+
+        Returns:
+            None
+
+        Пример:
+            >>> RobustRotatingFileHandler('logs/app.log', maxBytes=10_000_000,
+            ...                           backupCount=5, encoding='utf-8')
+        """
         super().__init__(
             filename,
             mode,
@@ -155,10 +173,28 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         self._last_check = 0
         self._check_interval = 1.0  # проверять не чаще раза в секунд
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord) -> None:
         """
-        Переопределённый метод emit: перед записью проверяет существование файла.
-        Если файл удалён, переоткрывает его.
+        Записывает запись в файл, восстанавливая файл при необходимости.
+
+        Порядок:
+            1. Не чаще раза в ``_check_interval`` секунд проверяет, что файл есть на диске;
+               если его удалили — переоткрывает (``_reopen``, вместе с папкой).
+            2. Пишет запись стандартным ``RotatingFileHandler.emit`` (с ротацией).
+            3. При ``FileNotFoundError``/``PermissionError`` повторяет до ``MAX_RETRIES`` раз
+               с паузой ``RETRY_DELAY`` и переоткрытием; после последней неудачи —
+               ``handleError`` (traceback в stderr), запись теряется.
+            4. Любая другая ошибка — сразу ``handleError``.
+
+        Args:
+            record: Запись лога.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается самим ``logging`` при ``logger.info(...)``; напрямую — только в тестах:
+            >>> handler.emit(logging.LogRecord('t', logging.INFO, __file__, 1, 'текст', None, None))
         """
         # max_retries = 5
         # retry_delay = 0.2        # добавить задержку между попытками
@@ -205,8 +241,18 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     self.handleError(record)
                     return
 
-    def _reopen(self):
-        """Принудительно закрывает и открывает файл."""
+    def _reopen(self) -> None:
+        """
+        Закрывает текущий поток и открывает файл заново (создаёт папку, если её нет).
+
+        Returns:
+            None
+
+        Пример:
+            >>> handler._reopen()      # после удаления файла
+            >>> handler.stream is not None
+            True
+        """
         with self._lock:
             # Файл удалён – закрываем текущий поток и открываем заново
             if self.stream:
@@ -241,8 +287,18 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                 return True
         return False
 
-    def force_reopen(self):
-        """Принудительно закрывает и переоткрывает файл."""
+    def force_reopen(self) -> None:
+        """
+        Принудительно переоткрывает файл, даже если он на месте, и сбрасывает таймер проверки.
+
+        Нужен после смены пути или внешних операций с файлом (архивация, перенос).
+
+        Returns:
+            None
+
+        Пример:
+            >>> handler.force_reopen()
+        """
         with self._lock:
             self._reopen()
             self._last_check = time.time()
@@ -569,44 +625,139 @@ class BaseAppLogger:
     _disabled_loggers: List[str] = []
 
     @classmethod
-    def on_show_call_depth_global(cls):
+    def on_show_call_depth_global(cls) -> None:
+        """
+        Включает классовый флаг «показывать глубину вызова везде».
+
+        Флаг сейчас нигде не читается (в декораторе его использование закомментировано) —
+        оставлен для совместимости с кодом приложения. Глубина включается параметром
+        ``show_call_depth`` логгера или ``show_depth=True`` декоратора.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.on_show_call_depth_global()
+            >>> AppLogger.status_show_call_depth_global()
+            True
+        """
         cls._show_call_depth_global = True
 
     @classmethod
-    def off_show_call_depth_global(cls):
+    def off_show_call_depth_global(cls) -> None:
+        """
+        Выключает классовый флаг «показывать глубину вызова везде».
+
+        См. ``on_show_call_depth_global`` — флаг сейчас ни на что не влияет.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.off_show_call_depth_global()
+        """
         cls._show_call_depth_global = False
 
 
     @classmethod
-    def status_show_call_depth_global(cls):
+    def status_show_call_depth_global(cls) -> bool:
+        """
+        Текущее значение классового флага глубины.
+
+        Returns:
+            ``True``, если флаг включён ``on_show_call_depth_global()``.
+
+        Пример:
+            >>> AppLogger.status_show_call_depth_global()
+            False
+        """
         return cls._show_call_depth_global
 
 
     @classmethod
-    def add_disabled_logger(cls, name: str):
-        """Добавляет имя логгера в список отключённых."""
+    def add_disabled_logger(cls, name: str) -> None:
+        """
+        Запрещает логгеру с этим именем писать (точное имя, не префикс).
+
+        Список общий для всех наследников BaseAppLogger. Логгер не выключается
+        (``is_enabled()`` остаётся ``True``) — его методы и декоратор просто молчат.
+        Повторное добавление ничего не меняет.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.add_disabled_logger('gui.PaginatedTableModel')
+            >>> AppLogger.is_disabled('gui.PaginatedTableModel')
+            True
+        """
         if name not in cls._disabled_loggers:
             cls._disabled_loggers.append(name)
 
     @classmethod
-    def remove_disabled_logger(cls, name: str):
-        """Удаляет имя из списка отключённых."""
+    def remove_disabled_logger(cls, name: str) -> None:
+        """
+        Снова разрешает логгеру писать. Если имени нет в списке — ничего не делает.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.remove_disabled_logger('gui.PaginatedTableModel')
+        """
         if name in cls._disabled_loggers:
             cls._disabled_loggers.remove(name)
 
     @classmethod
-    def clear_disabled_loggers(cls):
-        """Очищает список отключённых логгеров."""
+    def clear_disabled_loggers(cls) -> None:
+        """
+        Очищает список отключённых логгеров.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.clear_disabled_loggers()
+        """
         cls._disabled_loggers.clear()
 
     @classmethod
     def is_disabled(cls, name: str) -> bool:
-        """Проверяет, отключён ли логгер с указанным именем."""
+        """
+        Есть ли логгер в списке отключённых (``add_disabled_logger``).
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            ``True``, если логгеру запрещено писать.
+
+        Пример:
+            >>> AppLogger.is_disabled('system')
+            False
+        """
         return name in cls._disabled_loggers
 
     @classmethod
-    def disable_exact(cls, name: str):
-        """Отключает логгер с точным именем (не префикс)."""
+    def disable_exact(cls, name: str) -> None:
+        """
+        Выключает логгер с точным именем (``disable()``); неизвестное имя — ничего не делает.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_exact('gui.Table')     # 'gui.Table.Model' не затронут
+        """
         inst = None
 
         with cls._instances_lock:
@@ -616,40 +767,95 @@ class BaseAppLogger:
             inst.disable()
 
     @classmethod
-    def enable_exact(cls, name: str):
-        """Включает логгер с точным именем."""
+    def enable_exact(cls, name: str) -> None:
+        """
+        Включает логгер с точным именем (``enable()``); неизвестное имя — ничего не делает.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_exact('gui.Table')
+        """
         with cls._instances_lock:
             inst = cls._instances.get(name)
             if inst:
                 inst.enable()
 
     @classmethod
-    def disable_console_exact(cls, name: str):
-        """Отключает консольный вывод для точного логгера."""
+    def disable_console_exact(cls, name: str) -> None:
+        """
+        Выключает вывод в консоль у логгера с точным именем.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_console_exact('gui.Table')
+        """
         with cls._instances_lock:
             inst = cls._instances.get(name)
             if inst:
                 inst.disable_console()
 
     @classmethod
-    def enable_console_exact(cls, name: str):
-        """Включает консольный вывод для точного логгера."""
+    def enable_console_exact(cls, name: str) -> None:
+        """
+        Включает вывод в консоль у логгера с точным именем.
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_console_exact('gui.Table')
+        """
         with cls._instances_lock:
             inst = cls._instances.get(name)
             if inst:
                 inst.enable_console()
 
     @classmethod
-    def disable_file_exact(cls, name: str):
-        """Отключает файловое логирование для точного логгера."""
+    def disable_file_exact(cls, name: str) -> None:
+        """
+        Выключает запись в файл у логгера с точным именем (``turn_off_file_logging``).
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_file_exact('gui.Table')
+        """
         with cls._instances_lock:
             inst = cls._instances.get(name)
             if inst:
                 inst.disable_file()
 
     @classmethod
-    def enable_file_exact(cls, name: str):
-        """Включает файловое логирование для точного логгера."""
+    def enable_file_exact(cls, name: str) -> None:
+        """
+        Включает запись в файл у логгера с точным именем (``turn_on_file_logging``).
+
+        Args:
+            name: Точное имя логгера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_file_exact('gui.Table')
+        """
         with cls._instances_lock:
             inst = cls._instances.get(name)
             if inst:
@@ -669,8 +875,23 @@ class BaseAppLogger:
     #         inst.enable()
 
     @classmethod
-    def start_file_watchdog(cls, interval_sec: float = 5.0):
-        """Запускает фоновый поток, проверяющий существование файлов логов."""
+    def start_file_watchdog(cls, interval_sec: float = 5.0) -> None:
+        """
+        Запускает фоновый поток ``LoggerWatchdog``, восстанавливающий удалённые файлы логов.
+
+        Поток-демон раз в ``interval_sec`` секунд вызывает ``reopen_missing_files()``.
+        Запускается один раз на класс (повторные вызовы ничего не делают); вызывается
+        автоматически при первом ``get_instance()``.
+
+        Args:
+            interval_sec: Пауза между проверками, секунд.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.start_file_watchdog(interval_sec=10)
+        """
         # import threading
         with cls._watchdog_started_lock:
             if cls._watchdog_started:
@@ -678,7 +899,16 @@ class BaseAppLogger:
             
             cls._watchdog_started = True
 
-        def watch():
+        def watch() -> None:
+            """
+            Бесконечный цикл потока ``LoggerWatchdog``: пауза → проверка файлов.
+
+            Returns:
+                None (не возвращается; поток-демон завершается вместе с программой).
+
+            Пример:
+                Запускается только из ``start_file_watchdog``.
+            """
             while True:
                 time.sleep(interval_sec)
                 # cls.reopen_all_files()  # внутри есть блокировка
@@ -725,19 +955,43 @@ class BaseAppLogger:
         return reopened
 
     @classmethod
-    def reopen_all_files(cls):
-        """Переоткрывает файловые обработчики всех логгеров (например, после изменения пути)."""
+    def reopen_all_files(cls) -> None:
+        """
+        Принудительно переоткрывает файлы всех логгеров (``force_reopen``), даже существующие.
+
+        Для регулярной проверки используйте ``reopen_missing_files()`` — она трогает только
+        удалённые файлы. Этот метод — после внешних операций с папкой логов.
+
+        Returns:
+            None
+
+        Пример:
+            >>> shutil.move('logs', 'logs_old'); os.mkdir('logs')
+            >>> AppLogger.reopen_all_files()
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.file_handler and hasattr(inst.file_handler, 'force_reopen'):
                     inst.file_handler.force_reopen()
 
     @classmethod
-    def reload_all_from_config(cls, global_config: Dict[str, Any]):
+    def reload_all_from_config(cls, global_config: Dict[str, Any]) -> None:
         """
-        Перезагружает настройки для всех существующих логгеров из словаря.
-        Ключи вида '<name>_enabled' и т.д. применяются к конкретным логгерам,
-        ключи без префикса – как значения по умолчанию.
+        Применяет плоский конфиг ко всем логгерам класса (``reload_from_config`` каждого).
+
+        Ключи с префиксом ``{имя}_`` дополнительно передаются логгеру без префикса (например,
+        ``system_LEVEL`` → ``LEVEL`` для ``system``), остальные — общие. После перезагрузки
+        файлы включённых логгеров проверяются на существование.
+
+        Args:
+            global_config: Плоский словарь настроек (как у ``AppConfigManager.get_all()``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.reload_all_from_config({'LOG_FILE': 'logs/', 'LOG_LEVEL': 'INFO',
+            ...     'LOG_MAX_BYTES': 10**7, 'LOG_BACKUP_COUNT': 5, 'system_LEVEL': 'DEBUG'})
         """
         with cls._instances_lock:
 
@@ -760,17 +1014,24 @@ class BaseAppLogger:
                     inst._reopen_file_handler_if_needed()
 
     @classmethod
-    def add_global_handler(cls, handler):
+    def add_global_handler(cls, handler: logging.Handler) -> None:
         """
-        Добавляет обработчик ко всем существующим и будущим экземплярам логгеров.
+        Добавляет обработчик ко всем существующим и будущим логгерам (всех наследников).
 
-        Это может быть полезно, если вам нужно добавить общий обработчик для всех логгеров в программе.
-        Пример использования:
-            def my_handler(record):
-                # обработка записи лога
-                pass
-            BaseAppLogger.add_global_handler(logging.Handler(my_handler))
+        Используется окном логов GUI. Каждый логгер фильтрует записи своим уровнем;
+        уровень самого обработчика логгеры не меняют (S3). Для вывода в функцию удобнее
+        ``add_global_output()``.
 
+        Args:
+            handler: Любой ``logging.Handler``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> class ListHandler(logging.Handler):
+            ...     def emit(self, record): records.append(record)
+            >>> AppLogger.add_global_handler(ListHandler())
         """
         with cls._global_handlers_lock:
             cls._global_handlers.append(handler)
@@ -785,11 +1046,19 @@ class BaseAppLogger:
                     instance.handlers = instance.logger.handlers[:]
 
     @classmethod
-    def remove_global_handler(cls, handler):
+    def remove_global_handler(cls, handler: logging.Handler) -> None:
         """
-        Удаляет обработчик из глобального списка и из каждого существующего экземпляра логгера.
+        Убирает глобальный обработчик из списка и со всех логгеров. Не закрывает его.
 
-        :param handler: Обработчик, который нужно удалить.
+        Args:
+            handler: Обработчик, добавленный ``add_global_handler``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.remove_global_handler(handler)
+            >>> handler.close()
         """
 
         with cls._global_handlers_lock:
@@ -871,17 +1140,25 @@ class BaseAppLogger:
     @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         """
-        Возвращает конфигурацию по умолчанию, которая будет использоваться, если не указать config при вызове get_instance().
+        Конфиг для логгера, созданного без ``config`` (``get_instance(name)``).
 
-        Метод должен быть переопределён в наследнике, потому что конфигурация по умолчанию зависит от конкретного приложения.
+        В BaseAppLogger не задан — наследник обязан переопределить (как ``AppLogger``) или
+        каждый раз передавать ``config``. Обязательные ключи: ``LEVEL``, ``FILE``,
+        ``MAX_BYTES``, ``BACKUP_COUNT`` (с префиксом ``LOG_`` или без).
 
-        Если не переопределён, то будет выброшено исключение RuntimeError.
+        Returns:
+            Плоский словарь настроек.
 
-        В наследнике необходимо переопределить метод, чтобы он возвращал словарь с конфигурацией по умолчанию для конкретного приложения.
+        Raises:
+            RuntimeError: Метод не переопределён.
 
-        Например, если в приложении по умолчанию логгер должен писать в файл с именем "app.log", то
-        метод get_default_config() должен возвращать словарь {"LOG_FILE": "app.log"}.
-
+        Пример:
+            >>> class MyLogger(BaseAppLogger):
+            ...     _instances = {}
+            ...     @classmethod
+            ...     def get_default_config(cls):
+            ...         return {'LOG_LEVEL': 'INFO', 'LOG_FILE': 'logs/',
+            ...                 'LOG_MAX_BYTES': 10_000_000, 'LOG_BACKUP_COUNT': 5}
         """
         raise RuntimeError(
             "Метод get_default_config() не переопределён в наследнике. "
@@ -889,24 +1166,64 @@ class BaseAppLogger:
         )
 
     @classmethod
-    def disable_group(cls, name_prefix: str):
-        """Отключает все логгеры, чьи имена начинаются с name_prefix."""
+    def disable_group(cls, name_prefix: str) -> None:
+        """
+        Выключает все логгеры, имя которых начинается с ``name_prefix``.
+
+        Сравнение — ``str.startswith``: ``'gui.Table'`` захватит и ``'gui.TableX'``. Чтобы
+        взять только «детей», добавьте точку: ``'gui.Table.'``.
+
+        Args:
+            name_prefix: Начало имени.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_group('gui.')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
                     inst.disable()
 
     @classmethod
-    def enable_group(cls, name_prefix: str):
-        """Включает все логгеры группы."""
+    def enable_group(cls, name_prefix: str) -> None:
+        """
+        Включает все логгеры, имя которых начинается с ``name_prefix``.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_group('gui.')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
                     inst.enable()
 
     @classmethod
-    def set_group_level(cls, name_prefix: str, level: str):
-        """Устанавливает уровень логирования для всех логгеров группы."""
+    def set_group_level(cls, name_prefix: str, level: Union[str, int]) -> None:
+        """
+        Ставит порог ``logging.Logger`` всем логгерам группы через ``setLevel``.
+
+        Меняется только порог ``logging.Logger``, а не ``log_level``/``get_level()``. Для
+        полной смены уровня используйте ``reconfigure_group(prefix, level=...)``.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+            level: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.set_group_level('api.', 'ERROR')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
@@ -915,7 +1232,17 @@ class BaseAppLogger:
     @classmethod
     def get_group_loggers(cls, name_prefix: str) -> list:
         """
-        Возвращает список имён логгеров, чьи имена начинаются с name_prefix.
+        Имена логгеров, начинающиеся с ``name_prefix``.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            Список имён в порядке создания.
+
+        Пример:
+            >>> AppLogger.get_group_loggers('gui.Table')
+            ['gui.Table', 'gui.Table.Model']
         """
         with cls._instances_lock:
             return [
@@ -925,9 +1252,19 @@ class BaseAppLogger:
             ]
 
     @classmethod
-    def reconfigure_group(cls, name_prefix: str, **kwargs):
+    def reconfigure_group(cls, name_prefix: str, **kwargs: Any) -> None:
         """
-        Переконфигурирует все логгеры группы (например, изменить уровень).
+        Вызывает ``reconfigure(**kwargs)`` у всех логгеров группы.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+            **kwargs: Аргументы ``reconfigure`` (``level``, ``console_enabled``, ...).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.reconfigure_group('gui.', level='WARNING', console_enabled=False)
         """
         with cls._instances_lock:
             for inst in cls._instances.values():
@@ -3689,32 +4026,76 @@ class BaseAppLogger:
             self.set_file_level(kwargs['file_level'])
     
     @classmethod
-    def disable_group_console(cls, name_prefix: str):
-        """Отключает вывод в консоль для всех логгеров группы."""
+    def disable_group_console(cls, name_prefix: str) -> None:
+        """
+        Выключает консоль у всех логгеров группы.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_group_console('gui.PaginatedTableModel')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
                     inst.disable_console()
 
     @classmethod
-    def enable_group_console(cls, name_prefix: str):
-        """Включает вывод в консоль для всех логгеров группы."""
+    def enable_group_console(cls, name_prefix: str) -> None:
+        """
+        Включает консоль у всех логгеров группы.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_group_console('gui.')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
                     inst.enable_console()
 
     @classmethod
-    def disable_group_file(cls, name_prefix: str):
-        """Отключает файловое логирование для всех логгеров группы."""
+    def disable_group_file(cls, name_prefix: str) -> None:
+        """
+        Выключает запись в файл у всех логгеров группы (``turn_off_file_logging``).
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.disable_group_file('api.')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
                     inst.turn_off_file_logging()
 
     @classmethod
-    def enable_group_file(cls, name_prefix: str):
-        """Включает файловое логирование для всех логгеров группы."""
+    def enable_group_file(cls, name_prefix: str) -> None:
+        """
+        Включает запись в файл у всех логгеров группы (``turn_on_file_logging``).
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.enable_group_file('api.')
+        """
         with cls._instances_lock:
             for inst in cls._instances.values():
                 if inst.name.startswith(name_prefix):
@@ -3722,8 +4103,22 @@ class BaseAppLogger:
 
     # Также можно добавить установку уровня отдельно для консоли и файла для группы:
     @classmethod
-    def set_group_console_level(cls, name_prefix: str, level: str):
-        """Устанавливает уровень логирования для консольного вывода всех логгеров группы."""
+    def set_group_console_level(cls, name_prefix: str, level: Union[str, int]) -> None:
+        """
+        Ставит отдельный уровень консоли всем логгерам группы (``set_console_level``).
+
+        Отдельный уровень живёт до следующего перестроения обработчиков логгера.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+            level: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.set_group_console_level('gui.', 'ERROR')
+        """
         with cls._instances_lock:
             lvl = cls._parse_log_level(level)
             for inst in cls._instances.values():
@@ -3731,8 +4126,22 @@ class BaseAppLogger:
                     inst.set_console_level(lvl)
 
     @classmethod
-    def set_group_file_level(cls, name_prefix: str, level: str):
-        """Устанавливает уровень логирования для файлового вывода всех логгеров группы."""
+    def set_group_file_level(cls, name_prefix: str, level: Union[str, int]) -> None:
+        """
+        Ставит отдельный уровень файлового обработчика всем логгерам группы.
+
+        Если файл общий (мастер/слейв), порог действует на всех, кто через него пишет.
+
+        Args:
+            name_prefix: Начало имени (``str.startswith``).
+            level: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.set_group_file_level('api.', 'WARNING')
+        """
         with cls._instances_lock:
             lvl = cls._parse_log_level(level)
             for inst in cls._instances.values():

@@ -140,15 +140,19 @@ def test_slave_chain(make_logger, master_cfg, log_file):
     assert '[leaf]' in read(log_file)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: защита от циклов в effective_enable_file_logging/"
-    "effective_use_name_in_filename проверяет self.name, а в _visited кладёт id(self) — "
-    "цикл ссылок даёт RecursionError"
-))
-def test_cyclic_refs_do_not_recurse_forever(make_logger):
+def test_cyclic_refs_do_not_recurse_forever(make_logger, log_dir, capsys):
+    """B1: раньше цикл ссылок a→b→a давал RecursionError."""
     a = make_logger(name='cyc_a', enable_file_logging='cyc_b')
-    make_logger(name='cyc_b', enable_file_logging='cyc_a')
+    b = make_logger(name='cyc_b', enable_file_logging='cyc_a')
     assert a.effective_enable_file_logging() in (True, False)
+    assert a.effective_use_name_in_filename() in (True, False)
+    assert 'Циклическая ссылка' in capsys.readouterr().err
+
+    # оба логгера остаются рабочими
+    a.reload_from_config(make_config(log_dir, file_enabled='True'))
+    b.reconfigure(level='INFO')
+    a.info('из цикла')
+    assert 'из цикла' in read(os.path.join(log_dir, 'app.log'))
 
 
 # ---------------------------------------------------------------------------

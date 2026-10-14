@@ -100,9 +100,14 @@ def test_config_manager_corrupted_file(tmp_path):
     config_path = tmp_path / "config.msgpack"
     # Записываем мусор в файл конфигурации
     config_path.write_bytes(b"not msgpack")
-    # Ожидаем, что при создании менеджера будет исключение
-    with pytest.raises((msgpack.exceptions.ExtraData, msgpack.exceptions.UnpackException)):
-        AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
+    # # Ожидаем, что при создании менеджера будет исключение
+    # with pytest.raises((msgpack.exceptions.ExtraData, msgpack.exceptions.UnpackException)):
+    #     AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
+    # ↑ до M1 (2026-10-14): битый файл ронял запуск. Теперь — значения по умолчанию,
+    #   битый файл переименован (подробно — test_manager_behavior.py).
+    manager = AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
+    assert manager.get('YANDEX_TOKEN') == '----'
+    assert manager.broken_config_backup is not None
 
 
 

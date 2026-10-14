@@ -820,31 +820,68 @@ class BaseAppLogger:
 
         return depth
 
-    def _get_current_depth(self) -> int:
-        """Возвращает текущую глубину вложенности для текущего контекста (поток/задача)."""
+    # До исправления D1 (2026-10-14). Запись шла в contextvars (set не бросает
+    # LookupError, ветка с threading.local не срабатывала никогда), а чтение в
+    # синхронном коде — из threading.local, где всегда 0. Итог: декоратор с
+    # show_depth=True всегда показывал глубину 0.
+    # def _get_current_depth(self) -> int:
+    #     """Возвращает текущую глубину вложенности для текущего контекста (поток/задача)."""
 
-        try:
-            loop = asyncio.get_running_loop()
-            # Если есть текущая задача, считаем, что это асинхронный контекст
-            if asyncio.current_task(loop) is not None:
-                return self._depth_context.get()
-            
-            else:
-                return getattr(self._depth_local, 'depth', 0)
-        
-        except (RuntimeError, LookupError) as e:
-            err = e
-            # Если не задан, используем threading.local (синхронный поток)
-            # Нет запущенного event loop – синхронный контекст
-            return getattr(self._depth_local, 'depth', 0)
+    #     try:
+    #         loop = asyncio.get_running_loop()
+    #         # Если есть текущая задача, считаем, что это асинхронный контекст
+    #         if asyncio.current_task(loop) is not None:
+    #             return self._depth_context.get()
+
+    #         else:
+    #             return getattr(self._depth_local, 'depth', 0)
+
+    #     except (RuntimeError, LookupError) as e:
+    #         err = e
+    #         # Если не задан, используем threading.local (синхронный поток)
+    #         # Нет запущенного event loop – синхронный контекст
+    #         return getattr(self._depth_local, 'depth', 0)
+
+    # def _set_current_depth(self, depth: int) -> None:
+    #     """Устанавливает глубину для текущего контекста."""
+    #     try:
+    #         self._depth_context.set(depth)
+
+    #     except LookupError:
+    #         self._depth_local.depth = depth
+
+    def _get_current_depth(self) -> int:
+        """
+        Текущая глубина вложенности вызовов, обёрнутых декоратором (``show_depth=True``).
+
+        Хранится в ``contextvars.ContextVar``: значение своё у каждого потока (новый
+        поток стартует с пустым контекстом → 0) и у каждой задачи asyncio (задача
+        получает копию контекста создателя). Поэтому отдельный ``threading.local`` не нужен.
+
+        Returns:
+            Глубина, 0 вне обёрнутых вызовов.
+
+        Пример:
+            >>> log._get_current_depth()
+            0
+        """
+        return self._depth_context.get()
 
     def _set_current_depth(self, depth: int) -> None:
-        """Устанавливает глубину для текущего контекста."""
-        try:
-            self._depth_context.set(depth)
+        """
+        Устанавливает глубину вложенности для текущего потока/задачи.
 
-        except LookupError:
-            self._depth_local.depth = depth
+        Args:
+            depth: Новая глубина (не меньше 0).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._set_current_depth(2); log._get_current_depth()
+            2
+        """
+        self._depth_context.set(depth)
 
     def _increase_depth(self) -> int:
         """Увеличивает глубину на 1 и возвращает новое значение."""

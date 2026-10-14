@@ -323,11 +323,8 @@ def _indent(line):
     return len(re.search(r'\]\t(>*) File', line).group(1))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: _increase_depth пишет глубину в contextvars, а _get_current_depth в "
-    "синхронном коде читает threading.local → глубина всегда 0"
-))
 def test_show_depth_nested_sync(lg, lines):
+    """D1: раньше глубина в синхронном коде всегда была 0."""
     @lg.log_execution_time(show_depth=True)
     def outer():
         inner()
@@ -341,17 +338,55 @@ def test_show_depth_nested_sync(lg, lines):
     assert depths == [1, 2, 2, 1]
 
 
-def test_show_depth_nested_sync_current_behavior(lg, lines):
+def test_show_depth_restored_after_exception(lg, lines):
     @lg.log_execution_time(show_depth=True)
-    def outer():
-        inner()
+    def boom():
+        raise ValueError('x')
 
     @lg.log_execution_time(show_depth=True)
-    def inner():
+    def ok():
         pass
 
+    with pytest.raises(ValueError):
+        boom()
+    ok()
+    assert [_indent(line) for line in lines()] == [1, 1, 1, 1]
+    assert lg._get_current_depth() == 0
+
+
+def test_show_depth_independent_per_thread(lg, lines):
+    import threading
+
+    @lg.log_execution_time(show_depth=True)
+    def in_thread():
+        pass
+
+    @lg.log_execution_time(show_depth=True)
+    def outer():
+        t = threading.Thread(target=in_thread)
+        t.start()
+        t.join()
+
     outer()
-    assert [_indent(line) for line in lines()] == [0, 0, 0, 0]
+    thread_lines = [line for line in lines() if 'in_thread' in line]
+    assert [_indent(line) for line in thread_lines] == [1, 1]
+
+
+def test_show_depth_independent_per_async_task(lg, lines):
+    @lg.log_execution_time(show_depth=True)
+    async def leaf(name):
+        await asyncio.sleep(0)
+
+    @lg.log_execution_time(show_depth=True)
+    async def branch(name):
+        await leaf(name)
+
+    async def main():
+        await asyncio.gather(branch('a'), branch('b'))
+
+    asyncio.run(main())
+    leaf_depths = [_indent(line) for line in lines() if '.leaf>' in line]
+    assert leaf_depths == [2, 2, 2, 2]
 
 
 def test_show_call_depth_logger_flag_uses_stack(make_logger, log_dir, lines):

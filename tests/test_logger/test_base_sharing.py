@@ -280,13 +280,17 @@ def test_slave_disable_file_unshares_and_stops_writing(pair, log_file):
 
 
 def test_slave_enable_file_after_disable_file(pair, log_file):
-    """enable_file() у бывшего слейва создаёт собственный обработчик на тот же файл."""
+    """enable_file() у бывшего слейва создаёт собственный обработчик на тот же файл.
+
+    До исправления R2 обработчик не создавался: effective_enable_file_logging()
+    возвращал True от мастера, и метод считал файл «уже включённым».
+    """
     master, slave = pair
     slave.disable_file()
     slave.enable_file()
+    assert slave.file_handler is not None
     slave.info('снова')
-    # effective_enable_file_logging('M') == True → «уже включено» → _update_handlers без файла
-    assert slave.file_handler is None
+    assert '[S]' in read(log_file)
 
 
 def test_unshare_creates_own_handler_same_file(pair, log_file):

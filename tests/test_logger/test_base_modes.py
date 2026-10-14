@@ -140,14 +140,6 @@ def test_disable_file_keeps_console(make_file_logger, log_file, capsys):
     assert 'только консоль' not in read(log_file)
 
 
-BUG_REENABLE_FILE = (
-    "BUG: turn_on_file_logging() проверяет effective_enable_file_logging(), "
-    "который возвращает аргумент конструктора _enable_file_logging (True), а не "
-    "текущий _file_enabled; поэтому после disable_file() файл не включается обратно"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=BUG_REENABLE_FILE)
 def test_enable_file_back(make_file_logger, log_file):
     file_logger = make_file_logger()
     file_logger.disable_file()
@@ -158,13 +150,16 @@ def test_enable_file_back(make_file_logger, log_file):
     assert _kinds(file_logger) == ['console', 'file']
 
 
-def test_enable_file_back_current_behavior(make_file_logger, log_file):
+def test_enable_file_back_repeatedly(make_file_logger, log_file):
+    """R2: раньше enable_file() после disable_file() молча ничего не делал."""
     file_logger = make_file_logger()
-    """Как есть: enable_file() после disable_file() молча ничего не делает."""
-    file_logger.disable_file()
-    file_logger.enable_file()
-    assert file_logger.is_file_enabled() is False
-    assert file_logger.file_handler is None
+    for _ in range(3):
+        file_logger.disable_file()
+        assert file_logger.file_handler is None
+        file_logger.enable_file()
+        assert file_logger.file_handler is not None
+    file_logger.info('после трёх циклов')
+    assert read(log_file).count('после трёх циклов') == 1
 
 
 def test_enable_file_back_via_reconfigure_works(make_file_logger, log_file):
@@ -184,7 +179,6 @@ def test_enable_file_on_logger_created_without_file(make_logger, log_dir):
     assert 'появился файл' in read(os.path.join(log_dir, 'app.log'))
 
 
-@pytest.mark.xfail(strict=True, reason=BUG_REENABLE_FILE)
 def test_enable_file_logging_property(make_file_logger, log_file):
     file_logger = make_file_logger()
     assert file_logger.enable_file_logging is True

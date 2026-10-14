@@ -131,28 +131,26 @@ def test_disable_file_after_enable(logger_cls, group):
     assert lg.is_file_enabled() is False
 
 
-BUG_GROUP_LEVEL = (
-    "BUG: set_group_console_level/set_group_file_level переводят уровень в int, "
-    "а set_console_level/set_file_level снова вызывают _parse_log_level → AttributeError"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=BUG_GROUP_LEVEL)
 def test_set_group_console_level(logger_cls, group):
     logger_cls.set_group_console_level('gui.', 'ERROR')
     assert group['gui.Form'].console_handler.level == logging.ERROR
 
 
-@pytest.mark.xfail(strict=True, reason=BUG_GROUP_LEVEL)
 def test_set_group_file_level(logger_cls, group):
     logger_cls.enable_group_file('gui.')
     logger_cls.set_group_file_level('gui.', 'ERROR')
     assert group['gui.Form'].file_handler.level == logging.ERROR
 
 
-def test_set_group_console_level_current_behavior(logger_cls, group):
-    with pytest.raises(AttributeError):
-        logger_cls.set_group_console_level('gui.', 'ERROR')
+def test_set_group_levels_do_not_touch_others(logger_cls, group):
+    """B2: раньше оба групповых метода падали с AttributeError."""
+    logger_cls.set_group_console_level('gui.', 'ERROR')
+    assert group['api.Db'].console_handler.level == logging.DEBUG
+
+
+def test_set_console_level_accepts_int(group):
+    group['api.Db'].set_console_level(logging.CRITICAL)
+    assert group['api.Db'].console_handler.level == logging.CRITICAL
 
 
 # ---------------------------------------------------------------------------

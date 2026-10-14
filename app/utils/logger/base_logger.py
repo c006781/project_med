@@ -3766,10 +3766,44 @@ class BaseAppLogger:
             return instance
 
     @staticmethod
-    def _parse_log_level(level_str: str) -> int:
+    def _parse_log_level(level_str: Union[str, int]) -> int:
         """
-        Преобразует строковое представление уровня логирования в константу logging.
+        Приводит уровень логирования к числу из модуля ``logging``.
+
+        Принимает:
+            * строку-имя уровня без учёта регистра: ``'DEBUG'``, ``'info'``, ...;
+            * число (``logging.INFO``, ``20``, свои уровни ``>= 0``) — возвращается как есть.
+
+        Числа принимаются с 2026-10-14 (исправление B2): групповые
+        ``set_group_console_level``/``set_group_file_level`` переводили строку в число и
+        передавали его в ``set_*_level``, который снова вызывал этот метод → ``AttributeError``.
+
+        Args:
+            level_str: Имя уровня или число.
+
+        Returns:
+            Числовой уровень.
+
+        Raises:
+            ValueError: Неизвестное имя уровня или отрицательное число.
+            TypeError: Не строка и не число (например, ``None``).
+
+        Пример:
+            >>> BaseAppLogger._parse_log_level('warning')
+            30
+            >>> BaseAppLogger._parse_log_level(logging.ERROR)
+            40
         """
+        # bool — подкласс int, но True/False как уровень — почти наверняка ошибка
+        if isinstance(level_str, int) and not isinstance(level_str, bool):
+            if level_str < 0:
+                raise ValueError(f"Уровень логирования не может быть отрицательным: {level_str}")
+            return level_str
+
+        if not isinstance(level_str, str):
+            raise TypeError(
+                f"Уровень логирования должен быть строкой или числом, получено: {level_str!r}"
+            )
 
         upper_str = level_str.upper()
 

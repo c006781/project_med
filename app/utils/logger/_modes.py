@@ -329,6 +329,12 @@ class _ModesMixin:
             need_rebuild = True
 
         if 'enable_file_logging' in kwargs:
+            # P7 (2026-10-14): синоним file_enabled — оставлен для совместимости.
+            warnings.warn(
+                "reconfigure(enable_file_logging=...) устарел: используйте file_enabled=...",
+                DeprecationWarning,
+                stacklevel=3,
+            )
             # warnings.warn("'enable_file_logging' устарел, используйте 'file_enabled'", DeprecationWarning)
             # self._file_enabled = bool(kwargs['enable_file_logging'])
             # if isinstance(kwargs['enable_file_logging'], str):
@@ -864,6 +870,12 @@ class _ModesMixin:
         Пример:
             >>> log.enable_file_logging = False
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            'Присваивание log.enable_file_logging = ... устарело: используйте log.enable_file() / log.disable_file().',
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         if not isinstance(value, bool):
             warnings.warn(

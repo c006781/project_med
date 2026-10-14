@@ -18,6 +18,7 @@
     True
 """
 
+import warnings
 import logging
 import sys
 from typing import List, Optional, Dict, Any, Callable, Union
@@ -691,6 +692,12 @@ class _ConfigMixin:
             >>> log._get_config_param({'LOG_MAX_BYTES': '100'}, 'MAX_BYTES', fun=int)
             100
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            '_get_config_param() устарел: используйте _get_config_with_inheritance().',
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         # if key == 'LEVEL':
         #     0==0

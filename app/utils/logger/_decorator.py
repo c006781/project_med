@@ -18,9 +18,10 @@
     True
 """
 
+from ._common import _level_to_int
 import logging
 import time
-from typing import Optional, Dict, Any, Callable, Tuple
+from typing import Optional, Dict, Any, Callable, Tuple, Union
 
 import inspect
 
@@ -50,7 +51,9 @@ class _DecoratorMixin:
     def log_execution_time(
         self, 
         description: str = "", 
-        level: int = logging.DEBUG,
+        # level: int = logging.DEBUG,
+        # ↑ P7: теперь можно и строкой: level='INFO' (без AppLogger._parse_log_level(...)).
+        level: Union[int, str] = logging.DEBUG,
         log_args: Optional[bool] = None,
         # log_args: Optional[bool] = True,
         log_return: bool = False,
@@ -68,7 +71,7 @@ class _DecoratorMixin:
 
         Args:
             description: Текст перед ``[Начало]``/``[Завершение]``.
-            level: Уровень обеих строк (число, по умолчанию ``logging.DEBUG``).
+            level: Уровень обеих строк: число или имя (``'INFO'``); по умолчанию ``logging.DEBUG``.
             log_args: Писать аргументы вызова (без ``self``/``cls``; у ``__init__`` — никогда).
                 ``None`` — по ``log_args`` логгера в момент вызова.
             log_return: Дописывать ``-> repr(результат)`` (кроме ``None``).
@@ -86,6 +89,8 @@ class _DecoratorMixin:
             # INFO [PatientService] File "...", line 2, in <save>: Сохранение [Начало] with args: (5, force=True)
             # INFO [PatientService] File "...", line 2, in <save>: Сохранение [Завершение: 0.0031 сек]
         """
+        # P7 (2026-10-14): уровень можно передать строкой ('DEBUG') или числом
+        level = _level_to_int(level)
 
         logger_instance = self
 

@@ -427,3 +427,19 @@ def test_show_call_depth_logger_flag_uses_stack(make_logger, log_dir, lines):
     f()
     depths = [_indent(line) for line in lines()]
     assert depths[0] > 0 and depths[0] == depths[1]
+
+
+@pytest.mark.parametrize('level, name', [('INFO', 'INFO'), ('warning', 'WARNING'), (logging.ERROR, 'ERROR')])
+def test_level_as_string_or_int(lg, lines, level, name):
+    """P7: уровень декоратора можно передать строкой."""
+    @lg.log_execution_time(level=level)
+    def f():
+        pass
+
+    f()
+    assert all(f'\t{name}\t' in line for line in lines())
+
+
+def test_bad_level_raises_at_decoration(lg):
+    with pytest.raises(ValueError):
+        lg.log_execution_time(level='TRACE')

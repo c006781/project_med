@@ -18,6 +18,7 @@
     True
 """
 
+import warnings
 import logging
 import sys
 import time
@@ -65,6 +66,12 @@ class _RegistryMixin:
             >>> AppLogger.status_show_call_depth_global()
             True
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            'on_show_call_depth_global() устарел: флаг ни на что не влияет. Глубина включается параметром show_call_depth логгера или show_depth=True декоратора.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         cls._show_call_depth_global = True
 
     @classmethod
@@ -80,6 +87,12 @@ class _RegistryMixin:
         Пример:
             >>> AppLogger.off_show_call_depth_global()
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            'off_show_call_depth_global() устарел: флаг ни на что не влияет. Глубина включается параметром show_call_depth логгера или show_depth=True декоратора.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         cls._show_call_depth_global = False
 
 
@@ -95,6 +108,12 @@ class _RegistryMixin:
             >>> AppLogger.status_show_call_depth_global()
             False
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            'status_show_call_depth_global() устарел: флаг ни на что не влияет. Глубина включается параметром show_call_depth логгера или show_depth=True декоратора.',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return cls._show_call_depth_global
 
 
@@ -969,7 +988,9 @@ class _RegistryMixin:
         # ↑ до S4: явный False при подключении к мастеру затирал унаследованный флаг.
         #   None — для мастера False, для слейва — как у мастера.
         sync_full_state: Optional[bool] = None,
-        auto_share: bool = False, # Пока не используется
+        # auto_share: bool = False, # Пока не используется
+        # ↑ P7: None — не передан; любое значение — DeprecationWarning (параметр не работает).
+        auto_share: Optional[bool] = None, # Пока не используется
     ) -> 'BaseAppLogger':
         """
         Главная точка получения логгера: возвращает существующий или создаёт новый.
@@ -1003,6 +1024,14 @@ class _RegistryMixin:
             ...     .log_execution_time(level=logging.DEBUG)
             ... def apply(): ...
         """
+        # P7 (2026-10-14): параметр auto_share никогда не работал (автоподключение задаётся
+        # отсутствием share_file_with) — предупреждаем, если его передали.
+        if auto_share is not None:
+            warnings.warn(
+                'get_instance(auto_share=...) устарел и ни на что не влияет.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         # Если enable_file_logging – строка и это не 'true'/'false', используем как имя для шаринга
         if (

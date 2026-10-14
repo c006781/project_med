@@ -93,27 +93,59 @@ def test_startup_services_take_system_flags(app):
         assert svc.is_file_enabled() is True
 
 
-BUG_NOT_SHARED = (
-    "BUG: сервисные логгеры не привязываются к system: привязка проверяет "
-    "system.effective_enable_file_logging() → аргумент конструктора (False). "
-    "В итоге каждый логгер открывает свой RotatingFileHandler на тот же файл"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=BUG_NOT_SHARED)
 def test_startup_services_share_system_handler(app):
+    """S1: раньше привязка проверяла аргумент конструктора system и не срабатывала."""
     _, system, _, services = app
     for svc in services:
         assert svc.file_handler is system.file_handler
+        assert svc.get_master_logger() is system
 
 
-def test_startup_services_have_own_handlers_on_same_file(app, log_file):
-    """Как есть: N логгеров → N открытых обработчиков на один app.log."""
+def test_startup_single_handler_on_file(app):
+    """S1: раньше N логгеров открывали N обработчиков на один app.log."""
+    _, system, user, services = app
+    handlers = {id(lg.file_handler) for lg in [system, user] + services}
+    assert handlers == {id(system.file_handler)}
+
+
+def test_services_created_before_system_file_join_after_reload(logger_cls, app_cfg, log_dir):
+    """Реальный порядок старта: логгеры создаются до настройки, файл появляется позже."""
+    logger_cls.default_config = dict(app_cfg, system_file_enabled='False')
+    system = logger_cls.get_instance(name='system')
+    svc = logger_cls.get_instance(name='svc_early', enable_file_logging='system')
+    assert system.file_handler is None and svc.file_handler is None
+
+    logger_cls.reload_all_from_config(app_cfg)
+
+    assert system.file_handler is not None
+    assert svc.file_handler is system.file_handler
+    svc.info('после настройки')
+    assert read(os.path.join(log_dir, 'app.log')).count('после настройки') == 1
+
+
+def test_system_file_off_and_on_again(app, app_cfg, log_file):
+    """Файл system выключили и включили: сервисы снова пишут через один обработчик."""
     _, system, _, services = app
-    handlers = {id(lg.file_handler) for lg in [system] + services}
-    assert len(handlers) == 1 + len(services)
+    _reload(app, app_cfg, system_file_enabled='False')
+    _reload(app, app_cfg, system_file_enabled='True')
+    assert system.file_handler is not None
     for svc in services:
-        assert os.path.normcase(svc.file_handler.baseFilename) == os.path.normcase(log_file)
+        assert svc.file_handler is system.file_handler
+    open(log_file, 'w').close()
+    services[0].info('один раз')
+    assert read(log_file).count('один раз') == 1
+
+
+def test_explicit_unshare_survives_reload(app, app_cfg):
+    """Явно отвязанный логгер не подключается к system обратно при перезагрузке."""
+    _, system, _, services = app
+    svc = services[0]
+    svc.unshare_file_handler()
+    own = svc.file_handler
+    assert own is not None and own is not system.file_handler
+    _reload(app, app_cfg, system_LEVEL='INFO')
+    assert svc.has_shared_handler() is False
+    assert svc.file_handler is not system.file_handler
 
 
 def test_startup_everyone_writes_to_one_file(app, log_file):
@@ -154,7 +186,11 @@ def test_settings_system_file_off_services_stop_writing(app, app_cfg, log_file):
 
 
 def test_settings_system_file_off_user_keeps_writing(app, app_cfg, log_file):
-    """user_file_enabled=True → user продолжает писать через (закрытый) обработчик system."""
+    """user_file_enabled=True: system закрыл файл, user открывает свой (S2).
+
+    До исправления user «писал» через закрытый обработчик system (FileHandler
+    переоткрывал поток), то есть результат был тот же, но случайно.
+    """
     _, system, user, _ = app
     _reload(app, app_cfg, system_file_enabled='False')
     assert system.file_handler is None

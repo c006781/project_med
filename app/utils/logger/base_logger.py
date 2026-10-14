@@ -565,6 +565,12 @@ class BaseAppLogger:
 
         self._sync_full_state = sync_full_state  # по умолчанию копируем флаги консоли/включения
 
+        # Разрешено ли автоматически подключаться к файлу родителя по ссылке
+        # enable_file_logging='имя' (исправление S1). Сбрасывается явным
+        # unshare_file_handler(): если логгер попросили писать в свой файл,
+        # перестроение не должно молча подключить его обратно.
+        self._allow_ref_sharing: bool = True
+
         # self._console_enabled = True   # флаг для консольного вывода
         # self._enabled = True            # полное отключение логирования
 
@@ -880,7 +886,10 @@ class BaseAppLogger:
                 self._file_enabled != old_file or
                 self._console_enabled != old_console or
                 self._enabled != old_enabled or
-                file_params_changed
+                file_params_changed or
+                # Флаги могли не измениться, а обработчик пропасть (мастер выключил
+                # общий файл, S2) — тогда тоже перестраиваем.
+                self._file_output_missing()
             )
 
         # применение изменений БЕЗ блокировки
@@ -1047,6 +1056,75 @@ class BaseAppLogger:
         if logger is None:
             return False
         return any(not isinstance(h, logging.NullHandler) for h in logger.handlers)
+
+    def _file_output_missing(self) -> bool:
+        """
+        Файл логгеру нужен, а файлового обработчика нет.
+
+        Так бывает, когда флаги логгера не менялись, но мастер, через которого он
+        писал, закрыл общий файл (S2): обработчик у слейва отцеплен, а сам слейв
+        файл по-прежнему хочет. Используется как дополнительный повод перестроить
+        обработчики в ``reload_from_config()`` / ``apply_config_from_dict()``.
+
+        Returns:
+            ``True``, если логгер включён, файл включён, а ``file_handler`` пустой.
+
+        Пример:
+            >>> log.reconfigure(file_enabled=True)
+            >>> log._file_output_missing()
+            False
+        """
+        return self._enabled and self._file_enabled and self.file_handler is None
+
+    def _ref_parent_for_sharing(self) -> Optional['BaseAppLogger']:
+        """
+        Родитель по ссылке ``enable_file_logging='имя'``, к файлу которого можно подключиться.
+
+        Родитель подходит, если ВСЁ верно:
+            * ссылка задана и логгер с таким именем есть в реестре (и это не сам логгер);
+            * у родителя сейчас реально открыт файл: включён, файл включён, обработчик есть;
+            * родитель пишет в тот же файл, в который писал бы этот логгер
+              (иначе, например при ``use_name_in_filename=True``, подключаться нельзя).
+
+        Проверяется ФАКТИЧЕСКОЕ состояние родителя, а не аргумент его конструктора —
+        в этом и было исправление S1 (IMPLEMENTATION.md §5.2): ``system`` создаётся без
+        ``enable_file_logging=True``, файл ему включает конфиг, и раньше к нему не
+        подключался никто.
+
+        Returns:
+            Логгер-родитель или ``None``, если подключаться не к чему.
+
+        Пример:
+            >>> system = AppLogger.get_instance('system')            # файл включён конфигом
+            >>> svc = AppLogger.get_instance('svc', enable_file_logging='system')
+            >>> svc._ref_parent_for_sharing() is system
+            True
+        """
+        if not getattr(self, '_allow_ref_sharing', True):
+            # Логгер явно отвязали (unshare_file_handler) — пишет в свой файл
+            return None
+
+        ref = getattr(self, '_enable_file_logging_ref', None)
+        if not ref:
+            return None
+
+        parent = self._get_parent(ref)
+        if parent is None or parent is self:
+            return None
+
+        if not (parent._enabled and parent._file_enabled and parent.file_handler is not None):
+            return None
+
+        try:
+            same_file = (
+                os.path.normcase(os.path.abspath(parent._get_log_file()))
+                == os.path.normcase(os.path.abspath(self._get_log_file()))
+            )
+        except ValueError:
+            # У кого-то не задан base_log_file — сравнивать нечего
+            return None
+
+        return parent if same_file else None
 
     def _get_parent(self, key) -> Optional['BaseAppLogger']:
         cls = type(self)
@@ -1685,8 +1763,13 @@ class BaseAppLogger:
                         'master_max_bytes': master.log_max_bytes,
                         'master_backup_count': master.log_backup_count,
                         'master_timestamp': master.use_timestamp,
-                        'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
-                        'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                        # 'master_file_enabled': master.effective_enable_file_logging(_visited=visited),
+                        # 'master_use_name': master.effective_use_name_in_filename(_visited=visited),
+                        # ↑ до исправления S1/S2: effective_* — аргументы конструктора мастера,
+                        #   а не его состояние. Для system (создан без enable_file_logging=True)
+                        #   слейв получал _file_enabled=False в момент подключения к файлу.
+                        'master_file_enabled': master._file_enabled,
+                        'master_use_name': master._use_name_in_filename,
                         'master_sync_full': master._sync_full_state,
                         'master_args': master.log_args,
                         'master_show_depth': master._show_call_depth,
@@ -1785,6 +1868,15 @@ class BaseAppLogger:
                     if_close_file_handler=True,
                 )
 
+                # Слейв, которому файл сейчас не нужен (логгер или файл выключены),
+                # отцепляет общий обработчик, НЕ закрывая его — им пользуются мастер и
+                # другие слейвы. Раньше общий обработчик оставался подключённым и
+                # слейв продолжал писать в файл (часть исправления S2).
+                if self._shared_handler and self.file_handler is not None and not (
+                    self._enabled and self._file_enabled
+                ):
+                    self._remove_file_handler(if_close_file_handler=False)
+
                 # Если логгер полностью отключён – больше ничего не добавляем
                 if not self._enabled:
                     return
@@ -1803,9 +1895,19 @@ class BaseAppLogger:
                 # Создаём свой файловый обработчик, если не общий и включён
                 # Файловый обработчик – только если не используется общий и файловое логирование включено
 
-                if not self._shared_handler and self._file_enabled:
+                # if not self._shared_handler and self._file_enabled:
+                #     self._update_file_handler()
+                # ↑ до исправления S1: свой обработчик создавался всегда, даже если
+                #   логгер ссылается на родителя (enable_file_logging='system'), у которого
+                #   файл уже открыт → N обработчиков на один app.log.
+                #   Теперь в этом случае ниже (после _tt) логгер подключается к родителю.
+                if (
+                    not self._shared_handler
+                    and self._file_enabled
+                    and self._ref_parent_for_sharing() is None
+                ):
                     self._update_file_handler()
-                    
+
                 # Для остальных случаев (общий обработчик или потеря мастера) – не создаём,
                 # так как они будут обработаны позже без блокировки
                 # self._save_handlers()   # сохраняем состояние после базовой настройки
@@ -1813,11 +1915,23 @@ class BaseAppLogger:
             with BaseAppLogger._share_lock:
                 # Обновление общего обработчика (без удержания self._handler_lock)
                 if self._shared_handler and self._master_logger:
-                    # Если обработчик мастера существует, используем его
-                    self._update_file_handler_if_on()
-                    
-                    self._reopen_file_handler_if_needed()# Добавлено: при переключении на общий обработчик проверяем существование файла
-        
+                    # # Если обработчик мастера существует, используем его
+                    # self._update_file_handler_if_on()
+                    #
+                    # self._reopen_file_handler_if_needed()# Добавлено: при переключении на общий обработчик проверяем существование файла
+                    # ↑ до исправления S2: если файл у мастера выключен, слейв оставался без
+                    #   файла, даже когда ему самому файл нужен (user_file_enabled=True).
+                    if self._file_enabled:
+                        if self._master_logger.file_handler is None:
+                            # У мастера файла нет, а нам нужен — отвязываемся и пишем сами
+                            # (внутри снова вызовется _update_handlers уже без общего обработчика)
+                            self.unshare_file_handler(if_update_handlers=True, keep_ref_sharing=True)
+                        else:
+                            # Если обработчик мастера существует, используем его
+                            self._update_file_handler_if_on()
+
+                            self._reopen_file_handler_if_needed()# Добавлено: при переключении на общий обработчик проверяем существование файла
+
                 elif self._shared_handler and not self._master_logger:
                     # Аномалия: флаг установлен, а мастера нет – сбрасываем
                     self.logger.warning(
@@ -1833,7 +1947,22 @@ class BaseAppLogger:
                     # Случай, когда не общий и файловое логирование выключено – ничего не делаем
                     pass     
 
-        _tt()                
+        _tt()
+
+        # S1: логгер со ссылкой на родителя (enable_file_logging='system') подключается к
+        # обработчику родителя, если у того файл реально открыт и это тот же файл.
+        # Раньше привязка проверяла аргумент конструктора родителя и не срабатывала.
+        # share_file_handler_with() сам ещё раз вызовет _update_handlers() — уже по ветке
+        # «общий обработчик», так что повторного входа сюда не будет.
+        if (
+            self._enabled
+            and self._file_enabled
+            and not self._shared_handler
+            and self.file_handler is None
+        ):
+            parent = self._ref_parent_for_sharing()
+            if parent is not None:
+                self.share_file_handler_with(parent)
 
         # Добавляем глобальные обработчики обратно (например, для GUI-логов) (безопасное копирование)
         # Убедимся, что глобальные обработчики присутствуют (они не удалялись, но на всякий случай)
@@ -2348,7 +2477,19 @@ class BaseAppLogger:
         master_state = self._get_master_state()
         
         if master_state['file_handler'] is None:
-            # У мастера нет файлового обработчика – ничего не синхронизируем
+            # # У мастера нет файлового обработчика – ничего не синхронизируем
+            # return
+            # ↑ до исправления S2: слейвы оставались с закрытым обработчиком мастера,
+            #   а FileHandler при записи переоткрывает поток → слейвы продолжали писать
+            #   в файл, который мастер выключил.
+            # Теперь отцепляем старый общий обработчик (связь мастер/слейв сохраняется:
+            # когда мастер снова откроет файл, слейвы получат новый обработчик).
+            # Слейв, которому файл нужен сам, при своём перестроении откроет свой.
+            for slave in active_slaves:
+                with slave._handler_lock:
+                    if slave._shared_handler and slave.file_handler is not None:
+                        slave._remove_file_handler(if_close_file_handler=False)
+                        slave._save_handlers()
             return
 
         for slave in active_slaves:  # копия на случай изменения списка
@@ -2392,10 +2533,36 @@ class BaseAppLogger:
                 f"Логгер '{self.name}' имеет флаг _shared_handler=True, но _master_logger отсутствует"
             )
 
-    def unshare_file_handler(self, if_update_handlers=True) -> None:
+    def unshare_file_handler(
+        self,
+        if_update_handlers: bool = True,
+        keep_ref_sharing: bool = False,
+    ) -> None:
         """
-        Отвязывает текущий логгер от общего обработчика и создаёт собственный.
+        Отвязывает логгер от общего файлового обработчика; дальше он пишет в свой.
+
+        Общий обработчик не закрывается — им пользуются мастер и другие слейвы.
+
+        Args:
+            if_update_handlers: Сразу перестроить обработчики (создать свой файловый,
+                если файл включён). ``False`` — вызывающий код перестроит сам.
+            keep_ref_sharing: ``False`` (по умолчанию) — явная отвязка: логгер больше
+                не подключается к родителю по ссылке ``enable_file_logging='имя'``
+                автоматически. ``True`` — служебная отвязка (у мастера пропал файл,
+                S2): при появлении файла у родителя логгер сможет подключиться снова.
+
+        Returns:
+            None
+
+        Пример:
+            >>> svc = AppLogger.get_instance('svc', enable_file_logging='system')
+            >>> svc.unshare_file_handler()
+            >>> svc.has_shared_handler(), svc.file_handler is not None
+            (False, True)
         """
+        if not keep_ref_sharing:
+            self._allow_ref_sharing = False
+
         with BaseAppLogger._share_lock:
             if not self._shared_handler:
                 return
@@ -2868,7 +3035,10 @@ class BaseAppLogger:
                 self.log_max_bytes != old_max_bytes or
                 self.log_backup_count != old_backup_count or
                 self.use_timestamp != old_use_timestamp or
-                self._use_name_in_filename != old_use_name
+                self._use_name_in_filename != old_use_name or
+                # Флаги могли не измениться, а обработчик пропасть (мастер выключил
+                # общий файл, S2) — тогда тоже перестраиваем.
+                self._file_output_missing()
             )
 
         # применение изменений БЕЗ блокировки
@@ -3390,7 +3560,10 @@ class BaseAppLogger:
                 if other:
                     # Проверяем, должен ли у other быть файловый обработчик
                     # (учитываем эффективное состояние файлового логирования)
-                    if other.effective_enable_file_logging(_visited=None):
+                    # if other.effective_enable_file_logging(_visited=None):
+                    # ↑ до исправления S1: проверялся аргумент конструктора other, а не его
+                    #   состояние; к system (файл включён конфигом) не подключался никто.
+                    if other._enabled and other._file_enabled:
                         # Файловое логирование включено, но обработчик отсутствует – это ошибка
                         if other.file_handler is None:
                             print(f"WARNING: У логгера '{share_file_with}' включено файловое логирование, "

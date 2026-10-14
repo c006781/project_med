@@ -70,18 +70,51 @@ def test_startup_user_auto_shares_with_system(app):
     assert user.file_handler is system.file_handler
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: при привязке к system user получает уровень мастера (DEBUG) "
-    "вместо своего user_LEVEL=INFO"
-))
 def test_startup_user_level_is_own(app):
-    _, _, user, _ = app
+    """S3: раньше user при привязке к system получал DEBUG вместо user_LEVEL=INFO."""
+    _, system, user, _ = app
+    assert user.file_handler is system.file_handler
     assert user.log_level == logging.INFO
+    assert system.log_level == logging.DEBUG
 
 
-def test_startup_user_level_current_behavior(app):
-    _, _, user, _ = app
-    assert user.log_level == logging.DEBUG
+def test_shared_file_each_logger_filters_by_own_level(app, log_file):
+    """S3: в общий файл system пишет DEBUG, user — только INFO и выше."""
+    _, system, user, _ = app
+    system.debug('system debug')
+    user.debug('user debug')
+    user.info('user info')
+    content = read(log_file)
+    assert 'system debug' in content
+    assert 'user debug' not in content
+    assert 'user info' in content
+
+
+def test_personal_level_key_survives_sharing(logger_cls, app_cfg):
+    """S3: раньше ConfigApplier_LEVEL затирался уровнем system при подключении к файлу."""
+    logger_cls.default_config = dict(app_cfg, ConfigApplier_LEVEL='ERROR')
+    system = logger_cls.get_instance(name='system')
+    ca = logger_cls.get_instance(name='ConfigApplier', enable_file_logging='system')
+    assert ca.file_handler is system.file_handler
+    assert ca.get_level() == 'ERROR'
+
+
+def test_slave_reload_does_not_silence_master(app, app_cfg, log_file):
+    """S3: раньше перезагрузка слейва ставила его уровень общему файлу мастера."""
+    _, system, _, services = app
+    services[0].reload_from_config(dict(app_cfg, svc0_LEVEL='ERROR'))
+    system.debug('debug системы')
+    assert 'debug системы' in read(log_file)
+
+
+def test_reload_does_not_change_global_handler_level(app, app_cfg, list_handler):
+    """S3: раньше уровень окна логов GUI задавал логгер, перезагрузившийся последним."""
+    logger_cls, system, _, _ = app
+    h = list_handler()
+    logger_cls.add_global_handler(h)
+    _reload(app, app_cfg)
+    system.debug('system debug в окно')
+    assert any('system debug в окно' in m for m in h.messages)
 
 
 def test_startup_services_take_system_flags(app):
@@ -324,3 +357,24 @@ def test_apply_logging_with_real_logger_state(logger_cls, monkeypatch):
     assert applier.apply_logging({'system_LEVEL': 'ERROR'}) is True
     assert App.current_app_config()['system_LEVEL'] == 'ERROR'
     assert applier.apply_logging({'system_LEVEL': 'ERROR'}) is False
+
+
+def test_one_handler_per_file_after_late_configure(logger_cls, app_cfg, log_dir):
+    """Реальный порядок старта: system, user и их «дети» созданы до настройки.
+
+    После настройки на app.log должен остаться ОДИН обработчик (не по одному на
+    группу system и группу user), а уровни у каждого — свои.
+    """
+    logger_cls.default_config = dict(app_cfg, system_file_enabled='False', user_file_enabled='False')
+    system = logger_cls.get_instance(name='system')
+    user = logger_cls.get_instance(name='user')
+    svc = logger_cls.get_instance(name='svc', enable_file_logging='system')
+    gui = logger_cls.get_instance(name='gui', enable_file_logging='user')
+
+    logger_cls.reload_all_from_config(app_cfg)
+
+    handlers = {id(lg.file_handler) for lg in (system, user, svc, gui)}
+    assert handlers == {id(system.file_handler)}
+    assert gui.get_level() == 'INFO' and svc.get_level() == 'DEBUG'
+    gui.info('gui пишет')
+    assert read(os.path.join(log_dir, 'app.log')).count('gui пишет') == 1

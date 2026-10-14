@@ -229,6 +229,13 @@ class BaseAppLogger:
 
     _show_call_depth_global = False
 
+    # Параметры reconfigure(), которые относятся к самому файлу. У слейва они
+    # перенаправляются мастеру — владельцу общего обработчика (S3).
+    _SHARED_FILE_PARAMS = frozenset({
+        'base_log_FILE', 'log_MAX_BYTES', 'log_BACKUP_COUNT',
+        'use_timestamp', 'use_name_in_filename',
+    })
+
     # Вместо свойства list_stop_loger используем обычный классовый атрибут
     _disabled_loggers: List[str] = []
 
@@ -565,11 +572,12 @@ class BaseAppLogger:
 
         self._sync_full_state = sync_full_state  # по умолчанию копируем флаги консоли/включения
 
-        # Разрешено ли автоматически подключаться к файлу родителя по ссылке
-        # enable_file_logging='имя' (исправление S1). Сбрасывается явным
-        # unshare_file_handler(): если логгер попросили писать в свой файл,
-        # перестроение не должно молча подключить его обратно.
-        self._allow_ref_sharing: bool = True
+        # Разрешено ли при перестроении автоматически подключаться к уже открытому
+        # обработчику того же файла: родителя по ссылке enable_file_logging='имя'
+        # (исправление S1) или любого другого владельца этого файла.
+        # Сбрасывается явным unshare_file_handler(): если логгер попросили писать
+        # в свой обработчик, перестроение не должно молча подключить его обратно.
+        self._allow_auto_share: bool = True
 
         # self._console_enabled = True   # флаг для консольного вывода
         # self._enabled = True            # полное отключение логирования
@@ -898,8 +906,11 @@ class BaseAppLogger:
             
         else:
             # обновить уровни
-            for handler in self.logger.handlers:
-                handler.setLevel(self.log_level)
+            # for handler in self.logger.handlers:
+            # handler.setLevel(self.log_level)
+            # ↑ до S3: менялся уровень общего файла и глобальных обработчиков (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера).
+            if self.console_handler:
+                self.console_handler.setLevel(self.log_level)
 
             if self._shared_slaves:
                 self._update_shared_slaves()
@@ -1076,6 +1087,74 @@ class BaseAppLogger:
         """
         return self._enabled and self._file_enabled and self.file_handler is None
 
+    def _file_share_target(self) -> Optional['BaseAppLogger']:
+        """
+        К чьему файловому обработчику подключиться вместо открытия своего.
+
+        Порядок:
+            1. родитель по ссылке ``enable_file_logging='имя'`` (``_ref_parent_for_sharing``);
+            2. любой логгер, который сам (не через мастера) держит открытый обработчик
+               на тот же файл (``_same_file_owner``).
+
+        Цель — один обработчик на файл: несколько ``RotatingFileHandler`` на одном
+        файле конфликтуют при ротации (на Windows — ``PermissionError``). Уровни при
+        этом не смешиваются: общий обработчик порога не имеет, каждый логгер
+        фильтрует своим уровнем (S3).
+
+        Returns:
+            Логгер, к которому можно подключиться, или ``None``.
+
+        Пример:
+            >>> system = AppLogger.get_instance('system')      # открыл logs/app.log
+            >>> user = AppLogger.get_instance('user')          # тот же файл
+            >>> user._file_share_target() is system
+            True
+        """
+        target = self._ref_parent_for_sharing()
+        if target is None:
+            target = self._same_file_owner()
+        return target
+
+    def _same_file_owner(self) -> Optional['BaseAppLogger']:
+        """
+        Логгер из реестра, который сам владеет открытым обработчиком на тот же файл.
+
+        «Сам владеет» — не слейв (``_shared_handler`` ложно), включён, файл включён,
+        обработчик есть. Сравниваются абсолютные пути без учёта регистра (Windows).
+        Путь владельца берётся из ``file_handler.baseFilename`` — без обращения к диску.
+
+        Returns:
+            Найденный логгер или ``None`` (в том числе если автоподключение запрещено
+            явным ``unshare_file_handler()``).
+
+        Пример:
+            >>> AppLogger.get_instance('a', enable_file_logging=True)._same_file_owner()  # первый
+            >>> AppLogger.get_instance('b', enable_file_logging=True)._same_file_owner().name
+            'a'
+        """
+        if not getattr(self, '_allow_auto_share', True):
+            return None
+
+        try:
+            my_file = os.path.normcase(os.path.abspath(self._get_log_file()))
+        except ValueError:
+            return None
+
+        cls = type(self)
+        with cls._instances_lock:
+            candidates = list(cls._instances.values())
+
+        for other in candidates:
+            if other is self or other._shared_handler:
+                continue
+            if not (other._enabled and other._file_enabled and other.file_handler is not None):
+                continue
+            other_file = os.path.normcase(os.path.abspath(other.file_handler.baseFilename))
+            if other_file == my_file:
+                return other
+
+        return None
+
     def _ref_parent_for_sharing(self) -> Optional['BaseAppLogger']:
         """
         Родитель по ссылке ``enable_file_logging='имя'``, к файлу которого можно подключиться.
@@ -1100,7 +1179,7 @@ class BaseAppLogger:
             >>> svc._ref_parent_for_sharing() is system
             True
         """
-        if not getattr(self, '_allow_ref_sharing', True):
+        if not getattr(self, '_allow_auto_share', True):
             # Логгер явно отвязали (unshare_file_handler) — пишет в свой файл
             return None
 
@@ -1572,8 +1651,10 @@ class BaseAppLogger:
         if not self._master_logger:
             return
         
-        self.log_level = self._master_logger.log_level # устанавливаем уровень
-        self.logger.setLevel(self.log_level) # устанавливаем уровень
+        # self.log_level = self._master_logger.log_level # устанавливаем уровень
+        # self.logger.setLevel(self.log_level) # устанавливаем уровень
+        # ↑ до S3: при подключении к общему файлу слейв перенимал уровень мастера —
+        #   user получал DEBUG вместо user_LEVEL=INFO, ConfigApplier_LEVEL затирался (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера).
 
         self.formatter = self._master_logger.formatter # устанавливаем формат
         self.base_log_file = self._master_logger.base_log_file # устанавливаем имя файла
@@ -1667,8 +1748,9 @@ class BaseAppLogger:
             self.file_handler = master_handler
             self._reopen_file_handler_if_needed()
 
-            self.log_level = master_log_level
-            self.logger.setLevel(self.log_level)
+            # self.log_level = master_log_level
+            # self.logger.setLevel(self.log_level)
+            # ↑ до S3: слейв при подключении получал уровень мастера (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера).
             self.formatter = master_formatter
             self.base_log_file = master_base_log_file
             self.log_max_bytes = master_max_bytes
@@ -1904,7 +1986,7 @@ class BaseAppLogger:
                 if (
                     not self._shared_handler
                     and self._file_enabled
-                    and self._ref_parent_for_sharing() is None
+                    and self._file_share_target() is None
                 ):
                     self._update_file_handler()
 
@@ -1960,7 +2042,7 @@ class BaseAppLogger:
             and not self._shared_handler
             and self.file_handler is None
         ):
-            parent = self._ref_parent_for_sharing()
+            parent = self._file_share_target()
             if parent is not None:
                 self.share_file_handler_with(parent)
 
@@ -2009,7 +2091,11 @@ class BaseAppLogger:
             encoding='utf-8'
         )
 
-        handler.setLevel(self.log_level) # Устанавливаем уровень
+        # handler.setLevel(self.log_level) # Устанавливаем уровень
+        # ↑ до S3. Порог задаёт уровень каждого логгера (logging.Logger.setLevel): файл может
+        #   стать общим, и тогда уровень создавшего логгера заглушал бы остальных (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера).
+        #   Отдельный порог файла по-прежнему можно задать через set_file_level().
+        handler.setLevel(logging.NOTSET)
         handler.setFormatter(self.formatter) # Устанавливаем формат
 
         return handler
@@ -2090,7 +2176,8 @@ class BaseAppLogger:
     def _sync_log_level_and_formatters (self):
         # Синхронизируем уровень и формат для файлового обработчика
         if self.file_handler: # Если есть файловый обработчик
-            self.file_handler.setLevel(self.log_level) # устанавливаем уровень 
+            # self.file_handler.setLevel(self.log_level) # устанавливаем уровень
+            # ↑ до S3: уровень файла = уровень логгера; файл общий → заглушал других (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера)
             self.file_handler.setFormatter(self.formatter) # устанавливаем формат 
  
     # def _sync_formatters (self, formatter):
@@ -2147,6 +2234,17 @@ class BaseAppLogger:
         через исходный логгер.
         
         """
+
+        # Подключаемся к корневому владельцу обработчика, а не к промежуточному
+        # слейву: иначе при пересоздании обработчика у владельца новый обработчик
+        # не дойдёт до «внуков» (_update_shared_slaves обновляет только прямых слейвов).
+        # Пример цепочки до исправления: gui → user → system.
+        while (
+            other._shared_handler
+            and other._master_logger is not None
+            and other._master_logger is not self
+        ):
+            other = other._master_logger
 
         if self is other:
             return
@@ -2378,11 +2476,14 @@ class BaseAppLogger:
 
             # --- основные параметры синхронизируются ВСЕГДА ---
             # 3. Синхронизируем параметры (уровень, формат, лимиты и т.д.)
-            slave.log_level = master_state['log_LEVEL']
-            slave.logger.setLevel(slave.log_level)
-
-            if slave.file_handler:
-                slave.file_handler.setLevel(slave.log_level)
+            # slave.log_level = master_state['log_LEVEL']
+            # slave.logger.setLevel(slave.log_level)
+            # 
+            # if slave.file_handler:
+            # slave.file_handler.setLevel(slave.log_level)
+            # ↑ до S3: слейв получал уровень мастера, персональные ключи ({name}_LEVEL)
+            #   затирались, а общий файл получал уровень последнего слейва (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера).
+            # Уровень слейва — его собственный (из конфига или наследованием по ссылке).
 
             slave.log_max_bytes = master_state['log_MAX_BYTES']
             slave.log_backup_count = master_state['log_BACKUP_COUNT']
@@ -2561,7 +2662,7 @@ class BaseAppLogger:
             (False, True)
         """
         if not keep_ref_sharing:
-            self._allow_ref_sharing = False
+            self._allow_auto_share = False
 
         with BaseAppLogger._share_lock:
             if not self._shared_handler:
@@ -2731,11 +2832,22 @@ class BaseAppLogger:
             >>> log.reconfigure(level='DEBUG', console_level='ERROR')
             # в файл — DEBUG и выше, в консоль — только ERROR и выше
         """
-        # Если используем общий обработчик, перенаправляем вызов мастеру
+        # # Если используем общий обработчик, перенаправляем вызов мастеру
+        # if self._shared_handler and self._master_logger:
+        #     # self.logger.debug(f"Перенаправляю reconfigure мастеру '{self._master_logger.name}'")
+        #     self._master_logger.reconfigure(**kwargs)
+        #     return
+        # ↑ до S3: слейв перенаправлял мастеру ВСЁ, включая уровень и флаги, — вызов
+        #   slave.reconfigure(level=...) менял уровень мастеру (и его файлу), а не слейву.
+        # Теперь мастеру уходят только параметры общего файла (путь, ротация, имя файла):
+        # файл один на всех, менять его может только владелец. Уровень и флаги — свои.
         if self._shared_handler and self._master_logger:
-            # self.logger.debug(f"Перенаправляю reconfigure мастеру '{self._master_logger.name}'")
-            self._master_logger.reconfigure(**kwargs)
-            return
+            file_kwargs = {k: v for k, v in kwargs.items() if k in self._SHARED_FILE_PARAMS}
+            if file_kwargs:
+                self._master_logger.reconfigure(**file_kwargs)
+            kwargs = {k: v for k, v in kwargs.items() if k not in self._SHARED_FILE_PARAMS}
+            if not kwargs:
+                return
         
         # Обновляем уровень логирования
 
@@ -3048,8 +3160,12 @@ class BaseAppLogger:
 
         else:
             # Иначе просто обновляем уровни у существующих обработчиков
-            for handler in self.logger.handlers:
-                handler.setLevel(self.log_level)
+            # for handler in self.logger.handlers:
+            # handler.setLevel(self.log_level)
+            # ↑ до S3: перезагрузка слейва меняла уровень общего файла мастера и окна логов
+            #   GUI (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера). Теперь — только своя консоль.
+            if self.console_handler:
+                self.console_handler.setLevel(self.log_level)
 
             # if self._shared_slaves:
             self._update_shared_slaves()
@@ -3295,8 +3411,12 @@ class BaseAppLogger:
         if level != self.log_level:
             self.log_level = level
             self.logger.setLevel(level)
-            for handler in self.logger.handlers:
-                handler.setLevel(level)
+            # for handler in self.logger.handlers:
+            # handler.setLevel(level)
+            # ↑ до S3: уровень ставился и общим/глобальным обработчикам, заглушая других
+            #   логгеров (S3, IMPLEMENTATION.md §5.2: общий обработчик не фильтрует по уровню одного логгера). Теперь — только своей консоли.
+            if self.console_handler:
+                self.console_handler.setLevel(level)
    
     # @property
     # def enable_file_logging(self):

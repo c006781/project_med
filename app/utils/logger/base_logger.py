@@ -2446,9 +2446,27 @@ class BaseAppLogger:
 
         return need_rebuild
 
-    def _update_flags(self, **kwargs) -> bool:
-        """Обновляет флаги включения/отключения.
-        Возвращает True, если требуется перестроить обработчики.
+    def _update_flags(self, **kwargs: Any) -> bool:
+        """
+        Обновляет флаги включения: ``enabled``, ``console_enabled``, ``file_enabled``.
+
+        Отдельные уровни ``console_level`` / ``file_level`` здесь НЕ применяются:
+        их ставит ``reconfigure()`` после перестроения обработчиков, иначе
+        перестроение тут же сбросило бы их к общему уровню (исправление R4,
+        IMPLEMENTATION.md §5.1).
+
+        Args:
+            **kwargs: Аргументы ``reconfigure()``; учитываются только перечисленные
+                флаги, значения приводятся через ``_to_bool``.
+
+        Returns:
+            ``True``, если хотя бы один флаг был передан и нужно перестроить обработчики.
+
+        Пример:
+            >>> log._update_flags(console_enabled='False')
+            True
+            >>> log._update_flags(level='INFO')
+            False
         """
         need_rebuild = False
         level_changed = False
@@ -2465,16 +2483,21 @@ class BaseAppLogger:
             self._enabled = self._to_bool(kwargs['enabled'])
             need_rebuild = True
 
-        # Отдельные уровни для консоли и файла (не требуют перестройки)
-        if 'console_level' in kwargs:
-            self.set_console_level(kwargs['console_level'])
-            level_changed = True
+        # # Отдельные уровни для консоли и файла (не требуют перестройки)
+        # if 'console_level' in kwargs:
+        #     self.set_console_level(kwargs['console_level'])
+        #     level_changed = True
+        #
+        # if 'file_level' in kwargs:
+        #     self.set_file_level(kwargs['file_level'])
+        #     level_changed = True
+        #
+        # return need_rebuild or level_changed
+        # ↑ до исправления R4: уровень ставился здесь, а True в ответе запускал
+        #   _update_handlers(), который пересоздавал консоль с общим уровнем.
+        #   Теперь отдельные уровни применяет reconfigure() после перестроения.
 
-        if 'file_level' in kwargs:
-            self.set_file_level(kwargs['file_level'])
-            level_changed = True
-
-        return need_rebuild or level_changed
+        return need_rebuild
 
     def reconfigure(self, **kwargs):
         """
@@ -2489,6 +2512,12 @@ class BaseAppLogger:
             - console_enabled: bool
             - file_enabled: bool
             - enabled: bool
+            - console_level: str – уровень только консоли (применяется после перестроения)
+            - file_level: str – уровень только файла (применяется после перестроения)
+
+        Пример:
+            >>> log.reconfigure(level='DEBUG', console_level='ERROR')
+            # в файл — DEBUG и выше, в консоль — только ERROR и выше
         """
         # Если используем общий обработчик, перенаправляем вызов мастеру
         if self._shared_handler and self._master_logger:
@@ -2528,6 +2557,14 @@ class BaseAppLogger:
             # Если менялся только уровень, но обработчик не пересоздавался, тоже нужно синхронизировать
             # if 'level' in kwargs:
             self._update_shared_slaves()
+
+        # Отдельные уровни консоли/файла — строго ПОСЛЕ перестроения обработчиков,
+        # иначе _update_handlers() пересоздаст их с общим уровнем (R4).
+        if 'console_level' in kwargs:
+            self.set_console_level(kwargs['console_level'])
+
+        if 'file_level' in kwargs:
+            self.set_file_level(kwargs['file_level'])
     
     @classmethod
     def disable_group_console(cls, name_prefix: str):

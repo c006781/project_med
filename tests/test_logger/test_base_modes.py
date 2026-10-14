@@ -242,10 +242,6 @@ def test_separate_console_and_file_levels(make_file_logger, log_file, capsys):
     assert '\tINFO\t' in content and '\tDEBUG\t' not in content
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: reconfigure(console_level=...) ставит уровень, затем _update_flags "
-    "возвращает True и _update_handlers() пересоздаёт консоль с общим уровнем"
-))
 def test_reconfigure_console_level_via_flags(make_file_logger, capsys):
     file_logger = make_file_logger()
     file_logger.reconfigure(console_level='CRITICAL')
@@ -402,3 +398,19 @@ def test_custom_formatter_lost_after_rebuild(make_file_logger, log_file):
     file_logger.enable()
     assert file_logger.console_handler.formatter is fmt
     assert file_logger.file_handler.formatter is fmt
+
+
+def test_reconfigure_flag_and_separate_levels_together(make_file_logger, log_file, capsys):
+    """R4: перестроение (console_enabled) и отдельные уровни в одном вызове."""
+    file_logger = make_file_logger()
+    file_logger.reconfigure(console_enabled=True, file_enabled=True,
+                            console_level='ERROR', file_level='WARNING')
+    assert file_logger.console_handler.level == logging.ERROR
+    assert file_logger.file_handler.level == logging.WARNING
+    file_logger.info('нигде')
+    file_logger.warning('только файл')
+    file_logger.error('везде')
+    err, content = capsys.readouterr().err, read(log_file)
+    assert 'нигде' not in err and 'нигде' not in content
+    assert 'только файл' in content and 'только файл' not in err
+    assert 'везде' in content and 'везде' in err

@@ -53,6 +53,11 @@ from functools import wraps
 from logging.handlers import RotatingFileHandler
 import weakref
 
+# Маркер «значение не найдено» для поиска по цепочке родителей
+# (_get_config_with_inheritance): отличается от любого значения из конфига, включая None.
+_NOT_FOUND = object()
+
+
 class RobustRotatingFileHandler(RotatingFileHandler):
     """
     Обработчик файла с поддержкой восстановления при удалении файла.
@@ -711,6 +716,24 @@ class BaseAppLogger:
         3. LOG_{key}
         4. key
         5. default
+
+        Цикл ссылок (a → b → a): повторный заход в уже пройденный логгер возвращает
+        маркер «не найдено», и поиск продолжается с шага 3 у того, кто начал цикл.
+        До исправления (B1) возвращался ``default`` — шаги 3–4 пропускались, и,
+        например, путь к файлу из ``LOG_FILE`` подменялся на ``'logs'``.
+
+        Args:
+            config: Плоский словарь конфигурации.
+            key: Ключ без префикса (``'LEVEL'``, ``'FILE'``, ``'file_enabled'``...).
+            default: Значение, если ключ не найден нигде.
+            _visited: Служебное: ``id`` уже пройденных логгеров (защита от циклов).
+
+        Returns:
+            Найденное значение или ``default``.
+
+        Пример:
+            >>> log._get_config_with_inheritance({'LOG_LEVEL': 'INFO', 'svc_LEVEL': 'ERROR'}, 'LEVEL')
+            'ERROR'   # для логгера с именем 'svc'
         """
         
         if _visited is None:
@@ -721,7 +744,9 @@ class BaseAppLogger:
         #     return default
         
         if id(self) in _visited:          # используем id для защиты от циклов
-            return default
+            # return default
+            # ↑ до исправления B1: цикл обрывал поиск значением по умолчанию.
+            return _NOT_FOUND
         
         _visited.add(id(self))
 
@@ -739,7 +764,12 @@ class BaseAppLogger:
         # 2. Родитель по настройкам (мастер файлового обработчика или ссылка enable_file_logging)
         parent = self._get_settings_parent()
         if parent:
-            return parent._get_config_with_inheritance(config, key, default, _visited)
+            # return parent._get_config_with_inheritance(config, key, default, _visited)
+            # ↑ до исправления B1: результат родителя возвращался всегда, даже если это
+            #   был обрыв цикла. Теперь «не найдено» у родителя → ищем дальше сами.
+            inherited = parent._get_config_with_inheritance(config, key, _NOT_FOUND, _visited)
+            if inherited is not _NOT_FOUND:
+                return inherited
 
         # 3. Общий префикс LOG_
         log_key = f"LOG_{key}"
@@ -944,8 +974,11 @@ class BaseAppLogger:
 
         obj_id = id(self)
 
-        if self.name in _visited:
-            self.logger.error(f"Циклическая ссылка в effective_enable_file_logging для {self.name}")
+        # if self.name in _visited:
+        # ↑ до исправления B1: проверялось имя, а в _visited клали id(self) — проверка
+        #   никогда не срабатывала, цикл ссылок (a→b→a) давал RecursionError.
+        if obj_id in _visited:
+            self._report_self_problem(f"Циклическая ссылка в effective_enable_file_logging для {self.name}")
             return self._enable_file_logging
         
         # _visited.add(self.name)
@@ -1008,8 +1041,11 @@ class BaseAppLogger:
         if _visited is None:
             _visited = set()
         obj_id = id(self)
-        if self.name in _visited:
-            self.logger.error(f"Циклическая ссылка в effective_use_name_in_filename для {self.name}")
+        # if self.name in _visited:
+        # ↑ до исправления B1: проверялось имя, а в _visited клали id(self) — проверка
+        #   никогда не срабатывала, цикл ссылок (a→b→a) давал RecursionError.
+        if obj_id in _visited:
+            self._report_self_problem(f"Циклическая ссылка в effective_use_name_in_filename для {self.name}")
             # return self._enable_file_logging
             return self._use_name_in_filename
         
@@ -1044,6 +1080,28 @@ class BaseAppLogger:
             
         return self._use_name_in_filename
 
+
+    def _report_self_problem(self, message: str) -> None:
+        """
+        Сообщает о проблеме в настройке самого логгера (не о событии приложения).
+
+        Пока у логгера нет своего вывода (например, во время ``__init__``), сообщение
+        идёт прямо в stderr; иначе — через сам логгер уровнем ERROR. Без этого
+        сообщение поглотил бы постоянный ``NullHandler`` (R6).
+
+        Args:
+            message: Текст сообщения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._report_self_problem("Циклическая ссылка в effective_enable_file_logging для a")
+        """
+        if self._has_output_handlers():
+            self.logger.error(message)
+        else:
+            print(f"ERROR: {message}", file=sys.stderr)
 
     def _has_output_handlers(self) -> bool:
         """

@@ -75,11 +75,16 @@ def test_share_with_self_or_twice_is_noop(make_logger, master_cfg):
 
 
 def test_slave_inherits_master_settings(make_logger, log_dir):
+    """От мастера копируются параметры файла и log_args, но НЕ уровень (S3).
+
+    Уровень слейв берёт из своего конфига (здесь LOG_LEVEL=DEBUG по умолчанию);
+    до исправления S3 он перенимал уровень мастера (WARNING).
+    """
     master = make_logger(name='m5', config=make_config(
         log_dir, file_enabled='True', LOG_LEVEL='WARNING', LOG_ARGS='True'),
         enable_file_logging=True)
     slave = make_logger(name='s5', enable_file_logging='m5')
-    assert slave.log_level == logging.WARNING
+    assert slave.log_level == logging.DEBUG
     assert slave.log_args is True
     assert slave.base_log_file == master.base_log_file
 
@@ -157,20 +162,25 @@ def pair(make_logger, master_cfg):
     return master, slave
 
 
-def test_master_level_change_propagates(pair, log_file):
+def test_master_level_change_does_not_touch_slave(pair, log_file):
+    """S3: уровень мастера не навязывается слейву и не заглушает его в общем файле.
+
+    До исправления слейв получал уровень мастера (здесь ERROR) и его warning не писался.
+    Групповая смена уровня — через reconfigure_group() или конфиг.
+    """
     master, slave = pair
     master.reconfigure(level='ERROR')
-    assert slave.log_level == logging.ERROR
-    slave.warning('скрыто')
-    slave.error('видно')
+    assert slave.log_level == logging.DEBUG
+    master.warning('мастер скрыт')
+    slave.warning('слейв виден')
     content = read(log_file)
-    assert 'скрыто' not in content and 'видно' in content
+    assert 'мастер скрыт' not in content and 'слейв виден' in content
 
 
-def test_master_reload_level_propagates(pair, log_dir):
+def test_master_reload_level_does_not_touch_slave(pair, log_dir):
     master, slave = pair
     master.reload_from_config(make_config(log_dir, file_enabled='True', LOG_LEVEL='CRITICAL'))
-    assert slave.log_level == logging.CRITICAL
+    assert slave.log_level == logging.DEBUG
 
 
 def test_master_move_file_moves_slave(pair, tmp_path, log_file):
@@ -241,12 +251,25 @@ def test_master_turn_off_file_logging_unshares_slaves(pair, log_file):
 # Изменения на слейве
 # ---------------------------------------------------------------------------
 
-def test_slave_reconfigure_is_redirected_to_master(pair):
-    """reconfigure() у слейва меняет мастера (и через него всех слейвов)."""
+def test_slave_reconfigure_level_is_local(pair):
+    """S3: уровень слейва меняется у слейва. Раньше весь вызов уходил мастеру."""
     master, slave = pair
     slave.reconfigure(level='CRITICAL')
-    assert master.log_level == logging.CRITICAL
     assert slave.log_level == logging.CRITICAL
+    assert master.log_level == logging.DEBUG
+
+
+def test_slave_reconfigure_file_params_go_to_master(pair, tmp_path):
+    """Параметры общего файла меняет только мастер — слейв перенаправляет их ему."""
+    master, slave = pair
+    new_dir = tmp_path / 'by_slave'
+    slave.reconfigure(base_log_FILE=str(new_dir) + os.sep, level='ERROR')
+    assert master.base_log_file == str(new_dir) + os.sep
+    assert slave.file_handler is master.file_handler
+    assert slave.log_level == logging.ERROR
+    assert master.log_level == logging.DEBUG
+    slave.error('в новом файле')
+    assert 'в новом файле' in read(new_dir / 'app.log')
 
 
 def test_slave_disable_console_is_independent(pair, capsys):

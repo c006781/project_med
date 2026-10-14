@@ -218,7 +218,10 @@ def test_reconfigure_level(make_file_logger, log_file):
     file_logger.error('видно')
     content = read(log_file)
     assert 'скрыто' not in content and 'видно' in content
-    assert all(h.level == logging.ERROR for h in _own_handlers(file_logger))
+    # S3: порог задаёт logging.Logger и своя консоль; файл без порога (может быть общим)
+    assert file_logger.logger.level == logging.ERROR
+    assert file_logger.console_handler.level == logging.ERROR
+    assert file_logger.file_handler.level == logging.NOTSET
 
 
 def test_setlevel_changes_python_logger_only(make_file_logger):
@@ -328,7 +331,9 @@ def test_reload_changes_level(make_file_logger, log_dir, method):
     file_logger = make_file_logger()
     getattr(file_logger, method)(make_config(log_dir, LOG_LEVEL='ERROR', file_enabled='True'))
     assert file_logger.log_level == logging.ERROR
-    assert all(h.level == logging.ERROR for h in _own_handlers(file_logger))
+    assert file_logger.logger.level == logging.ERROR
+    assert file_logger.console_handler.level == logging.ERROR
+    assert file_logger.file_handler.level == logging.NOTSET  # S3
 
 
 @pytest.mark.parametrize('method', ['reload_from_config', 'apply_config_from_dict'])

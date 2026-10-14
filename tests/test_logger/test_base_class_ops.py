@@ -52,12 +52,15 @@ def test_force_new_replaces_registry_entry(logger_cls, make_logger):
     "BUG: force_new=True не снимает обработчики старого экземпляра с общего "
     "logging.Logger → каждое сообщение пишется дважды"
 ))
-def test_force_new_does_not_duplicate_output(make_logger, log_dir):
+def test_force_new_does_not_duplicate_output(make_logger, log_dir, capsys):
     make_logger(name='dup', enable_file_logging=True, use_name_in_filename=True)
     new = make_logger(name='dup', force_new=True, enable_file_logging=True,
                       use_name_in_filename=True)
     new.info('один')
+    # Файл перестал дублироваться «случайно»: новый экземпляр подключается к
+    # обработчику старого (один обработчик на файл). Консоль — нет.
     assert read(os.path.join(log_dir, 'dup.log')).count('один') == 1
+    assert capsys.readouterr().err.count('один') == 1
 
 
 # ---------------------------------------------------------------------------

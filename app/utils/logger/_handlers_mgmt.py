@@ -46,10 +46,17 @@ class _HandlersMixin:
 
     def _reopen_file_handler_if_needed(self) -> None:
         """
-        Переоткрывает файл своего обработчика (``force_reopen``), если обработчик есть.
+        Переоткрывает файл своего обработчика, только если файла нет на диске.
 
-        Название историческое: переоткрывает всегда, а не «если нужно». Ошибки не
-        пробрасываются: ``FileNotFoundError`` игнорируется, остальное — WARNING в лог.
+        До P5 (2026-10-14) метод, вопреки имени, ВСЕГДА закрывал и открывал файл
+        (``force_reopen``). Его вызывают после создания обработчика, после ``enable_file``,
+        у слейва при каждом подключении к общему файлу — при старте приложения общий файл
+        закрывался и открывался ~140 раз. Под нагрузкой каждое открытие стоит ~10 мс
+        (системный вызов отпускает GIL), из-за этого смена режимов ждала 0,2–1 с.
+        Теперь — ``reopen_if_needed`` (одна проверка существования). Принудительное
+        переоткрытие — ``file_handler.force_reopen()`` / ``reopen_all_files()``.
+
+        Ошибки не пробрасываются: ``FileNotFoundError`` игнорируется, остальное — WARNING.
 
         Returns:
             None
@@ -62,10 +69,14 @@ class _HandlersMixin:
         # if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
         #     self.file_handler.force_reopen()
 
-        # Если обработчик существует и есть метод force_reopen, вызываем его
-        if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
+        # # Если обработчик существует и есть метод force_reopen, вызываем его
+        # if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
+        #     try:
+        #         self.file_handler.force_reopen()
+        # ↑ до P5: всегда закрыть+открыть (см. докстринг).
+        if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
             try:
-                self.file_handler.force_reopen()
+                self.file_handler.reopen_if_needed()
 
             except FileNotFoundError:
                 # файл мог быть удалён между проверкой и переоткрытием – игнорируем

@@ -53,6 +53,13 @@ from functools import wraps
 from logging.handlers import RotatingFileHandler
 import weakref
 
+# Имя файла этого модуля так, как его видят кадры стека (frame.f_code.co_filename).
+# По нему логгер пропускает свои кадры при поиске места вызова. Берётся из самого
+# модуля, а не задаётся путём вида 'app/utils/logger/base_logger.py', поэтому модуль
+# работает при копировании в любой проект и в сборке PyInstaller (где co_filename
+# бывает относительным, а __file__ — абсолютным).
+_THIS_CODE_FILENAME: str = (lambda: None).__code__.co_filename
+
 # Маркер «значение не найдено» для поиска по цепочке родителей
 # (_get_config_with_inheritance): отличается от любого значения из конфига, включая None.
 _NOT_FOUND = object()
@@ -119,7 +126,10 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     if attempt == max_retries - 1:
                         self.handleError(record)
                         return
-                    print(f"подход {attempt} провал")
+                    # print(f"подход {attempt} провал")
+                    # ↑ до 2026-10-14 в stdout. Библиотека не должна писать в stdout
+                    #   (там вывод программы, а теперь и функции вывода вроде print).
+                    print(f"подход {attempt} провал", file=sys.stderr)
                     time.sleep(retry_delay)
                     with self._lock:
 
@@ -200,9 +210,16 @@ class BaseAppLogger:
     skip_patterns_modeles = ( # список пропусков в стеке вызовов модулей и функций для отображения логирования
         # 'filename' - часть пути до модуля, который пропускаем 
         # 'function': - ф-ции, которые пропускаем (если не указываем function', то пропуск всех ф-й из 'filename')
+        # {
+        #     'filename':('app','utils','logger','base_logger.py'),
+        #     'function':('_formatted', 'info', 'debug', 'warning', 'error', 'critical'),
+        # },
+        # ↑ до 2026-10-14: путь был зашит под этот проект — при копировании модуля в
+        #   другой проект свои кадры не пропускались и в лог попадал base_logger.py.
+        #   Не было и 'exception' (B6): log.exception() указывал внутрь логгера.
         {
-            'filename':('app','utils','logger','base_logger.py'),
-            'function':('_formatted', 'info', 'debug', 'warning', 'error', 'critical'), 
+            'filename': (_THIS_CODE_FILENAME,),
+            'function': ('_formatted', 'info', 'debug', 'warning', 'error', 'critical', 'exception'),
         },
     )
 
@@ -811,7 +828,8 @@ class BaseAppLogger:
         for frame_info in stack[1:]:  # пропускаем текущий фрейм
             # Пропускаем фреймы, относящиеся к логгеру
             if self._thec_skip_patterns_modeles({
-                'filename': (frame_info.filename,),
+                # frame_info.filename может отличаться от co_filename (inspect ищет исходник)
+                'filename': (frame_info.frame.f_code.co_filename,),
                 'function': (frame_info.function,)
             }):
                 continue
@@ -4123,8 +4141,9 @@ class BaseAppLogger:
                     continue
 
                 # Нормализуем путь и целевой суффикс
-                norm_filename = os.path.normpath(filename)
-                target_suffix = os.path.normpath(os.path.join(*required_parts))
+                # normcase: на Windows регистр букв в пути (диск 'c:' / 'C:') может различаться
+                norm_filename = os.path.normcase(os.path.normpath(filename))
+                target_suffix = os.path.normcase(os.path.normpath(os.path.join(*required_parts)))
 
                 if not norm_filename.endswith(target_suffix):
                     continue
@@ -4178,7 +4197,8 @@ class BaseAppLogger:
 
                 if self._thec_skip_patterns_modeles( # если входит в список пропуска, то след итерация
                     patterns_modeles={
-                        'filename':(frame_info.filename,),
+                        # co_filename, а не frame_info.filename — см. _THIS_CODE_FILENAME
+                        'filename':(frame_info.frame.f_code.co_filename,),
                         'function':(frame_info.function,),  
                     }
                 ):

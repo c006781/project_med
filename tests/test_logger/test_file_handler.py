@@ -99,7 +99,7 @@ def test_other_errors_go_to_handle_error(handler, monkeypatch):
 
 
 def test_permission_error_retries_then_handle_error(handler, monkeypatch, capsys):
-    """PermissionError: 5 попыток с паузой 0.2 c, печать 'подход N провал' в stdout."""
+    """PermissionError: 5 попыток с паузой 0.2 c, печать 'подход N провал' в stderr."""
     sleeps, calls = [], []
     monkeypatch.setattr('time.sleep', lambda s: sleeps.append(s))
     monkeypatch.setattr(handler, 'handleError', lambda record: calls.append(record))
@@ -108,4 +108,6 @@ def test_permission_error_retries_then_handle_error(handler, monkeypatch, capsys
     _emit(handler, 'x')
     assert sleeps == [0.2] * 4
     assert len(calls) == 1
-    assert capsys.readouterr().out.count('провал') == 4
+    out = capsys.readouterr()
+    assert out.err.count('провал') == 4
+    assert out.out == ''

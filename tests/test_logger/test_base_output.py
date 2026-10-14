@@ -296,3 +296,17 @@ def test_get_caller_info_explicit_levels(make_logger):
     assert 'test_get_caller_info_explicit_levels' in info
     deep = lg._get_caller_info(levels_up=10_000)
     assert deep.startswith('File "')
+
+
+def test_exception_caller_info_points_to_caller(make_logger, log_dir):
+    """B6: раньше log.exception() указывал на строку внутри base_logger.py."""
+    lg = make_logger(enable_file_logging=True)
+    lineno = inspect.currentframe().f_lineno + 4
+    try:
+        raise ValueError('x')
+    except ValueError:
+        lg.exception('упало')
+    first = read(os.path.join(log_dir, 'app.log')).splitlines()[0]
+    m = LINE_RE.match(first)
+    assert m['func'] == 'test_exception_caller_info_points_to_caller'
+    assert int(m['line']) == lineno

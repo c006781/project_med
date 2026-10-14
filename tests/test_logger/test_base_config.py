@@ -195,12 +195,20 @@ def test_use_name_in_filename_param(make_logger, log_dir):
     assert lg._get_log_file() == os.path.join(log_dir, 'named.log')
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: аргумент show_call_depth в get_instance()/__init__ затирается значением "
-    "из конфига (по умолчанию False) в _apply_config()"
-))
 def test_show_call_depth_param_is_respected(make_logger):
+    """B5: раньше аргумент всегда затирался значением False."""
     lg = make_logger(show_call_depth=True)
+    assert lg._show_call_depth is True
+
+
+def test_show_call_depth_config_key_wins_over_param(make_logger, log_dir):
+    lg = make_logger(config=make_config(log_dir, show_call_depth='False'), show_call_depth=True)
+    assert lg._show_call_depth is False
+
+
+def test_show_call_depth_param_survives_reload_without_key(make_logger, log_dir):
+    lg = make_logger(show_call_depth=True)
+    lg.reload_from_config(make_config(log_dir))
     assert lg._show_call_depth is True
 
 

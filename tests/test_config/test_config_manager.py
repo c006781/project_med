@@ -15,7 +15,9 @@ def test_config_manager_create(tmp_path):
     manager = AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
     # Проверяем, что значения по умолчанию загружены
     assert manager.get('YANDEX_TOKEN') == '----'
-    assert manager.get('database_local_path') == './clinic.db'
+    # assert manager.get('database_local_path') == './clinic.db'
+    # ↑ до 2026-10-14: падало на Windows — умолчание собирается os.path.join('.', 'clinic.db')
+    assert manager.get('database_local_path') == os.path.join('.', 'clinic.db')
 
 def test_config_manager_save_load(tmp_path):
     """

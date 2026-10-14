@@ -202,11 +202,8 @@ def test_settings_log_dir_change_moves_everyone(app, app_cfg, tmp_path):
         assert f'[{lg.name}]' in content
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: при выключенных консоли и файле сообщения WARNING+ всё равно попадают "
-    "в stderr через logging.lastResort (у logging.Logger нет ни одного обработчика)"
-))
 def test_no_handlers_means_silence(app, app_cfg, capsys):
+    """R6: раньше WARNING+ уходили в stderr через logging.lastResort."""
     _, system, _, services = app
     _reload(app, app_cfg, system_file_enabled='False', system_console_enabled='False')
     services[0].error('должно молчать')

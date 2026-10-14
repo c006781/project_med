@@ -290,7 +290,8 @@ def test_app_registry_separate_from_base():
 
 def test_exports():
     import app.utils.logger as pkg
-    assert pkg.__all__ == ['AppLogger']
+    assert pkg.__all__ == ['AppLogger', 'BaseAppLogger', 'CallableHandler']
+    assert pkg.BaseAppLogger is BaseAppLogger
     assert pkg.AppLogger is AppLogger
     assert logger_module.AppLogger is AppLogger
 

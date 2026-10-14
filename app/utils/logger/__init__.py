@@ -1,16 +1,39 @@
 # app/utils/logger/__init__.py
 
 """
-Класс логера 
+Пакет логирования.
+
+Самостоятельный: зависит только от стандартной библиотеки, импорты внутри
+относительные — пакет (или один base_logger.py) можно скопировать в другой проект.
+
+Экспорт:
+    AppLogger        — логгер приложения: получает конфиг через AppLogger.configure().
+    BaseAppLogger    — ядро без привязки к конфигу; наследуйтесь от него в других проектах.
+    CallableHandler  — обработчик logging, передающий записи в функцию вида print(text).
+
+Пример:
+    >>> from app.utils.logger import AppLogger
+    >>> AppLogger.configure({'LOG_DIR': 'logs'})
+    >>> log = AppLogger.get_instance('worker')
+    >>> log.add_output(print, level='ERROR')
+    >>> log.error('видно в консоли, файле и через print')
+
+Подробности устройства — IMPLEMENTATION.md рядом с этим файлом.
 """
 
-from .logger import( 
+from .logger import(
     AppLogger
+)
+from .base_logger import (
+    BaseAppLogger,
+    CallableHandler,
 )
 
 
 
 
 __all__ = [
-    'AppLogger', 
+    'AppLogger',
+    'BaseAppLogger',
+    'CallableHandler',
 ]

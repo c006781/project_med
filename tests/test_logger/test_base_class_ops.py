@@ -368,3 +368,70 @@ def test_force_new_old_object_still_works(make_logger, capsys):
     make_logger(name='fo', force_new=True)
     old.info('через новый')
     assert capsys.readouterr().err.count('через новый') == 1
+
+
+@pytest.fixture
+def fresh_watchdog(monkeypatch):
+    """Сбрасывает общий watchdog и перехватывает запуск потока."""
+    import weakref
+    from app.utils.logger.base_logger import BaseAppLogger
+    started = []
+    monkeypatch.setattr(BaseAppLogger, '_watchdog_started', False)
+    monkeypatch.setattr(BaseAppLogger, '_watched_classes', weakref.WeakSet())
+    monkeypatch.setattr('threading.Thread.start', lambda self: started.append(self))
+    return started
+
+
+def test_single_watchdog_for_all_classes(fresh_watchdog, log_dir):
+    """P2: один поток на все классы (раньше — свой вечный поток у каждого наследника)."""
+    from app.utils.logger.base_logger import BaseAppLogger
+
+    class A(BaseAppLogger):
+        pass
+
+    class B(BaseAppLogger):
+        pass
+
+    A.start_file_watchdog()
+    B.start_file_watchdog()
+    A.start_file_watchdog()
+    assert len(fresh_watchdog) == 1
+    assert set(BaseAppLogger._watched_classes) == {A, B}
+
+
+def test_watchdog_does_not_keep_class_alive(fresh_watchdog):
+    import gc
+    from app.utils.logger.base_logger import BaseAppLogger
+
+    def register():
+        class Temp(BaseAppLogger):
+            pass
+        Temp.start_file_watchdog()
+
+    register()
+    gc.collect()
+    assert len(BaseAppLogger._watched_classes) == 0
+
+
+def test_watchdog_loop_checks_every_class(fresh_watchdog, monkeypatch):
+    from app.utils.logger.base_logger import BaseAppLogger
+    checked = []
+
+    class StopLoop(Exception):
+        pass
+
+    def make(name):
+        class K(BaseAppLogger):
+            @classmethod
+            def reopen_missing_files(cls):
+                checked.append(name)
+                return 0
+        return K
+
+    a, b = make('a'), make('b')
+    a.start_file_watchdog(interval_sec=0)
+    b.start_file_watchdog(interval_sec=0)
+    monkeypatch.setattr('time.sleep', lambda s: (_ for _ in ()).throw(StopLoop) if checked else None)
+    with pytest.raises(StopLoop):
+        fresh_watchdog[0]._target()
+    assert sorted(checked) == ['a', 'b']

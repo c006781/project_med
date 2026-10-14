@@ -16,26 +16,17 @@
     >>> logging.getLogger('demo').addHandler(CallableHandler(print, level='INFO'))
 """
 
-import asyncio
 import os
 import logging
 import sys
 import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
+from typing import Optional, Any, Callable, Union
 
-import warnings
-import inspect
 
 import threading
 
-import contextvars
 
-from functools import wraps
 from logging.handlers import RotatingFileHandler
-import weakref
 import queue
 
 from ._common import LOGGER_CODE_FILES, _STOP_OUTPUT, _level_to_int
@@ -161,7 +152,7 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     super().emit(record)
                     return
                 
-                except (FileNotFoundError, PermissionError) as e:
+                except (FileNotFoundError, PermissionError):
                     # Если файл внезапно исчез между проверкой и записью
                     # self.handleError(record)
                     if attempt == max_retries - 1:
@@ -170,15 +161,25 @@ class RobustRotatingFileHandler(RotatingFileHandler):
                     # print(f"подход {attempt} провал")
                     # ↑ до 2026-10-14 в stdout. Библиотека не должна писать в stdout
                     #   (там вывод программы, а теперь и функции вывода вроде print).
-                    print(f"подход {attempt} провал", file=sys.stderr)
-                    time.sleep(retry_delay)
-                    with self._lock:
-
-                        self._reopen()
+                    # print(f"подход {attempt} провал", file=sys.stderr)
+                    # time.sleep(retry_delay)
+                    # with self._lock:
+                    #
+                    #     self._reopen()
+                    # ↑ до P4 (2026-10-14): пауза шла ВНУТРИ блокировки — все потоки, пишущие
+                    #   в этот файл, ждали вместе с текущим. Теперь пауза и переоткрытие —
+                    #   ниже, после выхода из блока with (блокировка отпущена).
 
                 except Exception:
                     self.handleError(record)
                     return
+
+            # Сюда доходим только после FileNotFoundError/PermissionError не на последней
+            # попытке: остальные ветки выше завершаются return. Блокировка уже отпущена.
+            print(f"подход {attempt} провал", file=sys.stderr)
+            time.sleep(retry_delay)
+            with self._lock:
+                self._reopen()
 
     def _reopen(self) -> None:
         """

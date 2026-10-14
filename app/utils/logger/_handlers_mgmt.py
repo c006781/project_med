@@ -18,29 +18,12 @@
     True
 """
 
-import asyncio
 import os
 import logging
-import sys
-import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
+from typing import List, Optional, Any
 
-import warnings
-import inspect
 
-import threading
-
-import contextvars
-
-from functools import wraps
-from logging.handlers import RotatingFileHandler
-import weakref
-import queue
-
-from ._common import LOGGER_CODE_FILES, _NOT_FOUND, _STOP_OUTPUT, _level_to_int
+from ._common import LOGGER_CODE_FILES
 from .handlers import CallableHandler, RobustRotatingFileHandler
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
@@ -397,7 +380,9 @@ class _HandlersMixin:
                     # Теперь захватываем блокировку мастера, чтобы скопировать остальные параметры, не меняющиеся редко
                     # master_ = self._copy_master(master)  # состояние мастера копируем
 
-                    visited = set()
+                    # visited = set()
+                    # ↑ P3: остаток от вызовов effective_*(_visited=visited) ниже (заменены
+                    #   на фактические флаги мастера при исправлении S1/S2) — не используется.
                     # Копируем все настройки мастера, которые могут измениться
                     # master_ =  {
                     #     'master_log_LEVEL': master.log_level,
@@ -865,7 +850,8 @@ class _HandlersMixin:
         
         timestamp = self._start_timestamp
         
-        name =  f"{self.name}" if self.use_name_in_filename else f"app"
+        # name =  f"{self.name}" if self.use_name_in_filename else f"app"
+        name = self.name if self.use_name_in_filename else "app"  # P3: f-строки без подстановок
         
         if self.use_name_in_filename:
             timestamp = timestamp if self.use_timestamp else ""

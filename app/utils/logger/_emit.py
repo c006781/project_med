@@ -18,30 +18,13 @@
     True
 """
 
-import asyncio
 import os
 import logging
 import sys
-import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
+from typing import Optional, Any, Tuple
 
-import warnings
-import inspect
 
-import threading
-
-import contextvars
-
-from functools import wraps
-from logging.handlers import RotatingFileHandler
-import weakref
-import queue
-
-from ._common import LOGGER_CODE_FILES, _NOT_FOUND, _STOP_OUTPUT, _level_to_int
-from .handlers import CallableHandler, RobustRotatingFileHandler
+from ._common import LOGGER_CODE_FILES
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
 
@@ -669,6 +652,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.DEBUG):
+            return
+
         self.logger.debug(
             self._formatted(
                 message = message,
@@ -697,6 +685,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.INFO):
+            return
+
         self.logger.info(
             self._formatted(
                 message = message,
@@ -728,6 +721,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.WARNING):
+            return
+
         self.logger.warning(
             self._formatted(
                 message = message,
@@ -759,6 +757,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.ERROR):
+            return
+
         self.logger.error(
             self._formatted(
                 message = message,
@@ -787,6 +790,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.CRITICAL):
+            return
+
         self.logger.critical(
             self._formatted(
                 message = message,
@@ -820,6 +828,11 @@ class _EmitMixin:
         if not self._enabled or self.__class__.is_disabled(self.name):
             return message
     
+        # P1 (2026-10-14): уровень проверяем ДО поиска места вызова — иначе
+        # отброшенная запись (DEBUG при уровне INFO) обходила стек (~14 мкс впустую).
+        if not self.logger.isEnabledFor(logging.ERROR):
+            return message
+
         self.logger.error(
             self._formatted(
                 message = message,

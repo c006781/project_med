@@ -20,27 +20,8 @@
     40
 """
 
-import asyncio
-import os
 import logging
-import sys
-import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
-
-import warnings
-import inspect
-
-import threading
-
-import contextvars
-
-from functools import wraps
-from logging.handlers import RotatingFileHandler
-import weakref
-import queue
+from typing import List, Union
 
 
 # Имена файлов (co_filename) всех модулей логгера. Каждый модуль добавляет себя при

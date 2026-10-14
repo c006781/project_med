@@ -18,30 +18,17 @@
     True
 """
 
-import asyncio
-import os
 import logging
 import sys
 import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
+from typing import Optional, Dict, Any, Callable, Union
 
-import warnings
-import inspect
 
 import threading
 
-import contextvars
 
-from functools import wraps
-from logging.handlers import RotatingFileHandler
-import weakref
-import queue
-
-from ._common import LOGGER_CODE_FILES, _NOT_FOUND, _STOP_OUTPUT, _level_to_int
-from .handlers import CallableHandler, RobustRotatingFileHandler
+from ._common import LOGGER_CODE_FILES
+from .handlers import CallableHandler
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
 
@@ -314,11 +301,12 @@ class _RegistryMixin:
     @classmethod
     def start_file_watchdog(cls, interval_sec: float = 5.0) -> None:
         """
-        Запускает фоновый поток ``LoggerWatchdog``, восстанавливающий удалённые файлы логов.
+        Регистрирует класс в фоновом потоке ``LoggerWatchdog`` (и запускает поток, если его нет).
 
-        Поток-демон раз в ``interval_sec`` секунд вызывает ``reopen_missing_files()``.
-        Запускается один раз на класс (повторные вызовы ничего не делают); вызывается
-        автоматически при первом ``get_instance()``.
+        Поток-демон один на всю программу: раз в ``interval_sec`` секунд вызывает
+        ``reopen_missing_files()`` у каждого зарегистрированного класса. Классы хранятся в
+        слабом множестве (``_watched_classes``) — поток их в памяти не держит. Интервал
+        задаёт первый вызов. Вызывается автоматически при первом ``get_instance()`` класса.
 
         Args:
             interval_sec: Пауза между проверками, секунд.
@@ -330,11 +318,20 @@ class _RegistryMixin:
             >>> AppLogger.start_file_watchdog(interval_sec=10)
         """
         # import threading
-        with cls._watchdog_started_lock:
-            if cls._watchdog_started:
+        # with cls._watchdog_started_lock:
+        #     if cls._watchdog_started:
+        #         return
+        #
+        #     cls._watchdog_started = True
+        # ↑ до P2 (2026-10-14): флаг ставился на каждый класс-наследник — у каждого свой
+        #   вечный поток, и поток держал класс в памяти. Теперь поток один на все
+        #   классы; классы регистрируются в слабом множестве и могут освобождаться.
+        with BaseAppLogger._watchdog_started_lock:
+            BaseAppLogger._watched_classes.add(cls)
+            if BaseAppLogger._watchdog_started:
                 return
-            
-            cls._watchdog_started = True
+
+            BaseAppLogger._watchdog_started = True
 
         def watch() -> None:
             """
@@ -352,7 +349,10 @@ class _RegistryMixin:
                 # ↑ до 2026-10-14: каждые interval_sec ВСЕ файловые обработчики
                 #   закрывались и открывались заново, даже если файл на месте.
                 #   Теперь переоткрываются только файлы, которых нет на диске.
-                cls.reopen_missing_files()
+                # cls.reopen_missing_files()
+                # ↑ до P2: только свой класс. Теперь — все зарегистрированные классы.
+                for watched in list(BaseAppLogger._watched_classes):
+                    watched.reopen_missing_files()
 
         thread = threading.Thread(target=watch, daemon=True, name="LoggerWatchdog")
         thread.start()

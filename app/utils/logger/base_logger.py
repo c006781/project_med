@@ -52,6 +52,7 @@ import contextvars
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 import weakref
+import queue
 
 # Имя файла этого модуля так, как его видят кадры стека (frame.f_code.co_filename).
 # По нему логгер пропускает свои кадры при поиске места вызова. Берётся из самого
@@ -59,6 +60,44 @@ import weakref
 # работает при копировании в любой проект и в сборке PyInstaller (где co_filename
 # бывает относительным, а __file__ — абсолютным).
 _THIS_CODE_FILENAME: str = (lambda: None).__code__.co_filename
+
+# Маркер остановки фонового потока CallableHandler (кладётся в очередь при close()).
+_STOP_OUTPUT = object()
+
+
+def _level_to_int(level: Union[int, str]) -> int:
+    """
+    Приводит уровень к числу: ``'error'`` → 40, ``logging.ERROR`` → 40.
+
+    Отдельная функция модуля (а не метод BaseAppLogger), чтобы ей могли пользоваться
+    обработчики, объявленные раньше класса логгера.
+
+    Args:
+        level: Имя уровня без учёта регистра или неотрицательное число.
+
+    Returns:
+        Числовой уровень.
+
+    Raises:
+        ValueError: Неизвестное имя или отрицательное число.
+        TypeError: Не строка и не число.
+
+    Пример:
+        >>> _level_to_int('warning'), _level_to_int(10)
+        (30, 10)
+    """
+    if isinstance(level, int) and not isinstance(level, bool):
+        if level < 0:
+            raise ValueError(f"Уровень логирования не может быть отрицательным: {level}")
+        return level
+    if not isinstance(level, str):
+        raise TypeError(f"Уровень логирования должен быть строкой или числом, получено: {level!r}")
+    names = {'DEBUG': logging.DEBUG, 'INFO': logging.INFO, 'WARNING': logging.WARNING,
+             'ERROR': logging.ERROR, 'CRITICAL': logging.CRITICAL, 'NOTSET': logging.NOTSET}
+    if level.upper() not in names:
+        raise ValueError(f"Неизвестный уровень логирования: {level}")
+    return names[level.upper()]
+
 
 # Маркер «значение не найдено» для поиска по цепочке родителей
 # (_get_config_with_inheritance): отличается от любого значения из конфига, включая None.
@@ -165,6 +204,232 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         with self._lock:
             self._reopen()
             self._last_check = time.time()
+
+class CallableHandler(logging.Handler):
+    """
+    Обработчик, который передаёт каждую запись лога в функцию вида ``print(text)``.
+
+    Нужен, чтобы выводить лог куда угодно, не разбираясь в ``logging``: в Telegram-бот,
+    в окно программы, в список для тестов. Функция получает одну строку —
+    запись, отформатированную ``formatter``.
+
+    Режимы доставки:
+        * ``background=False`` (по умолчанию) — функция вызывается сразу, в том же потоке,
+          где сделана запись. Просто и предсказуемо; подходит для быстрых функций
+          (``print``, добавление в список, вывод в виджет).
+        * ``background=True`` — запись кладётся в очередь, функцию вызывает отдельный
+          фоновый поток. Подходит для медленных функций (сеть, Telegram): запись в лог
+          не тормозит программу. Если очередь переполнена (функция не успевает), новые
+          записи отбрасываются и считаются в ``dropped`` — программа не блокируется.
+
+    Защиты:
+        * Исключение внутри функции не роняет программу: оно передаётся в
+          ``handleError`` (стандартный traceback ``--- Logging error ---`` в stderr).
+        * Повторный вход: если функция сама пишет в лог, эта запись в функцию не
+          передаётся (иначе бесконечная рекурсия). В остальные выводы она попадает.
+
+    Поле ``plain_message``: для записей ``BaseAppLogger`` — текст сообщения без имени
+    логгера и места вызова; для прочих — ``record.getMessage()``. Используйте в
+    формате для коротких сообщений: ``'%(levelname)s: %(plain_message)s'``.
+
+    Attributes:
+        func: Функция, получающая строку.
+        background: Доставка в фоновом потоке.
+        dropped: Сколько записей отброшено из-за переполненной очереди.
+
+    Пример:
+        >>> h = CallableHandler(print, level='INFO')
+        >>> h.setFormatter(logging.Formatter('%(levelname)s: %(plain_message)s'))
+        >>> logging.getLogger('demo').addHandler(h)
+
+        >>> def send_tg(text: str) -> None:
+        ...     bot.send_message(chat_id, text)
+        >>> tg = CallableHandler(send_tg, level='ERROR', background=True)
+        >>> tg.close()   # дождаться доставки остатка очереди и остановить поток
+    """
+
+    # Сколько ждать доставки остатка очереди при закрытии (секунд)
+    CLOSE_TIMEOUT: float = 5.0
+
+    def __init__(
+        self,
+        func: Callable[[str], Any],
+        level: Union[int, str] = logging.NOTSET,
+        background: bool = False,
+        queue_size: int = 1000,
+        name: Optional[str] = None,
+    ) -> None:
+        """
+        Создаёт обработчик-функцию.
+
+        Args:
+            func: Функция вида ``print``: принимает одну строку. Возвращаемое
+                значение игнорируется.
+            level: Порог этого вывода: имя (``'ERROR'``) или число (``logging.ERROR``).
+                Записи ниже порога в функцию не передаются.
+            background: ``True`` — доставка в отдельном фоновом потоке через очередь.
+            queue_size: Размер очереди для ``background=True``; при переполнении новые
+                записи отбрасываются (см. ``dropped``).
+            name: Имя обработчика (видно в ``repr`` и в имени фонового потока).
+                По умолчанию — имя функции.
+
+        Raises:
+            TypeError: ``func`` нельзя вызвать.
+
+        Пример:
+            >>> CallableHandler(print)
+            <CallableHandler print (NOTSET)>
+        """
+        if not callable(func):
+            raise TypeError(f"func должна быть вызываемой (как print), получено: {func!r}")
+
+        super().__init__(_level_to_int(level))
+        self.func: Callable[[str], Any] = func
+        self.background: bool = background
+        self.dropped: int = 0
+        self.set_name(name or getattr(func, '__name__', type(func).__name__))
+
+        # Флаг «функция сейчас выполняется» — отдельно для каждого потока
+        self._delivering = threading.local()
+
+        self._queue: Optional['queue.Queue'] = None
+        self._thread: Optional[threading.Thread] = None
+        if background:
+            self._queue = queue.Queue(maxsize=queue_size)
+            self._thread = threading.Thread(
+                target=self._worker, name=f"LogOutput-{self.get_name()}", daemon=True,
+            )
+            self._thread.start()
+
+    def __repr__(self) -> str:
+        """Пример: ``<CallableHandler send_tg (ERROR) background>``."""
+        mode = ' background' if self.background else ''
+        return f"<{type(self).__name__} {self.get_name()} ({logging.getLevelName(self.level)}){mode}>"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """
+        Форматирует запись и передаёт её в функцию (сразу или через очередь).
+
+        Args:
+            record: Запись лога.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается самим ``logging``; напрямую обычно не используется.
+        """
+        if getattr(self._delivering, 'active', False):
+            # Функция сама пишет в лог — не передаём ей её же запись (рекурсия)
+            return
+
+        if not hasattr(record, 'plain_message'):
+            record.plain_message = record.getMessage()
+
+        try:
+            text = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+
+        if self._queue is None:
+            self._deliver(text, record)
+            return
+
+        try:
+            self._queue.put_nowait((text, record))
+        except queue.Full:
+            self.dropped += 1
+
+    def _deliver(self, text: str, record: logging.LogRecord) -> None:
+        """
+        Вызывает функцию с защитой от исключений и повторного входа.
+
+        Args:
+            text: Отформатированная строка.
+            record: Исходная запись (нужна ``handleError`` при ошибке).
+
+        Returns:
+            None
+
+        Пример:
+            >>> h._deliver('текст', record)
+        """
+        self._delivering.active = True
+        try:
+            self.func(text)
+        except Exception:
+            self.handleError(record)
+        finally:
+            self._delivering.active = False
+
+    def _worker(self) -> None:
+        """
+        Цикл фонового потока: берёт записи из очереди и доставляет их по одной.
+
+        Останавливается, получив маркер ``_STOP_OUTPUT`` (его кладёт ``close()``).
+
+        Returns:
+            None
+
+        Пример:
+            Запускается в ``__init__`` при ``background=True``.
+        """
+        assert self._queue is not None
+        while True:
+            item = self._queue.get()
+            try:
+                if item is _STOP_OUTPUT:
+                    return
+                self._deliver(*item)
+            finally:
+                self._queue.task_done()
+
+    def flush(self, timeout: Optional[float] = None) -> bool:
+        """
+        Ждёт, пока фоновый поток доставит всё, что уже в очереди.
+
+        Для ``background=False`` ничего не делает (доставка и так синхронная).
+
+        Args:
+            timeout: Максимум ожидания в секундах; ``None`` — ``CLOSE_TIMEOUT``.
+
+        Returns:
+            ``True``, если очередь опустела за отведённое время.
+
+        Пример:
+            >>> tg.flush(timeout=2)
+            True
+        """
+        if self._queue is None:
+            return True
+        deadline = time.monotonic() + (self.CLOSE_TIMEOUT if timeout is None else timeout)
+        while self._queue.unfinished_tasks:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def close(self) -> None:
+        """
+        Закрывает обработчик; в фоновом режиме — дожидается остатка очереди и
+        останавливает поток (не дольше ``CLOSE_TIMEOUT`` секунд).
+
+        Returns:
+            None
+
+        Пример:
+            >>> tg.close()
+        """
+        if self._thread is not None and self._thread.is_alive():
+            self.flush()
+            try:
+                self._queue.put(_STOP_OUTPUT, timeout=self.CLOSE_TIMEOUT)
+            except queue.Full:
+                pass
+            self._thread.join(timeout=self.CLOSE_TIMEOUT)
+        super().close()
+
 
 class BaseAppLogger:
     """
@@ -462,6 +727,68 @@ class BaseAppLogger:
                     instance.handlers = instance.logger.handlers[:]
             
     @classmethod
+    def add_global_output(
+        cls,
+        func: Callable[[str], Any],
+        level: Union[int, str] = logging.NOTSET,
+        background: bool = False,
+        formatter: Optional[Union[logging.Formatter, str]] = None,
+        queue_size: int = 1000,
+    ) -> CallableHandler:
+        """
+        Добавляет вывод в функцию для ВСЕХ логгеров — существующих и будущих.
+
+        Работает через глобальные обработчики (``add_global_handler``), поэтому общий
+        для всех наследников BaseAppLogger. Каждый логгер фильтрует своим уровнем,
+        затем — порог ``level``.
+
+        Args:
+            func: Функция, принимающая одну строку.
+            level: Порог вывода (имя или число).
+            background: Доставка в фоновом потоке (для медленных функций).
+            formatter: ``None`` — стандартный формат ``LOG_FORMAT``; строка формата;
+                или ``logging.Formatter``.
+            queue_size: Размер очереди для ``background=True``.
+
+        Returns:
+            Созданный ``CallableHandler`` (для ``remove_global_output``).
+
+        Пример:
+            >>> AppLogger.add_global_output(send_tg, level='CRITICAL', background=True,
+            ...                             formatter='%(name)s: %(plain_message)s')
+        """
+        handler = CallableHandler(func, level=level, background=background, queue_size=queue_size)
+        handler.setFormatter(cls._make_output_formatter(formatter, logging.Formatter(cls.LOG_FORMAT)))
+        cls.add_global_handler(handler)
+        return handler
+
+    @classmethod
+    def remove_global_output(cls, output: Union[CallableHandler, Callable[[str], Any]]) -> bool:
+        """
+        Убирает глобальный вывод-функцию у всех логгеров и закрывает его.
+
+        Args:
+            output: Обработчик из ``add_global_output()`` или сама функция.
+
+        Returns:
+            ``True``, если что-то было убрано.
+
+        Пример:
+            >>> h = AppLogger.add_global_output(print)
+            >>> AppLogger.remove_global_output(h)
+            True
+        """
+        with cls._global_handlers_lock:
+            matched = [
+                h for h in cls._global_handlers
+                if isinstance(h, CallableHandler) and (h is output or h.func == output)
+            ]
+        for handler in matched:
+            cls.remove_global_handler(handler)
+            handler.close()
+        return bool(matched)
+
+    @classmethod
     def get_default_config(cls) -> Dict[str, Any]:
         """
         Возвращает конфигурацию по умолчанию, которая будет использоваться, если не указать config при вызове get_instance().
@@ -589,6 +916,10 @@ class BaseAppLogger:
         # self._sync_full_state = True   # по умолчанию копируем флаги консоли/включения
 
         self._show_call_depth = show_call_depth
+
+        # Выводы-функции этого логгера (add_output). _update_handlers() их не трогает:
+        # он пересоздаёт только console_handler/file_handler.
+        self._outputs: List[CallableHandler] = []
 
         self._handler_lock = threading.RLock()
 
@@ -1135,6 +1466,142 @@ class BaseAppLogger:
             
         return self._use_name_in_filename
 
+
+    # ----------------------------------------------------------------------
+    # Выводы-функции (add_output): лог в print, Telegram-бот, виджет и т. п.
+    # ----------------------------------------------------------------------
+
+    @staticmethod
+    def _make_output_formatter(
+        formatter: Optional[Union[logging.Formatter, str]],
+        default: logging.Formatter,
+    ) -> logging.Formatter:
+        """
+        Приводит аргумент ``formatter`` из ``add_output``/``add_global_output`` к Formatter.
+
+        Args:
+            formatter: ``None`` — взять ``default``; строка — формат ``logging``
+                (``'%(levelname)s: %(plain_message)s'``); готовый ``logging.Formatter``.
+            default: Форматтер по умолчанию.
+
+        Returns:
+            Объект ``logging.Formatter``.
+
+        Пример:
+            >>> BaseAppLogger._make_output_formatter('%(message)s', None)._fmt
+            '%(message)s'
+        """
+        if formatter is None:
+            return default
+        if isinstance(formatter, str):
+            return logging.Formatter(formatter)
+        return formatter
+
+    def add_output(
+        self,
+        func: Callable[[str], Any],
+        level: Union[int, str] = logging.NOTSET,
+        background: bool = False,
+        formatter: Optional[Union[logging.Formatter, str]] = None,
+        queue_size: int = 1000,
+    ) -> CallableHandler:
+        """
+        Добавляет вывод этого логгера в функцию вида ``print(text)``.
+
+        Каждая запись логгера, прошедшая его уровень и порог ``level``, форматируется
+        и передаётся в ``func`` одной строкой. Консоль и файл при этом работают как
+        раньше; чтобы писать только в функцию — ``disable_console()``/``disable_file()``.
+
+        Вывод:
+            * переживает перестроения обработчиков (смена уровня, флагов, конфига);
+            * молчит, когда логгер выключен (``disable()``) или в списке отключённых;
+            * у слейва — свой (с мастером не делится);
+            * снимается ``remove_output()`` или ``close()``.
+
+        Подробности о режимах и защитах — в ``CallableHandler``.
+
+        Args:
+            func: Функция, принимающая одну строку (``print``, ``bot_send``, ``list.append``).
+            level: Порог этого вывода (имя или число). Уровень самого логгера
+                фильтрует раньше: вывод не получит записей ниже ``get_level()``.
+            background: ``True`` — доставка в фоновом потоке (для медленных функций:
+                сеть, Telegram). Записи сверх ``queue_size`` отбрасываются.
+            formatter: ``None`` — формат логгера (как в консоли и файле); строка
+                формата ``logging``; или ``logging.Formatter``. Для коротких сообщений:
+                ``'%(levelname)s: %(plain_message)s'``.
+            queue_size: Размер очереди для ``background=True``.
+
+        Returns:
+            Созданный ``CallableHandler`` (пригодится для ``remove_output``,
+            ``flush`` и счётчика ``dropped``).
+
+        Raises:
+            TypeError: ``func`` нельзя вызвать.
+
+        Пример:
+            >>> log = AppLogger.get_instance('payments')
+            >>> log.add_output(print, level='INFO')
+
+            >>> def send_tg(text: str) -> None:
+            ...     bot.send_message(ADMIN_CHAT_ID, text)
+            >>> log.add_output(send_tg, level='ERROR', background=True,
+            ...                formatter='%(levelname)s %(name)s: %(plain_message)s')
+            >>> log.error('Платёж не прошёл')   # → в консоль, файл и Telegram
+        """
+        handler = CallableHandler(func, level=level, background=background, queue_size=queue_size)
+        handler.setFormatter(self._make_output_formatter(formatter, self.formatter))
+
+        with self._handler_lock:
+            self._outputs.append(handler)
+            self.logger.addHandler(handler)
+            self._save_handlers()
+
+        return handler
+
+    def remove_output(self, output: Union[CallableHandler, Callable[[str], Any]]) -> bool:
+        """
+        Убирает вывод, добавленный ``add_output()``, и закрывает его.
+
+        Args:
+            output: Обработчик, который вернул ``add_output()``, или сама функция
+                (тогда убираются все выводы с этой функцией).
+
+        Returns:
+            ``True``, если что-то было убрано.
+
+        Пример:
+            >>> h = log.add_output(print)
+            >>> log.remove_output(h)
+            True
+            >>> log.remove_output(print)   # уже нет
+            False
+        """
+        with self._handler_lock:
+            # h.func == output, а не «is»: связанный метод (list.append, bot.send)
+            # при каждом обращении — новый объект, но равный прежнему
+            matched = [h for h in self._outputs if h is output or h.func == output]
+            for handler in matched:
+                self._outputs.remove(handler)
+                self.logger.removeHandler(handler)
+            self._save_handlers()
+
+        for handler in matched:
+            handler.close()
+        return bool(matched)
+
+    def get_outputs(self) -> List[CallableHandler]:
+        """
+        Выводы-функции этого логгера (копия списка).
+
+        Returns:
+            Список ``CallableHandler`` в порядке добавления.
+
+        Пример:
+            >>> [h.func for h in log.get_outputs()]
+            [<built-in function print>]
+        """
+        with self._handler_lock:
+            return list(self._outputs)
 
     def _retire(self) -> None:
         """
@@ -4303,8 +4770,11 @@ class BaseAppLogger:
         
         self.logger.debug(
             self._formatted(
-                message = message,   
-            )
+                message = message,
+            ),
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
 
     def info(self, message: str) -> None:
@@ -4324,8 +4794,11 @@ class BaseAppLogger:
         
         self.logger.info(
             self._formatted(
-                message = message,   
-            )
+                message = message,
+            ),
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
 
     def warning(self, message: str) -> None:
@@ -4348,8 +4821,11 @@ class BaseAppLogger:
         
         self.logger.warning(
             self._formatted(
-                message = message,   
-            )
+                message = message,
+            ),
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
 
     def error(self, message: str) -> None:
@@ -4372,8 +4848,11 @@ class BaseAppLogger:
         
         self.logger.error(
             self._formatted(
-                message = message,   
-            )
+                message = message,
+            ),
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
 
     def critical(self, message: str) -> None:
@@ -4393,8 +4872,11 @@ class BaseAppLogger:
         
         self.logger.critical(
             self._formatted(
-                message = message,   
-            )
+                message = message,
+            ),
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
 
     def exception(self, message: str, exc_info: bool = True) -> str:
@@ -4416,8 +4898,11 @@ class BaseAppLogger:
     
         self.logger.error(
             self._formatted(
-                message = message,   
-            ), exc_info=exc_info
+                message = message,
+            ), exc_info=exc_info,
+            # Текст без имени логгера и места вызова — для коротких выводов
+            # (add_output(..., formatter='%(plain_message)s'))
+            extra={'plain_message': message},
         )
         return message
         
@@ -4540,7 +5025,7 @@ class BaseAppLogger:
                     else:
                         formatted = logger_instance._format_message(caller_info, start_msg)
 
-                    logger_instance.logger.log(level, formatted)
+                    logger_instance.logger.log(level, formatted, extra={'plain_message': start_msg})
 
                 def log_end(
                     execution_time: float, 
@@ -4568,7 +5053,7 @@ class BaseAppLogger:
                     else:
                         formatted = logger_instance._format_message(caller_info, end_msg)
 
-                    logger_instance.logger.log(level, formatted)
+                    logger_instance.logger.log(level, formatted, extra={'plain_message': end_msg})
 
                     # if 'PhotoUploaderWidget.set_existing_photos' in formatted:
                     #     0==0
@@ -4943,9 +5428,18 @@ class BaseAppLogger:
         3. Удаляем каждый хендлер из логгера (self.logger.removeHandler(handler))
         4. Очищаем список хендлеров (self.handlers.clear())
         """
+        # for handler in self.logger.handlers[:]:
+        #     handler.close()
+        #     self.logger.removeHandler(handler)
+        # ↑ до 2026-10-14 закрывались и глобальные обработчики (окно логов GUI, глобальные
+        #   выводы-функции): close() одного логгера ломал их для всех остальных.
+        with BaseAppLogger._global_handlers_lock:
+            global_handlers = list(BaseAppLogger._global_handlers)
         for handler in self.logger.handlers[:]:
-            handler.close()
             self.logger.removeHandler(handler)
+            if handler not in global_handlers:
+                handler.close()
+        self._outputs.clear()
         self.handlers.clear()
 
     @classmethod

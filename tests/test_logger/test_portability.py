@@ -27,7 +27,8 @@ def _run(script_path, cwd):
     """Запускает скрипт в изолированном интерпретаторе; возвращает CompletedProcess."""
     env = {k: v for k, v in os.environ.items() if k != 'PYTHONPATH'}
     return subprocess.run(
-        [sys.executable, '-I', script_path], cwd=cwd, capture_output=True,
+        # -X utf8: вывод дочернего процесса в UTF-8 (-I игнорирует PYTHONIOENCODING)
+        [sys.executable, '-I', '-X', 'utf8', script_path], cwd=cwd, capture_output=True,
         text=True, encoding='utf-8', env=env, timeout=60,
     )
 
@@ -95,18 +96,24 @@ def test_whole_package_with_app_logger(tmp_path):
 
         AppLogger.configure({{'LOG_DIR': {str(log_dir)!r}, 'system_LEVEL': 'DEBUG',
                               'system_console_enabled': 'False', 'system_file_enabled': 'True'}})
+        from mylogging import CallableHandler
         svc = AppLogger.get_instance('svc', enable_file_logging='system')
+        sent = []
+        out = svc.add_output(sent.append, formatter='%(plain_message)s')
+        assert isinstance(out, CallableHandler)
 
         def handler_func():
             svc.debug('из сервиса')
 
         handler_func()
+        print('sent:', sent)
         print('project loaded:', any(m == 'app' or m.startswith('app.') for m in sys.modules))
     '''), encoding='utf-8')
 
     out = _run(str(script), str(tmp_path))
     assert out.returncode == 0, out.stderr
     assert 'project loaded: False' in out.stdout
+    assert "sent: ['из сервиса']" in out.stdout
     line = next(l for l in (log_dir / 'app.log').read_text(encoding='utf-8').splitlines()
                 if 'из сервиса' in l)
     _check_line(line, str(script), 'handler_func')

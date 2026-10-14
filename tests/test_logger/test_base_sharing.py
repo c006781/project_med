@@ -197,13 +197,47 @@ def test_master_move_file_moves_slave(pair, tmp_path, log_file):
     assert 'переехал' not in read(log_file)
 
 
-def test_master_disable_with_full_sync_disables_slave_flag(make_logger, master_cfg, capsys):
+def test_full_sync_disable_and_enable_follow_master(make_logger, master_cfg, log_file):
+    """S4: при sync_full_state=True у мастера слейвы повторяют enable/disable.
+
+    До исправления get_instance() по умолчанию затирал унаследованный флаг False,
+    а выключение мастера до слейвов не доходило.
+    """
     master = make_logger(name='Mf', config=master_cfg, enable_file_logging=True, sync_full_state=True)
     slave = make_logger(name='Sf', enable_file_logging='Mf')
-    # от мастера копируется True, но get_instance(sync_full_state=False) перетирает
-    assert slave._sync_full_state is False
+    assert slave._sync_full_state is True  # унаследован от мастера
+
     master.disable()
-    # мастер без обработчика → _update_shared_slaves ничего не делает
+    assert slave.is_enabled() is False
+    slave.info('нет')
+    assert '[Sf]' not in read(log_file)
+
+    master.enable()
+    assert slave.is_enabled() is True
+    assert slave.file_handler is master.file_handler
+    slave.info('снова')
+    assert '[Sf]' in read(log_file)
+
+
+def test_full_sync_console_follows_master(make_logger, master_cfg):
+    master = make_logger(name='Mc', config=master_cfg, enable_file_logging=True, sync_full_state=True)
+    slave = make_logger(name='Sc', enable_file_logging='Mc')
+    master.disable_console()
+    assert slave.is_console_enabled() is False
+    assert slave.console_handler is None
+
+
+def test_full_sync_slave_can_opt_out(make_logger, master_cfg):
+    master = make_logger(name='Mo', config=master_cfg, enable_file_logging=True, sync_full_state=True)
+    slave = make_logger(name='So', enable_file_logging='Mo', sync_full_state=False)
+    assert slave.file_handler is master.file_handler
+    master.disable()
+    assert slave.is_enabled() is True
+
+
+def test_without_full_sync_slave_independent(pair):
+    master, slave = pair
+    master.disable()
     assert slave.is_enabled() is True
 
 

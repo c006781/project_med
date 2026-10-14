@@ -1003,7 +1003,11 @@ class BaseAppLogger:
 
         self._handler_lock = threading.RLock()
 
-        self._sync_full_state = sync_full_state  # по умолчанию копируем флаги консоли/включения
+        # self._sync_full_state = sync_full_state  # по умолчанию копируем флаги консоли/включения
+        # None (S4): мастеру — False; если логгер подключится к мастеру, флаг
+        # унаследуется (_sync_all_from_master). Явный True/False — свой выбор.
+        self._sync_full_state = bool(sync_full_state)
+        self._sync_full_state_explicit: Optional[bool] = sync_full_state
 
         # Разрешено ли при перестроении автоматически подключаться к уже открытому
         # обработчику того же файла: родителя по ссылке enable_file_logging='имя'
@@ -2406,7 +2410,10 @@ class BaseAppLogger:
         self._use_name_in_filename = self._master_logger._use_name_in_filename  # устанавливаем флаг использования имени
         self._file_enabled = self._master_logger._file_enabled  # устанавливаем флаг использования файлового обработчика
 
-        self._sync_full_state = self._master_logger._sync_full_state # устанавливаем флаг использования полного состояния
+        # self._sync_full_state = self._master_logger._sync_full_state # устанавливаем флаг использования полного состояния
+        # ↑ до S4: флаг мастера копировался всегда, явный отказ слейва терялся.
+        if getattr(self, '_sync_full_state_explicit', None) is None:
+            self._sync_full_state = self._master_logger._sync_full_state
 
         # Копируем флаги консоли и включения только если явно запрошено
         if self._sync_full_state: # Если нужно, чтобы слейв имел независимую консоль
@@ -3231,7 +3238,8 @@ class BaseAppLogger:
             slave.base_log_file = master_state['base_log_FILE']
             slave._use_name_in_filename = master_state['use_name_in_filename']
             slave.use_timestamp = master_state['use_timestamp']
-            slave._sync_full_state = master_state['sync_full_state']
+            # slave._sync_full_state = master_state['sync_full_state']
+            # ↑ до S4: затирало явный отказ слейва от полной синхронизации.
             slave._show_call_depth = master_state['show_call_depth']
             slave.log_args = master_state['log_ARGS']
 
@@ -3251,9 +3259,11 @@ class BaseAppLogger:
 
             # --- полная синхронизация флагов (опционально) ---
             # 5.1. Синхронизация флагов консоли и включения, если требуется полная синхронизация
-            if master_state.get('sync_full_state', False):
-                slave._console_enabled = master_state['console_enabled']
-                slave._enabled = master_state['enabled']
+            # if master_state.get('sync_full_state', False):
+            #     slave._console_enabled = master_state['console_enabled']
+            #     slave._enabled = master_state['enabled']
+            # ↑ до S4: флаги менялись без перестроения обработчиков (консоль не
+            #   появлялась/не пропадала). Теперь — _apply_full_sync + _update_handlers.
 
             # 6. Сохраняем список обработчиков для GUI
             slave._save_handlers()
@@ -3293,6 +3303,41 @@ class BaseAppLogger:
                 'enabled': self._enabled,
                 # 'sync_full_state': self._sync_full_state,
             }  
+    def _apply_full_sync(self, slave: 'BaseAppLogger', master_state: Dict[str, Any]) -> bool:
+        """
+        Копирует слейву флаги ``enabled`` и ``console_enabled`` мастера (S4).
+
+        Работает, только если мастер включил полную синхронизацию
+        (``sync_full_state=True``) и слейв от неё не отказался
+        (его ``_sync_full_state`` тоже ``True``; по умолчанию слейв наследует флаг
+        мастера, явный ``get_instance(..., sync_full_state=False)`` — отказ).
+
+        Args:
+            slave: Слейв этого мастера.
+            master_state: Снимок состояния мастера (``_get_master_state()``).
+
+        Returns:
+            ``True``, если флаги слейва изменились и ему нужно перестроить обработчики.
+
+        Пример:
+            >>> master = AppLogger.get_instance('m', enable_file_logging=True, sync_full_state=True)
+            >>> slave = AppLogger.get_instance('s', enable_file_logging='m')
+            >>> master.disable()        # внутри _apply_full_sync → slave тоже выключен
+            >>> slave.is_enabled()
+            False
+        """
+        if not (master_state.get('sync_full_state') and slave._sync_full_state):
+            return False
+
+        with slave._handler_lock:
+            changed = (
+                slave._enabled != master_state['enabled']
+                or slave._console_enabled != master_state['console_enabled']
+            )
+            slave._enabled = master_state['enabled']
+            slave._console_enabled = master_state['console_enabled']
+        return changed
+
     def _update_shared_slaves(self) -> None:
         """
         Обновляет всех зависимых логгеров (которые используют наш файловый обработчик)
@@ -3332,6 +3377,9 @@ class BaseAppLogger:
                     if slave._shared_handler and slave.file_handler is not None:
                         slave._remove_file_handler(if_close_file_handler=False)
                         slave._save_handlers()
+                # S4: мастер выключен целиком — с полной синхронизацией выключаем и слейва
+                if self._apply_full_sync(slave, master_state):
+                    slave._update_handlers()
             return
 
         for slave in active_slaves:  # копия на случай изменения списка
@@ -3339,12 +3387,21 @@ class BaseAppLogger:
             # if not slave._enabled or not slave._file_enabled:
             # if not slave._enabled or not slave.effective_enable_file_logging(_visited=None):
             #     continue
+            # if not slave._enabled:
+            #     continue
+            # ↑ до исправления S4: выключенный слейв пропускался всегда — при полной
+            #   синхронизации включение мастера до него не доходило.
+            full_sync_changed = self._apply_full_sync(slave, master_state)
             if not slave._enabled:
                 continue
 
             self._update_shared_slave(slave, master_state )# Убедимся, что он всё ещё использует наш обработчик # внутри будет захвачен slave._handler_lock, но _share_lock уже свободен
 
             # self._sync_log_formatters(slave) # Синхронизируем формат сообщений (если изменился у мастера)
+
+            if full_sync_changed:
+                # Флаги включения/консоли поменялись — у слейва нужны другие обработчики
+                slave._update_handlers()
         
             # self._sync_console_handler(slave) # Если у зависимого логгера включён консольный вывод, убедимся, что его уровень совпадает
 
@@ -4273,7 +4330,9 @@ class BaseAppLogger:
                 show_call_depth=show_call_depth, 
                 sync_full_state=sync_full_state,
             )
-            instance._sync_full_state = sync_full_state
+            # instance._sync_full_state = sync_full_state
+            # ↑ до S4: перезаписывало флаг, унаследованный от мастера при подключении
+            #   внутри конструктора. Конструктор уже выставил его сам.
             cls._instances[name] = instance
 
             # Автоматический шаринг, если разрешено
@@ -4299,7 +4358,7 @@ class BaseAppLogger:
         cls, 
         name, 
         share_file_with,
-        sync_full_state: bool = False,
+        sync_full_state: Optional[bool] = None,
     ):
         with cls._instances_lock:
             # экземпляр с таким именем уже существует - возвращается существующий
@@ -4326,7 +4385,10 @@ class BaseAppLogger:
         use_name_in_filename: Union[str,bool] = False,
         share_file_with: Optional[str] = None,
         show_call_depth: bool = False, # показывать уровень вложенности
-        sync_full_state: bool = False,
+        # sync_full_state: bool = False,
+        # ↑ до S4: явный False при подключении к мастеру затирал унаследованный флаг.
+        #   None — для мастера False, для слейва — как у мастера.
+        sync_full_state: Optional[bool] = None,
         auto_share: bool = False, # Пока не используется
     ) -> 'BaseAppLogger':
         """
@@ -4395,7 +4457,7 @@ class BaseAppLogger:
                 enable_file_logging = enable_file_logging,
                 use_name_in_filename = use_name_in_filename,
                 show_call_depth=show_call_depth,
-                sync_full_state=sync_full_state,
+                sync_full_state=sync_full_state,  # None допустим (S4)
 
                 # auto_share=False,
                 auto_share=auto_share_flag

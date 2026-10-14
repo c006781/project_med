@@ -399,3 +399,31 @@ def test_dead_slaves_are_cleaned(make_logger, master_cfg, logger_cls):
     gc.collect()
     master.reconfigure(level='INFO')
     assert master._shared_slaves == []
+
+
+def test_attaching_slaves_does_not_reopen_master_file(make_logger, master_cfg):
+    """P5: подключение слейва не закрывает/открывает общий файл мастера.
+
+    До исправления каждое подключение делало force_reopen общего обработчика —
+    при старте приложения файл открывался ~430 раз вместо одного.
+    """
+    master = make_logger(name='Mr', config=master_cfg, enable_file_logging=True)
+    master.info('открыл')
+    stream = master.file_handler.stream
+    for i in range(5):
+        make_logger(name=f'Sr{i}', enable_file_logging='Mr').info('слейв')
+    assert master.file_handler.stream is stream
+    assert not stream.closed
+
+
+def test_reopen_if_needed_only_when_file_missing(make_logger, log_dir):
+    lg = make_logger(enable_file_logging=True)
+    lg.info('x')
+    stream = lg.file_handler.stream
+    lg._reopen_file_handler_if_needed()
+    assert lg.file_handler.stream is stream          # файл на месте — не трогаем
+    stream.close()
+    lg.file_handler.stream = None
+    os.remove(os.path.join(log_dir, 'app.log'))
+    lg._reopen_file_handler_if_needed()
+    assert os.path.exists(os.path.join(log_dir, 'app.log'))

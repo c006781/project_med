@@ -1571,7 +1571,18 @@ class MainWindow(
             # повторно, на случай запуска окна в обход main_gui_window.py.
             AppLogger.configure(config_manager.get_all())
 
-        if not config_manager.config_exists:
+        # M1 (2026-10-14): config.msgpack был повреждён — менеджер переименовал его и
+        # создал новый со значениями по умолчанию. Сообщаем, где битый файл, и открываем
+        # настройки как при первом запуске (окно — после показа главного окна).
+        if config_manager.broken_config_message:
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                self, "Конфигурация восстановлена", config_manager.broken_config_message))
+            self.page_manager.switch_to(
+                'settings',
+                add_to_history=False,
+                extra_data={'first_start': True}
+            )
+        elif not config_manager.config_exists:
             # Первый запуск – открываем настройки с флагом first_start
             self.page_manager.switch_to(
                 'settings',

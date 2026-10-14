@@ -24,6 +24,15 @@ def cfg_path(config_sandbox):
 
 
 @pytest.fixture
+def manager_log():
+    """Записи логгера config.manager (через add_output: его консоль привязана к stderr импорта)."""
+    got = []
+    handler = manager_module._log.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+    yield got
+    manager_module._log.remove_output(handler)
+
+
+@pytest.fixture
 def env_ok(env_file):
     """.env с заполненными ключами — без перезаписей при чтении."""
     env_file.write_text("APP_CONFIG_PATH='config.msgpack'\nGITHUB_TOKEN='t'\n", encoding='utf-8')
@@ -62,35 +71,64 @@ def test_file_values_override_defaults_unknown_kept(cfg_path):
     assert m.get('YANDEX_TOKEN') == '----'              # остальное — умолчания
 
 
-def test_non_dict_file_ignored(cfg_path):
+def test_non_dict_file_recovered(cfg_path):
+    """M1: файл-«не словарь» тоже считается повреждённым (раньше молча игнорировался)."""
     with open(cfg_path, 'wb') as f:
         msgpack.pack([1, 2, 3], f)
-    assert AppConfigManager.get_instance(config_path=cfg_path).get('LOG_LEVEL') == 'INFO'
-
-
-def test_corrupted_file_raises_current(cfg_path):
-    """M1, как есть: битый файл — исключение (приложение не запускается)."""
-    with open(cfg_path, 'wb') as f:
-        f.write(b'\xc1 not msgpack')
-    with pytest.raises(Exception):
-        AppConfigManager.get_instance(config_path=cfg_path)
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "M1: повреждённый config.msgpack роняет запуск; ожидается: умолчания + сообщение, "
-    "битый файл сохранён рядом для разбора"
-))
-def test_corrupted_file_falls_back_to_defaults(cfg_path):
-    with open(cfg_path, 'wb') as f:
-        f.write(b'\xc1 not msgpack')
     m = AppConfigManager.get_instance(config_path=cfg_path)
     assert m.get('LOG_LEVEL') == 'INFO'
+    assert 'не словарь' in m.broken_config_message
+    assert os.path.exists(m.broken_config_backup)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "M2: save() не атомарный — файл обнуляется до записи; сбой посередине портит конфиг"
-))
+BROKEN = b'\xc1 not msgpack'
+
+
+def test_corrupted_file_recovered(cfg_path, manager_log):
+    """M1: раньше исключение — приложение не запускалось."""
+    with open(cfg_path, 'wb') as f:
+        f.write(BROKEN)
+    m = AppConfigManager.get_instance(config_path=cfg_path)
+
+    # значения по умолчанию
+    assert m.get('LOG_LEVEL') == 'INFO'
+    # битый файл переименован и не изменён
+    backup = m.broken_config_backup
+    assert backup and os.path.basename(backup).startswith('config.msgpack.broken-')
+    with open(backup, 'rb') as f:
+        assert f.read() == BROKEN
+    # создан новый файл со значениями по умолчанию
+    with open(cfg_path, 'rb') as f:
+        assert msgpack.unpack(f, raw=False)['LOG_LEVEL'] == 'INFO'
+    # сообщение: где битый и что создан новый
+    assert backup in m.broken_config_message
+    assert 'Создан новый файл со значениями по умолчанию' in m.broken_config_message
+    # сообщение — в лог уровнем ERROR (до настройки логирования — консоль)
+    assert any(r.startswith('ERROR|Файл конфигурации повреждён') and backup in r for r in manager_log)
+
+
+def test_corrupted_file_rename_fails_original_kept(cfg_path, monkeypatch):
+    """Не удалось переименовать — битый файл не затирается новым."""
+    with open(cfg_path, 'wb') as f:
+        f.write(BROKEN)
+    monkeypatch.setattr(manager_module.os, 'replace', lambda *a: (_ for _ in ()).throw(PermissionError('занято')))
+    m = AppConfigManager.get_instance(config_path=cfg_path)
+    assert m.get('LOG_LEVEL') == 'INFO'
+    assert m.broken_config_backup is None
+    assert 'файл не тронут' in m.broken_config_message
+    with open(cfg_path, 'rb') as f:
+        assert f.read() == BROKEN
+
+
+def test_healthy_file_no_message(cfg_path):
+    m = AppConfigManager.get_instance(config_path=cfg_path)
+    m.save()
+    again = AppConfigManager.get_instance(config_path=cfg_path, force_new=True)
+    assert again.broken_config_backup is None and again.broken_config_message is None
+
+
 def test_failed_save_keeps_previous_file(cfg_path, monkeypatch):
+    """M2: раньше файл обнулялся до записи — сбой посередине портил конфиг."""
     m = AppConfigManager.get_instance(config_path=cfg_path)
     m.set('YANDEX_TOKEN', 'первый')
     m.save()
@@ -106,6 +144,7 @@ def test_failed_save_keeps_previous_file(cfg_path, monkeypatch):
     monkeypatch.undo()
     with open(cfg_path, 'rb') as f:
         assert msgpack.unpack(f, raw=False)['YANDEX_TOKEN'] == 'первый'
+    assert not os.path.exists(cfg_path + '.tmp')          # временный файл убран
 
 
 def test_save_creates_parent_dirs(config_sandbox):
@@ -198,8 +237,8 @@ def test_listener_add_twice_and_remove(cfg_path):
     assert calls == [1]
 
 
-def test_failing_listener_printed_others_run_current(cfg_path, capsys):
-    """M5, как есть: ошибка слушателя печатается в stdout, остальные вызываются."""
+def test_failing_listener_logged_others_run(cfg_path, capsys, manager_log):
+    """M5: ошибка слушателя — в лог с traceback (раньше print в stdout); остальные вызываются."""
     calls = []
 
     def bad():
@@ -209,7 +248,9 @@ def test_failing_listener_printed_others_run_current(cfg_path, capsys):
     AppConfigManager.add_change_listener(lambda: calls.append(1))
     AppConfigManager.get_instance(config_path=cfg_path).save()
     assert calls == [1]
-    assert 'Ошибка в слушателе конфигурации: сломался' in capsys.readouterr().out
+    assert 'Ошибка в слушателе конфигурации' not in capsys.readouterr().out
+    assert any(r.startswith('ERROR|Ошибка в слушателе конфигурации') and 'сломался' in r
+               for r in manager_log)
 
 
 def test_listeners_shared_by_all_managers(cfg_path, config_sandbox):
@@ -221,31 +262,8 @@ def test_listeners_shared_by_all_managers(cfg_path, config_sandbox):
     assert AppConfigManager._listeners is BaseConfigManager._listeners
 
 
-def test_listeners_of_dropped_objects_stay_current(cfg_path):
-    """M3, как есть: слушатель — связанный метод; объект «удалён», а слушатель живёт."""
-    import gc
-
-    class Service:
-        reloads = 0
-
-        def __init__(self):
-            AppConfigManager.add_change_listener(self.reload)
-
-        def reload(self):
-            Service.reloads += 1
-
-    Service()
-    Service()
-    gc.collect()
-    AppConfigManager.get_instance(config_path=cfg_path).save()
-    assert Service.reloads == 2
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "M3: слушатели не удаляются вместе с объектами — пересозданные сервисы копятся "
-    "и продолжают переоткрывать БД при каждом save() (6 → 11 в приложении)"
-))
 def test_listeners_of_dropped_objects_removed(cfg_path):
+    """M3: раньше слушатели-методы держали объекты вечно (6 → 11 в приложении)."""
     import gc
 
     class Service:
@@ -366,3 +384,19 @@ def test_apply_photos_sets_private_attr(applier):
     make, _, photo, _ = applier
     make(saved={'PHOTOS_STORAGE_PATH': 'a'}).apply_photos_storage({'PHOTOS_STORAGE_PATH': 'b'})
     assert photo._storage_path == 'b'
+
+
+def test_listener_of_live_object_called_and_removable(cfg_path):
+    calls = []
+
+    class Service:
+        def reload(self):
+            calls.append(1)
+
+    s = Service()
+    AppConfigManager.add_change_listener(s.reload)
+    AppConfigManager.add_change_listener(s.reload)      # дубль не добавляется
+    AppConfigManager.get_instance(config_path=cfg_path).save()
+    AppConfigManager.remove_change_listener(s.reload)
+    AppConfigManager.get_instance(config_path=cfg_path).save()
+    assert calls == [1]

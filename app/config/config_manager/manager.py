@@ -19,11 +19,20 @@
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 
-from typing import Any, Dict, Optional
+import time
+import weakref
+from typing import Any, Callable, Dict, Optional
 
 
 # Импорты модулей
 from app.config.conf.get_config import get_config_env as _old_get_config_env
+# Логгер не читает конфиг (развязка 2026-10-14), поэтому импорт безопасен:
+# зависимость только в сторону config → logger.
+from app.utils.logger.logger import AppLogger
+
+# До настройки логирования (setup_logging) логгер пишет только в консоль — сообщения
+# о битом конфиге при старте видны в консоли и дублируются окном в MainWindow.
+_log = AppLogger.get_instance('config.manager', enable_file_logging='system')
 
 
 
@@ -51,27 +60,133 @@ class BaseConfigManager:
 
     _listeners = []   # список callable-функций
 
-    @classmethod
-    def add_change_listener(cls, callback):
-        """Добавляет слушатель, вызываемый при сохранении конфигурации."""
-        if callback not in cls._listeners:
-            cls._listeners.append(callback)
+    # @classmethod
+    # def add_change_listener(cls, callback):
+    #     """Добавляет слушатель, вызываемый при сохранении конфигурации."""
+    #     if callback not in cls._listeners:
+    #         cls._listeners.append(callback)
+    #
+    # @classmethod
+    # def remove_change_listener(cls, callback):
+    #     """Удаляет слушатель."""
+    #     if callback in cls._listeners:
+    #         cls._listeners.remove(callback)
+    #
+    # @classmethod
+    # def _notify_change(cls):
+    #     """Оповещает всех зарегистрированных слушателей об изменении конфига."""
+    #     for cb in cls._listeners:
+    #         try:
+    #             cb()
+    #         except Exception as e:
+    #             # Логируем ошибку, но не прерываем цепочку
+    #             print(f"Ошибка в слушателе конфигурации: {e}")
+    # ↑ до M3/M5 (2026-10-14): слушатели-методы держали объекты сервисов вечно (сервис
+    #   пересоздан — старый продолжал реагировать на save(): 6 → 11 в приложении);
+    #   ошибки печатались print в stdout.
+
+    @staticmethod
+    def _make_ref(callback: Callable[[], Any]) -> Callable[[], Optional[Callable[[], Any]]]:
+        """
+        Ссылка на слушателя: слабая для связанного метода, обычная для функции.
+
+        Связанный метод (``service.reload_config``) хранится через ``weakref.WeakMethod`` —
+        когда объект удалён, слушатель исчезает сам (M3). Функции и лямбды хранятся
+        обычной ссылкой: слабая на лямбду умерла бы сразу.
+
+        Args:
+            callback: Функция или связанный метод без аргументов.
+
+        Returns:
+            Вызываемый объект без аргументов, возвращающий слушателя или ``None``.
+
+        Пример:
+            >>> ref = BaseConfigManager._make_ref(print)
+            >>> ref() is print
+            True
+        """
+        if hasattr(callback, '__self__') and hasattr(callback, '__func__'):
+            return weakref.WeakMethod(callback)
+        return lambda: callback
 
     @classmethod
-    def remove_change_listener(cls, callback):
-        """Удаляет слушатель."""
-        if callback in cls._listeners:
-            cls._listeners.remove(callback)
+    def _live_listeners(cls) -> list:
+        """
+        Живые слушатели; ссылки на удалённые объекты по пути выбрасываются.
+
+        Returns:
+            Список вызываемых объектов.
+
+        Пример:
+            >>> AppConfigManager._live_listeners()
+            []
+        """
+        alive, refs = [], []
+        for ref in cls._listeners:
+            cb = ref()
+            if cb is not None:
+                alive.append(cb)
+                refs.append(ref)
+        cls._listeners[:] = refs
+        return alive
 
     @classmethod
-    def _notify_change(cls):
-        """Оповещает всех зарегистрированных слушателей об изменении конфига."""
-        for cb in cls._listeners:
+    def add_change_listener(cls, callback: Callable[[], Any]) -> None:
+        """
+        Подписывает функцию на сохранение конфигурации (``save()``).
+
+        Повторная подписка того же слушателя ничего не меняет. Связанные методы
+        хранятся по слабой ссылке и отписываются сами, когда объект удалён (M3).
+
+        Список слушателей общий для всех менеджеров (классовый).
+
+        Args:
+            callback: Функция или метод без аргументов.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppConfigManager.add_change_listener(lambda: print('сохранено'))
+        """
+        if callback not in cls._live_listeners():
+            cls._listeners.append(cls._make_ref(callback))
+
+    @classmethod
+    def remove_change_listener(cls, callback: Callable[[], Any]) -> None:
+        """
+        Отписывает функцию от сохранения конфигурации. Неизвестная — ничего не делает.
+
+        Args:
+            callback: Ранее подписанная функция или метод.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppConfigManager.remove_change_listener(handler)
+        """
+        cls._listeners[:] = [ref for ref in cls._listeners if ref() is not None and ref() != callback]
+
+    @classmethod
+    def _notify_change(cls) -> None:
+        """
+        Вызывает всех живых слушателей после ``save()``.
+
+        Ошибка одного слушателя не прерывает остальных; она пишется в лог с traceback
+        (до M5 — ``print`` в stdout).
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``save()``.
+        """
+        for cb in cls._live_listeners():
             try:
                 cb()
             except Exception as e:
-                # Логируем ошибку, но не прерываем цепочку
-                print(f"Ошибка в слушателе конфигурации: {e}")
+                _log.exception(f"Ошибка в слушателе конфигурации {cb!r}: {e}")
 
                 
     def __init__(
@@ -90,6 +205,11 @@ class BaseConfigManager:
         self._config_path = config_path or self._config_path
         self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
         self._config = self._defaults.copy()  # начинаем с умолчаний
+
+        # M1: если файл оказался повреждён — путь к его копии и текст сообщения
+        # (заполняет _recover_broken_file; MainWindow показывает их пользователю)
+        self.broken_config_backup: Optional[str] = None
+        self.broken_config_message: Optional[str] = None
 
         # # Определяем, нужно ли шифрование
         # self._encrypt_enabled = encrypt
@@ -111,12 +231,25 @@ class BaseConfigManager:
             # Файла нет – используем defaults, файл не создаём до первого сохранения
             return
 
-        # try:
-        with open(self._config_path, 'rb') as f:
-            data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+        # # try:
+        # with open(self._config_path, 'rb') as f:
+        #     data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+        #
+        # if not isinstance(data, dict):
+        #     # Если файл содержит не словарь, игнорируем его
+        #     return
+        # ↑ до M1 (2026-10-14): битый файл — исключение, приложение не запускалось;
+        #   «не словарь» молча игнорировался. Теперь оба случая — _recover_broken_file().
+        try:
+            with open(self._config_path, 'rb') as f:
+                data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+        except Exception as e:  # msgpack бросает разные исключения на мусор
+            detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            self._recover_broken_file(f"не читается — {detail}")
+            return
 
         if not isinstance(data, dict):
-            # Если файл содержит не словарь, игнорируем его
+            self._recover_broken_file(f"содержит не словарь, а {type(data).__name__}")
             return
         # Обновляем кеш: значения из файла перезаписывают defaults
         self._config.update(data)
@@ -125,6 +258,55 @@ class BaseConfigManager:
         #     # В случае ошибки чтения (повреждённый файл) оставляем defaults
         #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
         #     pass
+
+    def _recover_broken_file(self, reason: str) -> None:
+        """
+        Восстановление после повреждённого файла конфигурации (M1).
+
+        Шаги:
+            1. Битый файл переименовывается в ``<путь>.broken-<ГГГГММДД_ЧЧММСС>``
+               (ничего не теряется — можно разобрать вручную).
+            2. Остаются значения по умолчанию; по ним создаётся новый файл.
+            3. Сообщение в лог (до настройки логирования — в консоль). Путь к копии —
+               в ``broken_config_backup``: главное окно показывает его пользователю и
+               открывает настройки.
+
+        Если переименовать не удалось (нет прав) — новый файл НЕ создаётся, чтобы не
+        затереть битый; работа идёт на значениях по умолчанию в памяти.
+
+        Args:
+            reason: Что не так с файлом (для сообщения).
+
+        Returns:
+            None
+
+        Пример:
+            >>> m = AppConfigManager.get_instance()         # config.msgpack испорчен
+            >>> m.broken_config_backup
+            'config.msgpack.broken-20261014_230512'
+        """
+        backup = f"{self._config_path}.broken-{time.strftime('%Y%m%d_%H%M%S')}"
+        try:
+            os.replace(self._config_path, backup)
+        except OSError as e:
+            self.broken_config_backup = None
+            message = (f"Файл конфигурации повреждён: {os.path.abspath(self._config_path)} "
+                       f"({reason}). Переименовать не удалось ({e}) — файл не тронут, "
+                       f"используются значения по умолчанию.")
+            _log.error(message)
+            self.broken_config_message = message
+            return
+
+        self.broken_config_backup = os.path.abspath(backup)
+        try:
+            self.save()
+            created = f"Создан новый файл со значениями по умолчанию: {os.path.abspath(self._config_path)}."
+        except OSError as e:
+            created = f"Создать новый файл не удалось ({e}) — используются значения по умолчанию."
+        message = (f"Файл конфигурации повреждён ({reason}). "
+                   f"Повреждённый файл сохранён как: {self.broken_config_backup}. {created}")
+        _log.error(message)
+        self.broken_config_message = message
 
     def save(self) -> None:
         """
@@ -139,9 +321,23 @@ class BaseConfigManager:
         if dirname:  # только если есть директория
             os.makedirs(dirname, exist_ok=True)
 
-        # Сохраняем в бинарном режиме
-        with open(self._config_path, 'wb') as f:
-            msgpack.pack(self._config, f)
+        # # Сохраняем в бинарном режиме
+        # with open(self._config_path, 'wb') as f:
+        #     msgpack.pack(self._config, f)
+        # ↑ до M2 (2026-10-14): файл обнулялся до записи — сбой посередине (диск,
+        #   питание) оставлял пустой/битый конфиг. Теперь: пишем во временный файл
+        #   рядом и подменяем им старый одной операцией (os.replace).
+        tmp_path = f"{self._config_path}.tmp"
+        try:
+            with open(tmp_path, 'wb') as f:
+                msgpack.pack(self._config, f)
+            os.replace(tmp_path, self._config_path)
+        except BaseException:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
         
         # Уведомляем всех подписчиков
         self.__class__._notify_change()

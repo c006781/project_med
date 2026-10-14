@@ -18,6 +18,7 @@
     True
 """
 
+import warnings
 import os
 import logging
 import sys
@@ -158,6 +159,12 @@ class _EmitMixin:
             >>> log._convert_patterns_modeles_tips('a')
             {'a'}
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            '_convert_patterns_modeles_tips() устарел: относится к старому алгоритму пропуска кадров; используйте _is_logger_frame().',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         
         if  isinstance(modeles, simple_types):
             return {modeles}
@@ -187,6 +194,12 @@ class _EmitMixin:
             >>> log._thec_patterns_modeles_is_none([], False)
             True
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            '_thec_patterns_modeles_is_none() устарел: относится к старому алгоритму пропуска кадров; используйте _is_logger_frame().',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # Проверка на наличие              
         if (modeles is None)  : 
             if if_err_tip :  
@@ -219,6 +232,12 @@ class _EmitMixin:
             >>> log._thec_patterns_modeles(('a', 'b'), False)
             {'a', 'b'}
         """
+        # P7 (2026-10-14): устаревшее — оставлено для совместимости, не удаляется.
+        warnings.warn(
+            '_thec_patterns_modeles() устарел: относится к старому алгоритму пропуска кадров; используйте _is_logger_frame().',
+            DeprecationWarning,
+            stacklevel=2,
+        )
         
                       
         # Проверка на наличие   

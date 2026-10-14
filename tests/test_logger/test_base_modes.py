@@ -181,12 +181,15 @@ def test_enable_file_on_logger_created_without_file(make_logger, log_dir):
 
 
 def test_enable_file_logging_property(make_file_logger, log_file):
+    """Чтение свойства — как раньше; присваивание устарело (P7), но работает."""
     file_logger = make_file_logger()
     assert file_logger.enable_file_logging is True
-    file_logger.enable_file_logging = False
+    with pytest.warns(DeprecationWarning, match='disable_file'):
+        file_logger.enable_file_logging = False
     assert file_logger.enable_file_logging is False
     assert file_logger.file_handler is None
-    file_logger.enable_file_logging = True
+    with pytest.warns(DeprecationWarning):
+        file_logger.enable_file_logging = True
     assert file_logger.file_handler is not None
 
 
@@ -279,8 +282,10 @@ def test_reconfigure_flags(make_file_logger, capsys, log_file):
 
 
 def test_reconfigure_enable_file_logging_alias(make_file_logger):
+    """Синоним file_enabled устарел (P7), но работает."""
     file_logger = make_file_logger()
-    file_logger.reconfigure(enable_file_logging=False)
+    with pytest.warns(DeprecationWarning, match='file_enabled'):
+        file_logger.reconfigure(enable_file_logging=False)
     assert file_logger.file_handler is None
 
 

@@ -348,10 +348,37 @@ def test_watchdog_started_once(logger_cls, make_logger, monkeypatch):
 
 
 def test_show_call_depth_global_flag(logger_cls):
-    logger_cls.on_show_call_depth_global()
-    assert logger_cls.status_show_call_depth_global() is True
-    logger_cls.off_show_call_depth_global()
-    assert logger_cls.status_show_call_depth_global() is False
+    """Флаг устарел (P7): работает как раньше, но с DeprecationWarning."""
+    with pytest.warns(DeprecationWarning, match='ни на что не влияет'):
+        logger_cls.on_show_call_depth_global()
+    with pytest.warns(DeprecationWarning):
+        assert logger_cls.status_show_call_depth_global() is True
+    with pytest.warns(DeprecationWarning):
+        logger_cls.off_show_call_depth_global()
+    with pytest.warns(DeprecationWarning):
+        assert logger_cls.status_show_call_depth_global() is False
+
+
+def test_auto_share_param_deprecated(logger_cls, make_logger):
+    with pytest.warns(DeprecationWarning, match='auto_share'):
+        make_logger(name='as1', auto_share=True)
+
+
+def test_get_instance_without_auto_share_no_warning(make_logger, recwarn):
+    make_logger(name='as2')
+    assert not [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+
+
+@pytest.mark.parametrize('method, args', [
+    ('_get_config_param', ({'LOG_LEVEL': 'INFO'}, 'LEVEL')),
+    ('_convert_patterns_modeles_tips', ('a',)),
+    ('_thec_patterns_modeles_is_none', ([], False)),
+    ('_thec_patterns_modeles', (('a',), False)),
+])
+def test_unused_helpers_deprecated(make_logger, method, args):
+    lg = make_logger()
+    with pytest.warns(DeprecationWarning):
+        getattr(lg, method)(*args)
 
 
 def test_force_new_keeps_old_masters_slaves_writing(make_logger, log_dir):

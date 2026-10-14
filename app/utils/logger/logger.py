@@ -133,7 +133,10 @@ from typing import  Dict, Any, Mapping, Optional
     #     pass #  pass #  raise # e # pass
 
 # try:
-from app.utils.logger.base_logger import BaseAppLogger
+# from app.utils.logger.base_logger import BaseAppLogger
+# ↑ до 2026-10-14: абсолютный путь привязывал пакет к расположению в этом проекте.
+# Относительный импорт — пакет можно скопировать в другой проект под любым именем.
+from .base_logger import BaseAppLogger
 
 
 # Развязка с конфигом (2026-10-14): логгер больше НЕ читает конфиг сам.

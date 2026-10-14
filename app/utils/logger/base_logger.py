@@ -1486,7 +1486,11 @@ class BaseAppLogger:
             # ['DIR', None, None],
             ['MAX_BYTES', 10*1024*1024, int],
             ['BACKUP_COUNT', 5, int],
-            ['show_call_depth', False, self._to_bool],
+            # ['show_call_depth', False, self._to_bool],
+            # ↑ до исправления B5: аргумент show_call_depth конструктора/get_instance()
+            #   всегда затирался значением False. Теперь он — значение по умолчанию,
+            #   а явный ключ в конфиге сильнее (как у file_enabled).
+            ['show_call_depth', getattr(self, '_show_call_depth', False), self._to_bool],
             # ['show_call_depth', True, self._to_bool],
         ]:
             # if key == 'LEVEL':

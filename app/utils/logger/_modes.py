@@ -970,6 +970,8 @@ class _ModesMixin:
         #   выводы-функции): close() одного логгера ломал их для всех остальных.
         with BaseAppLogger._global_handlers_lock:
             global_handlers = list(BaseAppLogger._global_handlers)
+        # Общие выводы класса (OUTPUTS) тоже общие — их закрывает close_class_outputs()
+        global_handlers += self._class_output_handlers()
         for handler in self.logger.handlers[:]:
             self.logger.removeHandler(handler)
             if handler not in global_handlers:

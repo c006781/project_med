@@ -148,6 +148,95 @@ class _OutputsMixin:
 
         return handler
 
+    @classmethod
+    def _class_output_handlers(cls) -> List[CallableHandler]:
+        """
+        Общие выводы класса из ``OUTPUTS`` — по одному обработчику на весь класс.
+
+        Обработчики создаются один раз, при первом обращении, и хранятся у класса,
+        в котором объявлен ``OUTPUTS`` (наследники без своего ``OUTPUTS`` используют
+        те же). Каждый логгер класса подключает их в ``_update_handlers`` и фильтрует
+        записи своим уровнем; порог самого вывода — ``level`` из описания.
+
+        Описание вывода в ``OUTPUTS`` — функция (``print``) или словарь с ключами
+        ``func`` и, по желанию, ``level``, ``background``, ``formatter``, ``queue_size``
+        (как у ``add_output``). Формат по умолчанию — ``LOG_FORMAT`` класса (тот же,
+        что у консоли и файла).
+
+        Returns:
+            Список ``CallableHandler`` (пустой, если ``OUTPUTS`` не задан).
+
+        Raises:
+            TypeError: Описание вывода — не функция и не словарь с ``func``.
+
+        Пример:
+            >>> class BotLogger(AppLogger, outputs=[print]):
+            ...     pass
+            >>> BotLogger._class_output_handlers()
+            [<CallableHandler print (NOTSET)>]
+        """
+        owner = next((k for k in cls.__mro__ if 'OUTPUTS' in k.__dict__), None)
+        if owner is None or not owner.__dict__['OUTPUTS']:
+            return []
+
+        cached = owner.__dict__.get('_class_outputs_cache')
+        if cached is not None:
+            return cached
+
+        with BaseAppLogger._global_handlers_lock:
+            cached = owner.__dict__.get('_class_outputs_cache')
+            if cached is not None:
+                return cached
+
+            handlers: List[CallableHandler] = []
+            for spec in owner.__dict__['OUTPUTS']:
+                if callable(spec):
+                    spec = {'func': spec}
+                if not isinstance(spec, dict) or 'func' not in spec:
+                    raise TypeError(
+                        f"Описание вывода в OUTPUTS должно быть функцией или словарём с 'func': {spec!r}"
+                    )
+                handler = CallableHandler(
+                    spec['func'],
+                    level=spec.get('level', logging.NOTSET),
+                    background=spec.get('background', False),
+                    queue_size=spec.get('queue_size', 1000),
+                )
+                handler.setFormatter(owner._make_output_formatter(
+                    spec.get('formatter'), logging.Formatter(owner.LOG_FORMAT)))
+                handlers.append(handler)
+
+            setattr(owner, '_class_outputs_cache', handlers)
+            return handlers
+
+    @classmethod
+    def close_class_outputs(cls) -> None:
+        """
+        Закрывает общие выводы класса (``OUTPUTS``): дожидается фоновой доставки
+        и снимает их со всех логгеров класса. Вызывайте при выходе из программы.
+
+        Следующий созданный или перестроенный логгер класса создаст выводы заново.
+
+        Returns:
+            None
+
+        Пример:
+            >>> BotLogger.close_class_outputs()
+        """
+        owner = next((k for k in cls.__mro__ if '_class_outputs_cache' in k.__dict__), None)
+        if owner is None:
+            return
+        handlers = owner.__dict__['_class_outputs_cache']
+        delattr(owner, '_class_outputs_cache')
+        with cls._instances_lock:
+            instances = list(cls._instances.values())
+        for inst in instances:
+            for handler in handlers:
+                inst.logger.removeHandler(handler)
+            inst._save_handlers()
+        for handler in handlers:
+            handler.close()
+
     def remove_output(self, output: Union[CallableHandler, Callable[[str], Any]]) -> bool:
         """
         Убирает вывод, добавленный ``add_output()``, и закрывает его.

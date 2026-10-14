@@ -475,10 +475,15 @@ class _HandlersMixin:
 
     def _update_console_handler (self) -> None:
         """
-        Создаёт консольный обработчик (stderr), если консоль включена.
+        Создаёт консольный обработчик, если консоль включена.
 
-        Уровень — уровень логгера, форматтер — текущий. Поток ``sys.stderr`` запоминается
-        в момент создания.
+        Куда пишет «консоль»:
+            * по умолчанию — ``sys.stderr`` (поток запоминается в момент создания);
+            * если у класса задан ``CONSOLE_OUTPUT`` (функция вида ``print(text)``) —
+              в эту функцию (``CallableHandler``). Так наследник может заменить вывод
+              в консоль, например, на Telegram-бот или виджет.
+
+        Уровень — уровень логгера, форматтер — текущий (тот же формат, что у файла).
 
         Returns:
             None
@@ -488,7 +493,13 @@ class _HandlersMixin:
         """
         # Консольный обработчик (всегда создаётся заново, если включён)
         if self._console_enabled:
-            self.console_handler = logging.StreamHandler()
+            # self.console_handler = logging.StreamHandler()
+            # ↑ до 2026-10-14 — только stderr. Теперь класс может задать свою функцию.
+            console_output = type(self).CONSOLE_OUTPUT
+            if console_output is None:
+                self.console_handler = logging.StreamHandler()
+            else:
+                self.console_handler = CallableHandler(console_output, name='console')
             self.console_handler.setLevel(self.log_level)
             self.console_handler.setFormatter(self.formatter)
             self.logger.addHandler(self.console_handler)
@@ -616,6 +627,9 @@ class _HandlersMixin:
                 
                 handlers_copy = self._get_all_handlers()
                 self._set_all_handlers(handlers_copy)
+
+                # Общие выводы класса (OUTPUTS / outputs=... при наследовании)
+                self._set_all_handlers(self._class_output_handlers())
 
                 # self._save_handlers()
                 # if not self._shared_handler and self._file_enabled:

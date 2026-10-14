@@ -112,14 +112,6 @@ def test_disable_enable_group_console(logger_cls, group):
     assert group['gui.Form'].is_console_enabled()
 
 
-BUG_DISABLE_FILE = (
-    "BUG: turn_off_file_logging() выходит сразу, если effective_enable_file_logging() "
-    "(аргумент конструктора) False — у логгера, созданного без enable_file_logging=True, "
-    "файл, включённый позже, выключить нельзя"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=BUG_DISABLE_FILE)
 def test_enable_disable_group_file(logger_cls, group):
     logger_cls.enable_group_file('api.')
     assert group['api.Db'].file_handler is not None
@@ -127,12 +119,13 @@ def test_enable_disable_group_file(logger_cls, group):
     assert group['api.Db'].file_handler is None
 
 
-def test_disable_file_after_enable_current_behavior(logger_cls, group):
+def test_disable_file_after_enable(logger_cls, group):
+    """R3: раньше файл, включённый у логгера без enable_file_logging=True, не выключался."""
     lg = group['api.Db']
     lg.enable_file()
     lg.disable_file()
-    assert lg.file_handler is not None
-    assert lg.is_file_enabled() is True
+    assert lg.file_handler is None
+    assert lg.is_file_enabled() is False
 
 
 BUG_GROUP_LEVEL = (
@@ -179,6 +172,8 @@ def test_exact_methods(logger_cls, group):
 
     logger_cls.enable_file_exact('gui.Table')
     assert lg.file_handler is not None and child.file_handler is None
+    logger_cls.disable_file_exact('gui.Table')
+    assert lg.file_handler is None
 
 
 def test_exact_methods_unknown_name_is_noop(logger_cls):

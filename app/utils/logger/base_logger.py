@@ -2890,11 +2890,39 @@ class BaseAppLogger:
     def disable_file(self):
         self.turn_off_file_logging()
 
-    def turn_on_file_logging(self):
+    def turn_on_file_logging(self) -> None:
         """
-        Включает файловое логирование.
+        Включает запись в файл для этого логгера.
+
+        Поведение:
+            * файл уже включён и обработчик есть — только проверяет, что файл на диске
+              существует (переоткрывает, если его удалили);
+            * файл уже включён, но обработчика нет (например, логгер был выключен
+              целиком) — перестраивает обработчики;
+            * логгер пишет через общий обработчик другого логгера — ничего не делает
+              и пишет предупреждение (сначала ``unshare_file_handler()``);
+            * иначе — включает флаг и создаёт свой файловый обработчик.
+
+        Решение принимается по ТЕКУЩЕМУ состоянию ``is_file_enabled()``, а не по
+        аргументу ``enable_file_logging`` конструктора (исправление R2,
+        IMPLEMENTATION.md §5.1).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log = AppLogger.get_instance('svc', enable_file_logging=True)
+            >>> log.turn_off_file_logging()
+            >>> log.turn_on_file_logging()
+            >>> log.is_file_enabled()
+            True
         """
-        if self.effective_enable_file_logging(_visited=None):
+        # if self.effective_enable_file_logging(_visited=None):
+        # ↑ до исправления R2: effective_enable_file_logging() — это аргумент конструктора
+        #   (или родителя по ссылке), а не текущее состояние. У логгера, созданного с
+        #   enable_file_logging=True, после disable_file() метод считал файл «уже
+        #   включённым» и ничего не делал.
+        if self._file_enabled:
             # логирование уже включено, вызвать self._reopen_file_handler_if_needed() и затем вернуться
 
             if self.file_handler is None:
@@ -2922,9 +2950,30 @@ class BaseAppLogger:
         # self._reopen_file_handler_if_needed() # после перестроения обработчиков проверяем существование файл
            
 
-    def turn_off_file_logging(self):
+    def turn_off_file_logging(self) -> None:
         """
-        Отключает файловое логирование.
+        Выключает запись в файл для этого логгера.
+
+        Поведение:
+            * если у логгера есть слейвы (другие логгеры пишут через его обработчик) —
+              сначала отвязывает их: каждый создаёт свой обработчик по своим настройкам;
+            * если запись в файл уже выключена — больше ничего не делает;
+            * если логгер сам пишет через чужой (общий) обработчик — отвязывается от него,
+              не закрывая его (им пользуется мастер и другие слейвы);
+            * иначе — закрывает свой файловый обработчик.
+
+        Решение принимается по ТЕКУЩЕМУ состоянию ``is_file_enabled()``, а не по
+        аргументу конструктора (исправление R3, IMPLEMENTATION.md §5.1).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log = AppLogger.get_instance('svc')        # без файла
+            >>> log.turn_on_file_logging()
+            >>> log.turn_off_file_logging()
+            >>> log.file_handler is None
+            True
         """
         if self._shared_slaves:
             with BaseAppLogger._share_lock:
@@ -2935,7 +2984,10 @@ class BaseAppLogger:
                         slave.unshare_file_handler(if_update_handlers=True)
 
         # Если файловое логирование уже отключено, ничего не делаем
-        if not self.effective_enable_file_logging(_visited=None):
+        # if not self.effective_enable_file_logging(_visited=None):
+        # ↑ до исправления R3: проверялся аргумент конструктора. У логгера, созданного
+        #   без enable_file_logging=True, включённый позже файл нельзя было выключить.
+        if not self._file_enabled:
             return
         
         # Если логгер использует общий обработчик (мастер)

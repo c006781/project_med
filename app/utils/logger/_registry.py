@@ -449,6 +449,16 @@ class _RegistryMixin:
             >>> AppLogger.reload_all_from_config({'LOG_FILE': 'logs/', 'LOG_LEVEL': 'INFO',
             ...     'LOG_MAX_BYTES': 10**7, 'LOG_BACKUP_COUNT': 5, 'system_LEVEL': 'DEBUG'})
         """
+        # P8 (2026-10-14): опечатки в ключах логгера раньше молча игнорировались
+        suspicious = cls.find_suspicious_config_keys(global_config)
+        if suspicious:
+            warnings.warn(
+                'Логгер не понимает ключи конфига (опечатка или регистр?): '
+                + ', '.join(suspicious)
+                + '. Допустимые окончания: ' + ', '.join(sorted(cls.CONFIG_KEYS)),
+                UserWarning,
+                stacklevel=2,
+            )
         with cls._instances_lock:
 
             for inst in cls._instances.values():

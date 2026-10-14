@@ -4,7 +4,15 @@
 Пакет логирования.
 
 Самостоятельный: зависит только от стандартной библиотеки, импорты внутри
-относительные — пакет (или один base_logger.py) можно скопировать в другой проект.
+относительные — папку пакета можно скопировать в другой проект под любым именем.
+
+Модули:
+    base_logger.py     — BaseAppLogger (собирается из частей ниже); точка импорта ядра.
+    handlers.py        — RobustRotatingFileHandler, CallableHandler.
+    logger.py          — AppLogger: конфиг приложения через configure().
+    _registry.py, _config.py, _handlers_mgmt.py, _sharing.py, _modes.py,
+    _outputs.py, _emit.py, _decorator.py — части BaseAppLogger (примеси).
+    _common.py         — общие служебные объекты.
 
 Экспорт:
     AppLogger        — логгер приложения: получает конфиг через AppLogger.configure().

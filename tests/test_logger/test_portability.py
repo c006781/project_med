@@ -4,8 +4,11 @@
 Переносимость модуля логирования в другие проекты.
 
 Модуль должен работать, если его просто скопировать:
-    * один файл base_logger.py под любым именем — ядро;
-    * весь пакет app/utils/logger/ под любым именем — ядро + AppLogger.
+    * пакет app/utils/logger/ под любым именем, используется только ядро (BaseAppLogger);
+    * тот же пакет с AppLogger.
+
+До 2026-10-14 ядро было одним файлом base_logger.py и копировалось отдельно; после
+разбиения на модули единица переноса — папка пакета.
 
 Каждый сценарий — отдельный чистый процесс (``python -I``: без PYTHONPATH, без
 текущей папки в sys.path), в котором проект project_med недоступен.
@@ -38,15 +41,16 @@ def _check_line(line, script_path, func):
     assert f'in <{func}>' in line, line
 
 
-def test_single_file_core(tmp_path):
-    """Только base_logger.py, переименованный в corelog.py, в пустой папке."""
-    shutil.copy(os.path.join(LOGGER_DIR, 'base_logger.py'), tmp_path / 'corelog.py')
+def test_core_from_copied_package(tmp_path):
+    """Пакет, скопированный под именем corelog; используется только ядро BaseAppLogger."""
+    shutil.copytree(LOGGER_DIR, tmp_path / 'corelog',
+                    ignore=shutil.ignore_patterns('__pycache__', '*.md'))
     script = tmp_path / 'use_core.py'
     log_dir = tmp_path / 'logs'
     script.write_text(textwrap.dedent(f'''
         import os, sys
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from corelog import BaseAppLogger
+        from corelog.base_logger import BaseAppLogger
 
         class MyLogger(BaseAppLogger):
             _instances = {{}}

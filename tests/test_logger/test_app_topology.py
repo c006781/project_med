@@ -234,6 +234,15 @@ def _applier(saved_config):
 
 
 @pytest.fixture
+def applied(monkeypatch):
+    """Подменяет конфиг, с которым логгеры «настроены сейчас»; возвращает изменяемый словарь."""
+    from app.utils.logger.logger import AppLogger
+    current = {}
+    monkeypatch.setattr(AppLogger, 'current_app_config', classmethod(lambda cls: dict(current)))
+    return current
+
+
+@pytest.fixture
 def reload_spy(monkeypatch):
     from app.utils.logger.logger import AppLogger
     calls = []
@@ -242,25 +251,43 @@ def reload_spy(monkeypatch):
     return calls
 
 
-def test_apply_logging_detects_change_against_old_config(reload_spy):
-    old = {'system_LEVEL': 'DEBUG'}
+def test_apply_logging_detects_change_against_applied_config(reload_spy, applied):
+    applied.update(system_LEVEL='DEBUG')
     new = {'system_LEVEL': 'ERROR'}
-    assert _applier(old).apply_logging(new) is True
+    assert _applier(saved_config={}).apply_logging(new) is True
     assert reload_spy == [new]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: SettingsPage сначала сохраняет конфиг, потом вызывает apply_logging(new_config); "
-    "apply_logging сравнивает new_config с manager.get_all(), где уже лежат новые значения, "
-    "поэтому изменений не находит и логгеры не перезагружаются"
-))
-def test_apply_logging_after_save_reloads_loggers(reload_spy):
-    saved = {'system_LEVEL': 'ERROR'}  # менеджер уже сохранил новые значения
+def test_apply_logging_after_save_reloads_loggers(reload_spy, applied):
+    """R1: менеджер уже сохранил новые значения — логгеры всё равно перенастраиваются."""
+    applied.update(system_LEVEL='DEBUG')
+    saved = {'system_LEVEL': 'ERROR'}
     assert _applier(saved).apply_logging({'system_LEVEL': 'ERROR'}) is True
     assert reload_spy == [{'system_LEVEL': 'ERROR'}]
 
 
-def test_apply_logging_after_save_current_behavior(reload_spy):
-    saved = {'system_LEVEL': 'ERROR'}
-    assert _applier(saved).apply_logging({'system_LEVEL': 'ERROR'}) is False
+def test_apply_logging_no_change_no_reconfigure(reload_spy, applied):
+    applied.update(system_LEVEL='ERROR')
+    assert _applier({}).apply_logging({'system_LEVEL': 'ERROR', 'YANDEX_TOKEN': 'x'}) is False
     assert reload_spy == []
+
+
+def test_apply_logging_ignores_non_logging_keys(reload_spy, applied):
+    applied.update(system_LEVEL='ERROR')
+    assert _applier({}).apply_logging({'system_LEVEL': 'ERROR', 'database_local_path': 'new.db'}) is False
+
+
+def test_apply_logging_with_real_logger_state(logger_cls, monkeypatch):
+    """Без подмен: после configure() повторный apply_logging с теми же данными — False."""
+    from app.utils.logger.logger import AppLogger
+
+    class App(AppLogger):
+        _instances = {}
+        _app_config = None
+
+    import app.config.config_applier as ca
+    monkeypatch.setattr(ca, 'AppLogger', App)
+    applier = _applier({})
+    assert applier.apply_logging({'system_LEVEL': 'ERROR'}) is True
+    assert App.current_app_config()['system_LEVEL'] == 'ERROR'
+    assert applier.apply_logging({'system_LEVEL': 'ERROR'}) is False

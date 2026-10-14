@@ -385,25 +385,36 @@ class ConfigApplier:
         """
         Применяет все настройки логирования (системный, пользовательский, общие).
 
-        Сравнивает ключи, перечисленные в `logging_keys`, между текущей
-        конфигурацией (`self.manager.get_all()`) и `new_config`. Если хотя бы один
-        из них изменился, передаёт `new_config` всем логгерам через
+        Сравнивает ключи из `logging_keys` между конфигом, с которым логгеры
+        настроены сейчас (`AppLogger.current_app_config()`), и `new_config`. Если хотя
+        бы один изменился, передаёт `new_config` всем логгерам через
         `AppLogger.configure(new_config)` (логгер сам конфиг не читает).
 
-        Известная проблема (R1 в app/utils/logger/IMPLEMENTATION.md §5.1):
-        SettingsPage вызывает метод ПОСЛЕ сохранения, поэтому `self.manager.get_all()`
-        уже равен `new_config` и изменений не находится.
+        Почему сравнение не с `self.manager.get_all()` (исправление R1,
+        app/utils/logger/IMPLEMENTATION.md §5.1): SettingsPage и `apply_full_config`
+        вызывают метод ПОСЛЕ сохранения, менеджер к этому моменту уже содержит
+        `new_config`, и изменения не находились — режимы применялись только после
+        перезапуска.
 
         Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками.
+            new_config (Dict[str, Any]): Словарь с новыми настройками
+                (обычно `AppConfigManager.get_all()` после сохранения).
 
         Returns:
-            bool: `True`, если настройки логирования изменились и логгеры перезагружены;
+            bool: `True`, если настройки логирования изменились и логгеры перенастроены;
                   `False` в противном случае.
+
+        Пример:
+            >>> manager.set('system_LEVEL', 'ERROR'); manager.save()
+            >>> ConfigApplier().apply_logging(manager.get_all())
+            True
         """
 
-        # Получаем текущую полную конфигурацию логгеров (загружаем свежую из менеджера)
-        current_full = self.manager.get_all()
+        # # Получаем текущую полную конфигурацию логгеров (загружаем свежую из менеджера)
+        # current_full = self.manager.get_all()
+        # ↑ до исправления R1: менеджер уже сохранён → сравнение всегда «без изменений».
+        # Сравниваем с тем, что реально применено к логгерам:
+        current_full = AppLogger.current_app_config()
 
         # Определяем, изменился ли хотя бы один параметр логирования
         logging_keys = [

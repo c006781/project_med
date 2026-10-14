@@ -1118,6 +1118,54 @@ class BaseAppLogger:
         return self._use_name_in_filename
 
 
+    def _retire(self) -> None:
+        """
+        Выводит экземпляр из работы перед заменой через ``get_instance(force_new=True)``.
+
+        ``logging.getLogger(name)`` один на имя, поэтому старый и новый экземпляр
+        делят один ``logging.Logger``. Чтобы не было дублей, старый снимает с него
+        свои обработчики:
+            * консоль — снимается и закрывается;
+            * свои функции вывода (``add_output``) — снимаются и закрываются;
+            * файл: если пишет через чужой (общий) — отцепляется у мастера, не закрывая;
+              если свой и через него пишут слейвы — снимается, но не закрывается
+              (слейвы продолжают писать); иначе — снимается и закрывается.
+
+        Постоянный ``NullHandler`` и глобальные обработчики остаются — они общие.
+        Сам объект продолжает работать: его вызовы идут через обработчики нового
+        экземпляра (тот же ``logging.Logger``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> old = AppLogger.get_instance('svc')
+            >>> new = AppLogger.get_instance('svc', force_new=True)   # внутри old._retire()
+        """
+        with BaseAppLogger._share_lock:
+            with self._handler_lock:
+                self._remove_console_handler(if_close_console_handler=True)
+
+                for output in list(getattr(self, '_outputs', [])):
+                    self.logger.removeHandler(output)
+                    output.close()
+                if hasattr(self, '_outputs'):
+                    self._outputs.clear()
+
+                if self.file_handler is not None:
+                    if self._shared_handler:
+                        self._unshare_file_handler_master_logger()
+                        self._remove_file_handler(if_close_file_handler=False)
+                    else:
+                        live_slaves, _ = self._get_shared_slaves()
+                        self._remove_file_handler(if_close_file_handler=not live_slaves)
+
+                self.file_handler = None
+                self._shared_handler = False
+                self._master_logger = None
+
+            self._save_handlers()
+
     def _report_self_problem(self, message: str) -> None:
         """
         Сообщает о проблеме в настройке самого логгера (не о событии приложения).
@@ -3740,6 +3788,12 @@ class BaseAppLogger:
                     share_file_with=share_file_with,
                     sync_full_state=sync_full_state,
                 )
+
+            # force_new для существующего имени: старый экземпляр снимает свои обработчики
+            # с общего logging.Logger (он один на имя). До исправления B3 они оставались,
+            # и каждое сообщение выводилось дважды — старой и новой консолью.
+            if force_new and name in cls._instances:
+                cls._instances[name]._retire()
             auto_share_flag = share_file_with is None
             instance = cls._create_instance_and_share( # Создаём новый экземпляр и применяем шаринг
                 name=name,

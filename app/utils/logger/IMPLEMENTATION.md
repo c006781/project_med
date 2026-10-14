@@ -2,7 +2,7 @@
 
 > Файл для разработчиков: что делает модуль, как он устроен внутри, где у него
 > проблемы и неочевидные места, и почему он устроен именно так.
-> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, развязка с конфигом (ветка `refactor/logger`).
+> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, исправление режимов (ветка `refactor/logger`).
 
 Связанные файлы:
 
@@ -83,7 +83,7 @@ def apply_logging(self, new_config): ...
 | Вызовов `get_config_env()` за старт | 154 | 12 (остались в `dependencies.py`, `clinic.py`, страницах GUI) |
 | Записей в `app.log` | ~4570 | ~4550 |
 | Первая запись в файле | `main [Начало]` | `main [Начало]` |
-| Разных файловых обработчиков на один `app.log` | 18 | 18 (проблема S1, не исправлена) |
+| Разных файловых обработчиков на один `app.log` | 18 | 1 (после S1/S3, §3.6) |
 
 Число записей между двумя прогонами одного и того же кода плавает на десятки
 (таймеры и ленивая подгрузка таблиц), набор логгеров совпадает.
@@ -180,15 +180,50 @@ BaseAppLogger                          # вся логика, конфиг не 
 `use_name_in_filename=True` → `<имя>.log`; `use_timestamp=True` → `_<YYYYmmdd_HHMMSS>` от
 момента создания логгера.
 
-### 3.6 Мастер / слейв
+### 3.6 Мастер / слейв (общий файловый обработчик)
 
-Слейв подменяет свой `file_handler` обработчиком мастера и регистрируется в
-`master._shared_slaves`. При изменении мастера `_update_shared_slaves()` копирует слейвам
-уровень, форматтер, параметры файла. `reconfigure()` у слейва **перенаправляется мастеру**.
+Правило (с 2026-10-14): **один обработчик на файл**. Логгер, которому нужен файл,
+не открывает свой, если этот файл уже открыт другим логгером, а подключается к нему —
+становится слейвом: подменяет `file_handler` обработчиком мастера и регистрируется в
+`master._shared_slaves` (слабые ссылки).
 
-Связь создаётся: `enable_file_logging='имя'`, `share_file_with='имя'`, явным
-`share_file_handler_with()` или **автоматически** — если `share_file_with` не передан и у
-другого логгера тот же `base_log_file` (так `user` привязывается к `system`).
+К кому подключаться (`_file_share_target()`, проверяется при каждом перестроении
+обработчиков и при создании):
+
+1. к родителю по ссылке `enable_file_logging='имя'`, если у него сейчас реально открыт
+   тот же файл (`_ref_parent_for_sharing()`);
+2. иначе — к любому логгеру, который сам владеет открытым обработчиком на тот же файл
+   (`_same_file_owner()`). Так `user` и его «дети» пишут через обработчик `system`.
+
+Подключение всегда к **корневому** владельцу (`share_file_handler_with` поднимается по
+цепочке мастеров) — цепочек `gui → user → system` не бывает.
+
+Что общее, а что своё:
+
+| Общее (у мастера, копируется слейвам) | Своё у каждого логгера |
+|---|---|
+| файл, ротация (`MAX_BYTES`, `BACKUP_COUNT`), `use_timestamp`, форматтер, `log_args` | уровень, `enabled`, консоль, `file_enabled` |
+
+* Общий обработчик **без порога** (`NOTSET`): каждый логгер фильтрует своим уровнем
+  (`logging.Logger.setLevel`). Уровень ставится только своей консоли. Поэтому `system`
+  пишет в общий файл DEBUG, а `user` — INFO (S3). Исключение: явный `set_file_level()`
+  у общего обработчика действует на всех, кто через него пишет.
+* `reconfigure()` у слейва: параметры файла (`_SHARED_FILE_PARAMS`) уходят мастеру,
+  уровень и флаги меняются у самого слейва.
+* Мастер пересоздал обработчик (смена пути, ротации, включения) → `_update_shared_slaves()`
+  подменяет его у слейвов. Мастер закрыл файл → у слейвов обработчик отцепляется
+  (связь остаётся); слейв, которому файл нужен, при своём перестроении отвязывается и
+  открывает свой (S2).
+* Слейв выключил себе файл или логгер целиком → общий обработчик у него отцепляется,
+  но не закрывается.
+* Явный `unshare_file_handler()` отключает автоподключение (`_allow_auto_share=False`):
+  логгер дальше пишет через свой обработчик, перезагрузка конфига его не «приклеит» обратно.
+* `turn_off_file_logging()` у мастера сначала явно отвязывает всех слейвов — каждый
+  открывает свой обработчик по своим настройкам.
+
+Связь также создаётся явно: `share_file_with='имя'`, `share_file_handler_with()`; и при
+создании — автоматически, если `share_file_with` не передан и у другого логгера тот же
+`base_log_file`.
 
 ---
 
@@ -252,41 +287,41 @@ logger.py ──import──▶ config_manager.manager.get_config_env()
 
 ## 5. Известные проблемы
 
-Каждая закреплена тестом `xfail(strict=True)`; после исправления тест начнёт проходить и
-strict-xfail напомнит снять маркер. Рядом обычно лежит тест `*_current_behavior` — он
-фиксирует, как работает сейчас.
+Каждая проблема закреплена тестом. Пока не исправлена — `xfail(strict=True)` (после
+исправления тест начнёт проходить и strict-xfail напомнит снять маркер). После
+исправления тест обычный, в докстринге — как было раньше.
 
-### 5.1 Переключение режимов
+### 5.1 Переключение режимов — исправлено 2026-10-14
 
-| # | Проблема | Тест |
-|---|---|---|
-| R1 | Экран настроек сначала сохраняет конфиг, потом `ConfigApplier.apply_logging(new)` сравнивает `new` с уже сохранённым → изменений «нет», `AppLogger.configure()` не вызывается до перезапуска | `test_app_topology::test_apply_logging_after_save_reloads_loggers` |
-| R2 | `turn_on_file_logging()` проверяет `effective_enable_file_logging()` = аргумент конструктора, а не текущий `_file_enabled` → после `disable_file()` файл не включить | `test_base_modes::test_enable_file_back` |
-| R3 | Зеркально: `turn_off_file_logging()` выходит сразу, если аргумент конструктора `False` → у логгера, созданного без файла, включённый позже файл не выключить | `test_base_class_ops::test_enable_disable_group_file` |
-| R4 | `reconfigure(console_level=…)` ставит уровень и тут же пересоздаёт обработчики → уровень теряется | `test_base_modes::test_reconfigure_console_level_via_flags` |
-| R5 | `show_call_depth` есть в настройках, но `AppLogger.build_logger_config()` его отбрасывает | `test_app_logger::test_show_call_depth_reaches_logger_config` |
-| R6 | При выключенных консоли и файле WARNING+ всё равно идут в stderr через `logging.lastResort` | `test_app_topology::test_no_handlers_means_silence` |
+| # | Проблема (как было) | Исправление | Тест |
+|---|---|---|---|
+| R1 | Экран настроек сначала сохраняет конфиг, потом `ConfigApplier.apply_logging(new)` сравнивал `new` с уже сохранённым → изменений «нет», логгеры не перенастраивались до перезапуска | Сравнение с `AppLogger.current_app_config()` — тем, что применено к логгерам | `test_app_topology::test_apply_logging_after_save_reloads_loggers` |
+| R2 | `turn_on_file_logging()` проверял `effective_enable_file_logging()` = аргумент конструктора → после `disable_file()` файл не включался | Проверка текущего `_file_enabled` | `test_base_modes::test_enable_file_back` |
+| R3 | Зеркально в `turn_off_file_logging()` → у логгера без `enable_file_logging=True` включённый позже файл не выключался | То же | `test_base_class_ops::test_enable_disable_group_file` |
+| R4 | `reconfigure(console_level=…)` ставил уровень и тут же пересоздавал обработчики | Отдельные уровни применяются после перестроения | `test_base_modes::test_reconfigure_flag_and_separate_levels_together` |
+| R5 | `show_call_depth` из конфига отбрасывался `build_logger_config()` | Ключ пробрасывается | `test_app_logger::test_show_call_depth_applied_by_configure` |
+| R6 | При выключенных консоли и файле WARNING+ шли в stderr через `logging.lastResort` | Постоянный `NullHandler` у каждого `logging.Logger` | `test_app_topology::test_no_handlers_means_silence` |
 
 ### 5.2 Общий файл
 
-| # | Проблема | Тест |
-|---|---|---|
-| S1 | Логгеры с `enable_file_logging='system'` **не** привязываются к `system`: проверяется аргумент конструктора `system` (False). Каждый открывает свой обработчик на тот же файл (18 штук при старте) → на Windows конфликт при ротации | `test_app_topology::test_startup_services_share_system_handler` |
-| S2 | Мастер выключил файл → слейвы держат его закрытый обработчик, `FileHandler` при записи переоткрывает поток → слейвы продолжают писать | `test_base_sharing::test_master_file_off_stops_slaves` |
-| S3 | `user` при автопривязке к `system` получает уровень мастера (DEBUG вместо INFO) | `test_app_topology::test_startup_user_level_is_own` |
-| S4 | `get_instance(sync_full_state=False)` (по умолчанию) перетирает флаг, унаследованный от мастера | `test_base_sharing::test_master_disable_with_full_sync_disables_slave_flag` |
+| # | Проблема (как было) | Статус | Тест |
+|---|---|---|---|
+| S1 | Логгеры с `enable_file_logging='system'` не привязывались к `system` (проверялся аргумент конструктора); каждый открывал свой обработчик на `app.log` — 18 при старте | ✅ Подключение по фактическому состоянию + один обработчик на файл (§3.6). Старт: 1 обработчик на 142 логгера | `test_app_topology::test_startup_single_handler_on_file`, `test_one_handler_per_file_after_late_configure` |
+| S2 | Мастер выключил файл → слейвы писали через его закрытый обработчик | ✅ Обработчик у слейвов отцепляется | `test_base_sharing::test_master_file_off_stops_slaves` |
+| S3 | Уровень мастера навязывался слейвам (user → DEBUG, `{name}_LEVEL` затирался); перезагрузка любого логгера ставила его уровень общему файлу и окну логов GUI | ✅ Общие обработчики без порога, уровни свои (§3.6) | `test_app_topology::test_startup_user_level_is_own`, `test_slave_reload_does_not_silence_master`, `test_reload_does_not_change_global_handler_level` |
+| S4 | `get_instance(sync_full_state=False)` (по умолчанию) перетирает флаг, унаследованный от мастера | ⏳ Отложено: приложение `sync_full_state=True` не использует; разобрать при проходе по коду | `test_base_sharing::test_master_disable_with_full_sync_disables_slave_flag` (текущее поведение) |
 
-### 5.3 Прочие баги
+### 5.3 Прочие баги — открыты
 
 | # | Проблема | Тест |
 |---|---|---|
 | B1 | Защита от циклов в `effective_*` проверяет `self.name in _visited`, а кладёт `id(self)` → цикл ссылок = `RecursionError` | `test_base_sharing::test_cyclic_refs_do_not_recurse_forever` |
 | B2 | `set_group_console_level` / `set_group_file_level` переводят уровень в `int`, а `set_*_level` снова парсят строку → `AttributeError` | `test_base_class_ops::test_set_group_console_level` |
-| B3 | `force_new=True` не снимает обработчики старого экземпляра с общего `logging.Logger` → дубли строк | `test_base_class_ops::test_force_new_does_not_duplicate_output` |
+| B3 | `force_new=True` не снимает обработчики старого экземпляра с общего `logging.Logger` → консоль дублируется (файл перестал дублироваться после «один обработчик на файл») | `test_base_class_ops::test_force_new_does_not_duplicate_output` |
 | B4 | `warning()`/`error()` не проверяют `_disabled_loggers` (остальные методы проверяют) | `test_base_output::test_disabled_list_blocks_warning_and_error` |
 | B5 | Аргумент `show_call_depth` в `get_instance()` затирается конфигом | `test_base_config::test_show_call_depth_param_is_respected` |
 
-### 5.4 Глубина вызова
+### 5.4 Глубина вызова — открыто
 
 | # | Проблема | Тест |
 |---|---|---|
@@ -297,15 +332,29 @@ strict-xfail напомнит снять маркер. Рядом обычно �
 ## 6. Неочевидные места («углы»)
 
 * **`effective_enable_file_logging()` — это аргумент конструктора, а не состояние.**
-  Текущее состояние — `is_file_enabled()` / `_file_enabled`. Путаница этих двух — источник R2, R3, S1.
-* **Мастер работает как мастер, только если создан с `enable_file_logging=True`.**
-  Если файл у него включён только ключом конфига, слейвы к нему не привяжутся (S1).
+  Текущее состояние — `is_file_enabled()` / `_file_enabled`. Путаница этих двух была
+  источником R2, R3, S1. После исправлений `effective_*` используется только как
+  значение по умолчанию `file_enabled` при создании логгера; для решений «включён ли
+  файл сейчас» — только `_file_enabled`.
+* **У каждого `logging.Logger` есть постоянный `NullHandler`** (`_null_handler`, R6).
+  `_update_handlers()` его не трогает, снимает только `close()`. В `logger.handlers` он
+  виден — при подсчёте «настоящих» обработчиков его нужно исключать
+  (`_has_output_handlers()`).
+* **Сообщения логгера о самом себе в `__init__`** (ссылка на несуществующий логгер)
+  идут в stderr напрямую: обработчиков ещё нет, а `NullHandler` их бы поглотил.
+* **Уровни: фильтрует `logging.Logger`, а не файловый/глобальные обработчики** (S3).
+  Файловый обработчик создаётся с `NOTSET`. Проверять «какой порог у файла» по
+  `file_handler.level` бессмысленно — смотрите `get_level()`.
+* **`reload_from_config()` перестраивает обработчики и тогда, когда флаги не менялись,
+  но файл нужен, а обработчика нет** (`_file_output_missing()`): так слейв восстанавливает
+  файл после того, как мастер свой закрыл.
 * **Существующий логгер игнорирует новые аргументы `get_instance()`** (кроме попытки
   `share_file_with`). Первый вызов с этим именем определяет всё.
 * **`setLevel()` меняет только `logging.Logger`**, а `log_level` / `get_level()` — нет.
   Через `reconfigure(level=...)` меняется всё. `set_group_level` идёт через `setLevel`.
 * **Отдельные уровни консоли/файла живут до первого перестроения обработчиков**
-  (любой `enable*/disable*/reconfigure` с флагами).
+  (любой `enable*/disable*/reconfigure` с флагами). В одном вызове `reconfigure()`
+  с флагами они применяются после перестроения (R4) и сохраняются.
 * **`disable()` не снимает глобальные обработчики**, но методы логгера проверяют `_enabled`,
   поэтому до них ничего не доходит.
 * **Список отключённых — точное имя**, не префикс. Для префикса — `disable_group()`.
@@ -324,7 +373,8 @@ strict-xfail напомнит снять маркер. Рядом обычно �
 * **`RobustRotatingFileHandler` при `PermissionError`** делает 5 попыток с `sleep(0.2)`
   в потоке вызывающего (в GUI — подвисание до ~1 с) и печатает `подход N провал` в stdout.
 * **`close()` не делает логгер «мёртвым»**: методы продолжают работать, WARNING+ уходят в
-  `logging.lastResort`. `close_all()` чистит реестр, но не классовые списки.
+  `logging.lastResort` (`close()` снимает и `NullHandler`). `close_all()` чистит реестр,
+  но не классовые списки.
 * **Реестры наследников раздельные**, а `_global_handlers` и `_disabled_loggers` — общие на всех.
 * **Каждая запись вызывает `inspect.stack()`** (поиск места вызова), а при
   `show_call_depth=True` — ещё раз. `inspect.stack()` читает исходники файлов — это дорого.
@@ -361,7 +411,7 @@ strict-xfail напомнит снять маркер. Рядом обычно �
 
 1. ✅ Характеризующие тесты (этот набор).
 2. ✅ Развязка с конфигом (§7.1, §4.1).
-3. Исправление режимов R1–R6, S1–S4.
+3. ✅ Исправление режимов R1–R6, S1–S3 (S4 отложен, §5.2).
 4. Прочие баги B1–B5, D1.
 5. Проход по коду `base_logger.py`: докстринги/типизация, упрощение — с сохранением
    объяснений из закомментированного кода (переносить «почему» сюда).

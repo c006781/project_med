@@ -106,15 +106,19 @@ def test_other_errors_go_to_handle_error(handler, monkeypatch):
 
 
 def test_permission_error_retries_then_handle_error(handler, monkeypatch, capsys):
-    """PermissionError: 5 попыток с паузой 0.2 c, печать 'подход N провал' в stderr."""
+    """PermissionError: MAX_RETRIES попыток с паузой RETRY_DELAY, 'подход N провал' в stderr.
+
+    До 2026-10-14 было 5 попыток по 0,2 с (до 0,8 с подвисания на запись).
+    """
     sleeps, calls = [], []
     monkeypatch.setattr('time.sleep', lambda s: sleeps.append(s))
     monkeypatch.setattr(handler, 'handleError', lambda record: calls.append(record))
     monkeypatch.setattr(logging.handlers.RotatingFileHandler, 'emit',
                         lambda self, record: (_ for _ in ()).throw(PermissionError('locked')))
     _emit(handler, 'x')
-    assert sleeps == [0.2] * 4
+    assert handler.MAX_RETRIES == 3 and handler.RETRY_DELAY == 0.05
+    assert sleeps == [0.05] * 2
     assert len(calls) == 1
     out = capsys.readouterr()
-    assert out.err.count('провал') == 4
+    assert out.err.count('провал') == 2
     assert out.out == ''

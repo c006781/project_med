@@ -54,9 +54,10 @@
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 import os
-import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
+# ↑ P3: не используется.
 
-from typing import  Dict, Any, Mapping, Optional
+from typing import  Dict, Any, Mapping, Optional, Tuple
 
 # Импорты модулей
 # def _add_package_name(
@@ -197,6 +198,69 @@ class AppLogger(BaseAppLogger):
     UNCONFIGURED_APP_CONFIG: Dict[str, Any] = {
         'file_enabled': False,
     }
+
+    # Логгеры, которые создаются автоматически при первом get_instance() класса (P6).
+    # На них ссылаются остальные (enable_file_logging='system'), поэтому они должны
+    # существовать раньше. Наследник может переопределить кортеж (пустой — не создавать).
+    DEFAULT_LOGGERS: Tuple[Dict[str, Any], ...] = (
+        # show_call_depth=True — как было при импорте; ключ show_call_depth в конфиге сильнее
+        {'name': 'system', 'use_name_in_filename': False, 'show_call_depth': True},
+        {'name': 'user', 'use_name_in_filename': False},
+    )
+
+    # Флаг «идёт создание логгеров по умолчанию» — защита от рекурсии
+    # (_ensure_default_loggers сам вызывает get_instance)
+    _creating_default_loggers: bool = False
+
+    @classmethod
+    def _ensure_default_loggers(cls) -> None:
+        """
+        Создаёт логгеры из ``DEFAULT_LOGGERS``, которых ещё нет в реестре класса.
+
+        Вызывается из ``get_instance()`` перед созданием любого логгера. Повторно создаёт
+        логгеры после ``close_all()``. Защищён от рекурсии и от параллельных вызовов.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.get_instance('PatientService', enable_file_logging='system')
+            >>> AppLogger.thec_create('system')     # создан автоматически раньше
+            True
+        """
+        if cls._creating_default_loggers:
+            return
+        with cls._instances_lock:
+            if cls._creating_default_loggers:
+                return
+            cls._creating_default_loggers = True
+            try:
+                for spec in cls.DEFAULT_LOGGERS:
+                    if not cls.thec_create(spec['name']):
+                        super().get_instance(**spec)
+            finally:
+                cls._creating_default_loggers = False
+
+    @classmethod
+    def get_instance(cls, name: str = 'default', **kwargs: Any) -> 'BaseAppLogger':
+        """
+        То же, что ``BaseAppLogger.get_instance``, но сначала создаёт ``DEFAULT_LOGGERS``.
+
+        Так логгеры ``system``/``user`` существуют раньше любого логгера, который на них
+        ссылается, — без побочного эффекта при импорте модуля (P6).
+
+        Args:
+            name: Имя логгера.
+            **kwargs: Аргументы ``BaseAppLogger.get_instance``.
+
+        Returns:
+            Логгер.
+
+        Пример:
+            >>> log = AppLogger.get_instance('svc', enable_file_logging='system')
+        """
+        cls._ensure_default_loggers()
+        return super().get_instance(name, **kwargs)
 
     # # Словарь экземпляров (ключ - имя логгера)
     # @classmethod
@@ -523,29 +587,32 @@ class AppLogger(BaseAppLogger):
         return {**app_config, **cls.build_logger_config(app_config)}
 
 
-# Автоматическое создание экземпляров при импорте
-if not AppLogger.thec_create('system'):
-    ее = AppLogger.get_instance(
-        name='system',
-        # enable_file_logging = False,
-        # enable_file_logging = True,
-        use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
-        # share_file_with='system',
-        show_call_depth=True,
-    )
-    # 0==0
+# До P6 (2026-10-14) логгеры system и user создавались ПРИ ИМПОРТЕ модуля — в другом
+# проекте импорт пакета создавал логгеры как побочный эффект. Теперь их создаёт
+# AppLogger._ensure_default_loggers() при первом get_instance() (см. DEFAULT_LOGGERS).
+# # Автоматическое создание экземпляров при импорте
+# if not AppLogger.thec_create('system'):
+#     ее = AppLogger.get_instance(
+#         name='system',
+#         # enable_file_logging = False,
+#         # enable_file_logging = True,
+#         use_name_in_filename = False, # True, # False,   # используем общий файл из конфига
+#         # share_file_with='system',
+#         show_call_depth=True,
+#     )
+#     # 0==0
+#
+# if not AppLogger.thec_create('user'):
+#     AppLogger.get_instance(
+#         name='user',
+#         # enable_file_logging = False,    
+#         # enable_file_logging = True,    
+#         # enable_file_logging = 'system',   # строка – значит использовать общий обработчик system
+#         use_name_in_filename = False, # True, # False, # используем общий файл из конфига
+#         # share_file_with='system',
+#     )
+#     # 0==0
 
-if not AppLogger.thec_create('user'):
-    AppLogger.get_instance(
-        name='user',
-        # enable_file_logging = False,    
-        # enable_file_logging = True,    
-        # enable_file_logging = 'system',   # строка – значит использовать общий обработчик system
-        use_name_in_filename = False, # True, # False, # используем общий файл из конфига
-        # share_file_with='system',
-    )
-    # 0==0
-    
 if __name__ == '__main__':
     # logging.basicConfig(  # Настройка базового логирования
     #     level=logging.DEBUG,

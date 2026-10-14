@@ -278,9 +278,45 @@ def test_import_logger_does_not_load_config():
 # Побочные эффекты импорта, которые остались
 # ---------------------------------------------------------------------------
 
-def test_import_creates_system_and_user():
-    assert AppLogger.thec_create('system')
-    assert AppLogger.thec_create('user')
+def test_import_does_not_create_loggers_first_get_instance_does():
+    """P6: импорт пакета логгеры не создаёт; первый get_instance создаёт system/user раньше.
+
+    До 2026-10-14 system и user создавались при импорте модуля (побочный эффект).
+    """
+    code = (
+        "import sys, app.utils.logger as l\n"
+        "print(sorted(l.AppLogger._instances))\n"
+        "l.AppLogger.get_instance('svc', enable_file_logging='system')\n"
+        "print(list(l.AppLogger._instances))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, '-c', code], cwd=PROJECT_ROOT, capture_output=True, text=True,
+        env={**os.environ, 'PYTHONPATH': PROJECT_ROOT}, timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    first, second = out.stdout.strip().splitlines()
+    assert first == '[]'
+    assert second == "['system', 'user', 'svc']"
+    assert 'несуществующий' not in out.stderr
+
+
+def test_default_loggers_recreated_after_close_all(app_cls):
+    app_cls.get_instance('x')
+    app_cls.close_all()
+    app_cls.get_instance('y')
+    assert app_cls.thec_create('system') and app_cls.thec_create('user')
+
+
+def test_default_loggers_can_be_disabled(logger_cls):
+    class NoDefaults(AppLogger):
+        _app_config = None
+        DEFAULT_LOGGERS = ()
+
+    try:
+        NoDefaults.get_instance('only')
+        assert list(NoDefaults._instances) == ['only']
+    finally:
+        NoDefaults.close_all()
 
 
 def test_app_registry_separate_from_base():

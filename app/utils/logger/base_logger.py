@@ -106,9 +106,34 @@ _NOT_FOUND = object()
 
 class RobustRotatingFileHandler(RotatingFileHandler):
     """
-    Обработчик файла с поддержкой восстановления при удалении файла.
-    Потокобезопасен, проверяет существование файла не чаще 1 раза в секунду
+    RotatingFileHandler, который переживает удаление файла и кратковременные блокировки.
+
+    Отличия от ``logging.handlers.RotatingFileHandler``:
+        * не чаще раза в ``_check_interval`` секунд проверяет, что файл есть на диске,
+          и пересоздаёт его (вместе с папкой), если его удалили;
+        * при ``FileNotFoundError``/``PermissionError`` (на Windows — антивирус, второй
+          экземпляр программы, ротация) повторяет запись ``MAX_RETRIES`` раз с паузой
+          ``RETRY_DELAY`` и переоткрытием файла; после последней неудачи —
+          ``handleError`` (стандартный traceback в stderr), запись теряется.
+
+    Паузы идут в потоке, который пишет в лог (в GUI — в главном потоке), поэтому
+    суммарное ожидание ограничено: ``(MAX_RETRIES - 1) * RETRY_DELAY`` = 0,1 с.
+
+    Attributes:
+        MAX_RETRIES: Сколько всего попыток записи.
+        RETRY_DELAY: Пауза между попытками, секунд.
+
+    Пример:
+        >>> h = RobustRotatingFileHandler('logs/app.log', maxBytes=10_000_000,
+        ...                               backupCount=5, encoding='utf-8')
+        >>> logging.getLogger('demo').addHandler(h)
     """
+
+    # До 2026-10-14: 5 попыток по 0,2 с — до 0,8 с подвисания GUI на КАЖДУЮ запись,
+    # пока файл заблокирован. Сейчас не больше 0,1 с.
+    MAX_RETRIES: int = 3
+    RETRY_DELAY: float = 0.05
+
     def __init__(
         self,
         filename,
@@ -135,8 +160,10 @@ class RobustRotatingFileHandler(RotatingFileHandler):
         Переопределённый метод emit: перед записью проверяет существование файла.
         Если файл удалён, переоткрывает его.
         """
-        max_retries = 5
-        retry_delay = 0.2        # добавить задержку между попытками
+        # max_retries = 5
+        # retry_delay = 0.2        # добавить задержку между попытками
+        max_retries = self.MAX_RETRIES
+        retry_delay = self.RETRY_DELAY
         for attempt in range(max_retries):
             with self._lock:
                 try:

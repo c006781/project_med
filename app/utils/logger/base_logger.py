@@ -1,35 +1,44 @@
 # app/utils/logger/base_logger.py
 
 """
-Базовый модуль логирования.
+Ядро логирования: BaseAppLogger и обработчики.
 
-Содержит класс BaseAppLogger, который:
-- Управляет созданием и хранением экземпляров логгеров (паттерн Multiton).
-- Каждый экземпляр настраивается индивидуально (имя, конфигурация, параметры файла).
-- Предоставляет методы для логирования и декоратор log_execution_time.
-- Поддерживает запись в отдельные файлы для разных экземпляров и отключение файлового логирования.
-- Не использует глобальные переменные (все данные хранятся в атрибутах класса).
+Самостоятельный модуль — только стандартная библиотека Python 3.8+. Его можно
+скопировать в другой проект под любым именем (см. IMPLEMENTATION.md §8).
 
-Пример использования:
-    # Базовый логгер (пишет в файл по умолчанию)
-    logger = BaseAppLogger.get_instance()
-    logger.info("Сообщение")
+Состав:
+    BaseAppLogger              — именованные логгеры поверх ``logging``: реестр (Multiton),
+                                 место вызова в каждой строке, декоратор
+                                 ``log_execution_time``, режимы на лету, общий файл
+                                 (мастер/слейв), выводы в функции.
+    RobustRotatingFileHandler  — файл с ротацией, который пересоздаётся после удаления и
+                                 переживает кратковременные блокировки.
+    CallableHandler            — передаёт записи в функцию вида ``print(text)``
+                                 (Telegram-бот, окно программы), в т. ч. в фоне.
 
-    # Логгер, который пишет в отдельный файл с именем экземпляра
-    logger_db = BaseAppLogger.get_instance(name='db', use_name_in_filename = True)
-    logger_db.info("Сообщение для db")
+Формат строки:
+    2026-10-14 16:37:36,183<TAB>INFO<TAB>[имя]<TAB> File "путь", line N, in <функция>:<TAB>текст
 
-    # Логгер только в консоль (без файла)
-    logger_console = BaseAppLogger.get_instance(name='console', enable_file_logging = False)
-    logger_console.info("Только в консоль")
+Пример (свой логгер в другом проекте):
+    >>> class Log(BaseAppLogger):
+    ...     _instances = {}
+    ...     @classmethod
+    ...     def get_default_config(cls):
+    ...         return {'LOG_LEVEL': 'INFO', 'LOG_FILE': 'logs/', 'LOG_MAX_BYTES': 10_000_000,
+    ...                 'LOG_BACKUP_COUNT': 5, 'file_enabled': 'True'}
+    >>> log = Log.get_instance('worker')
+    >>> log.info('старт')
+    >>> log.add_output(print, level='ERROR', formatter='%(levelname)s: %(plain_message)s')
 
-Особенности настройки LOG_FILE (base_log_file):
-    - Может быть путём к ДИРЕКТОРИИ (например, "logs" или "./logs/").
-      В этом случае внутри директории автоматически создаётся файл с именем,
-      зависящим от параметров use_name_in_filename и use_timestamp.
-    - Может быть полным путём к ФАЙЛУ с расширением .log (например, "logs/app.log").
-      В этом случае используется именно этот файл (родительские директории создаются).
-    - Если путь не существует и не оканчивается на .log, он интерпретируется как директория.
+    >>> @log.log_execution_time(description='обработка', log_args=True)
+    ... def handle(order_id): ...
+
+Путь LOG_FILE (base_log_file):
+    * папка (существующая или с разделителем на конце) → внутри ``app.log`` или ``<имя>.log``;
+    * путь на ``.log`` или существующий файл → этот файл;
+    * иное несуществующее → считается папкой.
+
+Устройство, проблемы и история решений — IMPLEMENTATION.md рядом с модулем.
 """
 
 import asyncio
@@ -531,15 +540,43 @@ class CallableHandler(logging.Handler):
 
 class BaseAppLogger:
     """
-    Менеджер логгеров с поддержкой нескольких именованных экземпляров.
+    Именованный логгер поверх ``logging`` с реестром, режимами на лету и общим файлом.
+
+    Используйте через наследника, задающего ``get_default_config()`` (как ``AppLogger``),
+    и получайте экземпляры только через ``get_instance(name, ...)``.
+
+    Возможности:
+        * место вызова в каждой строке (``File "...", line N, in <func>``);
+        * ``debug``…``exception`` и декоратор ``log_execution_time``;
+        * режимы на лету: ``enable``/``disable``, консоль, файл, уровень, ``reconfigure``,
+          групповые методы по префиксу имени, список отключённых;
+        * один обработчик на файл: логгеры с одним файлом пишут через обработчик
+          мастера, каждый — со своим уровнем (IMPLEMENTATION.md §3.6);
+        * выводы в функции: ``add_output``/``add_global_output``.
 
     Атрибуты класса:
-        _instances (dict): Словарь созданных экземпляров {имя: экземпляр}.
+        _instances (Dict[str, BaseAppLogger]): Реестр {имя: логгер}; у каждого
+            наследника должен быть свой.
+        _global_handlers (List[logging.Handler]): Обработчики для всех логгеров.
+        _disabled_loggers (List[str]): Имена, которым запрещено писать.
+        skip_patterns_modeles: Правила пропуска своих кадров стека при поиске места вызова.
+        LOG_FORMAT (str): Формат строки по умолчанию.
 
-    Методы класса:
-        get_instance(name='default', force_new=False, config=None,
-                     enable_file_logging = True, use_name_in_filename = False) -> BaseAppLogger:
-            Возвращает экземпляр логгера с указанным именем.
+    Атрибуты экземпляра (основные):
+        name (str): Имя логгера.
+        logger (logging.Logger): ``logging.getLogger(name)`` — один на имя в процессе.
+        log_level (int): Уровень.
+        console_handler, file_handler: Текущие обработчики (или ``None``).
+
+    Пример:
+        >>> class Log(BaseAppLogger):
+        ...     _instances = {}
+        ...     @classmethod
+        ...     def get_default_config(cls):
+        ...         return {'LOG_LEVEL': 'INFO', 'LOG_FILE': 'logs/',
+        ...                 'LOG_MAX_BYTES': 10_000_000, 'LOG_BACKUP_COUNT': 5}
+        >>> log = Log.get_instance('db', enable_file_logging=True)
+        >>> log.warning('медленный запрос')
 
 
 
@@ -4115,16 +4152,21 @@ class BaseAppLogger:
                 
     def _update_shared_slave(self, slave: Optional['BaseAppLogger'], master_state: Dict[str, Any]) -> None:
         """
-        Полностью синхронизирует одного слейва с мастером, используя переданное состояние мастера.
-        
-        :param slave: экземпляр слейва (BaseAppLogger)
-        :param master_state: словарь с ключами:
-            - 'file_handler': файловый обработчик мастера
-            - 'log_LEVEL': уровень логирования мастера
-            - 'formatter': форматтер мастера
-            - 'base_log_FILE', 'log_MAX_BYTES', 'log_BACKUP_COUNT', 'use_timestamp',
-            'use_name_in_filename', 'sync_full_state', 'show_call_depth', 'log_ARGS'
-            - 'console_enabled' (опционально, для консольного уровня)
+        Синхронизирует одного слейва со снимком состояния мастера.
+
+        Если у слейва включён файл — подключает текущий обработчик мастера (старый общий
+        снимается без закрытия). Копирует параметры файла, форматтер, ``log_args``,
+        ``show_call_depth``. Уровень и флаги слейва НЕ меняет (S3; флаги — ``_apply_full_sync``).
+
+        Args:
+            slave: Слейв (``None`` — ничего не делать).
+            master_state: Снимок ``_get_master_state()`` мастера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> master._update_shared_slave(slave, master._get_master_state())
         """
         if slave is None:
             return
@@ -4849,10 +4891,21 @@ class BaseAppLogger:
                 if inst.name.startswith(name_prefix):
                     inst.set_file_level(lvl)
 
-    def _get_key_name_config (self, key, list_name:List = None) -> List:
+    def _get_key_name_config (self, key: str, list_name: Optional[List[Optional[str]]] = None) -> List[str]:
         """
-        Возвращает список ключей для конфига с учётом префиксов.
-        Приоритет: {self.name}_{key} -> LOG_{key} -> key
+        Варианты имени ключа в порядке приоритета: ``{name}_KEY``, ``LOG_KEY``, ``KEY``.
+
+        Args:
+            key: Ключ без префикса.
+            list_name: Свои префиксы (``None`` в списке — без префикса); по умолчанию
+                ``[self.name, 'LOG', None]``.
+
+        Returns:
+            Список имён ключей.
+
+        Пример:
+            >>> AppLogger.get_instance('svc')._get_key_name_config('LEVEL')
+            ['svc_LEVEL', 'LOG_LEVEL', 'LEVEL']
         """
         rezult = []
 
@@ -4880,8 +4933,22 @@ class BaseAppLogger:
         if_lower: bool = False,
     ) -> Any:
         """
-        Возвращает значение параметра из конфига с учётом префиксов.
-        Приоритет: {self.name}_{key} -> LOG_{key} -> key -> default
+        Первое найденное значение среди ``{name}_KEY`` → ``LOG_KEY`` → ``KEY``, без учёта родителей.
+
+        С учётом родителей ищет ``_get_config_with_inheritance``.
+
+        Args:
+            config: Плоский словарь настроек.
+            key: Ключ без префикса.
+            default: Значение, если ничего не найдено.
+            if_lower: Искать ключи без учёта регистра.
+
+        Returns:
+            Значение или ``default``.
+
+        Пример:
+            >>> log._get_config({'LOG_LEVEL': 'INFO'}, 'LEVEL')
+            'INFO'
         """
         # if key == 'LEVEL':
         #     0==0
@@ -4907,7 +4974,19 @@ class BaseAppLogger:
             return default
 
 
-    def _update_config_from (self, config_dict):
+    def _update_config_from (self, config_dict: Dict[str, Any]) -> None:
+            """
+            Вычисляет настройки из конфига и записывает их в логгер (без перестроения обработчиков).
+
+            Args:
+                config_dict: Плоский словарь настроек.
+
+            Returns:
+                None
+
+            Пример:
+                Вызывается из ``reload_from_config`` и ``apply_config_from_dict``.
+            """
         # Обновляем текущие параметры
 
             _config = self._init_config_load(config_dict, None, None)
@@ -4955,10 +5034,24 @@ class BaseAppLogger:
             #     self._show_call_depth = self._to_bool(_config['show_call_depth'])
 
 
-    def reload_from_config(self, new_config: Dict[str, Any]):
+    def reload_from_config(self, new_config: Dict[str, Any]) -> None:
         """
-        Полностью перезагружает настройки логгера из словаря.
-        Удобно вызывать после изменения конфигурации приложения.
+        Полностью перечитывает настройки логгера из конфига.
+
+        Обработчики перестраиваются, если изменились флаги или параметры файла, либо файл
+        нужен, а обработчика нет (S2). Иначе — только уровень консоли и синхронизация слейвов.
+        Обычно вызывается для всех логгеров сразу через ``reload_all_from_config`` /
+        ``AppLogger.configure``.
+
+        Args:
+            new_config: Плоский словарь настроек (ключи — IMPLEMENTATION.md §3.4).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.reload_from_config({'LOG_FILE': 'logs/', 'LOG_LEVEL': 'WARNING',
+            ...     'LOG_MAX_BYTES': 10**7, 'LOG_BACKUP_COUNT': 5, 'file_enabled': 'True'})
         """
         # # Если используем общий обработчик, перенаправляем вызов мастеру
         # if self._shared_handler and self._master_logger:
@@ -5088,11 +5181,19 @@ class BaseAppLogger:
 
 
 
-    def _set_enabled(self, value: bool):
+    def _set_enabled(self, value: bool) -> bool:
         """
-        Устанавливает состояние логирования.
+        Меняет флаг ``enabled`` под блокировкой.
 
-        возвращает True, если изменилось
+        Args:
+            value: Новое значение.
+
+        Returns:
+            ``True``, если значение изменилось (нужно перестроить обработчики).
+
+        Пример:
+            >>> log._set_enabled(False)
+            True
         """
         with self._handler_lock:
             if self._enabled != value:
@@ -5104,11 +5205,19 @@ class BaseAppLogger:
     
 
 
-    def _set_console_enabled(self, value: bool):
+    def _set_console_enabled(self, value: bool) -> bool:
         """
-        Устанавливает состояние вывода в консоль
+        Меняет флаг ``console_enabled`` под блокировкой.
 
-        возвращает True, если изменилось
+        Args:
+            value: Новое значение.
+
+        Returns:
+            ``True``, если значение изменилось.
+
+        Пример:
+            >>> log._set_console_enabled(False)
+            True
         """
         with self._handler_lock:
             if self._console_enabled != value:
@@ -5118,11 +5227,19 @@ class BaseAppLogger:
             
         return False
 
-    def _set_file_enabled(self, value: bool):
+    def _set_file_enabled(self, value: bool) -> bool:
         """
-        Устанавливает состояние вывода в файл
+        Меняет флаг ``file_enabled`` под блокировкой.
 
-        возвращает True, если изменилось
+        Args:
+            value: Новое значение.
+
+        Returns:
+            ``True``, если значение изменилось.
+
+        Пример:
+            >>> log._set_file_enabled(True)
+            True
         """
         with self._handler_lock:
             if self._file_enabled != value:
@@ -5132,38 +5249,84 @@ class BaseAppLogger:
             
         return False
 
-    def enable(self):
+    def enable(self) -> None:
         """
-        Полностью включает логирование (консоль + файл согласно настройкам).
+        Включает логгер целиком: консоль, файл и выводы — по их флагам.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.disable(); log.enable()
+            >>> log.info('снова пишу')
         """
         if self._set_enabled(True):
             self._update_handlers()
 
-    def disable(self):
+    def disable(self) -> None:
         """
-        Полностью отключает логирование (ничего не выводится).
+        Выключает логгер целиком: методы и декоратор молчат, консоль и файл сняты.
+
+        Настройки (флаги консоли, файла) сохраняются и вернутся при ``enable()``. У мастера
+        с полной синхронизацией выключатся и слейвы (S4).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.disable(); log.error('не будет записано')
         """
         if self._set_enabled(False):
             self._update_handlers()
 
-    def enable_console(self):
+    def enable_console(self) -> None:
         """
-        Включает вывод в консоль.
+        Включает вывод в консоль (stderr).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.enable_console()
         """
         if self._set_console_enabled(True):
             self._update_handlers()
 
-    def disable_console(self):
+    def disable_console(self) -> None:
         """
-        Отключает вывод в консоль.
+        Выключает вывод в консоль; файл и выводы-функции продолжают работать.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.disable_console()
         """
         if self._set_console_enabled(False):
             self._update_handlers()
 
-    def enable_file(self):
+    def enable_file(self) -> None:
+        """
+        Включает запись в файл — короткое имя для ``turn_on_file_logging()``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.enable_file()
+        """
         self.turn_on_file_logging()
 
-    def disable_file(self):
+    def disable_file(self) -> None:
+        """
+        Выключает запись в файл — короткое имя для ``turn_off_file_logging()``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.disable_file()
+        """
         self.turn_off_file_logging()
 
     def turn_on_file_logging(self) -> None:
@@ -5314,7 +5477,22 @@ class BaseAppLogger:
         if self._set_file_enabled(False):
             self._update_handlers()
 
-    def _update_level(self, new_level):
+    def _update_level(self, new_level: Union[str, int]) -> None:
+        """
+        Меняет уровень логгера: ``log_level``, порог ``logging.Logger`` и своей консоли.
+
+        Общие обработчики (файл, глобальные) не трогаются (S3).
+
+        Args:
+            new_level: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._update_level('ERROR'); log.get_level()
+            'ERROR'
+        """
         level = self._parse_log_level(new_level)
         if level != self.log_level:
             self.log_level = level
@@ -5351,12 +5529,34 @@ class BaseAppLogger:
 
     @property
     def enable_file_logging(self) -> bool:
-        """Возвращает текущее состояние файлового логирования (bool)."""
+        """
+        Включена ли запись в файл (то же, что ``is_file_enabled()``).
+
+        Returns:
+            ``True``, если файл включён.
+
+        Пример:
+            >>> log.enable_file_logging
+            True
+        """
         return self._file_enabled
 
     @enable_file_logging.setter
-    def enable_file_logging(self, value: bool):
-        """Устанавливает состояние файлового логирования через свойство."""
+    def enable_file_logging(self, value: bool) -> None:
+        """
+        Включает/выключает файл через присваивание: ``log.enable_file_logging = False``.
+
+        Не ``bool`` приводится к ``bool`` с ``DeprecationWarning``.
+
+        Args:
+            value: ``True`` — ``turn_on_file_logging()``, ``False`` — ``turn_off_file_logging()``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.enable_file_logging = False
+        """
 
         if not isinstance(value, bool):
             warnings.warn(
@@ -5374,12 +5574,32 @@ class BaseAppLogger:
 
     @property
     def use_name_in_filename(self) -> bool:
-        """Возвращает текущее состояние флага использования имени экземпляра в имени файла."""
+        """
+        Пишет ли логгер в файл ``<имя>.log`` вместо общего ``app.log``.
+
+        Returns:
+            Текущее значение флага.
+
+        Пример:
+            >>> AppLogger.get_instance('svc', use_name_in_filename=True).use_name_in_filename
+            True
+        """
         return self._use_name_in_filename
 
     @use_name_in_filename.setter
-    def use_name_in_filename(self, value: bool):
-        """Устанавливает флаг использования имени экземпляра в имени файла."""
+    def use_name_in_filename(self, value: bool) -> None:
+        """
+        Переключает отдельный файл ``<имя>.log`` и сразу перестраивает обработчики.
+
+        Args:
+            value: ``True`` — свой файл, ``False`` — общий ``app.log``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.use_name_in_filename = True    # дальше пишет в logs/<имя>.log
+        """
         self._use_name_in_filename = value
         self._update_handlers()   # перестроить обработчики, чтобы применить новое имя файла
 
@@ -5410,10 +5630,17 @@ class BaseAppLogger:
         name: str,
     ) -> bool:
         """
-        Проверяем, существует ли уже экземпляр класса с именем name.
-        
-        :param name: Имя экземпляра класса.
-        :return: True, если экземпляр с именем name существует, False в противном случае.
+        Есть ли в реестре класса логгер с этим именем.
+
+        Args:
+            name: Имя логгера.
+
+        Returns:
+            ``True``, если логгер уже создан.
+
+        Пример:
+            >>> AppLogger.thec_create('system')
+            True
         """
         with cls._instances_lock:
             return (name in cls._instances )
@@ -5421,15 +5648,37 @@ class BaseAppLogger:
     
     @classmethod
     def _create_instance_and_share(
-        cls, 
-        name, # имя экземпляра логгера (строка)
-        config, # конфигурация логгера (словарь)
-        enable_file_logging = True, # включить файловое логирование 
-        use_name_in_filename = False,  # использовать имя экземпляра в имени файла
-        show_call_depth=False, # показывать глубину вызова
-        sync_full_state=False, # синхронизировать полное состояние
-        auto_share=True, # автоматический шаринг
-    ):
+        cls,
+        name: str, # имя экземпляра логгера (строка)
+        config: Optional[Union[str, Dict[str, Any]]], # конфигурация логгера (словарь)
+        enable_file_logging: Union[str, bool] = True, # включить файловое логирование
+        use_name_in_filename: Union[str, bool] = False,  # использовать имя экземпляра в имени файла
+        show_call_depth: bool = False, # показывать глубину вызова
+        sync_full_state: Optional[bool] = False, # синхронизировать полное состояние
+        auto_share: bool = True, # автоматический шаринг
+    ) -> 'BaseAppLogger':
+        """
+        Создаёт логгер, регистрирует его в реестре и при ``auto_share`` подключает к общему файлу.
+
+        Автоподключение при создании: к первому логгеру с тем же ``base_log_file``, который
+        держит открытый обработчик и не использует имя в файле. Дальше, при перестроениях,
+        работает ``_file_share_target``.
+
+        Args:
+            name: Имя логгера.
+            config: Словарь настроек, имя логгера-источника или ``None``.
+            enable_file_logging: См. ``__init__``.
+            use_name_in_filename: См. ``__init__``.
+            show_call_depth: См. ``__init__``.
+            sync_full_state: См. ``__init__`` (``None`` — унаследовать у мастера).
+            auto_share: Искать логгер с тем же файлом при создании.
+
+        Returns:
+            Новый логгер.
+
+        Пример:
+            Вызывается из ``get_instance``.
+        """
         with cls._instances_lock:
             # Создаём новый экземпляр
             instance = cls(
@@ -5465,11 +5714,25 @@ class BaseAppLogger:
 
     @classmethod
     def _get_instance(
-        cls, 
-        name, 
-        share_file_with,
+        cls,
+        name: str,
+        share_file_with: Optional[str],
         sync_full_state: Optional[bool] = None,
-    ):
+    ) -> 'BaseAppLogger':
+        """
+        Возвращает существующий логгер; если просили общий файл и связи ещё нет — подключает.
+
+        Args:
+            name: Имя существующего логгера.
+            share_file_with: Имя логгера, к чьему файлу подключиться, или ``None``.
+            sync_full_state: Флаг полной синхронизации для подключения.
+
+        Returns:
+            Логгер из реестра.
+
+        Пример:
+            Вызывается из ``get_instance`` для уже созданного имени.
+        """
         with cls._instances_lock:
             # экземпляр с таким именем уже существует - возвращается существующий
             inst = cls._instances[name]
@@ -5502,23 +5765,36 @@ class BaseAppLogger:
         auto_share: bool = False, # Пока не используется
     ) -> 'BaseAppLogger':
         """
-        Возвращает экземпляр логгера с указанным именем.
+        Главная точка получения логгера: возвращает существующий или создаёт новый.
 
-        Если force_new=False, то происходит следующее:
-        - Если экземпляр с таким именем уже существует, возвращается существующий
-          (параметры enable_file_logging и use_name_in_filename игнорируются).
-        - Если экземпляр с таким именем не существует, создаётся новый экземпляр.
+        Если логгер с этим именем уже есть и ``force_new=False`` — возвращается он, новые
+        аргументы игнорируются (кроме попытки подключиться к ``share_file_with``). Первый
+        вызов с этим именем определяет настройки. ``force_new=True`` заменяет логгер в
+        реестре; старый снимает свои обработчики (B3).
 
-        Если force_new=True, то:
-        - Создаётся новый экземпляр (старый при этом не удаляется).
+        Args:
+            name: Имя логгера (видно в каждой строке ``[name]``).
+            force_new: Создать новый, даже если имя занято.
+            config: Словарь настроек, имя логгера-источника или ``None`` (``get_default_config``).
+            enable_file_logging: ``True``/``False`` или имя логгера-родителя, чей файл и
+                настройки использовать (так подключены почти все логгеры приложения:
+                ``enable_file_logging='system'``).
+            use_name_in_filename: Отдельный файл ``<name>.log``; или имя логгера-источника.
+            share_file_with: Имя логгера, к чьему файлу подключиться (без наследования настроек).
+            show_call_depth: Отступ ``>`` по глубине стека в каждой строке.
+            sync_full_state: Флаг полной синхронизации (S4); ``None`` — для слейва как у мастера.
+            auto_share: Не используется (оставлен для совместимости).
 
-        :param name: (str) Имя логгера.
-        :param force_new: (bool) Принудительное создание нового экземпляра.
-        :param config: (dict) Конфигурация для нового экземпляра (если None, используется провайдер).
-        :param enable_file_logging: (bool) Для нового экземпляра: включать ли запись в файл.
-        :param use_name_in_filename: (bool) Для нового экземпляра: добавлять ли имя в имя файла.
-        :param share_file_with: (str) Для нового экземпляра: имя другого экземпляра, с которым будет общий файл
-        :return: Экземпляр BaseAppLogger.
+        Returns:
+            Логгер.
+
+        Пример:
+            >>> log = AppLogger.get_instance('PatientService', enable_file_logging='system')
+            >>> log.info('Пациент создан')
+
+            >>> @AppLogger.get_instance('ConfigApplier', enable_file_logging='system') \\
+            ...     .log_execution_time(level=logging.DEBUG)
+            ... def apply(): ...
         """
 
         # Если enable_file_logging – строка и это не 'true'/'false', используем как имя для шаринга
@@ -5674,7 +5950,24 @@ class BaseAppLogger:
         return BaseAppLogger.level_map[upper_str]
     
     @staticmethod
-    def parse_log_level(level_str: str) -> int:
+    def parse_log_level(level_str: Union[str, int]) -> int:
+        """
+        Публичное имя ``_parse_log_level``: уровень по имени или числу → число.
+
+        Args:
+            level_str: ``'INFO'``, ``'debug'``, ``logging.ERROR``…
+
+        Returns:
+            Числовой уровень.
+
+        Raises:
+            ValueError: Неизвестное имя или отрицательное число.
+            TypeError: Не строка и не число.
+
+        Пример:
+            >>> AppLogger.parse_log_level('warning')
+            30
+        """
         return BaseAppLogger._parse_log_level(level_str)    
     
     # --------------------------------------------------------------------------
@@ -5683,14 +5976,25 @@ class BaseAppLogger:
 
     def _convert_patterns_modeles_tips(
         self,
-        modeles,
-        simple_types = (int, float, str, bool, type(None)),
-    ):  
+        modeles: Any,
+        simple_types: Tuple[type, ...] = (int, float, str, bool, type(None)),
+    ) -> Optional[set]:
         """
-        Преобразует указатель на место вызова в множество значений.
+        Приводит значение к множеству (служебный метод старого алгоритма пропуска кадров).
 
-        Если указатель на место вызова является одним из простых типов (int, float, str, bool, None), то возвращает множество с одним элементом - этим указателем.
-        Если указатель на место вызова не является множеством, то возвращает множество с указателем на место вызова как единственным элементом.
+        Сейчас не используется: старый ``_thec_skip_patterns_modeles`` закомментирован.
+        Особенность: для уже переданного ``set`` возвращает ``None``.
+
+        Args:
+            modeles: Одно значение или коллекция.
+            simple_types: Типы, которые считаются одиночным значением.
+
+        Returns:
+            Множество или ``None`` (если передан ``set``).
+
+        Пример:
+            >>> log._convert_patterns_modeles_tips('a')
+            {'a'}
         """
         
         if  isinstance(modeles, simple_types):
@@ -5701,15 +6005,25 @@ class BaseAppLogger:
        
     def _thec_patterns_modeles_is_none(
         self,
-        modeles,
+        modeles: Any,
         if_err_tip: bool,
-    )-> bool: 
+    )-> bool:
         """
-        Проверяет, является ли указатель на место вызова None или пустым.
-        
-        :param modeles: (Any) Указатель на место вызова.
-        :param if_err_tip: (bool) Если True, то если указатель на место вызова None или пустой, то будет выброшено исключение ValueError.
-        :return: (bool) True, если указатель на место вызова None или пустой, False в противном случае.
+        Пустое ли значение (``None`` или длина 0). Не используется (см. ``_convert_patterns_modeles_tips``).
+
+        Args:
+            modeles: Проверяемое значение.
+            if_err_tip: ``True`` — вместо ``True`` выбросить ``ValueError``.
+
+        Returns:
+            ``True``, если значение пустое.
+
+        Raises:
+            ValueError: Значение пустое и ``if_err_tip=True``.
+
+        Пример:
+            >>> log._thec_patterns_modeles_is_none([], False)
+            True
         """
         # Проверка на наличие              
         if (modeles is None)  : 
@@ -5726,14 +6040,22 @@ class BaseAppLogger:
 
     def _thec_patterns_modeles(
         self,
-        modeles,
-        if_err_tip,
-    ): 
+        modeles: Any,
+        if_err_tip: bool,
+    ) -> Optional[set]:
         """
-        Проверяет, является ли указатель на место вызова None или пустым.
-        
-        Если указатель на место вызова None или пустой, то возвращает None.
-        Если указатель на место вызова не является множеством, то возвращает множество с указателем на место вызова как единственным элементом.
+        Пустое значение → ``None``, иначе множество. Не используется (см. ``_convert_patterns_modeles_tips``).
+
+        Args:
+            modeles: Значение или коллекция.
+            if_err_tip: Выбрасывать ``ValueError`` для пустого значения.
+
+        Returns:
+            Множество или ``None``.
+
+        Пример:
+            >>> log._thec_patterns_modeles(('a', 'b'), False)
+            {'a', 'b'}
         """
         
                       
@@ -5848,11 +6170,22 @@ class BaseAppLogger:
     #     return True
     def _thec_skip_patterns_modeles(self, patterns_modeles: dict) -> bool:
         """
-        Проверяет, нужно ли пропустить фрейм (т.е. является ли он внутренним для логгера).
-        
-        :param patterns_modeles: словарь с ключами 'filename' и 'function',
-                                каждый значение — кортеж из одного элемента (строка).
-        :return: True — фрейм нужно пропустить, False — не пропускать.
+        Подходит ли кадр под одно из правил ``skip_patterns_modeles`` (кадр логгера).
+
+        Правило срабатывает, если путь файла кадра оканчивается на путь из правила
+        (сравнение без учёта регистра, ``normcase``) и имя функции входит в список правила
+        (пустой список — любая функция). Без кэша; на каждый кадр вызывайте
+        ``_is_logger_frame`` — он кэширует ответ.
+
+        Args:
+            patterns_modeles: ``{'filename': (co_filename,), 'function': (co_name,)}``.
+
+        Returns:
+            ``True`` — кадр нужно пропустить.
+
+        Пример:
+            >>> log._thec_skip_patterns_modeles({'filename': (_THIS_CODE_FILENAME,), 'function': ('info',)})
+            True
         """
 
         # Извлекаем filename и function из переданного словаря
@@ -6067,16 +6400,23 @@ class BaseAppLogger:
         depth: Optional[int] = None
     ) -> str:
         """
-        Форматирует итоговое сообщение, добавляя имя логгера и указатель.
+        Собирает текст записи: ``[имя]<TAB><отступ> <место вызова>:<TAB><сообщение>``.
 
-        caller_info - строка, полученная из _get_caller_info, содержащая информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Отступ ``>`` повторяется ``depth`` раз. Если ``depth`` не передан: при
+        ``show_call_depth`` — глубина стека (``_get_call_depth``), иначе — глубина
+        вложенности декоратора (``_get_current_depth``, 0 вне ``show_depth``).
 
-        message - текст сообщения, который будет добавлен к caller_info
+        Args:
+            caller_info: Строка ``File "...", line N, in <func>``.
+            message: Текст сообщения.
+            depth: Явная глубина (у декоратора с ``show_depth=True``).
 
-        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом ">"
+        Returns:
+            Текст записи (время и уровень добавит форматтер).
+
+        Пример:
+            >>> log._format_message('File "a.py", line 1, in <f>', 'привет', depth=2)
+            '[svc]\\t>> File "a.py", line 1, in <f>:\\tпривет'
         """
         if depth is None:
             # Нет переданной глубины – определяем автоматически
@@ -6099,15 +6439,22 @@ class BaseAppLogger:
     def _formatted(
         self,
         message: str,  # текст сообщения, которое будет добавлено к caller_info
-        levels_up: int = None,  # глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
-    ):
+        levels_up: Optional[int] = None,  # глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
+    ) -> str:
         """
-        Форматирует итоговое сообщение, добавляя имя логгера и указатель.
+        Текст записи для ``debug()``…``exception()``: место вызова + сообщение.
 
-        - levels_up: глубина поиска в стеке вызов (0 - автоматически, > 0 - явно)
-        - message: текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения.
+            levels_up: Глубина поиска места вызова; ``None`` — ``_levels_up`` класса (0 —
+                автоматически, первый кадр вне логгера).
 
-        Возвращаемый результат - строка, содержащая caller_info и message, разделенные символом табуляции '\t'
+        Returns:
+            Текст записи; пустая строка, если логгер выключен.
+
+        Пример:
+            >>> log._formatted('привет')
+            '[svc]\\t File "C:\\\\proj\\\\svc.py", line 10, in <run>:\\tпривет'
         """
 
         if not self._enabled:
@@ -6131,14 +6478,19 @@ class BaseAppLogger:
     
     def debug(self, message: str) -> None:
         """
-        Метод для логирования отладки в уровне DEBUG.
+        Пишет сообщение уровня DEBUG с местом вызова.
 
-        Он вызывает self.logger.debug сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Молчит, если логгер выключен или в списке отключённых. Поле ``plain_message`` записи —
+        сам текст (для ``add_output(..., formatter='%(plain_message)s')``).
 
-        message - текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения (уже готовая строка, без ``%``-подстановки).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.debug(f'Запрос пациента id={patient_id}')
         """
 
         if not self._enabled or self.__class__.is_disabled(self.name):
@@ -6155,14 +6507,18 @@ class BaseAppLogger:
 
     def info(self, message: str) -> None:
         """
-        Метод для логирования информации в уровне INFO.
+        Пишет сообщение уровня INFO с местом вызова.
 
-        Он вызывает self.logger.info сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Молчит, если логгер выключен или в списке отключённых.
 
-        message - текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.info('Настройки сохранены')
         """
 
         if not self._enabled or self.__class__.is_disabled(self.name):
@@ -6179,14 +6535,18 @@ class BaseAppLogger:
 
     def warning(self, message: str) -> None:
         """
-        Метод для логирования предупреждения в уровне WARNING.
+        Пишет сообщение уровня WARNING с местом вызова.
 
-        Он вызывает self.logger.warning сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Молчит, если логгер выключен или в списке отключённых (B4).
 
-        message - текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.warning('Файл БД не найден, будет создан новый')
         """
 
         # if not self._enabled:
@@ -6206,14 +6566,18 @@ class BaseAppLogger:
 
     def error(self, message: str) -> None:
         """
-        Метод для логирования ошибки в уровне ERROR.
+        Пишет сообщение уровня ERROR с местом вызова (без traceback — для него ``exception``).
 
-        Он вызывает self.logger.error сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Молчит, если логгер выключен или в списке отключённых (B4).
 
-        message - текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.error('Не удалось подключиться к Яндекс.Диску')
         """
 
         # if not self._enabled:
@@ -6233,14 +6597,18 @@ class BaseAppLogger:
 
     def critical(self, message: str) -> None:
         """
-        Метод для логирования критических ошибок в уровне CRITICAL.
+        Пишет сообщение уровня CRITICAL с местом вызова.
 
-        Он вызывает self.logger.critical сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
+        Молчит, если логгер выключен или в списке отключённых.
 
-        message - текст сообщения, которое будет добавлено к caller_info
+        Args:
+            message: Текст сообщения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.critical('База данных повреждена')
         """
 
         if not self._enabled or self.__class__.is_disabled(self.name):
@@ -6257,16 +6625,23 @@ class BaseAppLogger:
 
     def exception(self, message: str, exc_info: bool = True) -> str:
         """
-        Метод для логирования информации об ошибке в уровне ERROR.
+        Пишет ERROR с traceback текущего исключения; вызывайте внутри ``except``.
 
-        Он вызывает self.logger.error сформатированным сообщением, которое содержит информацию о вызове функции:
-            - имя файла, в котором находится вызов функции
-            - номер строки в файле, в которой находится вызов функции
-            - имя функции
-            - информацию об ошибке (если exc_info == True)
+        Место вызова — строка с ``log.exception`` (B6). Удобно сразу использовать в ``raise``:
+        метод возвращает тот же текст.
 
-        message - текст сообщения, которое будет добавлено к caller_info
-        exc_info - флаг, указывающий, нужно ли добавлять информацию об ошибке
+        Args:
+            message: Текст сообщения.
+            exc_info: ``False`` — без traceback (как ``error``).
+
+        Returns:
+            ``message`` без изменений.
+
+        Пример:
+            >>> try:
+            ...     save(patient)
+            ... except DatabaseError as e:
+            ...     raise SaveError(log.exception(f'Не сохранён пациент {patient.id}')) from e
         """
 
         if not self._enabled or self.__class__.is_disabled(self.name):
@@ -6298,12 +6673,33 @@ class BaseAppLogger:
         # show_depth: bool = True,
     ) -> Callable:
         """
-        Декоратор для логирования времени выполнения функции или метода.
+        Декоратор: пишет ``[Начало]`` и ``[Завершение: N сек]`` вокруг вызова функции.
 
-        :param description: дополнительное описание (будет добавлено перед сообщением)
-        :param level: уровень логирования
-        :param log_args: если True, в начало логирования добавляются переданные аргументы.
-                         Если None, используется значение из конфигурации логгера (self.log_args).
+        Работает с обычными функциями, методами, ``staticmethod``/``classmethod`` (в любом
+        порядке декораторов) и ``async``-функциями. Место вызова в строках — строка ``def``
+        обёрнутой функции (вычисляется один раз, дёшево). Исключение пишется в строку
+        завершения и пробрасывается дальше. Если уровень ниже порога логгера, логгер
+        выключен или в списке отключённых — функция просто вызывается.
+
+        Args:
+            description: Текст перед ``[Начало]``/``[Завершение]``.
+            level: Уровень обеих строк (число, по умолчанию ``logging.DEBUG``).
+            log_args: Писать аргументы вызова (без ``self``/``cls``; у ``__init__`` — никогда).
+                ``None`` — по ``log_args`` логгера в момент вызова.
+            log_return: Дописывать ``-> repr(результат)`` (кроме ``None``).
+            show_depth: Отступ ``>`` по вложенности обёрнутых вызовов (отдельно для потоков
+                и задач asyncio, D1).
+
+        Returns:
+            Декоратор.
+
+        Пример:
+            >>> log = AppLogger.get_instance('PatientService', enable_file_logging='system')
+            >>> @log.log_execution_time(description='Сохранение', level=logging.INFO, log_args=True)
+            ... def save(patient_id, force=False): ...
+            >>> save(5, force=True)
+            # INFO [PatientService] File "...", line 2, in <save>: Сохранение [Начало] with args: (5, force=True)
+            # INFO [PatientService] File "...", line 2, in <save>: Сохранение [Завершение: 0.0031 сек]
         """
 
         logger_instance = self
@@ -6316,17 +6712,16 @@ class BaseAppLogger:
 
         def decorator(func: Callable) -> Callable:
             """
-            Декоратор для логирования времени выполнения функции или метода.
+            Оборачивает ``func``: собирает неизменные данные (место ``def``, async ли) и возвращает обёртку.
 
-            Он обернул функцию, добавляя информацию о вызове функции:
-                - имя файла, в котором находится вызов функции
-                - номер строки в файле, в которой находится вызов функции
-                - имя функции
-                - информацию об ошибке (если exc_info == True)
+            Args:
+                func: Функция, метод, ``staticmethod``/``classmethod`` или корутина.
 
-            description - текст, добавляемый к caller_info
-            level - уровень логирования
-            log_args - флаг, указывающий, нужно ли добавлять информацию об аргументах
+            Returns:
+                Синхронная или асинхронная обёртка с теми же ``__name__``/``__doc__`` (``functools.wraps``).
+
+            Пример:
+                >>> wrapped = log.log_execution_time()(my_func)
             """
 
             # func_filename = inspect.getfile(func)
@@ -6363,7 +6758,16 @@ class BaseAppLogger:
             is_async = inspect.iscoroutinefunction(func)
 
             # Общая логика для формирования сообщений и замера времени
-            def make_wrapper():
+            def make_wrapper() -> Callable:
+                """
+                Строит обёртку (синхронную или ``async``) и вспомогательные функции записи.
+
+                Returns:
+                    Обёртка для ``func``.
+
+                Пример:
+                    Вызывается только из ``decorator``.
+                """
                 # Формируем базовую информацию о caller'е (один раз для всех вызовов)
                 caller_info = f'File "{func_filename}", line {func_lineno}, in <{func_qualname}>'
                 desc_part = f"{description} " if description else ""
@@ -6386,7 +6790,7 @@ class BaseAppLogger:
                     code.co_argcount > 0 and code.co_varnames[0] in ('self', 'cls')
                 )
 
-                def format_args(args, kwargs):
+                def format_args(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
                     """
                     Строка с аргументами вызова для ``[Начало]`` или пустая строка.
 
@@ -6421,7 +6825,20 @@ class BaseAppLogger:
 
                     return f" with args: ({all_args})"
 
-                def log_start(args, kwargs):
+                def log_start(args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> None:
+                    """
+                    Пишет строку ``[Начало]`` (с аргументами, если включены).
+
+                    Args:
+                        args: Позиционные аргументы вызова.
+                        kwargs: Именованные аргументы вызова.
+
+                    Returns:
+                        None
+
+                    Пример:
+                        Вызывается обёрткой перед вызовом функции.
+                    """
                     args_part = format_args(args, kwargs)
                     start_msg = f"{desc_part}[Начало]{args_part}"
 
@@ -6435,10 +6852,24 @@ class BaseAppLogger:
                     logger_instance.logger.log(level, formatted, extra={'plain_message': start_msg})
 
                 def log_end(
-                    execution_time: float, 
-                    error: Optional[Exception] = None,
-                    return_value=None,
-                ):
+                    execution_time: float,
+                    error: Optional[BaseException] = None,
+                    return_value: Any = None,
+                ) -> None:
+                    """
+                    Пишет строку ``[Завершение: N сек]`` (с ошибкой или результатом).
+
+                    Args:
+                        execution_time: Длительность вызова, секунд.
+                        error: Исключение, если функция упала (текст дописывается через ``:``).
+                        return_value: Результат (дописывается при ``log_return``, если не ``None``).
+
+                    Returns:
+                        None
+
+                    Пример:
+                        Вызывается обёрткой в ``finally``.
+                    """
 
                     if desc_part:
                         end_msg = f"{desc_part}[Завершение: {execution_time:.4f} сек]" 
@@ -6465,7 +6896,20 @@ class BaseAppLogger:
                     # if 'PhotoUploaderWidget.set_existing_photos' in formatted:
                     #     0==0
                     # 0==0
-                def _thec(tp, level):
+                def _thec(tp: type, level: int) -> bool:
+                    """
+                    Нужно ли МОЛЧАТЬ: уровень ниже порога, логгер выключен или в списке отключённых.
+
+                    Args:
+                        tp: Класс логгера (для списка отключённых).
+                        level: Уровень строк декоратора.
+
+                    Returns:
+                        ``True`` — не писать, просто вызвать функцию.
+
+                    Пример:
+                        Вызывается синхронной обёрткой при каждом вызове.
+                    """
                     return (
                         (
                             not logger_instance.logger.isEnabledFor(level)
@@ -6478,7 +6922,23 @@ class BaseAppLogger:
 
                 # Создаём синхронную обёртку
                 @wraps(func)
-                def sync_wrapper(*args, **kwargs):
+                def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+                    """
+                    Обёртка обычной функции: ``[Начало]`` → вызов → ``[Завершение]``.
+
+                    Args:
+                        *args: Позиционные аргументы для ``func``.
+                        **kwargs: Именованные аргументы для ``func``.
+
+                    Returns:
+                        Результат ``func``.
+
+                    Raises:
+                        Exception: Любое исключение ``func`` (после записи строки завершения).
+
+                    Пример:
+                        Вызывается вместо обёрнутой функции.
+                    """
 
 
                     # thec = (
@@ -6581,7 +7041,23 @@ class BaseAppLogger:
 
                 # Создаём асинхронную обёртку
                 @wraps(func)
-                async def async_wrapper(*args, **kwargs):
+                async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                    """
+                    Обёртка корутины: ``[Начало]`` → ``await func(...)`` → ``[Завершение]``.
+
+                    Args:
+                        *args: Позиционные аргументы для ``func``.
+                        **kwargs: Именованные аргументы для ``func``.
+
+                    Returns:
+                        Результат корутины.
+
+                    Raises:
+                        Exception: Любое исключение корутины (после записи строки завершения).
+
+                    Пример:
+                        >>> await wrapped_coro(1)
+                    """
                     
                     if (
                         (not logger_instance.logger.isEnabledFor(level))
@@ -6828,12 +7304,17 @@ class BaseAppLogger:
     # --------------------------------------------------------------------------
     def close(self) -> None:
         """
-        Закрывает логгер, удаляя все хендлеры из него и очищает список хендлеров.
-        
-        1. Берем все хендлеры из логгера (self.logger.handlers[:])
-        2. Закрываем каждый хендлер (handler.close())
-        3. Удаляем каждый хендлер из логгера (self.logger.removeHandler(handler))
-        4. Очищаем список хендлеров (self.handlers.clear())
+        Снимает с логгера все обработчики; свои (консоль, файл, выводы) закрывает.
+
+        Глобальные обработчики снимаются, но не закрываются — ими пользуются другие
+        логгеры (B7). Объект остаётся рабочим: WARNING+ уйдут в ``logging.lastResort``.
+        Из реестра логгер не удаляется (для этого — ``close_all``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.close()
         """
         # for handler in self.logger.handlers[:]:
         #     handler.close()
@@ -6852,8 +7333,15 @@ class BaseAppLogger:
     @classmethod
     def close_all(cls) -> None:
         """
-        Закрывает все экземпляры логгера, удаляя все хендлеры из каждого из них,
-        и очищает словарь экземпляров.
+        Закрывает все логгеры класса и очищает реестр.
+
+        Глобальные обработчики и список отключённых логгеров не трогаются.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.close_all()     # при выходе из программы или в тестах
         """
 
         with cls._instances_lock:

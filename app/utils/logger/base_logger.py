@@ -1276,32 +1276,49 @@ class BaseAppLogger:
         name: str,
         config: Optional[Union[str,Dict[str, Any]]] = None,
         enable_file_logging: Union[str,bool] = False,
-        use_name_in_filename: Union[str,bool] = False, # 
+        use_name_in_filename: Union[str,bool] = False, #
         # show_call_depth: bool = False,
         show_call_depth: bool = True,
-        sync_full_state = True,    # по умолчанию копируем флаги консоли/включения
-    ): 
+        sync_full_state: Optional[bool] = True,    # по умолчанию копируем флаги консоли/включения
+    ) -> None:
         """
-        Инициализирует новый экземпляр логгера. Не вызывается напрямую – используйте get_instance().
+        Создаёт логгер. Напрямую не вызывайте — используйте ``get_instance()`` (реестр,
+        автоподключение к общему файлу).
 
-        :param name: (str) Имя логгера.
-        :param config: (str/dict) : Конфигурация для нового экземпляра (если None, используется провайдер
-                str     - Указатель на экземпляр лога откуда берём этот параметр. 
-                dict    - Словарь с настройками. 
-                None    - Если не передан, загружается через get_default_config(). 
-                
-                Поддерживаемые ключи для dict:
-                        - 'LOG_FILE' : str – путь к директории (логи будут внутри с именем <name>.log)
-                                        или полный путь к файлу с расширением .log.
+        Что происходит:
+            1. Берётся ``logging.getLogger(name)`` (один на имя в процессе), отключается
+               передача записей предкам (``propagate=False``), добавляется постоянный
+               ``NullHandler`` (R6).
+            2. Строковые ссылки в ``enable_file_logging``/``use_name_in_filename`` (имя другого
+               логгера) запоминаются: от того логгера наследуются настройки и общий файл.
+            3. Конфиг загружается (``_load_config``), проверяется (``_validate_config``),
+               значения вычисляются с учётом иерархии (``_init_config_load``) и применяются.
+            4. Создаются обработчики (``_update_handlers``): консоль, файл или подключение
+               к общему файлу.
 
-        :param enable_file_logging: (str/bool) : Для нового экземпляра: включать ли запись в файл.
-                str     - Указатель на экземпляр лога откуда берём этот параметр. 
-                True    - добавляется файловый обработчик. 
-                False   - только консоль.
-        :param use_name_in_filename: (str/bool) : Для нового экземпляра: добавлять ли имя в имя файла.
-                str     - Указатель на экземпляр лога откуда берём этот параметр. 
-                True    - имя экземпляра вставляется в имя файла лога. 
-                False   - имя экземпляра НЕ вставляется в имя файла лога.
+        Args:
+            name: Имя логгера (видно в каждой строке: ``[name]``).
+            config: Словарь настроек; строка — имя существующего логгера, чьи настройки
+                скопировать; ``None`` — ``get_default_config()``. Ключи и приоритеты —
+                IMPLEMENTATION.md §3.4.
+            enable_file_logging: ``True``/``False`` — писать ли в файл, если в конфиге нет
+                ``file_enabled``; ``'true'``/``'false'`` — то же строкой; другая строка — имя
+                логгера-родителя: файл и настройки наследуются от него.
+            use_name_in_filename: ``True`` — файл ``<name>.log`` вместо ``app.log``; строка —
+                имя логгера, чьё значение использовать.
+            show_call_depth: Отступ ``>`` по глубине стека в каждой строке; ключ
+                ``show_call_depth`` в конфиге сильнее. Дорогой режим.
+            sync_full_state: Для мастера — слейвы повторяют его ``enabled``/консоль (S4).
+                ``None`` — для слейва унаследовать флаг мастера.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: В конфиге нет обязательного ключа или значение не приводится к типу.
+
+        Пример:
+            >>> log = AppLogger.get_instance('payments', enable_file_logging='system')
         """
 
         self.name = name
@@ -1456,7 +1473,20 @@ class BaseAppLogger:
         self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)
 
     def _get_settings_parent(self) -> Optional['BaseAppLogger']:
-        """Возвращает логгер, от которого следует наследовать настройки (конфиг)."""
+        """
+        Логгер, от которого этот наследует настройки при чтении конфига.
+
+        Приоритет: мастер общего файла → ссылка ``enable_file_logging='имя'`` → ссылка
+        ``use_name_in_filename='имя'``.
+
+        Returns:
+            Логгер-родитель или ``None``.
+
+        Пример:
+            >>> svc = AppLogger.get_instance('svc', enable_file_logging='system')
+            >>> svc._get_settings_parent().name
+            'system'
+        """
         with self._handler_lock:
             # Приоритет: мастер файлового обработчика > ссылка enable_file_logging > ссылка use_name_in_filename
             if self._master_logger:
@@ -1553,7 +1583,21 @@ class BaseAppLogger:
         return default
 
     def _apply_config(self, config_dict: Dict[str, Any]) -> None:
-        """Применяет настройки из словаря, полученного от _init_config_load."""
+        """
+        Записывает в атрибуты логгера значения, вычисленные ``_init_config_load()``.
+
+        Обработчики не перестраивает — только состояние и порог ``logging.Logger``.
+
+        Args:
+            config_dict: Результат ``_init_config_load()`` (ключи ``enabled``, ``LEVEL``,
+                ``FILE``, ``MAX_BYTES``…).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._apply_config(log._init_config_load(config, None, None))
+        """
         self._enabled = config_dict['enabled']
         self._console_enabled = config_dict['console_enabled']
         self._file_enabled = config_dict['file_enabled']
@@ -1683,7 +1727,16 @@ class BaseAppLogger:
         self._depth_context.set(depth)
 
     def _increase_depth(self) -> int:
-        """Увеличивает глубину на 1 и возвращает новое значение."""
+        """
+        Увеличивает глубину вложенности на 1 (вход в обёрнутый декоратором вызов).
+
+        Returns:
+            Новая глубина.
+
+        Пример:
+            >>> log._increase_depth()
+            1
+        """
         current = self._get_current_depth()
         new_depth = current + 1
         self._set_current_depth(new_depth)
@@ -1691,15 +1744,40 @@ class BaseAppLogger:
         return new_depth
 
     def _decrease_depth(self) -> int:
-        """Уменьшает глубину на 1 и возвращает новое значение."""
+        """
+        Уменьшает глубину вложенности на 1 (выход из вызова), не ниже 0.
+
+        Returns:
+            Новая глубина.
+
+        Пример:
+            >>> log._decrease_depth()
+            0
+        """
         current = self._get_current_depth()
         new_depth = max(0, current - 1)
         self._set_current_depth(new_depth)
 
         return new_depth
 
-    def apply_config_from_dict(self, config_dict: Dict[str, Any]):
-        """Применяет настройки из словаря (аналогично reload_from_config, но без перенаправления мастеру)."""
+    def apply_config_from_dict(self, config_dict: Dict[str, Any]) -> None:
+        """
+        Применяет конфиг к этому логгеру; аналог ``reload_from_config``.
+
+        Обработчики перестраиваются, только если изменились флаги или параметры файла
+        (или файл нужен, а обработчика нет); иначе обновляется уровень консоли и
+        синхронизируются слейвы.
+
+        Args:
+            config_dict: Плоский словарь настроек (ключи — IMPLEMENTATION.md §3.4).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.apply_config_from_dict({'LOG_FILE': 'logs/', 'LOG_LEVEL': 'INFO',
+            ...     'LOG_MAX_BYTES': 10**7, 'LOG_BACKUP_COUNT': 5, 'file_enabled': 'True'})
+        """
         # # Если используем общий обработчик, перенаправляем мастеру
         # if self._shared_handler and self._master_logger:
         #     self._master_logger.apply_config_from_dict(config_dict)
@@ -1781,8 +1859,19 @@ class BaseAppLogger:
             if self._shared_slaves:
                 self._update_shared_slaves()
 
-    def _reopen_file_handler_if_needed(self):
-        """Переоткрывает файловый обработчик, если файл лога был удалён извне."""
+    def _reopen_file_handler_if_needed(self) -> None:
+        """
+        Переоткрывает файл своего обработчика (``force_reopen``), если обработчик есть.
+
+        Название историческое: переоткрывает всегда, а не «если нужно». Ошибки не
+        пробрасываются: ``FileNotFoundError`` игнорируется, остальное — WARNING в лог.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._reopen_file_handler_if_needed()
+        """
         # if self.file_handler and hasattr(self.file_handler, 'reopen_if_needed'):
             # self.file_handler.reopen_if_needed()
         # if self.file_handler and hasattr(self.file_handler, 'force_reopen'):
@@ -1802,8 +1891,26 @@ class BaseAppLogger:
         # Если обработчика нет – ничего не делаем. Пересоздание произойдёт при следующем
 
     # @property # убираем изза циклических ссылок _visited
-    def effective_enable_file_logging(self, _visited=None) -> bool:
-        """Возвращает реальное состояние файлового логирования с учётом ссылки на другой логгер."""
+    def effective_enable_file_logging(self, _visited: Optional[set] = None) -> bool:
+        """
+        Аргумент ``enable_file_logging`` конструктора с учётом ссылки на родителя.
+
+        ВНИМАНИЕ: это НЕ текущее состояние файла (оно — ``is_file_enabled()``). Значение
+        используется только как умолчание ``file_enabled`` при создании логгера. Путаница
+        этих двух была причиной R2, R3, S1 (IMPLEMENTATION.md §6).
+
+        Ссылка ``'имя'`` разрешается рекурсивно; цикл ссылок обрывается (B1) с сообщением.
+
+        Args:
+            _visited: Служебное: ``id`` пройденных логгеров (защита от циклов).
+
+        Returns:
+            ``True``/``False``.
+
+        Пример:
+            >>> AppLogger.get_instance('a', enable_file_logging=True).effective_enable_file_logging()
+            True
+        """
 
         if _visited is None:
             _visited = set()
@@ -1873,7 +1980,23 @@ class BaseAppLogger:
 
 
     # @property # убираем изза циклических ссылок _visited
-    def effective_use_name_in_filename(self, _visited=None) -> bool:
+    def effective_use_name_in_filename(self, _visited: Optional[set] = None) -> bool:
+        """
+        Аргумент ``use_name_in_filename`` конструктора с учётом ссылки на родителя.
+
+        Как и ``effective_enable_file_logging``, это умолчание при создании, а текущее
+        значение — ``use_name_in_filename`` (свойство).
+
+        Args:
+            _visited: Служебное: ``id`` пройденных логгеров (защита от циклов).
+
+        Returns:
+            ``True``/``False``.
+
+        Пример:
+            >>> AppLogger.get_instance('b', use_name_in_filename=True).effective_use_name_in_filename()
+            True
+        """
         if _visited is None:
             _visited = set()
         obj_id = id(self)
@@ -2283,7 +2406,20 @@ class BaseAppLogger:
 
         return parent if same_file else None
 
-    def _get_parent(self, key) -> Optional['BaseAppLogger']:
+    def _get_parent(self, key: str) -> Optional['BaseAppLogger']:
+        """
+        Логгер с именем ``key`` из реестра этого класса.
+
+        Args:
+            key: Имя логгера.
+
+        Returns:
+            Логгер или ``None``, если такого нет.
+
+        Пример:
+            >>> log._get_parent('system').name
+            'system'
+        """
         cls = type(self)
         with cls._instances_lock:
         # with type(self)._instances_lock:
@@ -2293,10 +2429,34 @@ class BaseAppLogger:
             )
         
     def get_level(self) -> str:
+        """
+        Текущий уровень логгера по имени.
+
+        Returns:
+            ``'DEBUG'``, ``'INFO'``, … (для нестандартного числа — ``'Level N'``).
+
+        Пример:
+            >>> AppLogger.get_instance('system').get_level()
+            'DEBUG'
+        """
         return logging.getLevelName(self.log_level)
 
-    def set_formatter(self, formatter: logging.Formatter):
-        """Устанавливает новый форматтер для всех обработчиков."""
+    def set_formatter(self, formatter: logging.Formatter) -> None:
+        """
+        Ставит форматтер всем обработчикам логгера и запоминает его для будущих.
+
+        Затрагивает и общие обработчики (файл мастера, глобальные), а также выводы
+        ``add_output`` без своего форматтера. Переживает перестроения обработчиков.
+
+        Args:
+            formatter: Новый ``logging.Formatter``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.set_formatter(logging.Formatter('%(asctime)s %(plain_message)s'))
+        """
         with self._handler_lock:
             self.formatter = formatter
             
@@ -2328,20 +2488,47 @@ class BaseAppLogger:
     #             self.file_handler.force_reopen()
     #             self.logger.debug(f"Файл лога {log_file} переоткрыт (был удалён)")
 
-    def setLevel(self, level):
+    def setLevel(self, level: Union[int, str]) -> None:
         """
-        Установка уровня логирования для логгера.
+        Меняет порог только у ``logging.Logger`` (как ``logging.Logger.setLevel``).
 
-        Уровень logging, который будет использоваться для логгера, определяется параметром level.
+        ``log_level`` и ``get_level()`` не меняются, после перестроения или перезагрузки
+        конфига порог вернётся. Для полной смены уровня — ``reconfigure(level=...)``.
+
+        Args:
+            level: Число или имя уровня (как принимает ``logging``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.setLevel(logging.ERROR)
         """
         self.logger.setLevel(level)
         # super().setLevel(level)
         if self._shared_slaves:
             self._update_shared_slaves()
 
-    def _validate_config (self, config):
+    def _validate_config(self, config: Dict[str, Any]) -> None:
         """
-        Проверка конфигурации на наличие обязательных ключей
+        Проверяет, что в конфиге есть обязательные ключи.
+
+        Обязательны ``LEVEL``, ``FILE``, ``MAX_BYTES``, ``BACKUP_COUNT`` — в любом варианте:
+        ``{name}_KEY``, ``LOG_KEY`` или ``KEY``. ``LOG_DIR`` вместо ``LOG_FILE`` не подходит.
+
+        Args:
+            config: Плоский словарь настроек.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: Нет ни одного варианта какого-либо ключа.
+
+        Пример:
+            >>> log._validate_config({'LOG_LEVEL': 'INFO'})
+            Traceback (most recent call last):
+            ValueError: Отсутствует обязательный ключ 'FILE' ...
         """
         # required_keys = [
         #     'LOG_LEVEL', 
@@ -2380,7 +2567,26 @@ class BaseAppLogger:
         # if missing_keys:
         #     raise ValueError(f"Отсутствуют обязательные ключи конфигурации: {missing_keys}")        
 
-    def _load_config (self, config):
+    def _load_config(self, config: Optional[Union[str, Dict[str, Any]]]) -> Dict[str, Any]:
+        """
+        Превращает аргумент ``config`` конструктора в словарь.
+
+        * словарь — возвращается как есть;
+        * строка — имя существующего логгера: собирается словарь из его текущих
+          настроек (уровень, файл, ротация, флаги); неизвестное имя — предупреждение в
+          stderr и ``get_default_config()``;
+        * ``None`` — ``get_default_config()``.
+
+        Args:
+            config: Словарь, имя логгера или ``None``.
+
+        Returns:
+            Плоский словарь настроек.
+
+        Пример:
+            >>> log._load_config('system')['LOG_LEVEL']
+            'DEBUG'
+        """
         # Обработка config: если строка, берём из другого экземпляра
         if isinstance(config, str) and config is not None:
             # parent = self._instances.get(config)
@@ -2430,18 +2636,56 @@ class BaseAppLogger:
         return config
 
     @staticmethod
-    def _to_bool(value):
+    def _to_bool(value: Any) -> bool:
+        """
+        Приводит значение из конфига к ``bool``.
+
+        Строки: ``'true'``, ``'1'``, ``'yes'`` (без учёта регистра) → ``True``, любые другие
+        (в том числе ``'on'``) → ``False``. Не строки — обычный ``bool(value)``.
+
+        Args:
+            value: Значение из конфига (строка из msgpack/.env или bool/int).
+
+        Returns:
+            ``True``/``False``.
+
+        Пример:
+            >>> BaseAppLogger._to_bool('Yes'), BaseAppLogger._to_bool('on'), BaseAppLogger._to_bool(1)
+            (True, False, True)
+        """
         if isinstance(value, str):
             return value.lower() in ('true', '1', 'yes')
         return bool(value)
     
     def _get_config_param (
-            self, 
+            self,
             config: Dict[str, Any],
-            key: str, 
-            default: Any=None, 
-            fun: Callable=None
+            key: str,
+            default: Any=None,
+            fun: Optional[Callable[[Any], Any]]=None
         )-> Any:
+        """
+        Значение ключа (``{name}_KEY`` → ``LOG_KEY`` → ``KEY``), приведённое функцией ``fun``.
+
+        Сейчас не используется (его заменил ``_get_config_with_inheritance`` в
+        ``_init_config_load``); оставлен для совместимости.
+
+        Args:
+            config: Плоский словарь настроек.
+            key: Ключ без префикса.
+            default: Значение, если ключа нет.
+            fun: Функция приведения (``int``, ``_to_bool``); ``None`` — без приведения.
+
+        Returns:
+            Значение.
+
+        Raises:
+            ValueError: ``fun`` не смогла привести значение.
+
+        Пример:
+            >>> log._get_config_param({'LOG_MAX_BYTES': '100'}, 'MAX_BYTES', fun=int)
+            100
+        """
 
         # if key == 'LEVEL':
         #     0==0
@@ -2461,7 +2705,39 @@ class BaseAppLogger:
         return temp
 
         
-    def _init_config_load (self, config, enable_file_logging, use_name_in_filename)-> Dict[str, Any]:
+    def _init_config_load (
+        self,
+        config: Dict[str, Any],
+        enable_file_logging: Any,
+        use_name_in_filename: Any,
+    )-> Dict[str, Any]:
+        """
+        Вычисляет все настройки логгера из конфига с учётом иерархии и умолчаний.
+
+        Каждый ключ ищется ``_get_config_with_inheritance`` (свой ``{name}_KEY`` → родитель
+        → ``LOG_KEY`` → ``KEY`` → умолчание) и приводится к типу. Умолчания:
+        ``file_enabled``/``use_name_in_filename`` — аргументы конструктора
+        (``effective_*``), ``show_call_depth`` — текущее значение (аргумент, B5),
+        ``FILE`` → ``DIR`` → ``'logs'``.
+
+        Args:
+            config: Плоский словарь настроек.
+            enable_file_logging: Не используется (оставлен для совместимости вызовов).
+            use_name_in_filename: Не используется (оставлен для совместимости вызовов).
+
+        Returns:
+            Словарь с ключами ``enabled``, ``console_enabled``, ``file_enabled``,
+            ``use_name_in_filename``, ``use_timestamp``, ``ARGS``, ``LEVEL`` (число), ``FILE``,
+            ``MAX_BYTES``, ``BACKUP_COUNT``, ``show_call_depth``.
+
+        Raises:
+            ValueError: Значение не приводится (уровень, число).
+
+        Пример:
+            >>> log._init_config_load({'LOG_LEVEL': 'info', 'LOG_FILE': 'logs/',
+            ...     'LOG_MAX_BYTES': '100', 'LOG_BACKUP_COUNT': 1}, None, None)['LEVEL']
+            20
+        """
         # Чтение флагов из конфигурации (с значениями по умолчанию)
         # self._enabled = config.get('enabled', True)
         # self._console_enabled = config.get('console_enabled', True)
@@ -2630,6 +2906,17 @@ class BaseAppLogger:
         return result
 
     def dump_config(self) -> Dict[str, Any]:
+        """
+        Краткий снимок состояния логгера для отладки.
+
+        Returns:
+            Словарь: ``name``, ``enabled``, ``console_enabled``, ``file_enabled``, ``level``
+            (имя), ``use_name_in_filename``, ``use_timestamp``, ``log_FILE`` (итоговый путь).
+
+        Пример:
+            >>> AppLogger.get_instance('system').dump_config()['log_FILE']
+            'logs\\app.log'
+        """
         return {
             'name': self.name,
             'enabled': self._enabled,
@@ -2642,7 +2929,18 @@ class BaseAppLogger:
         }
 
     def get_config(self) -> Dict[str, Any]:
-        """Возвращает текущую конфигурацию логгера."""
+        """
+        Текущие настройки логгера.
+
+        Returns:
+            Словарь: ``level``, ``base_log_FILE``, ``log_MAX_BYTES``, ``log_BACKUP_COUNT``,
+            ``log_ARGS``, ``enabled``, ``console_enabled``, ``file_enabled``,
+            ``use_name_in_filename``, ``use_timestamp``.
+
+        Пример:
+            >>> log.get_config()['level']
+            'INFO'
+        """
         return {
             'level': logging.getLevelName(self.log_level),
             'base_log_FILE': self.base_log_file,
@@ -2656,8 +2954,19 @@ class BaseAppLogger:
             'use_timestamp': self.use_timestamp,
         }
 
-    def _save_handlers (self):
-        """Сохраняет копию списка обработчиков."""
+    def _save_handlers (self) -> None:
+        """
+        Обновляет ``self.handlers`` — копию списка обработчиков ``logging.Logger``.
+
+        Вызывается после любого изменения набора обработчиков.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._save_handlers(); log.handlers == log.logger.handlers
+            True
+        """
         # Сохраняем ссылки на обработчики (может пригодиться для GUI)
         self.handlers = self.logger.handlers[:]
 
@@ -2716,20 +3025,74 @@ class BaseAppLogger:
     #         self.logger.addHandler(self.file_handler)
 
     def is_enabled(self) -> bool:
+        """
+        Включён ли логгер целиком (``enable()``/``disable()``, ключ ``enabled``).
+
+        Список отключённых (``add_disabled_logger``) на результат не влияет.
+
+        Returns:
+            ``True``, если логгер включён.
+
+        Пример:
+            >>> log.disable(); log.is_enabled()
+            False
+        """
         return self._enabled
 
     def is_console_enabled(self) -> bool:
+        """
+        Включён ли вывод в консоль (флаг, а не наличие обработчика).
+
+        Returns:
+            ``True``, если консоль включена.
+
+        Пример:
+            >>> log.disable_console(); log.is_console_enabled()
+            False
+        """
         return self._console_enabled
 
     def is_file_enabled(self) -> bool:
+        """
+        Включена ли запись в файл — ТЕКУЩЕЕ состояние (в отличие от ``effective_enable_file_logging``).
+
+        Returns:
+            ``True``, если файл включён.
+
+        Пример:
+            >>> log.enable_file(); log.is_file_enabled()
+            True
+        """
         return self._file_enabled
     
     def has_shared_handler(self) -> bool:
-        """Возвращает True, если логгер использует общий файловый обработчик."""
+        """
+        Пишет ли логгер через чужой (общий) файловый обработчик — то есть является слейвом.
+
+        Returns:
+            ``True`` для слейва.
+
+        Пример:
+            >>> AppLogger.get_instance('svc', enable_file_logging='system').has_shared_handler()
+            True
+        """
         return self._shared_handler
     
-    def _sync_all_from_master(self):
-        """Копирует все настройки от мастера (для слейва)."""
+    def _sync_all_from_master(self) -> None:
+        """
+        Копирует у мастера общие параметры файла при подключении к нему.
+
+        Копируются: форматтер, путь, ротация, ``use_timestamp``, ``log_args``,
+        ``use_name_in_filename``, ``file_enabled``, ``show_call_depth``; флаг полной
+        синхронизации — если слейв не задал свой (S4); при полной синхронизации — ещё
+        ``enabled`` и консоль. Уровень НЕ копируется (S3).
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``share_file_handler_with``.
+        """
         if not self._master_logger:
             return
         

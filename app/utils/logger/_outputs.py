@@ -18,30 +18,12 @@
     True
 """
 
-import asyncio
-import os
 import logging
-import sys
-import time
-from typing import (
-    List, Optional, Dict, 
-    Any, Callable, Tuple, Union
-)
+from typing import List, Optional, Any, Callable, Union
 
-import warnings
-import inspect
 
-import threading
-
-import contextvars
-
-from functools import wraps
-from logging.handlers import RotatingFileHandler
-import weakref
-import queue
-
-from ._common import LOGGER_CODE_FILES, _NOT_FOUND, _STOP_OUTPUT, _level_to_int
-from .handlers import CallableHandler, RobustRotatingFileHandler
+from ._common import LOGGER_CODE_FILES
+from .handlers import CallableHandler
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
 

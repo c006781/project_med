@@ -310,3 +310,27 @@ def test_exception_caller_info_points_to_caller(make_logger, log_dir):
     m = LINE_RE.match(first)
     assert m['func'] == 'test_exception_caller_info_points_to_caller'
     assert int(m['line']) == lineno
+
+
+@pytest.mark.parametrize('method', ['debug', 'info', 'warning', 'error', 'critical', 'exception'])
+def test_filtered_record_does_not_look_up_caller(make_logger, log_dir, monkeypatch, method):
+    """P1: запись ниже уровня логгера не ищет место вызова (раньше — обход стека впустую)."""
+    lg = make_logger(config=make_config(log_dir, LOG_LEVEL='CRITICAL'))
+    if method == 'critical':
+        lg.reconfigure(level='CRITICAL')
+        lg.logger.setLevel(logging.CRITICAL + 1)
+    calls = []
+    monkeypatch.setattr(lg, '_get_caller_info', lambda *a, **k: calls.append(1) or '')
+    result = getattr(lg, method)('отброшено')
+    assert calls == []
+    if method == 'exception':
+        assert result == 'отброшено'
+
+
+def test_passing_record_still_looks_up_caller(make_logger, monkeypatch):
+    lg = make_logger()
+    calls = []
+    real = lg._get_caller_info
+    monkeypatch.setattr(lg, '_get_caller_info', lambda *a, **k: calls.append(1) or real(*a, **k))
+    lg.info('проходит')
+    assert calls == [1]

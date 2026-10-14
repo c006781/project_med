@@ -257,6 +257,9 @@ class BaseAppLogger(
 
     _watchdog_started = False
     _watchdog_started_lock = threading.Lock()
+    # Классы, файлы которых проверяет общий поток LoggerWatchdog (P2). Слабые ссылки:
+    # поток не мешает освобождать классы, созданные, например, в тестах.
+    _watched_classes: 'weakref.WeakSet[type]' = weakref.WeakSet()
     #
     # @property
     # def list_stop_loger(self) -> List[str]:

@@ -122,3 +122,48 @@ def test_permission_error_retries_then_handle_error(handler, monkeypatch, capsys
     out = capsys.readouterr()
     assert out.err.count('провал') == 2
     assert out.out == ''
+
+
+def test_retry_pause_releases_lock(handler, monkeypatch):
+    """P4: во время паузы перед повторной попыткой блокировка обработчика свободна."""
+    import threading
+    free_during_pause = []
+
+    def try_lock(got):
+        # RLock отпускается только тем потоком, который его взял
+        ok = handler._lock.acquire(blocking=False)
+        if ok:
+            handler._lock.release()
+        got.append(ok)
+
+    def fake_sleep(sec):
+        got = []
+        t = threading.Thread(target=try_lock, args=(got,))
+        t.start()
+        t.join()
+        free_during_pause.append(got[0])
+
+    monkeypatch.setattr('time.sleep', fake_sleep)
+    monkeypatch.setattr(handler, 'handleError', lambda record: None)
+    monkeypatch.setattr(logging.handlers.RotatingFileHandler, 'emit',
+                        lambda self, record: (_ for _ in ()).throw(PermissionError('locked')))
+    _emit(handler, 'x')
+    assert free_during_pause and all(free_during_pause)
+
+
+def test_retry_then_success(handler, monkeypatch, tmp_path):
+    """Вторая попытка удаётся — запись не теряется."""
+    attempts = []
+    real_emit = logging.handlers.RotatingFileHandler.emit
+
+    def flaky(self, record):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise PermissionError('занято')
+        real_emit(self, record)
+
+    monkeypatch.setattr('time.sleep', lambda s: None)
+    monkeypatch.setattr(logging.handlers.RotatingFileHandler, 'emit', flaky)
+    _emit(handler, 'дошло')
+    assert len(attempts) == 2
+    assert read(tmp_path / 'h.log') == 'дошло\n'

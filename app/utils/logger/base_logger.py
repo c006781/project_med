@@ -3131,9 +3131,18 @@ class BaseAppLogger:
 
 
 
-    def _update_file_handler_if_not_shared(
-        self,
-    ):
+    def _update_file_handler_if_not_shared(self) -> None:
+        """
+        Сбрасывает связь с мастером и, если файл включён, создаёт свой обработчик.
+
+        Вызывается при аномалии «флаг общего обработчика есть, а мастера нет».
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``_update_handlers``.
+        """
         with self._handler_lock:
             if self.file_handler and self.file_handler in self.logger.handlers:
                 self.logger.removeHandler(self.file_handler)
@@ -3180,11 +3189,47 @@ class BaseAppLogger:
     #         }
 
     def _update_file_handler_if_on_and_not_shared_with_master_handler(
-        self, 
-        master_handler, master_log_level, master_formatter, master_base_log_file,
-        master_max_bytes, master_backup_count, master_timestamp,
-        master_file_enabled, master_use_name, master_sync_full, master_args, master_show_depth
-    ):
+        self,
+        master_handler: Optional[logging.Handler],
+        master_log_level: int,
+        master_formatter: logging.Formatter,
+        master_base_log_file: str,
+        master_max_bytes: int,
+        master_backup_count: int,
+        master_timestamp: bool,
+        master_file_enabled: bool,
+        master_use_name: bool,
+        master_sync_full: bool,
+        master_args: bool,
+        master_show_depth: bool,
+    ) -> None:
+        """
+        Подключает слейва к обработчику мастера и копирует параметры файла.
+
+        Ничего не делает, если обработчика у мастера нет или слейв уже подключён к нему.
+        Уровень мастера (``master_log_level``) больше не копируется (S3) — параметр оставлен
+        для совместимости вызова.
+
+        Args:
+            master_handler: Файловый обработчик мастера.
+            master_log_level: Уровень мастера (не используется, S3).
+            master_formatter: Форматтер мастера.
+            master_base_log_file: Путь к логам у мастера.
+            master_max_bytes: Размер ротации у мастера.
+            master_backup_count: Число старых файлов у мастера.
+            master_timestamp: ``use_timestamp`` мастера.
+            master_file_enabled: Включён ли файл у мастера (фактическое состояние).
+            master_use_name: ``use_name_in_filename`` мастера.
+            master_sync_full: Флаг полной синхронизации мастера.
+            master_args: ``log_args`` мастера.
+            master_show_depth: ``show_call_depth`` мастера.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``_update_file_handler_if_on`` со снимком состояния мастера.
+        """
         if master_handler is None: 
             return
         
@@ -3243,9 +3288,19 @@ class BaseAppLogger:
 
     #         self._reopen_file_handler_if_needed()
 
-    def _update_file_handler_if_on (
-        self,
-    ):
+    def _update_file_handler_if_on (self) -> None:
+        """
+        Для слейва: берёт текущий обработчик мастера и подключается к нему.
+
+        Снимок состояния мастера делается под его блокировкой, подключение — под своей.
+        Защищён от повторного входа (флаг ``_updating_file_handler``).
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``_update_handlers`` для логгера с общим обработчиком.
+        """
         if getattr(self, '_updating_file_handler', False):
             return
         self._updating_file_handler = True
@@ -3315,9 +3370,19 @@ class BaseAppLogger:
         finally:
             self._updating_file_handler = False
 
-    def _update_file_handler (
-        self,
-    ):
+    def _update_file_handler (self) -> None:
+        """
+        Создаёт свой файловый обработчик и добавляет его в ``logging.Logger``.
+
+        Для слейва не вызывается (пишет предупреждение и выходит). Если файл создать не
+        удалось — ошибка в лог и ``file_enabled`` выключается.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``_update_handlers``.
+        """
         if self._shared_handler:
             self.logger.warning(
                 "_update_file_handler вызван для логгера с общим обработчиком"
@@ -3335,9 +3400,19 @@ class BaseAppLogger:
             self.logger.error(f"Не удалось создать файловый обработчик: {e}")
             self._file_enabled = False
 
-    def _update_console_handler (
-        self,
-    ):
+    def _update_console_handler (self) -> None:
+        """
+        Создаёт консольный обработчик (stderr), если консоль включена.
+
+        Уровень — уровень логгера, форматтер — текущий. Поток ``sys.stderr`` запоминается
+        в момент создания.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``_update_handlers``.
+        """
         # Консольный обработчик (всегда создаётся заново, если включён)
         if self._console_enabled:
             self.console_handler = logging.StreamHandler()
@@ -3349,9 +3424,24 @@ class BaseAppLogger:
 
     def _del_console_handler_and_file_handler (
         self,
-        if_close_console_handler=True,
-        if_close_file_handler=True,
-    ):
+        if_close_console_handler: bool = True,
+        if_close_file_handler: bool = True,
+    ) -> None:
+        """
+        Снимает свой консольный и свой (не общий) файловый обработчики.
+
+        Общий обработчик мастера здесь не трогается — им занимается ``_update_handlers``.
+
+        Args:
+            if_close_console_handler: Закрыть консольный обработчик после снятия.
+            if_close_file_handler: Закрыть файловый обработчик после снятия.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается в начале ``_update_handlers``.
+        """
         # Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
 
         #    Закрываем их только если они не являются общими с другими логгерами.
@@ -3360,36 +3450,72 @@ class BaseAppLogger:
         if self.file_handler and not self._shared_handler:
             self._remove_file_handler(if_close_file_handler=if_close_file_handler)
 
-    def _get_all_handlers (
-        self,
-    ):
+    def _get_all_handlers (self) -> List[logging.Handler]:
+        """
+        Копия списка глобальных обработчиков (под блокировкой).
+
+        Returns:
+            Список обработчиков из ``add_global_handler``/``add_global_output``.
+
+        Пример:
+            >>> log._get_all_handlers()
+            [<LogViewerHandler (NOTSET)>]
+        """
         with BaseAppLogger._global_handlers_lock:
             return list(BaseAppLogger._global_handlers)
         
-    def _set_all_handlers (
-        self,
-        handlers_copy,
-    ):             
+    def _set_all_handlers (self, handlers_copy: List[logging.Handler]) -> None:
+        """
+        Добавляет в ``logging.Logger`` недостающие глобальные обработчики (без дублей).
+
+        Args:
+            handlers_copy: Результат ``_get_all_handlers()``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._set_all_handlers(log._get_all_handlers())
+        """
         for handler in handlers_copy:
             if handler not in self.logger.handlers:
                 self.logger.addHandler(handler)
                 
     
-    def _update_handlers(self):
+    def _update_handlers(self) -> None:
         """
-        Обновляет набор обработчиков (консольный и файловый) в соответствии с текущими флагами:
-        - _enabled, _console_enabled, _file_enabled
-        - _shared_handler (использует общий обработчик от другого логгера)
-        - эффективные значения (с учётом ссылок enable_file_logging_ref)
+        Перестраивает обработчики под текущие флаги — центральный метод класса.
 
-        При включении файлового логирования дополнительно вызывает _reopen_file_handler_if_needed()
-        для восстановления файла, если он был удалён извне.
+        Порядок:
+            1. Снимает свою консоль и свой файл; у слейва, которому файл не нужен,
+               отцепляет общий обработчик (не закрывая).
+            2. Если логгер выключен — на этом всё (остаются ``NullHandler``, выводы,
+               глобальные обработчики — они молчат по ``_enabled``).
+            3. Создаёт консоль (если включена), добавляет глобальные обработчики.
+            4. Файл: если есть к кому подключиться (``_file_share_target``) — подключается
+               к его обработчику (один обработчик на файл); иначе создаёт свой. Слейв
+               обновляет обработчик мастера или, если у мастера файла нет, отвязывается и
+               пишет сам (S2).
+            5. Обновляет ``self.handlers`` и синхронизирует своих слейвов.
 
-        После обновления собственных обработчиков синхронизирует зависимые логгеры (_shared_slaves).
+        Не вызывайте, удерживая ``_handler_lock``: метод берёт его сам, затем ``_share_lock``.
 
-        Пытаться НЕ вызывать в блокировках. Блокировка self._handler_lock уже есть
+        Returns:
+            None
+
+        Пример:
+            >>> log._enabled = False; log._update_handlers()   # так работает disable()
         """
-        def _tt():
+        def _tt() -> None:
+            """
+            Шаги 1–4 ``_update_handlers`` (под блокировками).
+
+            Returns:
+                None
+
+            Пример:
+                Вызывается только из ``_update_handlers``.
+            """
             with self._handler_lock:
                 # 1. Удаляем старые «свои» обработчики (консольный и файловый, если они не общие)
                 #    Закрываем их только если они не являются общими с другими логгерами.
@@ -3517,8 +3643,22 @@ class BaseAppLogger:
 
         # self._save_handlers() # Сохраняем ссылки на обработчики (может пригодиться для GUI)               
 
-    def _create_file_handler(self):
-        """Создаёт файловый обработчик на основе текущих настроек."""
+    def _create_file_handler(self) -> RobustRotatingFileHandler:
+        """
+        Создаёт файловый обработчик по текущим настройкам (папка создаётся при необходимости).
+
+        Порог обработчика — ``NOTSET`` (фильтрует уровень логгера; файл может стать общим, S3).
+
+        Returns:
+            Новый ``RobustRotatingFileHandler`` (в ``logging.Logger`` не добавлен).
+
+        Raises:
+            RuntimeError: Не удалось создать папку для логов.
+
+        Пример:
+            >>> h = log._create_file_handler(); h.baseFilename
+            'C:\\proj\\logs\\app.log'
+        """
 
         log_file = self._get_log_file() # Возвращает имя файла лога с учётом use_name_in_filename
 
@@ -3548,8 +3688,25 @@ class BaseAppLogger:
 
         return handler
 
-    def _get_log_file(self):
-        """Возвращает имя файла лога с учётом use_name_in_filename."""
+    def _get_log_file(self) -> str:
+        """
+        Итоговый путь к файлу лога из ``base_log_file`` (правила — IMPLEMENTATION.md §3.5).
+
+        * существующая папка или путь с разделителем на конце → ``<папка>/app.log``
+          (или ``<имя>.log``, с меткой времени при ``use_timestamp``);
+        * несуществующий путь на ``.log`` или существующий файл → он сам;
+        * иначе путь считается папкой.
+
+        Returns:
+            Путь к файлу.
+
+        Raises:
+            ValueError: ``base_log_file`` не задан.
+
+        Пример:
+            >>> log.base_log_file = 'logs/'; log._get_log_file()
+            'logs\\app.log'
+        """
         if not self.base_log_file:
             raise ValueError("base_log_file (LOG_DIR) не задан")
 
@@ -3603,7 +3760,21 @@ class BaseAppLogger:
         return self._build_log_file_in_dir(path)
 
     def _build_log_file_in_dir(self, dir_path: str) -> str:
-        """Формирует имя файла внутри директории с учётом use_name_in_filename и use_timestamp."""
+        """
+        Имя файла внутри папки: ``app.log`` / ``<имя>.log``, с ``_<YYYYmmdd_HHMMSS>`` при ``use_timestamp``.
+
+        Метка времени — момент создания логгера (``_start_timestamp``).
+
+        Args:
+            dir_path: Папка для логов.
+
+        Returns:
+            Путь к файлу в этой папке.
+
+        Пример:
+            >>> log._build_log_file_in_dir('logs')
+            'logs\\app.log'
+        """
         
         timestamp = self._start_timestamp
         
@@ -3621,7 +3792,18 @@ class BaseAppLogger:
 
         return os.path.join(dir_path, filename)    
 
-    def _sync_log_level_and_formatters (self):
+    def _sync_log_level_and_formatters (self) -> None:
+        """
+        Ставит текущий форматтер файловому обработчику.
+
+        Уровень больше не ставится (S3): файл может быть общим. Название историческое.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._sync_log_level_and_formatters()
+        """
         # Синхронизируем уровень и формат для файлового обработчика
         if self.file_handler: # Если есть файловый обработчик
             # self.file_handler.setLevel(self.log_level) # устанавливаем уровень
@@ -3634,7 +3816,19 @@ class BaseAppLogger:
     #     if self.file_handler:
     #         self.file_handler.setFormatter(self.formatter)
 
-    def _set_file_handler (self, file_handler):
+    def _set_file_handler (self, file_handler: logging.Handler) -> None:
+        """
+        Делает ``file_handler`` текущим файловым обработчиком и добавляет его в ``logging.Logger``.
+
+        Args:
+            file_handler: Обработчик (обычно — мастера).
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``share_file_handler_with``.
+        """
         # Берём обработчик другого логгера
         self.file_handler = file_handler
 
@@ -3642,7 +3836,20 @@ class BaseAppLogger:
         if self.file_handler not in self.logger.handlers:
             self.logger.addHandler(self.file_handler)
 
-    def _remove_console_handler (self, if_close_console_handler: bool = True):
+    def _remove_console_handler (self, if_close_console_handler: bool = True) -> None:
+        """
+        Снимает консольный обработчик (если есть) и, по желанию, закрывает его.
+
+        Args:
+            if_close_console_handler: Закрыть после снятия.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log._remove_console_handler(); log.console_handler is None
+            True
+        """
         # Удаляем старые "свои" обработчики, если они были
         if self.console_handler:
             self.logger.removeHandler(self.console_handler)
@@ -3652,7 +3859,21 @@ class BaseAppLogger:
 
             self.console_handler = None
 
-    def _remove_file_handler (self, if_close_file_handler: bool = True):
+    def _remove_file_handler (self, if_close_file_handler: bool = True) -> None:
+        """
+        Снимает файловый обработчик (если есть) и, по желанию, закрывает его.
+
+        Общий обработчик мастера закрывать нельзя — передавайте ``False``.
+
+        Args:
+            if_close_file_handler: Закрыть после снятия.
+
+        Returns:
+            None
+
+        Пример:
+            >>> slave._remove_file_handler(if_close_file_handler=False)
+        """
         # Удаляем текущий файловый обработчик, если есть
         if self.file_handler:
             self.logger.removeHandler(self.file_handler)
@@ -3668,19 +3889,27 @@ class BaseAppLogger:
         sync_full_state: Optional[bool] = None,
     ) -> None:
         """
-        Добавляет файловый обработчик другого логгера к текущему.
-        После этого оба логгера пишут в один и тот же файл (с общей ротацией).
+        Подключает этот логгер к файловому обработчику ``other`` (делает слейвом).
 
-        sync_full_state: синхронизировать состояние, если True
-        (состояние: включен ли файловый логирование, включен ли обработчик, etc.)
+        Подключение всегда к корневому владельцу обработчика (по цепочке мастеров).
+        Ничего не делает, если это тот же логгер, если они уже связаны или у ``other`` нет
+        открытого файла (тогда — предупреждение). Свой прежний файловый обработчик
+        закрывается (общий — нет). Копируются параметры файла мастера
+        (``_sync_all_from_master``), уровень — свой (S3).
 
-        ВНИМАНИЕ: после вызова этого метода НЕ вызывайте turn_off_file_logging()
-        у текущего логгера, так как это закроет общий обработчик и остановит
-        запись и для другого логгера. Для отключения файлового логирования
-        у текущего логгера используйте этот метод только если другой логгер
-        больше не нуждается в обработчике, или управляйте файловым логированием
-        через исходный логгер.
-        
+        Не вызывайте ``turn_off_file_logging()`` у мастера, если слейвам нужен файл: он
+        отвяжет всех слейвов (каждый откроет свой обработчик).
+
+        Args:
+            other: Логгер, к чьему файлу подключиться.
+            sync_full_state: Явно задать флаг полной синхронизации этому логгеру;
+                ``None`` — как у мастера.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.get_instance('report').share_file_handler_with(AppLogger.get_instance('system'))
         """
 
         # Подключаемся к корневому владельцу обработчика, а не к промежуточному
@@ -3810,7 +4039,16 @@ class BaseAppLogger:
 
 
     def get_shared_group(self) -> List['BaseAppLogger']:
-        """Возвращает список всех логгеров, использующих тот же файловый обработчик."""
+        """
+        Все логгеры, пишущие через тот же файловый обработчик (мастер и живые слейвы).
+
+        Returns:
+            Список логгеров; для логгера без общего файла — ``[self]``.
+
+        Пример:
+            >>> [l.name for l in AppLogger.get_instance('system').get_shared_group()][:3]
+            ['system', 'user', 'main.py']
+        """
         with BaseAppLogger._share_lock:
             # if self._shared_handler and self._master_logger:
             #     # слейв: возвращаем мастера и всех его слейвов
@@ -3875,7 +4113,7 @@ class BaseAppLogger:
     #         formatter = formatter
     #     )  
                 
-    def _update_shared_slave(self, slave, master_state: dict) -> None:
+    def _update_shared_slave(self, slave: Optional['BaseAppLogger'], master_state: Dict[str, Any]) -> None:
         """
         Полностью синхронизирует одного слейва с мастером, используя переданное состояние мастера.
         
@@ -3970,6 +4208,15 @@ class BaseAppLogger:
 
 
     def _get_shared_slaves(self) -> Tuple[List, List]: 
+        """
+        Живые слейвы и «мёртвые» слабые ссылки (логгеры, удалённые сборщиком мусора).
+
+        Returns:
+            Кортеж ``(живые_слейвы, мёртвые_ссылки)``.
+
+        Пример:
+            >>> alive, dead = master._get_shared_slaves()
+        """
         # Разыменовываем слабые ссылки, удаляем мёртвые
         active_slaves = []
         dead_refs = []
@@ -3985,6 +4232,18 @@ class BaseAppLogger:
     
 
     def _get_master_state(self) -> Dict[str, Any]:
+        """
+        Снимок состояния этого логгера как мастера (под его блокировкой).
+
+        Returns:
+            Словарь: ``file_handler``, ``log_LEVEL``, ``formatter``, ``base_log_FILE``,
+            ``log_MAX_BYTES``, ``log_BACKUP_COUNT``, ``use_timestamp``, ``use_name_in_filename``,
+            ``sync_full_state``, ``show_call_depth``, ``log_ARGS``, ``console_enabled``, ``enabled``.
+
+        Пример:
+            >>> master._get_master_state()['file_handler'] is master.file_handler
+            True
+        """
         with self._handler_lock:
             return  {
                 'file_handler': self.file_handler,
@@ -4040,8 +4299,21 @@ class BaseAppLogger:
 
     def _update_shared_slaves(self) -> None:
         """
-        Обновляет всех зависимых логгеров (которые используют наш файловый обработчик)
-        при изменении параметров мастера (уровень, путь, лимиты и т.д.).
+        Синхронизирует всех слейвов с этим мастером после его изменения.
+
+        * у мастера есть файл — каждому включённому слейву подключается текущий
+          обработчик и копируются параметры файла (``_update_shared_slave``);
+        * у мастера файла нет — у слейвов обработчик отцепляется (связь остаётся, S2);
+        * при полной синхронизации слейвам копируются ``enabled``/консоль и они
+          перестраиваются (S4).
+
+        Мёртвые слабые ссылки удаляются.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается в конце ``_update_handlers`` и при смене уровня/форматтера.
         """
 
         with BaseAppLogger._share_lock:
@@ -4107,7 +4379,18 @@ class BaseAppLogger:
 
    
 
-    def _unshare_file_handler_master_logger (self):
+    def _unshare_file_handler_master_logger (self) -> None:
+        """
+        Удаляет этот логгер из списка слейвов его мастера.
+
+        Ожидается, что вызывающий уже держит ``_share_lock``. Если мастера нет — WARNING.
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``unshare_file_handler`` и ``share_file_handler_with``.
+        """
         # Предполагается, что вызывающий код уже удерживает BaseAppLogger._share_lock
    
         master = self._master_logger
@@ -4180,25 +4463,74 @@ class BaseAppLogger:
             # Пересоздаём собственный обработчик согласно текущим настройкам
             self._update_handlers()
 
-    def get_master_logger(self):
-        """Возвращает логгер, предоставивший общий обработчик, или None."""
+    def get_master_logger(self) -> Optional['BaseAppLogger']:
+        """
+        Мастер, через чей обработчик пишет этот логгер.
+
+        Returns:
+            Логгер-мастер или ``None``, если файл свой или выключен.
+
+        Пример:
+            >>> AppLogger.get_instance('svc', enable_file_logging='system').get_master_logger().name
+            'system'
+        """
         return self._master_logger
 
-    def set_console_level(self, level_str: str):
-        """Устанавливает уровень логирования для консольного вывода."""
+    def set_console_level(self, level_str: Union[str, int]) -> None:
+        """
+        Отдельный порог консоли (выше уровня логгера смысла не имеет ниже — логгер отфильтрует раньше).
+
+        Действует до следующего перестроения обработчиков; в ``reconfigure(console_level=...)``
+        применяется после перестроения (R4).
+
+        Args:
+            level_str: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.set_console_level('ERROR')   # в консоль только ошибки, в файл — всё
+        """
         level = self._parse_log_level(level_str)
         if self.console_handler:
             self.console_handler.setLevel(level)
 
-    def set_file_level(self, level_str: str):
-        """Устанавливает уровень логирования для файлового вывода."""
+    def set_file_level(self, level_str: Union[str, int]) -> None:
+        """
+        Отдельный порог файлового обработчика.
+
+        Если файл общий, порог действует на всех, кто через него пишет.
+
+        Args:
+            level_str: Имя уровня или число.
+
+        Returns:
+            None
+
+        Пример:
+            >>> log.set_file_level('WARNING')
+        """
         level = self._parse_log_level(level_str)
         if self.file_handler:
             self.file_handler.setLevel(level)
 
-    def _update_file_params(self, **kwargs) -> bool:
-        """Обновляет параметры, связанные с файловым логированием.
-        Возвращает True, если требуется перестроить обработчики.
+    def _update_file_params(self, **kwargs: Any) -> bool:
+        """
+        Обновляет параметры файла из аргументов ``reconfigure``.
+
+        Учитываются: ``base_log_FILE``, ``log_MAX_BYTES``, ``log_BACKUP_COUNT``,
+        ``use_timestamp``, ``use_name_in_filename``, ``enable_file_logging``.
+
+        Args:
+            **kwargs: Аргументы ``reconfigure``; остальные ключи игнорируются.
+
+        Returns:
+            ``True``, если хоть один параметр передан и нужно перестроить обработчики.
+
+        Пример:
+            >>> log._update_file_params(log_MAX_BYTES='2048')
+            True
         """
         need_rebuild = False
         if 'base_log_FILE' in kwargs:
@@ -4310,25 +4642,31 @@ class BaseAppLogger:
 
         return need_rebuild
 
-    def reconfigure(self, **kwargs):
+    def reconfigure(self, **kwargs: Any) -> None:
         """
-        Динамически изменяет настройки логгера.
+        Меняет настройки логгера на лету.
+
         Поддерживаемые ключи:
-            - level: str ('DEBUG', 'INFO', ...)
-            - base_log_file: str
-            - log_max_bytes: int
-            - log_backup_count: int
-            - enable_file_logging: bool
-            - use_name_in_filename: bool
-            - console_enabled: bool
-            - file_enabled: bool
-            - enabled: bool
-            - console_level: str – уровень только консоли (применяется после перестроения)
-            - file_level: str – уровень только файла (применяется после перестроения)
+            * ``level`` — уровень (имя или число);
+            * ``console_enabled``, ``file_enabled``, ``enabled`` — флаги (bool или строка);
+            * ``enable_file_logging`` — то же, что ``file_enabled``;
+            * ``base_log_FILE``, ``log_MAX_BYTES``, ``log_BACKUP_COUNT``, ``use_timestamp``,
+              ``use_name_in_filename`` — параметры файла;
+            * ``log_ARGS``, ``show_call_depth`` — поведение;
+            * ``console_level``, ``file_level`` — отдельные пороги (после перестроения, R4).
+
+        У слейва параметры файла уходят мастеру (файл общий), остальное меняется у
+        самого слейва (S3). Неизвестные ключи игнорируются.
+
+        Args:
+            **kwargs: Настройки из списка выше.
+
+        Returns:
+            None
 
         Пример:
-            >>> log.reconfigure(level='DEBUG', console_level='ERROR')
-            # в файл — DEBUG и выше, в консоль — только ERROR и выше
+            >>> log.reconfigure(level='DEBUG', console_enabled=False)
+            >>> log.reconfigure(base_log_FILE='D:/logs/', log_MAX_BYTES=50_000_000)
         """
         # # Если используем общий обработчик, перенаправляем вызов мастеру
         # if self._shared_handler and self._master_logger:

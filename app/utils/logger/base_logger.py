@@ -4225,7 +4225,10 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        # if not self._enabled:
+        # ↑ до исправления B4: warning() не проверял список отключённых логгеров
+        #   (add_disabled_logger), в отличие от debug/info/critical/exception.
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.warning(
@@ -4246,7 +4249,10 @@ class BaseAppLogger:
         message - текст сообщения, которое будет добавлено к caller_info
         """
 
-        if not self._enabled:
+        # if not self._enabled:
+        # ↑ до исправления B4: error() не проверял список отключённых логгеров
+        #   (add_disabled_logger), в отличие от debug/info/critical/exception.
+        if not self._enabled or self.__class__.is_disabled(self.name):
             return
         
         self.logger.error(

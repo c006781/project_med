@@ -215,12 +215,9 @@ def test_disabled_list_blocks_methods(logger_cls, make_logger, capsys, method):
     assert capsys.readouterr().err == ''
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: warning() и error() не проверяют список отключённых логгеров "
-    "(is_disabled), в отличие от debug/info/critical/exception"
-))
 @pytest.mark.parametrize('method', ['warning', 'error'])
 def test_disabled_list_blocks_warning_and_error(logger_cls, make_logger, capsys, method):
+    """B4: раньше warning/error писали, даже если логгер в списке отключённых."""
     lg = make_logger(name='blocked_b')
     logger_cls.add_disabled_logger('blocked_b')
     getattr(lg, method)('скрыто')

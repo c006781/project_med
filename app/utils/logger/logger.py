@@ -8,6 +8,22 @@
 - Каждый экземпляр настраивается индивидуально (имя, конфигурация).
 - Предоставляет методы для логирования и декоратор log_execution_time.
 - Не использует глобальные переменные (все данные хранятся в атрибутах класса).
+- НЕ читает конфигурацию приложения сам: её передают через AppLogger.configure().
+
+Связь с конфигом приложения:
+    Модуль не импортирует app.config. Точки входа (main_gui_window.py, main_cli.py,
+    pars_start.py) первым делом вызывают app.config.logging_setup.setup_logging(),
+    который читает конфиг и передаёт его в AppLogger.configure(). До этого логгеры
+    работают на безопасных настройках по умолчанию: консоль, уровень INFO, без файла.
+
+    Порядок важен: всё, что залогировано до setup_logging(), в файл не попадёт.
+
+        # main_gui_window.py
+        from app.config.logging_setup import setup_logging
+        setup_logging()        # ← до любой работы
+        main()
+
+    Подробности и история решения — IMPLEMENTATION.md, §4 и §7.1.
 
 Пример использования:
     # Получить экземпляр по умолчанию
@@ -40,7 +56,7 @@
 import os
 import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-from typing import  Dict, Any
+from typing import  Dict, Any, Mapping, Optional
 
 # Импорты модулей
 # def _add_package_name(
@@ -120,7 +136,13 @@ from typing import  Dict, Any
 from app.utils.logger.base_logger import BaseAppLogger
 
 
-from app.config.config_manager.manager import get_config_env
+# Развязка с конфигом (2026-10-14): логгер больше НЕ читает конфиг сам.
+# Раньше здесь был импорт, и каждый новый логгер вызывал get_config_env()
+# (154 чтения конфига и .env за старт GUI). Теперь конфиг передаётся снаружи через
+# AppLogger.configure(...) — см. app/config/logging_setup.py и IMPLEMENTATION.md §4, §7.1.
+# Строка оставлена для истории: из-за неё менеджер конфига не мог логировать
+# (циклический импорт, блоки sys.modules выше).
+# from app.config.config_manager.manager import get_config_env
 
 # except ImportError as e:
 #     try:
@@ -137,17 +159,41 @@ from app.config.config_manager.manager import get_config_env
 
 class AppLogger(BaseAppLogger):
     """
-    Менеджер логгеров с поддержкой нескольких именованных экземпляров.
+    Логгер приложения: BaseAppLogger + настройки, переданные из конфига приложения.
+
+    Отличия от BaseAppLogger:
+        * свой реестр экземпляров (``_instances``);
+        * ``get_default_config()`` строит конфиг логгера из словаря, переданного в
+          ``configure()``, а до этого — из безопасных значений по умолчанию;
+        * ``configure()`` — единственная точка, через которую конфиг приложения попадает
+          в логгеры.
+
+    Модуль конфигурацию НЕ читает (см. докстринг модуля и IMPLEMENTATION.md §7.1).
 
     Атрибуты класса:
-        _instances (dict): Словарь созданных экземпляров {имя: экземпляр}.
+        _instances (Dict[str, BaseAppLogger]): Реестр экземпляров {имя: экземпляр}.
+        _app_config (Optional[Dict[str, Any]]): Последний конфиг приложения из
+            ``configure()``; ``None`` — логгер ещё не настроен.
+        UNCONFIGURED_APP_CONFIG (Dict[str, Any]): Конфиг приложения, который
+            используется до вызова ``configure()``.
 
-    Методы класса:
-        get_instance(name='default', force_new=False, config=None) -> AppLogger:
-            Возвращает экземпляр логгера с указанным именем.
+    Пример:
+        >>> AppLogger.configure({'LOG_DIR': './logs', 'system_LEVEL': 'DEBUG'})
+        >>> log = AppLogger.get_instance('PatientService', enable_file_logging='system')
+        >>> log.info('Пациент сохранён')
     """
 
     _instances = {}  # переопределяем, чтобы был свой пул
+
+    # Конфиг приложения, переданный через configure(). None — ещё не настроен.
+    _app_config: Optional[Dict[str, Any]] = None
+
+    # До configure(): только консоль. Файл не создаём, чтобы скрипты и тесты, которые
+    # не вызывали setup_logging(), не писали в ./logs/app.log.
+    # Остальные значения берутся из умолчаний build_logger_config().
+    UNCONFIGURED_APP_CONFIG: Dict[str, Any] = {
+        'file_enabled': False,
+    }
 
     # # Словарь экземпляров (ключ - имя логгера)
     # @classmethod
@@ -156,25 +202,115 @@ class AppLogger(BaseAppLogger):
     #         from app.config.config_manager.manager import get_config_env
     #     else:
     #         get_config_env = sys.modules['app.config.config_manager.manager'].get_config_env
-        
+
     #     config = get_config_env()
     #     # Добавляем ключ LOG_ARGS, если его нет (по умолчанию False)
     #     config.setdefault('LOG_ARGS', False)
 
     #     # tt = sys.modules['app.config.config_manager.manager']
     #     return config
-    @classmethod
-    def get_default_config(cls) -> Dict[str, Any]:
-        # from app.config.config_manager.manager import get_config_env
-        config = get_config_env() # уже содержит все настройки из msgpack (или .env по умолчанию)
-        
+
+    # Реализация до развязки с конфигом (до 2026-10-14). Сохранена для понимания:
+    # каждый новый логгер сам вызывал get_config_env() → чтение msgpack и .env
+    # (154 раза за старт GUI). Логика преобразования перенесена в build_logger_config(),
+    # чтение конфига — в app/config/logging_setup.py.
+    # @classmethod
+    # def get_default_config(cls) -> Dict[str, Any]:
+    #     # from app.config.config_manager.manager import get_config_env
+    #     config = get_config_env() # уже содержит все настройки из msgpack (или .env по умолчанию)
+
+    #     # Используем LOG_DIR, если есть, иначе LOG_FILE (для обратной совместимости)
+    #     log_path = config.get('LOG_DIR', config.get('LOG_FILE', 'logs'))
+    #     # Если путь не оканчивается на разделитель, считаем его директорией
+    #     if not log_path.endswith(('/', '\\')) and not log_path.lower().endswith('.log'):
+    #         log_path = log_path + os.sep
+
+    #     result =  {
+    #         # 'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
+    #         'LOG_LEVEL': config.get('LOG_LEVEL', 'INFO'),
+    #         'LOG_FILE': log_path,                     # именно LOG_FILE ожидает BaseAppLogger
+    #         'LOG_MAX_BYTES': config.get('LOG_MAX_BYTES', 10*1024*1024),
+    #         'LOG_BACKUP_COUNT': config.get('LOG_BACKUP_COUNT', 5),
+    #         'LOG_ARGS': config.get('LOG_ARGS', False),
+    #         # Общие флаги
+    #         'enabled': config.get('enabled', True),
+    #         'console_enabled': config.get('console_enabled', True), # 
+    #         'file_enabled': config.get('file_enabled', True),
+    #         'use_timestamp': config.get('use_timestamp', False),
+    #     }
+
+
+    #     # Добавляем специфичные для разных логгеров ключи (чтобы BaseAppLogger мог их прочитать через _get_config_with_inheritance)
+    #     # Они нужны для того, чтобы при создании логгера 'system' его настройки были взяты из system_LEVEL и т.д.
+    #     for key, value in config.items():
+    #         if (
+    #             key.startswith('system_') 
+    #             or key.startswith('user_') 
+    #             or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
+    #         ):
+    #             if key not in result:
+    #                 result[key] = value
+
+    #     return result
+
+    # @classmethod
+    # def reload_all_from_app_config(cls):
+    #     """
+    #     Загружает текущую конфигурацию приложения и применяет её ко всем существующим логгерам.
+
+    #     Вызывается автоматически при изменении настроек через SettingsPage.
+    #     Использует `get_config_env()` для получения словаря настроек и передаёт его в
+    #     `cls.reload_all_from_config(full_config)`.
+
+    #     Пример:
+    #         >>> AppLogger.reload_all_from_app_config()
+    #         # После этого все логгеры перечитают настройки (уровни, директории и т.д.)
+    #     """
+
+    #     # from app.config.config_manager.manager import get_config_env
+    #     full_config = get_config_env()
+    #     cls.reload_all_from_config(full_config)
+
+    @staticmethod
+    def build_logger_config(app_config: Mapping[str, Any]) -> Dict[str, Any]:
+        """
+        Строит конфиг для BaseAppLogger из плоского конфига приложения.
+
+        Что делает:
+            1. Путь к логам: берёт ``LOG_DIR``, иначе ``LOG_FILE``, иначе ``'logs'``.
+               Если путь не оканчивается на разделитель и не на ``.log`` — добавляет
+               ``os.sep``, чтобы BaseAppLogger однозначно считал его папкой.
+            2. Кладёт его в ``LOG_FILE`` — именно этот ключ проверяет BaseAppLogger
+               (``LOG_DIR`` валидацию не проходит, см. IMPLEMENTATION.md §3.4).
+            3. Заполняет общие ключи значениями по умолчанию.
+            4. Переносит как есть ключи ``system_*`` и ``user_*``: через них
+               логгеры ``system``/``user`` и все их «наследники»
+               (``enable_file_logging='system'``) получают свои настройки.
+
+        Значения не приводятся к типам (``'True'`` остаётся строкой) — это делает
+        BaseAppLogger при чтении.
+
+        Args:
+            app_config: Плоский словарь настроек приложения
+                (обычно ``AppConfigManager.get_all()``). Не изменяется.
+
+        Returns:
+            Новый словарь, пригодный для ``BaseAppLogger.get_instance(config=...)``.
+
+        Пример:
+            >>> cfg = AppLogger.build_logger_config({'LOG_DIR': 'logs', 'system_LEVEL': 'DEBUG'})
+            >>> cfg['LOG_FILE'] == 'logs' + os.sep, cfg['system_LEVEL'], cfg['LOG_LEVEL']
+            (True, 'DEBUG', 'INFO')
+        """
+        config = app_config
+
         # Используем LOG_DIR, если есть, иначе LOG_FILE (для обратной совместимости)
         log_path = config.get('LOG_DIR', config.get('LOG_FILE', 'logs'))
         # Если путь не оканчивается на разделитель, считаем его директорией
         if not log_path.endswith(('/', '\\')) and not log_path.lower().endswith('.log'):
             log_path = log_path + os.sep
-        
-        result =  {
+
+        result: Dict[str, Any] = {
             # 'LOG_LEVEL': config.get('LOG_LEVEL', 'DEBUG'),
             'LOG_LEVEL': config.get('LOG_LEVEL', 'INFO'),
             'LOG_FILE': log_path,                     # именно LOG_FILE ожидает BaseAppLogger
@@ -183,42 +319,179 @@ class AppLogger(BaseAppLogger):
             'LOG_ARGS': config.get('LOG_ARGS', False),
             # Общие флаги
             'enabled': config.get('enabled', True),
-            'console_enabled': config.get('console_enabled', True), # 
+            'console_enabled': config.get('console_enabled', True), #
             'file_enabled': config.get('file_enabled', True),
             'use_timestamp': config.get('use_timestamp', False),
         }
-        
-        
+
         # Добавляем специфичные для разных логгеров ключи (чтобы BaseAppLogger мог их прочитать через _get_config_with_inheritance)
         # Они нужны для того, чтобы при создании логгера 'system' его настройки были взяты из system_LEVEL и т.д.
         for key, value in config.items():
             if (
-                key.startswith('system_') 
-                or key.startswith('user_') 
+                key.startswith('system_')
+                or key.startswith('user_')
                 or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
             ):
                 if key not in result:
                     result[key] = value
-        
-        return result
-    
-    @classmethod
-    def reload_all_from_app_config(cls):
-        """
-        Загружает текущую конфигурацию приложения и применяет её ко всем существующим логгерам.
 
-        Вызывается автоматически при изменении настроек через SettingsPage.
-        Использует `get_config_env()` для получения словаря настроек и передаёт его в
-        `cls.reload_all_from_config(full_config)`.
+        return result
+
+    @classmethod
+    def get_default_config(cls) -> Dict[str, Any]:
+        """
+        Конфиг для нового логгера, у которого в ``get_instance()`` не передан ``config``.
+
+        Источник:
+            * после ``configure()`` — переданный туда конфиг приложения;
+            * до ``configure()`` — ``UNCONFIGURED_APP_CONFIG`` (консоль, без файла).
+
+        Конфиг приложения здесь НЕ читается — только то, что передали в ``configure()``.
+
+        Returns:
+            Словарь для BaseAppLogger (результат ``build_logger_config()``).
 
         Пример:
-            >>> AppLogger.reload_all_from_app_config()
-            # После этого все логгеры перечитают настройки (уровни, директории и т.д.)
+            >>> AppLogger.configure({'LOG_LEVEL': 'WARNING'})
+            >>> AppLogger.get_default_config()['LOG_LEVEL']
+            'WARNING'
         """
-            
-        # from app.config.config_manager.manager import get_config_env
-        full_config = get_config_env()
-        cls.reload_all_from_config(full_config)
+        return cls.build_logger_config(cls._current_app_config())
+
+    @classmethod
+    def is_configured(cls) -> bool:
+        """
+        Передавался ли уже конфиг приложения через ``configure()``.
+
+        Returns:
+            ``True`` после первого ``configure()``, ``False`` до него
+            и после ``reset_configuration()``.
+
+        Пример:
+            >>> AppLogger.reset_configuration()
+            >>> AppLogger.is_configured()
+            False
+            >>> AppLogger.configure({})
+            >>> AppLogger.is_configured()
+            True
+        """
+        return cls._app_config is not None
+
+    @classmethod
+    def configure(cls, app_config: Mapping[str, Any]) -> None:
+        """
+        Передаёт логгерам конфиг приложения и применяет его ко всем существующим.
+
+        Единственная точка входа конфига в логгеры. Вызывается:
+            * при старте — из ``app.config.logging_setup.setup_logging()``, до любой работы;
+            * при сохранении настроек — из ``ConfigApplier.apply_logging()``;
+            * при открытии главного окна — из ``MainWindow`` (повторно, для надёжности).
+
+        Что делает:
+            1. Запоминает копию ``app_config`` — по ней будут настроены логгеры,
+               созданные позже (``get_default_config()``).
+            2. Перенастраивает все уже созданные логгеры через
+               ``reload_all_from_config()``: уровни, флаги, путь к файлу.
+
+        Во второй шаг уходит сырой конфиг, дополненный результатом
+        ``build_logger_config()``: так сохраняются персональные ключи вида
+        ``ConfigApplier_LEVEL``, а путь к файлу (``LOG_FILE``) у созданных раньше и
+        созданных позже логгеров совпадает (от этого зависит автопривязка к общему файлу).
+
+        Args:
+            app_config: Плоский словарь настроек приложения
+                (обычно ``AppConfigManager.get_all()``). Копируется, не изменяется.
+
+        Returns:
+            None
+
+        Пример:
+            >>> from app.config.config_manager.manager import get_config_env
+            >>> AppLogger.configure(get_config_env())
+        """
+        cls._app_config = dict(app_config)
+        cls.reload_all_from_config(cls._config_for_reload(cls._app_config))
+
+    @classmethod
+    def reset_configuration(cls) -> None:
+        """
+        Возвращает класс в состояние «не настроен» (для тестов).
+
+        Существующие логгеры НЕ перенастраиваются — меняется только то, с чем будут
+        созданы новые.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.reset_configuration()
+            >>> AppLogger.is_configured()
+            False
+        """
+        cls._app_config = None
+
+    @classmethod
+    def reload_all_from_app_config(cls) -> None:
+        """
+        Повторно применяет ко всем логгерам последний конфиг из ``configure()``.
+
+        Раньше метод сам читал конфиг приложения (``get_config_env()``). После развязки
+        логгер конфиг не читает, поэтому метод только переприменяет уже переданный.
+        Чтобы применить НОВЫЙ конфиг, вызывайте ``configure(new_config)``.
+
+        Если ``configure()`` ещё не вызывался, применяются значения по умолчанию
+        (``UNCONFIGURED_APP_CONFIG``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppLogger.configure({'system_LEVEL': 'ERROR'})
+            >>> AppLogger.get_instance('system').reconfigure(level='DEBUG')
+            >>> AppLogger.reload_all_from_app_config()   # system снова ERROR
+        """
+        cls.reload_all_from_config(cls._config_for_reload(cls._current_app_config()))
+
+    @classmethod
+    def _current_app_config(cls) -> Mapping[str, Any]:
+        """
+        Конфиг приложения, действующий сейчас.
+
+        Returns:
+            Последний конфиг из ``configure()`` или ``UNCONFIGURED_APP_CONFIG``,
+            если ``configure()`` ещё не вызывался. Возвращается без копирования —
+            не изменяйте результат.
+
+        Пример:
+            >>> AppLogger.reset_configuration()
+            >>> AppLogger._current_app_config() is AppLogger.UNCONFIGURED_APP_CONFIG
+            True
+        """
+        return cls._app_config if cls._app_config is not None else cls.UNCONFIGURED_APP_CONFIG
+
+    @classmethod
+    def _config_for_reload(cls, app_config: Mapping[str, Any]) -> Dict[str, Any]:
+        """
+        Конфиг для ``reload_all_from_config()``: сырой конфиг + нормализованные ключи.
+
+        Сырой конфиг нужен ради персональных ключей (``ConfigApplier_LEVEL`` и т. п.),
+        которые ``build_logger_config()`` отбрасывает. Нормализованные ключи нужны,
+        чтобы ``LOG_FILE`` совпадал с тем, с которым создаются новые логгеры.
+
+        Args:
+            app_config: Плоский словарь настроек приложения.
+
+        Returns:
+            Новый словарь: все ключи ``app_config``, поверх них — результат
+            ``build_logger_config(app_config)``.
+
+        Пример:
+            >>> cfg = AppLogger._config_for_reload({'LOG_DIR': 'logs', 'ConfigApplier_LEVEL': 'ERROR'})
+            >>> cfg['LOG_FILE'] == 'logs' + os.sep, cfg['ConfigApplier_LEVEL']
+            (True, 'ERROR')
+        """
+        return {**app_config, **cls.build_logger_config(app_config)}
+
 
 # Автоматическое создание экземпляров при импорте
 if not AppLogger.thec_create('system'):

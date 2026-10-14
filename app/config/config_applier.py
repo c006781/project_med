@@ -387,8 +387,12 @@ class ConfigApplier:
 
         Сравнивает ключи, перечисленные в `logging_keys`, между текущей
         конфигурацией (`self.manager.get_all()`) и `new_config`. Если хотя бы один
-        из них изменился, перезагружает все логгеры через
-        `AppLogger.reload_all_from_app_config()`.
+        из них изменился, передаёт `new_config` всем логгерам через
+        `AppLogger.configure(new_config)` (логгер сам конфиг не читает).
+
+        Известная проблема (R1 в app/utils/logger/IMPLEMENTATION.md §5.1):
+        SettingsPage вызывает метод ПОСЛЕ сохранения, поэтому `self.manager.get_all()`
+        уже равен `new_config` и изменений не находится.
 
         Параметры:
             new_config (Dict[str, Any]): Словарь с новыми настройками.
@@ -417,7 +421,9 @@ class ConfigApplier:
         if changed:
             self.logger.info("Применение новых настроек логирования")
             # Перезагружаем все логгеры через AppLogger
-            AppLogger.reload_all_from_app_config()
+            # AppLogger.reload_all_from_app_config()  # до развязки: логгер сам перечитывал конфиг
+            # Логгер конфиг не читает — передаём новый (app/utils/logger/IMPLEMENTATION.md §7.1).
+            AppLogger.configure(new_config)
 
         return changed
 

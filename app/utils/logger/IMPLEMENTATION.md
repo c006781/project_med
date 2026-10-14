@@ -2,14 +2,15 @@
 
 > Файл для разработчиков: что делает модуль, как он устроен внутри, где у него
 > проблемы и неочевидные места, и почему он устроен именно так.
-> Обновляется вместе с кодом. Последнее обновление: 2026-10-14 (ветка `refactor/logger`).
+> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, развязка с конфигом (ветка `refactor/logger`).
 
 Связанные файлы:
 
 | Файл | Назначение |
 |---|---|
 | [base_logger.py](base_logger.py) | `BaseAppLogger` — вся логика; `RobustRotatingFileHandler` — файловый обработчик |
-| [logger.py](logger.py) | `AppLogger` — наследник, связанный с конфигом приложения; создаёт `system` и `user` при импорте |
+| [logger.py](logger.py) | `AppLogger` — наследник, получающий конфиг приложения через `configure()`; создаёт `system` и `user` при импорте |
+| [../../config/logging_setup.py](../../config/logging_setup.py) | `setup_logging()` — читает конфиг и передаёт его логгерам; вызывается из точек входа |
 | [\_\_init\_\_.py](__init__.py) | Экспортирует только `AppLogger` |
 | [tests/test_logger/](../../../tests/test_logger/) | Характеризующие тесты (поведение «как есть» + известные баги как `xfail`) |
 
@@ -58,31 +59,39 @@ def apply_logging(self, new_config): ...
 Статистика по коду (`app/`, `interfaces/`): `get_instance` — ~1400 вызовов,
 `enable_file_logging='system'` — ~1200, `='user'` — ~80.
 
-### 2.2 Последовательность старта GUI (замер 2026-10-14)
+### 2.2 Последовательность старта GUI
 
-1. `main_gui_window.py` импортирует `interfaces/gui/gui_window/main.py`,
-   тот — `app.utils.logger.logger`.
-2. **Импорт `logger.py`** создаёт логгеры `system` и `user`. Каждый читает конфиг
-   через `get_config_env()`.
-3. Вызов `main()` (сам обёрнут декоратором → первая запись `main [Начало]`).
-4. Внутри `main()` импортируется `MainWindow` → подтягиваются сервисы, страницы, виджеты →
-   создаются остальные логгеры. **Каждый новый логгер снова читает конфиг.**
-5. `MainWindow.__init__` вызывает `AppLogger.reload_all_from_app_config()`.
+После развязки с конфигом (2026-10-14):
+
+1. `main_gui_window.py` импортирует `interfaces/gui/gui_window/main.py`, тот —
+   `app.utils.logger.logger`. Импорт создаёт `system`, `user` и `main.py` **по
+   умолчанию** (консоль, INFO, без файла) — конфиг не читается.
+2. **`setup_logging()`** (`app/config/logging_setup.py`) читает конфиг и вызывает
+   `AppLogger.configure(config)` → уже созданные логгеры перенастраиваются.
+3. Вызов `main()` → первая запись `main [Начало]` уже идёт по настройкам из конфига.
+4. Внутри `main()` импортируется `MainWindow` → создаются остальные логгеры; они берут
+   конфиг из `configure()`, ничего не читая.
+5. `MainWindow.__init__` вызывает `AppLogger.configure(config_manager.get_all())` ещё раз
+   (страховка на случай запуска окна в обход точки входа).
 
 Замер на копии реальных `config.msgpack` / `clinic.db` (offscreen, до показа окна):
 
-| Показатель | Значение |
-|---|---|
-| Время старта | 5,5 с |
-| Логгеров | 142 |
-| Вызовов `get_config_env()` | 154 |
-| Записей лога | 4487 |
-| Разных файловых обработчиков на один `app.log` | 18 |
+| Показатель | До развязки | После |
+|---|---|---|
+| Время старта | 5,5 с | 4,8 с |
+| Логгеров | 142 | 142 |
+| Вызовов `get_config_env()` за старт | 154 | 12 (остались в `dependencies.py`, `clinic.py`, страницах GUI) |
+| Записей в `app.log` | ~4570 | ~4550 |
+| Первая запись в файле | `main [Начало]` | `main [Начало]` |
+| Разных файловых обработчиков на один `app.log` | 18 | 18 (проблема S1, не исправлена) |
+
+Число записей между двумя прогонами одного и того же кода плавает на десятки
+(таймеры и ленивая подгрузка таблиц), набор логгеров совпадает.
 
 **Требование:** если в конфиге включено полное логирование, весь старт программы должен
-попадать в лог — начиная с первой записи. Сейчас это выполняется только потому, что каждый
-логгер при создании сам читает конфиг. Любая развязка с конфигом обязана сохранить это
-свойство (см. §7).
+попадать в лог — начиная с первой записи. Обеспечивается порядком вызова в точках входа
+(§7.1) и закреплено тестами `test_logging_setup.py`
+(`test_entry_points_call_setup_logging_before_work`, `test_full_startup_first_record_goes_to_file`).
 
 ---
 
@@ -183,22 +192,57 @@ BaseAppLogger                          # вся логика, конфиг не 
 
 ---
 
-## 4. Связь с конфигом приложения (текущая)
+## 4. Связь с конфигом приложения
+
+### 4.1 Сейчас (с 2026-10-14)
+
+```
+точка входа ─▶ app/config/logging_setup.setup_logging()
+                 ├─▶ config_manager.get_config_env()   (читает msgpack/.env)
+                 └─▶ AppLogger.configure(config)        (логгер только получает словарь)
+
+ConfigApplier.apply_logging(new) ─▶ AppLogger.configure(new)
+MainWindow.__init__              ─▶ AppLogger.configure(config_manager.get_all())
+```
+
+* Пакет `app.utils.logger` **не импортирует** `app.config` (проверяется тестами
+  `test_app_logger.py::test_logger_package_does_not_import_config` и
+  `test_import_logger_does_not_load_config`). Зависимость одна: config → logger.
+* `AppLogger._app_config` — последний конфиг из `configure()`. `None` — не настроен;
+  тогда `get_default_config()` строит конфиг из `UNCONFIGURED_APP_CONFIG`
+  (`file_enabled=False`): консоль, INFO, без файла.
+* `AppLogger.build_logger_config(app_config)` — бывшая логика `get_default_config()`:
+  `LOG_DIR → LOG_FILE` с разделителем на конце, значения по умолчанию, проброс `system_*`/`user_*`.
+* `configure()` передаёт в `reload_all_from_config()` сырой конфиг **плюс** результат
+  `build_logger_config()`. Сырой — ради персональных ключей (`ConfigApplier_LEVEL`),
+  нормализованный — чтобы `LOG_FILE` у созданных до и после настройки логгеров совпадал
+  (от строкового равенства `base_log_file` зависит автопривязка к общему файлу).
+* `reload_all_from_app_config()` оставлен для совместимости: переприменяет последний
+  конфиг из `configure()`, сам ничего не читает.
+* Модуль при импорте по-прежнему создаёт `system` и `user` — но уже без чтения конфига.
+
+Что осталось вне логгера (отдельные задачи модуля конфига):
+
+* `get_config_env()` каждый раз дергает `.env`; если ключ пустой (`GITHUB_TOKEN=''`),
+  `get_getenv()` считает его отсутствующим и **перезаписывает `.env`**.
+* Менеджер конфига по-прежнему не логирует — чтение конфига происходит до `configure()`
+  (следствие выбранного варианта, §7.1). Циклического импорта больше нет, так что
+  логирование в нём можно вернуть; записи до `configure()` пойдут в консоль.
+
+### 4.2 Как было до 2026-10-14 (история)
 
 ```
 logger.py ──import──▶ config_manager.manager.get_config_env()
                          └─▶ conf.get_config.get_config_env() ──▶ getenv.get_getenv() ──▶ .env
 ```
 
-* `AppLogger.get_default_config()` вызывает `get_config_env()` при **каждом** создании логгера.
-* `get_config_env()` каждый раз дергает `.env`; если ключ пустой (`GITHUB_TOKEN=''`),
-  `get_getenv()` считает его отсутствующим и **перезаписывает `.env`**.
-* `reload_all_from_app_config()` передаёт в `reload_all_from_config` сырой конфиг
-  приложения, а не результат `get_default_config()` (там нет преобразования `LOG_DIR → LOG_FILE`;
-  работает, потому что `_init_config_load` умеет читать `DIR`).
-* Модуль при импорте создаёт `system` и `user` — импорт логгера = чтение конфига.
+* `AppLogger.get_default_config()` вызывал `get_config_env()` при **каждом** создании
+  логгера (154 раза за старт GUI, каждый раз с чтением и возможной перезаписью `.env`).
+* `reload_all_from_app_config()` сам читал конфиг и передавал сырой словарь
+  (без `LOG_DIR → LOG_FILE`; работало, потому что `_init_config_load` умеет читать `DIR`).
+* Импорт логгера = чтение конфига: старый код сохранён в комментариях в `logger.py`.
 
-**Почему так (история).** Коммит `b3ccbf4` «новая схема», март 2026: менеджер конфига
+**Почему так было.** Коммит `b3ccbf4` «новая схема», март 2026: менеджер конфига
 логировал через `AppLogger`, логгер читал конфиг → циклический импорт. Логирование в
 менеджере конфига закомментировали (`manager.py`, блоки с `sys.modules[...]`), в `logger.py`
 остались закомментированные варианты с той же защитой. Итог — зависимость только в
@@ -216,11 +260,11 @@ strict-xfail напомнит снять маркер. Рядом обычно �
 
 | # | Проблема | Тест |
 |---|---|---|
-| R1 | Экран настроек сначала сохраняет конфиг, потом `ConfigApplier.apply_logging(new)` сравнивает `new` с уже сохранённым → изменений «нет», логгеры не перезагружаются до перезапуска | `test_app_topology::test_apply_logging_after_save_reloads_loggers` |
+| R1 | Экран настроек сначала сохраняет конфиг, потом `ConfigApplier.apply_logging(new)` сравнивает `new` с уже сохранённым → изменений «нет», `AppLogger.configure()` не вызывается до перезапуска | `test_app_topology::test_apply_logging_after_save_reloads_loggers` |
 | R2 | `turn_on_file_logging()` проверяет `effective_enable_file_logging()` = аргумент конструктора, а не текущий `_file_enabled` → после `disable_file()` файл не включить | `test_base_modes::test_enable_file_back` |
 | R3 | Зеркально: `turn_off_file_logging()` выходит сразу, если аргумент конструктора `False` → у логгера, созданного без файла, включённый позже файл не выключить | `test_base_class_ops::test_enable_disable_group_file` |
 | R4 | `reconfigure(console_level=…)` ставит уровень и тут же пересоздаёт обработчики → уровень теряется | `test_base_modes::test_reconfigure_console_level_via_flags` |
-| R5 | `show_call_depth` есть в настройках, но `AppLogger.get_default_config()` его отбрасывает | `test_app_logger::test_show_call_depth_reaches_logger_config` |
+| R5 | `show_call_depth` есть в настройках, но `AppLogger.build_logger_config()` его отбрасывает | `test_app_logger::test_show_call_depth_reaches_logger_config` |
 | R6 | При выключенных консоли и файле WARNING+ всё равно идут в stderr через `logging.lastResort` | `test_app_topology::test_no_handlers_means_silence` |
 
 ### 5.2 Общий файл
@@ -316,7 +360,7 @@ strict-xfail напомнит снять маркер. Рядом обычно �
 ### 7.2 Порядок работ
 
 1. ✅ Характеризующие тесты (этот набор).
-2. Развязка с конфигом (§7.1).
+2. ✅ Развязка с конфигом (§7.1, §4.1).
 3. Исправление режимов R1–R6, S1–S4.
 4. Прочие баги B1–B5, D1.
 5. Проход по коду `base_logger.py`: докстринги/типизация, упрощение — с сохранением

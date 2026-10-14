@@ -272,3 +272,37 @@ def test_get_config_and_dump_config(make_logger, log_dir):
     assert dump['level'] == 'INFO'
     assert dump['log_FILE'] == os.path.join(log_dir, 'app.log')
     assert lg.get_level() == 'INFO'
+
+
+# ---------------------------------------------------------------------------
+# P8: опечатки в ключах конфига
+# ---------------------------------------------------------------------------
+
+def test_find_suspicious_config_keys(logger_cls):
+    cfg = {
+        'LOG_LEVEL': 'INFO', 'LOG_LEVLE': 'DEBUG',          # опечатка после LOG_
+        'system_LEVEL': 'DEBUG', 'system_level': 'INFO',    # неверный регистр
+        'system_file_enabled': 'True', 'system_fileenabled': 'True',
+        'YANDEX_TOKEN': 'x', 'database_local_path': 'a.db',  # чужие ключи — не трогаем
+        'user_console_enabled': 'False',
+    }
+    assert logger_cls.find_suspicious_config_keys(cfg, ['system', 'user']) == [
+        'LOG_LEVLE', 'system_level', 'system_fileenabled']
+
+
+def test_longest_logger_name_prefix_wins(logger_cls):
+    cfg = {'gui.Table_LEVEL': 'INFO', 'gui_LEVEL': 'INFO'}
+    assert logger_cls.find_suspicious_config_keys(cfg, ['gui', 'gui.Table']) == []
+
+
+def test_reload_all_warns_about_typos(logger_cls, make_logger, log_dir):
+    make_logger(name='system')
+    with pytest.warns(UserWarning, match='system_LEVLE'):
+        logger_cls.reload_all_from_config(make_config(log_dir, system_LEVLE='ERROR'))
+
+
+def test_reload_all_no_warning_for_valid_config(logger_cls, make_logger, log_dir, recwarn):
+    make_logger(name='system')
+    logger_cls.reload_all_from_config(make_config(
+        log_dir, system_LEVEL='ERROR', LOG_DIR=log_dir, YANDEX_TOKEN='x', show_call_depth='False'))
+    assert not [w for w in recwarn if issubclass(w.category, UserWarning)]

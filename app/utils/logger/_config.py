@@ -44,6 +44,63 @@ class _ConfigMixin:
         (<class '...BaseAppLogger'>, <class '..._ConfigMixin'>, ...)
     """
 
+    # Окончания ключей конфига, которые понимает логгер (после префикса {имя}_ или LOG_,
+    # либо без префикса). Регистр важен: 'system_level' не то же, что 'system_LEVEL'.
+    CONFIG_KEYS = frozenset({
+        'LEVEL', 'FILE', 'DIR', 'MAX_BYTES', 'BACKUP_COUNT', 'ARGS',
+        'enabled', 'console_enabled', 'file_enabled',
+        'use_name_in_filename', 'use_timestamp', 'show_call_depth',
+    })
+
+    @classmethod
+    def find_suspicious_config_keys(
+        cls,
+        config: Dict[str, Any],
+        logger_names: Optional[List[str]] = None,
+    ) -> List[str]:
+        """
+        Ключи конфига, похожие на настройки логгера, но с неизвестным окончанием (P8).
+
+        Конфиг приложения общий: в нём много чужих ключей (``YANDEX_TOKEN``, пути),
+        поэтому проверяются только ключи, начинающиеся с ``LOG_`` или с
+        ``<имя логгера>_``. Если окончание такого ключа не входит в ``CONFIG_KEYS`` —
+        это, скорее всего, опечатка или неверный регистр, и логгер ключ проигнорирует.
+
+        Args:
+            config: Плоский словарь настроек.
+            logger_names: Имена логгеров для проверки префиксов; ``None`` — все из реестра.
+
+        Returns:
+            Список подозрительных ключей в порядке словаря (пустой — всё в порядке).
+
+        Пример:
+            >>> AppLogger.find_suspicious_config_keys(
+            ...     {'system_LEVLE': 'DEBUG', 'system_level': 'INFO', 'LOG_LEVEL': 'INFO',
+            ...      'YANDEX_TOKEN': '...'}, logger_names=['system'])
+            ['system_LEVLE', 'system_level']
+        """
+        if logger_names is None:
+            with cls._instances_lock:
+                logger_names = list(cls._instances)
+        # длинные имена раньше: 'gui.Table' должен победить 'gui'
+        prefixes = sorted((n + '_' for n in logger_names), key=len, reverse=True)
+
+        suspicious = []
+        for key in config:
+            if not isinstance(key, str):
+                continue
+            if key.startswith('LOG_'):
+                suffix = key[len('LOG_'):]
+            else:
+                prefix = next((p for p in prefixes if key.startswith(p)), None)
+                if prefix is None:
+                    continue
+                suffix = key[len(prefix):]
+            if suffix not in cls.CONFIG_KEYS:
+                suspicious.append(key)
+        return suspicious
+
+
     def _get_settings_parent(self) -> Optional['BaseAppLogger']:
         """
         Логгер, от которого этот наследует настройки при чтении конфига.

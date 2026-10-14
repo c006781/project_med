@@ -5136,8 +5136,11 @@ class BaseAppLogger:
 
         logger_instance = self
 
-        if log_args is None:
-            log_args = self.log_args
+        # if log_args is None:
+        #     log_args = self.log_args
+        # ↑ до 2026-10-14: значение фиксировалось в момент декорирования (при импорте
+        #   модуля), и смена LOG_ARGS в настройках на уже обёрнутые функции не влияла.
+        #   Теперь None означает «смотреть logger.log_args в момент вызова».
 
         def decorator(func: Callable) -> Callable:
             """
@@ -5197,20 +5200,48 @@ class BaseAppLogger:
                 _show_depth = show_depth#  or type(logger_instance).status_show_call_depth_global()
 
                 # Определяем, нужно ли логировать аргументы
+                # (None — решает logger_instance.log_args в момент вызова)
                 effective_log_args = log_args
                 if func.__name__ == '__init__':
                     effective_log_args = False
 
-                def format_args(args, kwargs):
-                    """Форматирует аргументы для логирования."""
+                # Первый параметр 'self'/'cls' — метод: этот аргумент в лог не выводим.
+                # До 2026-10-14 проверялось inspect.ismethod(func) — на этапе
+                # декорирования это всегда False (функция ещё не привязана к объекту),
+                # и в лог попадал repr(self).
+                code = func.__code__
+                _skip_first_arg = (
+                    code.co_argcount > 0 and code.co_varnames[0] in ('self', 'cls')
+                )
 
-                    if not effective_log_args:
+                def format_args(args, kwargs):
+                    """
+                    Строка с аргументами вызова для ``[Начало]`` или пустая строка.
+
+                    Args:
+                        args: Позиционные аргументы вызова.
+                        kwargs: Именованные аргументы вызова.
+
+                    Returns:
+                        ``' with args: (1, x=2)'`` или ``''``, если аргументы не логируются.
+
+                    Пример:
+                        >>> format_args((svc, 5), {'force': True})   # для метода
+                        ' with args: (5, force=True)'
+                    """
+                    enabled = (
+                        logger_instance.log_args if effective_log_args is None
+                        else effective_log_args
+                    )
+                    if not enabled:
                         return ""
-                    
+
                     display_args = args
 
-                    if args and inspect.ismethod(func) and func.__self__ is not None:
-                        display_args = args[1:]  # убираем self
+                    # if args and inspect.ismethod(func) and func.__self__ is not None:
+                    #     display_args = args[1:]  # убираем self
+                    if args and _skip_first_arg:
+                        display_args = args[1:]  # убираем self / cls
 
                     args_str = ', '.join(repr(a) for a in display_args)
                     kwargs_str = ', '.join(f"{k}={repr(v)}" for k, v in kwargs.items())

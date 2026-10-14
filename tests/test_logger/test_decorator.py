@@ -152,8 +152,8 @@ def test_log_args_function(lg, lines):
     assert _msgs(lines())[0] == "[Начало] with args: (1, 'x', c=[2])"
 
 
-def test_log_args_method_includes_self(lg, lines):
-    """self попадает в аргументы: inspect.ismethod(func) при декорировании всегда False."""
+def test_log_args_method_excludes_self(lg, lines):
+    """self в аргументы не попадает (до 2026-10-14 попадал repr(self))."""
     class Svc:
         def __repr__(self):
             return '<Svc>'
@@ -163,7 +163,7 @@ def test_log_args_method_includes_self(lg, lines):
             pass
 
     Svc().run(5)
-    assert _msgs(lines())[0] == '[Начало] with args: (<Svc>, 5)'
+    assert _msgs(lines())[0] == '[Начало] with args: (5)'
 
 
 def test_log_args_never_for_init(lg, lines):
@@ -180,17 +180,44 @@ def read_all(lines):
     return '\n'.join(lines())
 
 
-def test_log_args_default_from_logger_at_decoration_time(make_logger, log_dir, lines):
-    """log_args=None берёт lg.log_args в момент декорирования, а не вызова."""
+def test_log_args_default_read_at_call_time(make_logger, log_dir, lines):
+    """log_args=None — смотрим lg.log_args в момент вызова.
+
+    До 2026-10-14 значение фиксировалось при декорировании (при импорте модуля).
+    """
     lg = make_logger(config=make_config(log_dir, LOG_ARGS='True'), enable_file_logging=True)
 
     @lg.log_execution_time()
     def f(x):
         pass
 
-    lg.log_args = False
     f(7)
-    assert 'with args: (7)' in _msgs(lines())[0]
+    lg.log_args = False
+    f(8)
+    msgs = [m for m in _msgs(lines()) if '[Начало]' in m]
+    assert msgs == ['[Начало] with args: (7)', '[Начало]']
+
+
+def test_log_args_explicit_overrides_logger(lg, lines):
+    lg.log_args = True
+
+    @lg.log_execution_time(log_args=False)
+    def f(x):
+        pass
+
+    f(1)
+    assert _msgs(lines())[0] == '[Начало]'
+
+
+def test_log_args_classmethod_excludes_cls(lg, lines):
+    class C:
+        @classmethod
+        @lg.log_execution_time(log_args=True)
+        def make(cls, n):
+            return n
+
+    C.make(3)
+    assert _msgs(lines())[0] == '[Начало] with args: (3)'
 
 
 # ---------------------------------------------------------------------------

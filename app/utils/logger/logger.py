@@ -286,6 +286,8 @@ class AppLogger(BaseAppLogger):
             4. Переносит как есть ключи ``system_*`` и ``user_*``: через них
                логгеры ``system``/``user`` и все их «наследники»
                (``enable_file_logging='system'``) получают свои настройки.
+            5. Переносит ``show_call_depth``, если он задан (отступ ``>`` по глубине
+               стека; дорогой — ``inspect.stack()`` на каждую запись).
 
         Значения не приводятся к типам (``'True'`` остаётся строкой) — это делает
         BaseAppLogger при чтении.
@@ -330,7 +332,11 @@ class AppLogger(BaseAppLogger):
             if (
                 key.startswith('system_')
                 or key.startswith('user_')
-                or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
+                # or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp')
+                # ↑ до исправления R5: show_call_depth из конфига отбрасывался,
+                #   и ключ в config.msgpack ни на что не влиял.
+                or key in ('enabled', 'console_enabled', 'file_enabled', 'use_timestamp',
+                           'show_call_depth')
             ):
                 if key not in result:
                     result[key] = value

@@ -96,9 +96,9 @@ def test_build_system_and_user_keys_passed_through():
 
 def test_build_other_keys_dropped():
     cfg = AppLogger.build_logger_config({
-        'YANDEX_TOKEN': 'secret', 'show_call_depth': 'True',
+        'YANDEX_TOKEN': 'secret',
         'ConfigApplier_LEVEL': 'ERROR', 'database_local_path': 'x.db'})
-    for key in ('YANDEX_TOKEN', 'show_call_depth', 'ConfigApplier_LEVEL', 'database_local_path'):
+    for key in ('YANDEX_TOKEN', 'ConfigApplier_LEVEL', 'database_local_path'):
         assert key not in cfg
 
 
@@ -108,12 +108,10 @@ def test_build_does_not_mutate_input():
     assert src == {'LOG_DIR': 'logs'}
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: show_call_depth есть на экране настроек и в ConfigApplier, но "
-    "build_logger_config() его отбрасывает → переключатель ни на что не влияет"
-))
 def test_show_call_depth_reaches_logger_config():
+    """R5: раньше ключ отбрасывался и ни на что не влиял."""
     assert AppLogger.build_logger_config({'show_call_depth': 'True'}).get('show_call_depth') == 'True'
+    assert 'show_call_depth' not in AppLogger.build_logger_config({})
 
 
 # ---------------------------------------------------------------------------
@@ -295,3 +293,12 @@ def test_exports():
     assert pkg.__all__ == ['AppLogger']
     assert pkg.AppLogger is AppLogger
     assert logger_module.AppLogger is AppLogger
+
+
+def test_show_call_depth_applied_by_configure(app_cls, log_dir):
+    """R5: show_call_depth из конфига приложения доходит до логгеров."""
+    lg = app_cls.get_instance('depth')
+    app_cls.configure({'LOG_DIR': log_dir, 'show_call_depth': 'True'})
+    assert lg._show_call_depth is True
+    app_cls.configure({'LOG_DIR': log_dir, 'show_call_depth': 'False'})
+    assert lg._show_call_depth is False

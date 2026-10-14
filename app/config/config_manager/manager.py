@@ -307,6 +307,43 @@ class AppConfigManager(BaseConfigManager):
     # Хранилище для экземпляров (Multiton)
     _instances = {}
 
+    # Путь к конфигу из .env (APP_CONFIG_PATH), прочитанный один раз (E6)
+    _resolved_default_path: Optional[str] = None
+
+    @classmethod
+    def _default_config_path(cls) -> str:
+        """
+        Путь к файлу конфигурации по умолчанию: ``APP_CONFIG_PATH`` из ``.env``.
+
+        Читается из ``.env`` при первом вызове и запоминается (E6): раньше ``.env``
+        перечитывался при каждом ``get_instance()`` без пути.
+
+        Returns:
+            Путь к файлу конфигурации.
+
+        Пример:
+            >>> AppConfigManager._default_config_path()
+            'config.msgpack'
+        """
+        if cls._resolved_default_path is None:
+            cls._resolved_default_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
+        return cls._resolved_default_path
+
+    @classmethod
+    def reset_default_config_path(cls) -> None:
+        """
+        Забывает запомненный путь к конфигу — следующий ``get_instance()`` перечитает ``.env``.
+
+        Нужен тестам и случаям, когда ``.env`` изменили во время работы.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppConfigManager.reset_default_config_path()
+        """
+        cls._resolved_default_path = None
+
     def __init__(self, config_path: str = None):
         """
         Инициализирует менеджер с путём к файлу и значениями по умолчанию.
@@ -340,8 +377,11 @@ class AppConfigManager(BaseConfigManager):
         """
 
         if config_path is None:
-            # Получаем путь из старой конфигурации (там он уже должен быть)
-            config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
+            # # Получаем путь из старой конфигурации (там он уже должен быть)
+            # config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
+            # ↑ до E6 (2026-10-14): .env перечитывался при КАЖДОМ вызове (34 чтения за старт
+            #   GUI). Путь к конфигу за время работы не меняется — читаем один раз.
+            config_path = cls._default_config_path()
 
         # Если не требуем новый экземпляр и такой уже есть – возвращаем его
         if not force_new and config_path in cls._instances:

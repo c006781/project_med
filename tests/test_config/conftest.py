@@ -36,6 +36,7 @@ def config_sandbox(tmp_path, monkeypatch):
     for key in ('GITHUB_TOKEN', 'APP_CONFIG_PATH'):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(AppConfigManager, '_instances', {})
+    monkeypatch.setattr(AppConfigManager, '_resolved_default_path', None)  # E6: путь запоминается
     monkeypatch.setattr(BaseConfigManager, '_listeners', [])
 
     yield tmp_path

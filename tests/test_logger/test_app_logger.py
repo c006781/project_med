@@ -1,37 +1,52 @@
 # tests/test_logger/test_app_logger.py
 
 """
-AppLogger — наследник BaseAppLogger, связанный с конфигурацией приложения.
+AppLogger — наследник BaseAppLogger, получающий конфиг приложения через configure().
 
-Связь с конфигом: get_default_config() и reload_all_from_app_config() вызывают
-app.config.config_manager.manager.get_config_env(), а модуль при импорте сразу
-создаёт логгеры 'system' и 'user'.
+После развязки (2026-10-14) модуль логгера конфиг не читает: его передаёт
+app.config.logging_setup.setup_logging() из точки входа.
 """
 
+import ast
 import os
+import subprocess
+import sys
 
 import pytest
 
 import app.utils.logger.logger as logger_module
 from app.utils.logger.base_logger import BaseAppLogger
 from app.utils.logger.logger import AppLogger
+from tests.test_logger.conftest import read
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture
-def fake_env(monkeypatch):
-    """Подменяет get_config_env в модуле логгера; возвращает изменяемый словарь."""
-    env = {}
-    monkeypatch.setattr(logger_module, 'get_config_env', lambda: dict(env))
-    return env
+def app_cls(logger_cls):
+    """Изолированный подкласс AppLogger: свой реестр и своё состояние configure().
+
+    logger_cls подключён ради восстановления общего классового состояния BaseAppLogger.
+    """
+    class IsolatedApp(AppLogger):
+        _instances = {}
+        _app_config = None
+
+    yield IsolatedApp
+
+    for inst in list(IsolatedApp._instances.values()):
+        for handler in inst.logger.handlers[:]:
+            handler.close()
+            inst.logger.removeHandler(handler)
+    IsolatedApp._instances.clear()
 
 
 # ---------------------------------------------------------------------------
-# get_default_config
+# build_logger_config — преобразование конфига приложения
 # ---------------------------------------------------------------------------
 
-def test_defaults_when_config_empty(fake_env):
-    cfg = AppLogger.get_default_config()
-    assert cfg == {
+def test_build_defaults_from_empty():
+    assert AppLogger.build_logger_config({}) == {
         'LOG_LEVEL': 'INFO',
         'LOG_FILE': 'logs' + os.sep,
         'LOG_MAX_BYTES': 10 * 1024 * 1024,
@@ -44,90 +59,225 @@ def test_defaults_when_config_empty(fake_env):
     }
 
 
-def test_log_dir_becomes_log_file_with_separator(fake_env):
-    fake_env['LOG_DIR'] = os.path.join('.', 'my_logs')
-    assert AppLogger.get_default_config()['LOG_FILE'] == os.path.join('.', 'my_logs') + os.sep
+def test_build_log_dir_becomes_log_file_with_separator():
+    cfg = AppLogger.build_logger_config({'LOG_DIR': os.path.join('.', 'my_logs')})
+    assert cfg['LOG_FILE'] == os.path.join('.', 'my_logs') + os.sep
 
 
-def test_log_dir_preferred_over_log_file(fake_env):
-    fake_env.update(LOG_DIR='dir_a', LOG_FILE='dir_b')
-    assert AppLogger.get_default_config()['LOG_FILE'] == 'dir_a' + os.sep
+def test_build_log_dir_preferred_over_log_file():
+    assert AppLogger.build_logger_config({'LOG_DIR': 'a', 'LOG_FILE': 'b'})['LOG_FILE'] == 'a' + os.sep
 
 
-def test_log_file_fallback(fake_env):
-    fake_env['LOG_FILE'] = 'legacy'
-    assert AppLogger.get_default_config()['LOG_FILE'] == 'legacy' + os.sep
+def test_build_log_file_fallback():
+    assert AppLogger.build_logger_config({'LOG_FILE': 'legacy'})['LOG_FILE'] == 'legacy' + os.sep
 
 
 @pytest.mark.parametrize('value', ['logs/', 'logs\\', 'logs/app.log', 'LOGS/APP.LOG'])
-def test_trailing_separator_or_log_extension_kept(fake_env, value):
-    fake_env['LOG_DIR'] = value
-    assert AppLogger.get_default_config()['LOG_FILE'] == value
+def test_build_trailing_separator_or_log_extension_kept(value):
+    assert AppLogger.build_logger_config({'LOG_DIR': value})['LOG_FILE'] == value
 
 
-def test_values_passed_as_is_without_conversion(fake_env):
+def test_build_values_passed_as_is():
     """Строки из msgpack не приводятся: это делает BaseAppLogger при чтении."""
-    fake_env.update(LOG_LEVEL='DEBUG', LOG_MAX_BYTES='100', LOG_BACKUP_COUNT='2',
-                    LOG_ARGS='True', enabled='False', console_enabled='False',
-                    file_enabled='False', use_timestamp='True')
-    cfg = AppLogger.get_default_config()
+    cfg = AppLogger.build_logger_config({
+        'LOG_LEVEL': 'DEBUG', 'LOG_MAX_BYTES': '100', 'LOG_ARGS': 'True', 'enabled': 'False'})
     assert cfg['LOG_MAX_BYTES'] == '100'
     assert cfg['enabled'] == 'False'
     assert cfg['LOG_ARGS'] == 'True'
 
 
-def test_system_and_user_keys_passed_through(fake_env):
-    fake_env.update(system_LEVEL='DEBUG', system_file_enabled='False',
-                    user_console_enabled='True', user_anything='x')
-    cfg = AppLogger.get_default_config()
+def test_build_system_and_user_keys_passed_through():
+    cfg = AppLogger.build_logger_config({
+        'system_LEVEL': 'DEBUG', 'system_file_enabled': 'False', 'user_anything': 'x'})
     assert cfg['system_LEVEL'] == 'DEBUG'
     assert cfg['system_file_enabled'] == 'False'
-    assert cfg['user_console_enabled'] == 'True'
     assert cfg['user_anything'] == 'x'
 
 
-def test_other_keys_dropped(fake_env):
-    """Ключи других логгеров и show_call_depth в конфиг логгера не попадают."""
-    fake_env.update(YANDEX_TOKEN='secret', show_call_depth='True',
-                    ConfigApplier_LEVEL='ERROR', database_local_path='x.db')
-    cfg = AppLogger.get_default_config()
+def test_build_other_keys_dropped():
+    cfg = AppLogger.build_logger_config({
+        'YANDEX_TOKEN': 'secret', 'show_call_depth': 'True',
+        'ConfigApplier_LEVEL': 'ERROR', 'database_local_path': 'x.db'})
     for key in ('YANDEX_TOKEN', 'show_call_depth', 'ConfigApplier_LEVEL', 'database_local_path'):
         assert key not in cfg
 
 
+def test_build_does_not_mutate_input():
+    src = {'LOG_DIR': 'logs'}
+    AppLogger.build_logger_config(src)
+    assert src == {'LOG_DIR': 'logs'}
+
+
 @pytest.mark.xfail(strict=True, reason=(
     "BUG: show_call_depth есть на экране настроек и в ConfigApplier, но "
-    "get_default_config() его отбрасывает → переключатель ни на что не влияет"
+    "build_logger_config() его отбрасывает → переключатель ни на что не влияет"
 ))
-def test_show_call_depth_reaches_logger_config(fake_env):
-    fake_env['show_call_depth'] = 'True'
-    assert AppLogger.get_default_config().get('show_call_depth') == 'True'
-
-
-def test_get_default_config_reads_config_every_call(monkeypatch):
-    calls = []
-    monkeypatch.setattr(logger_module, 'get_config_env', lambda: calls.append(1) or {})
-    AppLogger.get_default_config()
-    AppLogger.get_default_config()
-    assert len(calls) == 2
+def test_show_call_depth_reaches_logger_config():
+    assert AppLogger.build_logger_config({'show_call_depth': 'True'}).get('show_call_depth') == 'True'
 
 
 # ---------------------------------------------------------------------------
-# reload_all_from_app_config
+# До configure(): безопасные значения по умолчанию
 # ---------------------------------------------------------------------------
 
-def test_reload_all_from_app_config_passes_raw_config(monkeypatch):
-    """В reload уходит СЫРОЙ конфиг приложения, а не результат get_default_config()."""
-    raw = {'LOG_DIR': 'x', 'system_LEVEL': 'ERROR'}
-    monkeypatch.setattr(logger_module, 'get_config_env', lambda: dict(raw))
-    seen = []
-    monkeypatch.setattr(AppLogger, 'reload_all_from_config', classmethod(lambda cls, cfg: seen.append(cfg)))
-    AppLogger.reload_all_from_app_config()
-    assert seen == [raw]
+def test_unconfigured_state(app_cls):
+    assert app_cls.is_configured() is False
+    cfg = app_cls.get_default_config()
+    assert cfg['file_enabled'] is False
+    assert cfg['console_enabled'] is True
+    assert cfg['LOG_LEVEL'] == 'INFO'
+
+
+def test_unconfigured_logger_console_only(app_cls, capsys):
+    lg = app_cls.get_instance('early')
+    assert lg.file_handler is None
+    lg.info('до настройки')
+    assert 'до настройки' in capsys.readouterr().err
+
+
+def test_unconfigured_slave_of_system_has_no_file(app_cls):
+    app_cls.get_instance('system')
+    svc = app_cls.get_instance('svc', enable_file_logging='system')
+    assert svc.file_handler is None
 
 
 # ---------------------------------------------------------------------------
-# Побочные эффекты импорта
+# configure()
+# ---------------------------------------------------------------------------
+
+def _app_config(log_dir, **overrides):
+    cfg = {
+        'LOG_DIR': log_dir, 'LOG_LEVEL': 'INFO',
+        'system_enabled': 'True', 'system_console_enabled': 'False',
+        'system_file_enabled': 'True', 'system_LEVEL': 'DEBUG',
+        'user_enabled': 'True', 'user_console_enabled': 'True',
+        'user_file_enabled': 'True', 'user_LEVEL': 'INFO',
+    }
+    cfg.update(overrides)
+    return cfg
+
+
+def test_configure_marks_configured_and_copies(app_cls, log_dir):
+    src = _app_config(log_dir)
+    app_cls.configure(src)
+    assert app_cls.is_configured() is True
+    src['LOG_LEVEL'] = 'CRITICAL'
+    assert app_cls.get_default_config()['LOG_LEVEL'] == 'INFO'
+
+
+def test_configure_applies_to_loggers_created_after(app_cls, log_dir):
+    app_cls.configure(_app_config(log_dir))
+    system = app_cls.get_instance('system')
+    assert system.get_level() == 'DEBUG'
+    assert system.is_console_enabled() is False
+    assert system.file_handler is not None
+    system.info('после настройки')
+    assert 'после настройки' in read(os.path.join(log_dir, 'app.log'))
+
+
+def test_configure_reconfigures_loggers_created_before(app_cls, log_dir):
+    """Главный сценарий старта: логгеры созданы импортами, конфиг пришёл позже."""
+    system = app_cls.get_instance('system')
+    svc = app_cls.get_instance('svc', enable_file_logging='system')
+    assert system.file_handler is None and svc.file_handler is None
+
+    app_cls.configure(_app_config(log_dir))
+
+    assert system.get_level() == 'DEBUG'
+    assert svc.get_level() == 'DEBUG'
+    assert svc.is_console_enabled() is False
+    svc.debug('первая запись старта')
+    assert 'первая запись старта' in read(os.path.join(log_dir, 'app.log'))
+
+
+def test_configure_same_log_file_for_before_and_after(app_cls, log_dir):
+    """LOG_FILE у перенастроенных и новых логгеров совпадает (важно для автопривязки)."""
+    before = app_cls.get_instance('before')
+    app_cls.configure(_app_config(log_dir))
+    after = app_cls.get_instance('after')
+    assert before.base_log_file == after.base_log_file == log_dir + os.sep
+
+
+def test_configure_keeps_personal_keys(app_cls, log_dir):
+    lg = app_cls.get_instance('ConfigApplier')
+    app_cls.configure(_app_config(log_dir, ConfigApplier_LEVEL='ERROR'))
+    assert lg.get_level() == 'ERROR'
+
+
+def test_configure_again_applies_new_values(app_cls, log_dir):
+    system = app_cls.get_instance('system')
+    app_cls.configure(_app_config(log_dir))
+    app_cls.configure(_app_config(log_dir, system_LEVEL='ERROR', system_file_enabled='False'))
+    assert system.get_level() == 'ERROR'
+    assert system.file_handler is None
+
+
+def test_reload_all_from_app_config_reapplies_last(app_cls, log_dir):
+    system = app_cls.get_instance('system')
+    app_cls.configure(_app_config(log_dir, system_LEVEL='ERROR'))
+    system.reconfigure(level='DEBUG')
+    app_cls.reload_all_from_app_config()
+    assert system.get_level() == 'ERROR'
+
+
+def test_reload_all_from_app_config_unconfigured_uses_defaults(app_cls):
+    lg = app_cls.get_instance('x')
+    lg.reconfigure(level='DEBUG')
+    app_cls.reload_all_from_app_config()
+    assert lg.get_level() == 'INFO'
+
+
+def test_reset_configuration(app_cls, log_dir):
+    lg = app_cls.get_instance('system')
+    app_cls.configure(_app_config(log_dir))
+    app_cls.reset_configuration()
+    assert app_cls.is_configured() is False
+    assert lg.file_handler is not None  # существующие логгеры не трогаются
+
+
+def test_configure_does_not_touch_other_class(app_cls, log_dir):
+    app_cls.configure(_app_config(log_dir))
+    assert AppLogger._app_config is not app_cls._app_config
+
+
+# ---------------------------------------------------------------------------
+# Развязка с конфигом: модуль логгера не зависит от app.config
+# ---------------------------------------------------------------------------
+
+def _imported_modules(path):
+    tree = ast.parse(open(path, encoding='utf-8').read())
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    return names
+
+
+@pytest.mark.parametrize('module', ['logger.py', 'base_logger.py', '__init__.py'])
+def test_logger_package_does_not_import_config(module):
+    path = os.path.join(PROJECT_ROOT, 'app', 'utils', 'logger', module)
+    assert not any(m.startswith('app.config') for m in _imported_modules(path))
+
+
+def test_import_logger_does_not_load_config():
+    """Чистый процесс: импорт логгера не подтягивает app.config и не трогает .env."""
+    code = (
+        "import sys, app.utils.logger as l;"
+        "print(any(m.startswith('app.config') for m in sys.modules));"
+        "print(l.AppLogger.is_configured())"
+    )
+    out = subprocess.run(
+        [sys.executable, '-c', code], cwd=PROJECT_ROOT, capture_output=True, text=True,
+        env={**os.environ, 'PYTHONPATH': PROJECT_ROOT}, timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.split() == ['False', 'False']
+
+
+# ---------------------------------------------------------------------------
+# Побочные эффекты импорта, которые остались
 # ---------------------------------------------------------------------------
 
 def test_import_creates_system_and_user():
@@ -140,12 +290,8 @@ def test_app_registry_separate_from_base():
     assert 'system' not in BaseAppLogger._instances
 
 
-def test_logger_module_depends_on_config_module():
-    """Модуль логгера импортирует конфиг напрямую — источник циклических зависимостей."""
-    assert logger_module.get_config_env.__module__ == 'app.config.config_manager.manager'
-
-
 def test_exports():
     import app.utils.logger as pkg
     assert pkg.__all__ == ['AppLogger']
     assert pkg.AppLogger is AppLogger
+    assert logger_module.AppLogger is AppLogger

@@ -1,11 +1,27 @@
 # main_gui_window.py
 
+"""
+Точка входа графического приложения (из неё же собирается MedicalApp.exe).
+
+Порядок запуска:
+    1. handle_rename_argument() — только в собранном exe после обновления:
+       переименовывает exe и перезапускает его.
+    2. setup_logging() — передаёт логгерам конфиг. Должен идти ДО main(), иначе
+       старт программы не попадёт в лог по настройкам из конфига.
+    3. main() — создаёт QApplication и главное окно.
+
+Пример:
+    python main_gui_window.py
+    MedicalApp.exe --rename-to MedicalApp.exe
+"""
+
 import os
 import subprocess
 import sys
 import traceback
 
 import interfaces.gui.gui_window.main as main_gui_window
+from app.config.logging_setup import setup_logging
 
 def handle_rename_argument():
     """Если передан аргумент --rename-to, переименовываем текущий exe и перезапускаем."""
@@ -52,5 +68,11 @@ def handle_rename_argument():
 
 if __name__ == '__main__':
     handle_rename_argument()
-    main_gui_window.main() 
+
+    # Логгеры не читают конфиг сами: передаём его до запуска main(),
+    # иначе старт (main [Начало] и всё внутри) пойдёт по настройкам по умолчанию.
+    # См. app/utils/logger/IMPLEMENTATION.md §7.1.
+    setup_logging()
+
+    main_gui_window.main()
 

@@ -1565,7 +1565,11 @@ class MainWindow(
         # Применяем сохранённые настройки ко всем логгерам (если файл существует)
         if config_manager.config_exists:
             # from app.utils.logger.logger import AppLogger
-            AppLogger.reload_all_from_app_config()
+            # AppLogger.reload_all_from_app_config()  # до развязки: логгер сам перечитывал конфиг
+            # Логгер конфиг не читает — передаём актуальный (IMPLEMENTATION.md §7.1).
+            # Основная настройка уже сделана setup_logging() в точке входа; здесь —
+            # повторно, на случай запуска окна в обход main_gui_window.py.
+            AppLogger.configure(config_manager.get_all())
 
         if not config_manager.config_exists:
             # Первый запуск – открываем настройки с флагом first_start

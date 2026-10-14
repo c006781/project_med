@@ -237,7 +237,8 @@ def _applier(saved_config):
 def reload_spy(monkeypatch):
     from app.utils.logger.logger import AppLogger
     calls = []
-    monkeypatch.setattr(AppLogger, 'reload_all_from_app_config', classmethod(lambda cls: calls.append(1)))
+    # после развязки apply_logging передаёт новый конфиг в AppLogger.configure()
+    monkeypatch.setattr(AppLogger, 'configure', classmethod(lambda cls, cfg: calls.append(dict(cfg))))
     return calls
 
 
@@ -245,7 +246,7 @@ def test_apply_logging_detects_change_against_old_config(reload_spy):
     old = {'system_LEVEL': 'DEBUG'}
     new = {'system_LEVEL': 'ERROR'}
     assert _applier(old).apply_logging(new) is True
-    assert reload_spy == [1]
+    assert reload_spy == [new]
 
 
 @pytest.mark.xfail(strict=True, reason=(
@@ -256,7 +257,7 @@ def test_apply_logging_detects_change_against_old_config(reload_spy):
 def test_apply_logging_after_save_reloads_loggers(reload_spy):
     saved = {'system_LEVEL': 'ERROR'}  # менеджер уже сохранил новые значения
     assert _applier(saved).apply_logging({'system_LEVEL': 'ERROR'}) is True
-    assert reload_spy == [1]
+    assert reload_spy == [{'system_LEVEL': 'ERROR'}]
 
 
 def test_apply_logging_after_save_current_behavior(reload_spy):

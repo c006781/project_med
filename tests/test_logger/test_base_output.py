@@ -200,8 +200,10 @@ def test_disabled_logger_writes_nothing(make_logger, log_dir, capsys, method):
 
 
 def test_disabled_logger_has_no_handlers(make_logger, log_dir):
+    """У выключенного логгера остаётся только постоянный NullHandler (R6)."""
     lg = make_logger(config=make_config(log_dir, enabled='False'), enable_file_logging=True)
-    assert lg.logger.handlers == []
+    assert lg.logger.handlers == [lg._null_handler]
+    assert isinstance(lg._null_handler, logging.NullHandler)
     assert lg.console_handler is None
 
 

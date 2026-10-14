@@ -14,8 +14,9 @@ from tests.test_logger.conftest import make_config, read
 
 
 def _own_handlers(lg):
-    """Обработчики логгера без глобальных."""
-    return [h for h in lg.logger.handlers if h not in type(lg)._global_handlers]
+    """Обработчики логгера без глобальных и без постоянного NullHandler (R6)."""
+    return [h for h in lg.logger.handlers
+            if h not in type(lg)._global_handlers and h is not lg._null_handler]
 
 
 def _kinds(lg):

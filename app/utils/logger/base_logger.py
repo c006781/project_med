@@ -539,6 +539,20 @@ class BaseAppLogger:
         self.logger.propagate = False
         self.logger.setLevel(logging.DEBUG)  # временно
 
+        # Постоянный «пустой» обработчик (исправление R6, IMPLEMENTATION.md §5.1).
+        # Если у logging.Logger нет ни одного обработчика (консоль и файл выключены),
+        # Python пишет WARNING и выше в stderr через logging.lastResort — выключенный
+        # логгер «протекал» в консоль. NullHandler ничего не выводит, но обработчик
+        # есть, и lastResort не срабатывает. _update_handlers() его не трогает
+        # (снимает только console_handler/file_handler), снимает только close().
+        # logging.Logger общий для одного имени (force_new) — второй не добавляем.
+        self._null_handler: logging.Handler = next(
+            (h for h in self.logger.handlers if isinstance(h, logging.NullHandler)),
+            None,
+        ) or logging.NullHandler()
+        if self._null_handler not in self.logger.handlers:
+            self.logger.addHandler(self._null_handler)
+
         self._shared_handler = False    # флаг, что используется общий обработчик
         self._master_logger = None      # ссылка на логгер, предоставивший общий обработчик
         self._shared_slaves = []        # логгеры, которые используют мой обработчик
@@ -930,7 +944,11 @@ class BaseAppLogger:
             # )
             # родитель не найден
 
-            if hasattr(self, 'logger') and self.logger:
+            # if hasattr(self, 'logger') and self.logger:
+            # ↑ до R6 работало «случайно»: в __init__ у logging.Logger ещё нет обработчиков,
+            #   и warning выводил logging.lastResort. С постоянным NullHandler запись
+            #   пропала бы, поэтому пока свои обработчики не созданы — пишем в stderr.
+            if self._has_output_handlers():
                 self.logger.warning(
                     f"Логгер '{self.name}' "
                     f"ссылается на несуществующий '{self._enable_file_logging_ref}'"
@@ -986,7 +1004,11 @@ class BaseAppLogger:
                 return parent.effective_use_name_in_filename(_visited=_visited)
             # родитель не найден — логируем предупреждение, если логгер уже существует
 
-            if hasattr(self, 'logger') and self.logger:
+            # if hasattr(self, 'logger') and self.logger:
+            # ↑ до R6 работало «случайно»: в __init__ у logging.Logger ещё нет обработчиков,
+            #   и warning выводил logging.lastResort. С постоянным NullHandler запись
+            #   пропала бы, поэтому пока свои обработчики не созданы — пишем в stderr.
+            if self._has_output_handlers():
                 self.logger.warning(
                     f"Логгер '{self.name}' "
                     f"ссылается на несуществующий '{self._use_name_in_filename_ref}'"
@@ -1002,6 +1024,29 @@ class BaseAppLogger:
             
         return self._use_name_in_filename
 
+
+    def _has_output_handlers(self) -> bool:
+        """
+        Есть ли у логгера реальный вывод: консоль, файл или глобальный обработчик.
+
+        Постоянный ``NullHandler`` (R6) не считается. Нужен там, где сообщение
+        логгера о самом себе может прийти до создания обработчиков (в ``__init__``):
+        тогда его надо вывести в stderr напрямую, иначе оно потеряется.
+
+        Returns:
+            ``True``, если хотя бы один обработчик, кроме NullHandler, подключён.
+
+        Пример:
+            >>> log = AppLogger.get_instance('x')
+            >>> log._has_output_handlers()
+            True
+            >>> log.disable(); log._has_output_handlers()   # остались глобальные?
+            False
+        """
+        logger = getattr(self, 'logger', None)
+        if logger is None:
+            return False
+        return any(not isinstance(h, logging.NullHandler) for h in logger.handlers)
 
     def _get_parent(self, key) -> Optional['BaseAppLogger']:
         cls = type(self)

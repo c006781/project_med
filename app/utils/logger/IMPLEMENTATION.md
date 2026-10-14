@@ -2,7 +2,8 @@
 
 > Файл для разработчиков: что делает модуль, как он устроен внутри, где у него
 > проблемы и неочевидные места, и почему он устроен именно так.
-> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, исправление режимов (ветка `refactor/logger`).
+> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, баги B1–B7, переносимость,
+> выводы-функции (ветка `refactor/logger`).
 
 Связанные файлы:
 
@@ -31,6 +32,12 @@
 5. **Общий файловый обработчик (мастер/слейв).** Много логгеров пишут в один файл через
    один `RotatingFileHandler`, чтобы ротация работала корректно.
 6. **Восстановление файла лога**, если его удалили во время работы программы.
+7. **Вывод в любую функцию** вида `print(text)`: Telegram-бот, окно программы, список —
+   для одного логгера (`add_output`) или для всех (`add_global_output`), в том числе в
+   фоновом потоке (§3.7).
+
+Модуль **самостоятельный**: только стандартная библиотека, импорты внутри пакета
+относительные. Его можно скопировать в другой проект — см. §8.
 
 Формат строки:
 
@@ -104,8 +111,11 @@ logging.Handler
 └── RotatingFileHandler
     └── RobustRotatingFileHandler      # переоткрывает удалённый файл, ретраи при PermissionError
 
+logging.Handler
+└── CallableHandler                    # запись → функция вида print(text); фоновый режим
+
 BaseAppLogger                          # вся логика, конфиг не знает
-└── AppLogger                          # get_default_config() читает конфиг приложения
+└── AppLogger                          # конфиг приложения приходит через configure()
 ```
 
 `BaseAppLogger` **не наследуется** от `logging.Logger`, а держит его в `self.logger`
@@ -225,6 +235,37 @@ BaseAppLogger                          # вся логика, конфиг не 
 создании — автоматически, если `share_file_with` не передан и у другого логгера тот же
 `base_log_file`.
 
+### 3.7 Выводы-функции (`add_output`)
+
+```python
+log.add_output(print)                                      # сразу, в том же потоке
+log.add_output(send_tg, level='ERROR', background=True,    # в фоновом потоке
+               formatter='%(levelname)s: %(plain_message)s')
+AppLogger.add_global_output(send_tg, level='CRITICAL')     # от всех логгеров
+```
+
+* `CallableHandler` — обычный `logging.Handler`: форматирует запись и вызывает
+  `func(text)`. Можно использовать и без BaseAppLogger, с голым `logging`.
+* Фильтрация: сначала уровень логгера, затем порог вывода `level`.
+* Формат по умолчанию: у `add_output` — форматтер логгера (как в консоли/файле, меняется
+  `set_formatter`), у `add_global_output` — `LOG_FORMAT`.
+* `plain_message` — поле записи: текст сообщения без `[имя]` и места вызова. Методы
+  логгера и декоратор кладут его через `extra`; для чужих записей `CallableHandler`
+  подставляет `record.getMessage()`.
+* `background=True`: очередь (`queue_size`, по умолчанию 1000) + поток-демон
+  `LogOutput-<имя>`. Переполнение — запись отбрасывается, `dropped += 1`, без блокировки.
+  `flush(timeout)` ждёт опустошения очереди; `close()` дожидается остатка
+  (до `CLOSE_TIMEOUT` = 5 с) и останавливает поток.
+* Исключение в функции → `handleError` (стандартный `--- Logging error ---` в stderr),
+  программа и остальные выводы продолжают работать; фоновый поток не умирает.
+* Повторный вход: запись, сделанная из самой функции (в том же потоке), ей не
+  передаётся — без бесконечной рекурсии. Флаг — `threading.local`.
+* Выводы логгера хранятся в `_outputs`; `_update_handlers()` их не трогает, поэтому они
+  переживают любые перестроения. Снимаются `remove_output()`, `close()`, `_retire()`.
+  У слейва выводы свои — с мастером не делятся.
+* Глобальные выводы живут в `_global_handlers` (общие для всех наследников).
+  `close()` логгера их снимает, но не закрывает (B7).
+
 ---
 
 ## 4. Связь с конфигом приложения
@@ -311,26 +352,34 @@ logger.py ──import──▶ config_manager.manager.get_config_env()
 | S3 | Уровень мастера навязывался слейвам (user → DEBUG, `{name}_LEVEL` затирался); перезагрузка любого логгера ставила его уровень общему файлу и окну логов GUI | ✅ Общие обработчики без порога, уровни свои (§3.6) | `test_app_topology::test_startup_user_level_is_own`, `test_slave_reload_does_not_silence_master`, `test_reload_does_not_change_global_handler_level` |
 | S4 | `get_instance(sync_full_state=False)` (по умолчанию) перетирает флаг, унаследованный от мастера | ⏳ Отложено: приложение `sync_full_state=True` не использует; разобрать при проходе по коду | `test_base_sharing::test_master_disable_with_full_sync_disables_slave_flag` (текущее поведение) |
 
-### 5.3 Прочие баги — открыты
+### 5.3 Прочие баги — исправлены 2026-10-14
 
-| # | Проблема | Тест |
-|---|---|---|
-| B1 | Защита от циклов в `effective_*` проверяет `self.name in _visited`, а кладёт `id(self)` → цикл ссылок = `RecursionError` | `test_base_sharing::test_cyclic_refs_do_not_recurse_forever` |
-| B2 | `set_group_console_level` / `set_group_file_level` переводят уровень в `int`, а `set_*_level` снова парсят строку → `AttributeError` | `test_base_class_ops::test_set_group_console_level` |
-| B3 | `force_new=True` не снимает обработчики старого экземпляра с общего `logging.Logger` → консоль дублируется (файл перестал дублироваться после «один обработчик на файл») | `test_base_class_ops::test_force_new_does_not_duplicate_output` |
-| B4 | `warning()`/`error()` не проверяют `_disabled_loggers` (остальные методы проверяют) | `test_base_output::test_disabled_list_blocks_warning_and_error` |
-| B5 | Аргумент `show_call_depth` в `get_instance()` затирается конфигом | `test_base_config::test_show_call_depth_param_is_respected` |
+| # | Проблема (как было) | Исправление | Тест |
+|---|---|---|---|
+| B1 | Защита от циклов в `effective_*` проверяла имя, а запоминала `id` → цикл ссылок a→b→a давал `RecursionError`; в `_get_config_with_inheritance` обрыв цикла возвращал значение по умолчанию и пропускал `LOG_*` (путь к файлу становился `logs`) | Проверка по `id`; маркер `_NOT_FOUND` — поиск продолжается | `test_base_sharing::test_cyclic_refs_do_not_recurse_forever` |
+| B2 | `set_group_console_level`/`set_group_file_level` падали с `AttributeError` | `_parse_log_level` принимает и число | `test_base_class_ops::test_set_group_console_level`, `test_base_config::test_parse_log_level_accepts_int` |
+| B3 | `force_new=True` оставлял обработчики старого экземпляра на общем `logging.Logger` → дубли | `_retire()` у старого экземпляра | `test_base_class_ops::test_force_new_does_not_duplicate_output` |
+| B4 | `warning()`/`error()` не проверяли список отключённых | Проверка добавлена | `test_base_output::test_disabled_list_blocks_warning_and_error` |
+| B5 | Аргумент `show_call_depth` затирался значением `False` | Аргумент — значение по умолчанию, ключ конфига сильнее | `test_base_config::test_show_call_depth_param_is_respected` |
+| B6 | `log.exception()` указывал место вызова внутри логгера (в списке пропуска не было `exception`) | Добавлено в список | `test_base_output::test_exception_caller_info_points_to_caller` |
+| B7 | `close()` одного логгера закрывал глобальные обработчики (окно логов GUI) для всех | Глобальные снимаются, но не закрываются | `test_outputs::test_close_of_one_logger_keeps_global_output` |
 
-### 5.4 Глубина вызова — открыто
+### 5.4 Глубина вызова — исправлено 2026-10-14
 
-| # | Проблема | Тест |
-|---|---|---|
-| D1 | Декоратор с `show_depth=True`: `_increase_depth` пишет в `contextvars`, а в синхронном коде `_get_current_depth` читает `threading.local` → глубина всегда 0 | `test_decorator::test_show_depth_nested_sync` |
+| # | Проблема (как было) | Исправление | Тест |
+|---|---|---|---|
+| D1 | Запись глубины шла в `contextvars`, чтение в синхронном коде — из `threading.local` → всегда 0 | Только `contextvars` (свой контекст у потока и у задачи asyncio) | `test_decorator::test_show_depth_nested_sync`, `..._per_thread`, `..._per_async_task` |
 
 ---
 
 ## 6. Неочевидные места («углы»)
 
+* **Свои кадры стека логгер узнаёт по `_THIS_CODE_FILENAME`** — `co_filename` самого модуля,
+  а не по пути вида `app/utils/logger/base_logger.py`. Сравнение — по
+  `frame.f_code.co_filename` (не `FrameInfo.filename`: `inspect` может подменить его путём
+  к исходнику). Так модуль работает под любым именем, в любом проекте и в PyInstaller.
+  Если наследник добавляет свои методы-обёртки над `info()` и т. п., их нужно добавить в
+  `skip_patterns_modeles`, иначе местом вызова станет обёртка.
 * **`effective_enable_file_logging()` — это аргумент конструктора, а не состояние.**
   Текущее состояние — `is_file_enabled()` / `_file_enabled`. Путаница этих двух была
   источником R2, R3, S1. После исправлений `effective_*` используется только как
@@ -373,8 +422,14 @@ logger.py ──import──▶ config_manager.manager.get_config_env()
 * **`RobustRotatingFileHandler` при `PermissionError`** делает 5 попыток с `sleep(0.2)`
   в потоке вызывающего (в GUI — подвисание до ~1 с) и печатает `подход N провал` в stdout.
 * **`close()` не делает логгер «мёртвым»**: методы продолжают работать, WARNING+ уходят в
-  `logging.lastResort` (`close()` снимает и `NullHandler`). `close_all()` чистит реестр,
-  но не классовые списки.
+  `logging.lastResort` (`close()` снимает и `NullHandler`). Глобальные обработчики `close()`
+  снимает, но не закрывает (B7). `close_all()` чистит реестр, но не классовые списки.
+* **`force_new=True`**: старый экземпляр «уходит в отставку» (`_retire`), но объект
+  остаётся рабочим — его вызовы идут через обработчики нового (тот же `logging.Logger`).
+  Если через файл старого мастера пишут слейвы, файл не закрывается, а новый экземпляр
+  открывает свой — на файле временно два обработчика.
+* **Уровень можно передавать числом** везде, где принимается строка (`'ERROR'` или
+  `logging.ERROR`), — `_parse_log_level` / `_level_to_int`.
 * **Реестры наследников раздельные**, а `_global_handlers` и `_disabled_loggers` — общие на всех.
 * **Каждая запись вызывает `inspect.stack()`** (поиск места вызова), а при
   `show_call_depth=True` — ещё раз. `inspect.stack()` читает исходники файлов — это дорого.
@@ -412,6 +467,60 @@ logger.py ──import──▶ config_manager.manager.get_config_env()
 1. ✅ Характеризующие тесты (этот набор).
 2. ✅ Развязка с конфигом (§7.1, §4.1).
 3. ✅ Исправление режимов R1–R6, S1–S3 (S4 отложен, §5.2).
-4. Прочие баги B1–B5, D1.
+4. ✅ Прочие баги B1–B7, D1; переносимость (§8); выводы-функции (§3.7).
 5. Проход по коду `base_logger.py`: докстринги/типизация, упрощение — с сохранением
    объяснений из закомментированного кода (переносить «почему» сюда).
+
+---
+
+## 8. Использование в других проектах
+
+Зависимости: только стандартная библиотека Python 3.8+. Проверяется тестами
+`tests/test_logger/test_portability.py` (копия в пустой папке, чистый процесс `python -I`).
+
+### 8.1 Только ядро (один файл)
+
+Скопируйте `base_logger.py` под любым именем и унаследуйтесь, задав конфиг по умолчанию:
+
+```python
+from corelog import BaseAppLogger          # base_logger.py, переименованный в corelog.py
+
+class Log(BaseAppLogger):
+    _instances = {}                        # свой реестр
+
+    @classmethod
+    def get_default_config(cls):
+        return {'LOG_LEVEL': 'INFO', 'LOG_FILE': 'logs/', 'LOG_MAX_BYTES': 10_000_000,
+                'LOG_BACKUP_COUNT': 5, 'file_enabled': 'True'}
+
+log = Log.get_instance('bot')
+log.add_output(send_to_telegram, level='ERROR', background=True,
+               formatter='%(levelname)s: %(plain_message)s')
+
+@log.log_execution_time(description='обработка заказа')
+def handle(order): ...
+```
+
+### 8.2 Весь пакет (ядро + AppLogger)
+
+Скопируйте папку `app/utils/logger/` под любым именем (например, `mylogging/`).
+`AppLogger` ждёт плоский словарь настроек через `configure()` — откуда его взять, решает
+проект (файл, переменные окружения, БД):
+
+```python
+from mylogging import AppLogger
+
+AppLogger.configure({'LOG_DIR': 'logs', 'LOG_LEVEL': 'INFO',
+                     'system_LEVEL': 'DEBUG', 'system_console_enabled': 'False'})
+log = AppLogger.get_instance('worker', enable_file_logging='system')
+```
+
+Ключи `system_*` / `user_*` и логгеры `system`/`user`, создаваемые при импорте, —
+особенность этого приложения; в другом проекте можно пользоваться ими или завести свои
+имена с ключами `{имя}_LEVEL`, `{имя}_file_enabled` и т. д. (§3.4).
+
+### 8.3 Что принадлежит этому проекту, а не модулю
+
+* `app/config/logging_setup.py` — чтение `config.msgpack` и вызов `configure()`;
+* вызов `setup_logging()` в точках входа (`main_gui_window.py`, `main_cli.py`, `pars_start.py`);
+* `ConfigApplier.apply_logging`, `MainWindow` (`configure()` после сохранения настроек).

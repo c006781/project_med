@@ -193,30 +193,37 @@ def test_master_disable_with_full_sync_disables_slave_flag(make_logger, master_c
     assert slave.is_enabled() is True
 
 
-BUG_MASTER_FILE_OFF = (
-    "BUG: при отключении файла у мастера слейвы продолжают писать в файл: "
-    "у них остаётся ссылка на закрытый обработчик мастера, а FileHandler "
-    "переоткрывает поток при следующей записи"
-)
-
-
-@pytest.mark.xfail(strict=True, reason=BUG_MASTER_FILE_OFF)
 def test_master_file_off_stops_slaves(pair, log_file):
+    """S2: раньше слейв продолжал писать через закрытый обработчик мастера."""
     master, slave = pair
     master.reconfigure(file_enabled=False)
+    assert master.file_handler is None
+    assert slave.file_handler is None
+    assert slave.file_handler not in slave.logger.handlers
     open(log_file, 'w').close()
     slave.info('не должно попасть в файл')
     assert read(log_file) == ''
 
 
-def test_master_file_off_current_behavior(pair, log_file):
-    """Как есть: мастер выключен по файлу, а запись слейва всё равно попадает в файл."""
+def test_master_file_off_keeps_link(pair):
+    """Связь мастер/слейв сохраняется: когда мастер снова откроет файл, слейв подключится."""
     master, slave = pair
     master.reconfigure(file_enabled=False)
-    assert master.file_handler is None
-    assert slave.file_handler is not None
-    slave.info('просочилось')
-    assert 'просочилось' in read(log_file)
+    assert slave.get_master_logger() is master
+    master.reconfigure(file_enabled=True)
+    assert slave.file_handler is master.file_handler
+
+
+def test_slave_file_off_detaches_shared_handler(pair, log_file):
+    """Слейв выключил себе файл через reload — общий обработчик отцеплен, но не закрыт."""
+    master, slave = pair
+    slave.reload_from_config(make_config(os.path.dirname(log_file), S_file_enabled='False'))
+    assert slave.file_handler is None
+    open(log_file, 'w').close()
+    slave.info('нет')
+    master.info('да')
+    content = read(log_file)
+    assert '[S]' not in content and '[M]' in content
 
 
 def test_master_turn_off_file_logging_unshares_slaves(pair, log_file):

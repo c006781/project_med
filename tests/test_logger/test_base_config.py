@@ -35,10 +35,16 @@ def test_parse_log_level_unknown_raises():
         BaseAppLogger._parse_log_level('TRACE')
 
 
-def test_parse_log_level_int_is_not_supported():
-    """Числовой уровень не принимается: у int нет .upper()."""
-    with pytest.raises(AttributeError):
-        BaseAppLogger._parse_log_level(logging.INFO)
+@pytest.mark.parametrize('level', [logging.INFO, logging.CRITICAL, 0, 5])
+def test_parse_log_level_accepts_int(level):
+    """B2: раньше число давало AttributeError (у int нет .upper())."""
+    assert BaseAppLogger._parse_log_level(level) == level
+
+
+@pytest.mark.parametrize('bad, exc', [(-1, ValueError), (None, TypeError), (True, TypeError), (1.5, TypeError)])
+def test_parse_log_level_rejects_bad_types(bad, exc):
+    with pytest.raises(exc):
+        BaseAppLogger._parse_log_level(bad)
 
 
 @pytest.mark.parametrize('raw, expected', [

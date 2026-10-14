@@ -132,6 +132,11 @@ from datetime import date, time
 # Добавляем корень проекта в sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Импорт app.* создаёт логгеры, а они читают конфиг через get_getenv(),
+# который перезаписывает .env, если ключ пустой (GITHUB_TOKEN='' в .env).
+# load_dotenv не переопределяет уже заданные переменные, поэтому .env не трогается.
+os.environ.setdefault('GITHUB_TOKEN', 'test-placeholder')
+
 from app.repositories import (
     PatientRepository, AppointmentRepository,
     AppointmentNoteRepository, PhotoRepository

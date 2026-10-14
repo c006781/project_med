@@ -1147,57 +1147,86 @@ class BaseAppLogger:
 
         self.logger.setLevel(self.log_level)
 
+    # До 2026-10-14: inspect.stack() на каждую запись. Он строит FrameInfo для ВСЕХ
+    # кадров стека и читает строки исходников (контекст) — ~5 мс на вызов log.info()
+    # при стеке глубиной 30, а в Qt-приложении стек глубже. Заменено проходом по
+    # f_back (sys._getframe) — см. новую реализацию ниже.
+    # def _get_call_depth(self) -> int:
+    #     """
+    #     Вычисляет реальную глубину вызовов на основе стека.
+    #     Пропускает фреймы самого логгера и его внутренних методов.
+    #     Возвращает количество пользовательских фреймов (глубину вложенности).
+    #     """
+    #     # import inspect
+    #     stack = inspect.stack()
+    #     depth = 0
+    #     for frame_info in stack[1:]:  # пропускаем текущий фрейм
+    #         # Пропускаем фреймы, относящиеся к логгеру
+    #         if self._thec_skip_patterns_modeles({
+    #             # frame_info.filename может отличаться от co_filename (inspect ищет исходник)
+    #             'filename': (frame_info.frame.f_code.co_filename,),
+    #             'function': (frame_info.function,)
+    #         }):
+    #             continue
+
+    #         depth += 1
+
+    #     return depth
+
+    # # До исправления D1 (2026-10-14). Запись шла в contextvars (set не бросает
+    # # LookupError, ветка с threading.local не срабатывала никогда), а чтение в
+    # # синхронном коде — из threading.local, где всегда 0. Итог: декоратор с
+    # # show_depth=True всегда показывал глубину 0.
+    # # def _get_current_depth(self) -> int:
+    # #     """Возвращает текущую глубину вложенности для текущего контекста (поток/задача)."""
+
+    # #     try:
+    # #         loop = asyncio.get_running_loop()
+    # #         # Если есть текущая задача, считаем, что это асинхронный контекст
+    # #         if asyncio.current_task(loop) is not None:
+    # #             return self._depth_context.get()
+
+    # #         else:
+    # #             return getattr(self._depth_local, 'depth', 0)
+
+    # #     except (RuntimeError, LookupError) as e:
+    # #         err = e
+    # #         # Если не задан, используем threading.local (синхронный поток)
+    # #         # Нет запущенного event loop – синхронный контекст
+    # #         return getattr(self._depth_local, 'depth', 0)
+
+    # # def _set_current_depth(self, depth: int) -> None:
+    # #     """Устанавливает глубину для текущего контекста."""
+    # #     try:
+    # #         self._depth_context.set(depth)
+
+    # #     except LookupError:
+    # #         self._depth_local.depth = depth
+
     def _get_call_depth(self) -> int:
         """
-        Вычисляет реальную глубину вызовов на основе стека.
-        Пропускает фреймы самого логгера и его внутренних методов.
-        Возвращает количество пользовательских фреймов (глубину вложенности).
+        Глубина стека вызовов без кадров самого логгера (для ``show_call_depth=True``).
+
+        Идёт от вызывающего кадра к корню через ``f_back`` и считает кадры, которые не
+        относятся к логгеру (``_is_logger_frame``). Отступ ``>`` в строке лога равен
+        этому числу.
+
+        Returns:
+            Количество «пользовательских» кадров в стеке.
+
+        Пример:
+            >>> def a(): return log._get_call_depth()
+            >>> def b(): return a()
+            >>> b() - a()
+            1
         """
-        # import inspect
-        stack = inspect.stack()
         depth = 0
-        for frame_info in stack[1:]:  # пропускаем текущий фрейм
-            # Пропускаем фреймы, относящиеся к логгеру
-            if self._thec_skip_patterns_modeles({
-                # frame_info.filename может отличаться от co_filename (inspect ищет исходник)
-                'filename': (frame_info.frame.f_code.co_filename,),
-                'function': (frame_info.function,)
-            }):
-                continue
-
-            depth += 1
-
+        frame = sys._getframe(1)  # пропускаем текущий кадр (_get_call_depth)
+        while frame is not None:
+            if not self._is_logger_frame(frame.f_code):
+                depth += 1
+            frame = frame.f_back
         return depth
-
-    # До исправления D1 (2026-10-14). Запись шла в contextvars (set не бросает
-    # LookupError, ветка с threading.local не срабатывала никогда), а чтение в
-    # синхронном коде — из threading.local, где всегда 0. Итог: декоратор с
-    # show_depth=True всегда показывал глубину 0.
-    # def _get_current_depth(self) -> int:
-    #     """Возвращает текущую глубину вложенности для текущего контекста (поток/задача)."""
-
-    #     try:
-    #         loop = asyncio.get_running_loop()
-    #         # Если есть текущая задача, считаем, что это асинхронный контекст
-    #         if asyncio.current_task(loop) is not None:
-    #             return self._depth_context.get()
-
-    #         else:
-    #             return getattr(self._depth_local, 'depth', 0)
-
-    #     except (RuntimeError, LookupError) as e:
-    #         err = e
-    #         # Если не задан, используем threading.local (синхронный поток)
-    #         # Нет запущенного event loop – синхронный контекст
-    #         return getattr(self._depth_local, 'depth', 0)
-
-    # def _set_current_depth(self, depth: int) -> None:
-    #     """Устанавливает глубину для текущего контекста."""
-    #     try:
-    #         self._depth_context.set(depth)
-
-    #     except LookupError:
-    #         self._depth_local.depth = depth
 
     def _get_current_depth(self) -> int:
         """
@@ -4628,62 +4657,157 @@ class BaseAppLogger:
 
 
 
+    # До 2026-10-14: inspect.stack() на каждую запись. Он строит FrameInfo для ВСЕХ
+    # кадров стека и читает строки исходников (контекст) — ~5 мс на вызов log.info()
+    # при стеке глубиной 30, а в Qt-приложении стек глубже. Заменено проходом по
+    # f_back (sys._getframe) — см. новую реализацию ниже.
+    # def _get_caller_info(self, levels_up: int = 2) -> str:
+    #     """
+    #     Возвращает строку с информацией о caller'е.
+
+    #     - Если levels_up > 0: поднимается на указанное количество уровней (стандартное поведение).
+    #     - Если levels_up == 0: автоматически ищет первый фрейм вне модулей логирования.
+
+    #     Важно: мы используем inspect.stack() для получения стека вызываемых функций.
+    #     Каждый элемент стека - это объект FrameInfo, содержащий информацию о текущей функции:
+    #       - filename: путь к файлу, в котором находится функция
+    #       - lineno: номер строки в файле, в которой находится функция
+    #       - function: имя функции
+
+    #     Мы ищем фрейм, чей файл не содержит 'logger' или 'base_logger', чтобы не учитывать
+    #     вызовы изнутри модулей логирования. Если таких фреймов не найдено, берем последний
+    #     фрейм (в конце стека).
+    #     """
+
+    #     # import inspect
+    #     stack = inspect.stack()
+    #     frame_info = stack[-1]
+
+    #     if levels_up > 0:
+    #         # Явно заданная глубина
+    #         if len(stack) <= levels_up:
+    #             frame_info = stack[-1]
+    #         else:
+    #             frame_info = stack[levels_up]
+    #     else:
+    #         # Автоматический поиск: пропускаем фреймы, относящиеся к логгеру
+    #         # Пропускаем текущий фрейм (индекс 0) и ищем первый, чей файл не содержит 'logger'
+
+    #         for frame_info in stack[1:]:
+
+    #             if self._thec_skip_patterns_modeles( # если входит в список пропуска, то след итерация
+    #                 patterns_modeles={
+    #                     # co_filename, а не frame_info.filename — см. _THIS_CODE_FILENAME
+    #                     'filename':(frame_info.frame.f_code.co_filename,),
+    #                     'function':(frame_info.function,),  
+    #                 }
+    #             ):
+    #                 continue
+    #             # если не в списке, то выводим            
+    #             filename = frame_info.filename
+    #             break
+
+    #         else:
+    #             # Если не нашли (вдруг весь стек состоит из логгера), берём последний
+    #             frame_info = stack[-1]
+
+    #     filename = frame_info.filename
+    #     lineno = frame_info.lineno
+    #     funcname = frame_info.function
+
+    #     return f'File "{filename}", line {lineno}, in <{funcname}>'
+
+
+    # Кэш ответов _is_logger_frame: (класс, co_filename, co_name) → bool.
+    # Набор кадров конечен, а проверка нормализует пути — без кэша это заметно на
+    # каждом вызове. Если наследник меняет skip_patterns_modeles во время работы,
+    # вызовите _skip_cache.clear().
+    _skip_cache: Dict[Tuple[type, str, str], bool] = {}
+
+    def _is_logger_frame(self, code: Any) -> bool:
+        """
+        Относится ли кадр к самому логгеру (его надо пропустить при поиске места вызова).
+
+        Обёртка над ``_thec_skip_patterns_modeles`` с кэшем по
+        ``(класс, co_filename, co_name)``.
+
+        Args:
+            code: Объект кода кадра (``frame.f_code``).
+
+        Returns:
+            ``True`` — кадр логгера, пропустить.
+
+        Пример:
+            >>> log._is_logger_frame(BaseAppLogger.info.__code__)
+            True
+            >>> log._is_logger_frame((lambda: None).__code__)
+            False
+        """
+        key = (type(self), code.co_filename, code.co_name)
+        cached = BaseAppLogger._skip_cache.get(key)
+        if cached is None:
+            cached = self._thec_skip_patterns_modeles({
+                'filename': (code.co_filename,),
+                'function': (code.co_name,),
+            })
+            BaseAppLogger._skip_cache[key] = cached
+        return cached
+
     def _get_caller_info(self, levels_up: int = 2) -> str:
         """
-        Возвращает строку с информацией о caller'е.
+        Место вызова в формате, который IDE превращает в ссылку.
 
-        - Если levels_up > 0: поднимается на указанное количество уровней (стандартное поведение).
-        - Если levels_up == 0: автоматически ищет первый фрейм вне модулей логирования.
+        Режимы:
+            * ``levels_up > 0`` — взять кадр на ``levels_up`` уровней выше этого метода
+              (если стек короче — самый внешний кадр);
+            * ``levels_up == 0`` — автоматически: первый кадр, не относящийся к логгеру
+              (``_is_logger_frame``); если весь стек — логгер, самый внешний кадр.
 
-        Важно: мы используем inspect.stack() для получения стека вызываемых функций.
-        Каждый элемент стека - это объект FrameInfo, содержащий информацию о текущей функции:
-          - filename: путь к файлу, в котором находится функция
-          - lineno: номер строки в файле, в которой находится функция
-          - function: имя функции
+        Используется ``sys._getframe`` / ``f_back``: без построения списка кадров и без
+        чтения исходников (в отличие от ``inspect.stack()``).
 
-        Мы ищем фрейм, чей файл не содержит 'logger' или 'base_logger', чтобы не учитывать
-        вызовы изнутри модулей логирования. Если таких фреймов не найдено, берем последний
-        фрейм (в конце стека).
+        Args:
+            levels_up: Глубина подъёма; 0 — автоматический поиск (так вызывает ``_formatted``).
+
+        Returns:
+            Строка ``File "<путь>", line <N>, in <функция>``.
+
+        Пример:
+            >>> def handler():
+            ...     return log._get_caller_info(levels_up=1)
+            >>> handler()
+            'File "C:\\proj\\svc.py", line 2, in <handler>'
         """
-
-        # import inspect
-        stack = inspect.stack()
-        frame_info = stack[-1]
+        frame = sys._getframe(0)
+        outermost = frame
+        target = None
 
         if levels_up > 0:
             # Явно заданная глубина
-            if len(stack) <= levels_up:
-                frame_info = stack[-1]
-            else:
-                frame_info = stack[levels_up]
+            target = frame
+            for _ in range(levels_up):
+                if target.f_back is None:
+                    break
+                target = target.f_back
         else:
-            # Автоматический поиск: пропускаем фреймы, относящиеся к логгеру
-            # Пропускаем текущий фрейм (индекс 0) и ищем первый, чей файл не содержит 'logger'
-            
-            for frame_info in stack[1:]:
+            # Автоматический поиск: первый кадр вне логгера
+            candidate = frame.f_back
+            while candidate is not None:
+                outermost = candidate
+                if not self._is_logger_frame(candidate.f_code):
+                    target = candidate
+                    break
+                candidate = candidate.f_back
 
-                if self._thec_skip_patterns_modeles( # если входит в список пропуска, то след итерация
-                    patterns_modeles={
-                        # co_filename, а не frame_info.filename — см. _THIS_CODE_FILENAME
-                        'filename':(frame_info.frame.f_code.co_filename,),
-                        'function':(frame_info.function,),  
-                    }
-                ):
-                    continue
-                # если не в списке, то выводим            
-                filename = frame_info.filename
-                break
-                
-            else:
-                # Если не нашли (вдруг весь стек состоит из логгера), берём последний
-                frame_info = stack[-1]
+        if target is None:
+            # Весь стек — логгер: берём самый внешний кадр (как раньше stack[-1])
+            target = outermost
+            while target.f_back is not None:
+                target = target.f_back
 
-        filename = frame_info.filename
-        lineno = frame_info.lineno
-        funcname = frame_info.function
+        code = target.f_code
+        return f'File "{code.co_filename}", line {target.f_lineno}, in <{code.co_name}>'
 
-        return f'File "{filename}", line {lineno}, in <{funcname}>'
-    
     def _format_message(
         self, 
         caller_info: str,

@@ -54,17 +54,19 @@ def test_recreates_deleted_directory(handler, tmp_path):
     assert os.path.exists(tmp_path / 'h.log')
 
 
-def test_force_reopen_closes_stream_and_touches_file(handler, tmp_path):
-    """force_reopen() закрывает поток; _open() открывает файл, но результат не сохраняется.
+def test_force_reopen_reopens_stream(handler, tmp_path):
+    """force_reopen() закрывает и сразу открывает поток заново.
 
-    Поток остаётся None до следующей записи. Watchdog вызывает это для всех
-    файловых обработчиков каждые 5 секунд.
+    До 2026-10-14 результат _open() выбрасывался и поток оставался None до
+    следующей записи (файл открывался дважды).
     """
     _emit(handler, 'x')
+    old_stream = handler.stream
     handler._last_check = 0
     handler.force_reopen()
     assert handler._last_check > 0
-    assert handler.stream is None
+    assert handler.stream is not None and handler.stream is not old_stream
+    assert old_stream.closed
     assert os.path.exists(tmp_path / 'h.log')
     _emit(handler, 'y')
     assert read(tmp_path / 'h.log') == 'x\ny\n'
@@ -73,8 +75,13 @@ def test_force_reopen_closes_stream_and_touches_file(handler, tmp_path):
 def test_reopen_if_needed_only_when_missing(handler, tmp_path):
     _emit(handler, 'x')
     stream = handler.stream
-    handler.reopen_if_needed()
+    assert handler.reopen_if_needed() is False
     assert handler.stream is stream
+    handler.stream.close()
+    handler.stream = None
+    os.remove(tmp_path / 'h.log')
+    assert handler.reopen_if_needed() is True
+    assert os.path.exists(tmp_path / 'h.log')
 
 
 def test_rotation(tmp_path):

@@ -48,17 +48,12 @@ def test_force_new_replaces_registry_entry(logger_cls, make_logger):
     assert new.logger is old.logger  # logging.getLogger(name) общий
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "BUG: force_new=True не снимает обработчики старого экземпляра с общего "
-    "logging.Logger → каждое сообщение пишется дважды"
-))
 def test_force_new_does_not_duplicate_output(make_logger, log_dir, capsys):
+    """B3: раньше старый экземпляр оставлял свои обработчики → дубли."""
     make_logger(name='dup', enable_file_logging=True, use_name_in_filename=True)
     new = make_logger(name='dup', force_new=True, enable_file_logging=True,
                       use_name_in_filename=True)
     new.info('один')
-    # Файл перестал дублироваться «случайно»: новый экземпляр подключается к
-    # обработчику старого (один обработчик на файл). Консоль — нет.
     assert read(os.path.join(log_dir, 'dup.log')).count('один') == 1
     assert capsys.readouterr().err.count('один') == 1
 
@@ -315,3 +310,19 @@ def test_show_call_depth_global_flag(logger_cls):
     assert logger_cls.status_show_call_depth_global() is True
     logger_cls.off_show_call_depth_global()
     assert logger_cls.status_show_call_depth_global() is False
+
+
+def test_force_new_keeps_old_masters_slaves_writing(make_logger, log_dir):
+    """Старый мастер с живыми слейвами не закрывает общий файл при force_new."""
+    make_logger(name='fm', enable_file_logging=True)
+    slave = make_logger(name='fs', enable_file_logging='fm')
+    make_logger(name='fm', force_new=True, enable_file_logging=True)
+    slave.info('слейв жив')
+    assert 'слейв жив' in read(os.path.join(log_dir, 'app.log'))
+
+
+def test_force_new_old_object_still_works(make_logger, capsys):
+    old = make_logger(name='fo')
+    make_logger(name='fo', force_new=True)
+    old.info('через новый')
+    assert capsys.readouterr().err.count('через новый') == 1

@@ -2,13 +2,36 @@
 
 > Файл для разработчиков: что делает модуль, как он устроен внутри, где у него
 > проблемы и неочевидные места, и почему он устроен именно так.
-> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, проход по коду
-> (скорость, watchdog, ретраи, декоратор, S4, докстринги) (ветка `refactor/logger`).
+> Обновляется вместе с кодом. Последнее обновление: 2026-10-14, разбиение на модули,
+> настройка наследника, ревью (ветка `rework`).
 
-Связанные файлы:
+Связанные файлы (с 2026-10-14 ядро разбито на модули; методы перенесены без изменений,
+вместе с комментариями и старым закомментированным кодом):
 
 | Файл | Назначение |
 |---|---|
+| [base_logger.py](base_logger.py) | `BaseAppLogger`: атрибуты класса, `__init__`, `__init_subclass__`; собирается из примесей ниже; реэкспорт для старых импортов |
+| [handlers.py](handlers.py) | `RobustRotatingFileHandler`, `CallableHandler` |
+| [_registry.py](_registry.py) | Реестр и `get_instance`, группы, `*_exact`, список отключённых, глобальные обработчики/выводы, watchdog, `close_all` |
+| [_config.py](_config.py) | Чтение конфига: приоритеты и наследование ключей, `reload_from_config`, уровни |
+| [_handlers_mgmt.py](_handlers_mgmt.py) | Сборка обработчиков (`_update_handlers`), путь к файлу |
+| [_sharing.py](_sharing.py) | Общий файл (мастер/слейв) |
+| [_modes.py](_modes.py) | Режимы на лету, `reconfigure`, свойства, `close` |
+| [_outputs.py](_outputs.py) | `add_output`, общие выводы класса (`OUTPUTS`) |
+| [_emit.py](_emit.py) | `debug`…`exception`, место вызова, глубина |
+| [_decorator.py](_decorator.py) | `log_execution_time` |
+| [_common.py](_common.py) | Общие служебные объекты, `LOGGER_CODE_FILES` |
+| [logger.py](logger.py) | `AppLogger` — конфиг приложения через `configure()`; создаёт `system` и `user` при импорте |
+| [../../config/logging_setup.py](../../config/logging_setup.py) | `setup_logging()` — читает конфиг и передаёт его логгерам; вызывается из точек входа |
+| [tests/test_logger/](../../../tests/test_logger/) | Тесты (398) |
+
+Как устроена сборка класса: части — классы-примеси (`_ConfigMixin` и т. д.), а
+`BaseAppLogger` наследуется от всех. Методы частей обращаются к классу по имени
+`BaseAppLogger` (`BaseAppLogger._share_lock`) — `base_logger.py` подставляет итоговый
+класс в каждый модуль-часть сразу после его создания. Свои кадры стека логгер узнаёт по
+`LOGGER_CODE_FILES` — список `co_filename` всех модулей пакета.
+
+---|---|
 | [base_logger.py](base_logger.py) | `BaseAppLogger` — вся логика; `RobustRotatingFileHandler` — файловый обработчик |
 | [logger.py](logger.py) | `AppLogger` — наследник, получающий конфиг приложения через `configure()`; создаёт `system` и `user` при импорте |
 | [../../config/logging_setup.py](../../config/logging_setup.py) | `setup_logging()` — читает конфиг и передаёт его логгерам; вызывается из точек входа |
@@ -266,6 +289,29 @@ AppLogger.add_global_output(send_tg, level='CRITICAL')     # от всех ло�
 * Глобальные выводы живут в `_global_handlers` (общие для всех наследников).
   `close()` логгера их снимает, но не закрывает (B7).
 
+**Формат.** Вывод в функцию по умолчанию получает ту же строку, что консоль и файл
+(время, уровень, `[имя]`, место вызова, текст). Другой формат — только явно (`formatter=`).
+
+**Настройка в объявлении наследника** (с 2026-10-14, `__init_subclass__`):
+
+```python
+class BotLogger(AppLogger,
+                console_output=send_tg,                      # «консоль» → функция
+                outputs=[print, {'func': send_admin, 'level': 'ERROR', 'background': True}],
+                log_format='%(asctime)s %(levelname)s %(message)s'):
+    pass
+```
+
+* `console_output` / атрибут `CONSOLE_OUTPUT` — консольный обработчик становится
+  `CallableHandler(func)`: флаги консоли, `console_level` работают как раньше.
+* `outputs` / `OUTPUTS` — общие выводы класса: **один** обработчик на класс (создаётся при
+  первом обращении, хранится у класса, где объявлен `OUTPUTS`; наследники без своего
+  `OUTPUTS` используют те же). Подключаются в `_update_handlers` как глобальные.
+  Закрываются `close_class_outputs()` и `close_all()`; `close()` логгера их не закрывает.
+* `log_format` / `LOG_FORMAT` — формат консоли, файла и выводов.
+* Наследник получает свой реестр `_instances` автоматически. Раньше без явного
+  `_instances = {}` он делил реестр с родителем.
+
 ---
 
 ## 4. Связь с конфигом приложения
@@ -500,16 +546,15 @@ logger.py ──import──▶ config_manager.manager.get_config_env()
 Зависимости: только стандартная библиотека Python 3.8+. Проверяется тестами
 `tests/test_logger/test_portability.py` (копия в пустой папке, чистый процесс `python -I`).
 
-### 8.1 Только ядро (один файл)
+### 8.1 Только ядро
 
-Скопируйте `base_logger.py` под любым именем и унаследуйтесь, задав конфиг по умолчанию:
+Скопируйте папку пакета под любым именем (с 2026-10-14 ядро — несколько модулей, одним
+файлом его больше не перенести) и унаследуйтесь, задав конфиг по умолчанию:
 
 ```python
-from corelog import BaseAppLogger          # base_logger.py, переименованный в corelog.py
+from corelog.base_logger import BaseAppLogger   # папка пакета, скопированная как corelog/
 
-class Log(BaseAppLogger):
-    _instances = {}                        # свой реестр
-
+class Log(BaseAppLogger):                  # свой реестр создаётся автоматически
     @classmethod
     def get_default_config(cls):
         return {'LOG_LEVEL': 'INFO', 'LOG_FILE': 'logs/', 'LOG_MAX_BYTES': 10_000_000,
@@ -546,3 +591,29 @@ log = AppLogger.get_instance('worker', enable_file_logging='system')
 * `app/config/logging_setup.py` — чтение `config.msgpack` и вызов `configure()`;
 * вызов `setup_logging()` в точках входа (`main_gui_window.py`, `main_cli.py`, `pars_start.py`);
 * `ConfigApplier.apply_logging`, `MainWindow` (`configure()` после сохранения настроек).
+
+---
+
+## 9. Предложения по улучшению (ревью 2026-10-14)
+
+Не сделано — на решение владельца. Порядок — по соотношению пользы и риска.
+
+| # | Что | Почему | Объём / риск |
+|---|---|---|---|
+| P1 | В `debug`…`critical` проверять `logger.isEnabledFor(level)` ДО поиска места вызова | Сейчас отфильтрованная запись (DEBUG при уровне INFO) всё равно обходит стек: ~14 мкс против ~1 мкс у декоратора, который проверяет заранее | Малый / низкий |
+| P2 | Один поток watchdog на все классы (общий реестр классов через слабые ссылки) | Сейчас поток на каждый класс-наследник; потоки вечные и держат классы в памяти | Малый / низкий |
+| P3 | Убрать неиспользуемые импорты в модулях-частях (180), мелочи pyflakes: неиспользуемые `visited`, `level_changed`, `e`, f-строка без подстановок | После разбиения у всех частей одинаковый заголовок импортов | Малый / нулевой |
+| P4 | В `RobustRotatingFileHandler.emit` паузу ретрая делать вне блокировки | Пауза держит `_lock` — другие потоки ждут вместе с текущим | Малый / низкий |
+| P5 | Перестроение под непрерывной записью ждёт блокировок 0,3–1 с (не честные блокировки Python) | Видно в нагрузочном тесте: 3–4 потока пишут без пауз. В приложении не проявляется | Средний: меньше захватов в `_update_handlers` или очередь записи (`QueueHandler`) |
+| P6 | `AppLogger` создаёт `system`/`user` при импорте — перенести в явный вызов (`configure()`/`setup_logging()`) | В других проектах это побочный эффект импорта. В приложении логгеры с `enable_file_logging='system'` создаются при импорте модулей — нужен порядок | Средний |
+| P7 | Упростить API: дубли (`enable_file`/`turn_on_file_logging`/свойство `enable_file_logging`; `file_enabled`/`enable_file_logging` в `reconfigure`), неиспользуемое (`auto_share`, аргументы `_init_config_load`, `_get_config_param`, `_convert_patterns_modeles_tips`, `*_show_call_depth_global`) — пометить `DeprecationWarning` | Новому разработчику трудно понять, чем пользоваться | Средний (код приложения почти не использует) |
+| P8 | Единая схема ключей конфига (сейчас `LEVEL`, `LOG_ARGS`, `file_enabled`, `show_call_depth` — разные стили) с проверкой неизвестных ключей | Опечатка в ключе сейчас молча игнорируется | Средний |
+| P9 | Перенести объяснения из закомментированного старого кода сюда и убрать его из модулей | Модули ~40% комментариев | Только по решению владельца (правило 3) |
+
+Вне логгера (замечено по ходу):
+
+* `app/config/conf/getenv.py`: пустой ключ (`GITHUB_TOKEN=''`) считается отсутствующим, и
+  `.env` перезаписывается при каждом чтении конфига.
+* `ConfigApplier.apply_database`/`apply_sync` сравнивают новый конфиг с уже сохранённым —
+  та же ошибка, что R1 у логирования: смена пути БД/токена применяется после перезапуска.
+* Старые тесты сервисов/репозиториев: 26 падений и 43 ошибки (были до рефакторинга).

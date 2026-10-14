@@ -47,7 +47,7 @@ import logging
 import sys
 import time
 from typing import (
-    List, Optional, Dict, 
+    List, Optional, Dict, Sequence,
     Any, Callable, Tuple, Union
 )
 
@@ -191,6 +191,61 @@ class BaseAppLogger(
 
     # Простой формат лога: время, уровень, сообщение (всё остальное формируем вручную)
     LOG_FORMAT = '%(asctime)s\t%(levelname)s\t%(message)s'
+
+    # Куда пишет «консоль»: None — sys.stderr; функция вида print(text) — в неё
+    # (тот же формат). Задаётся у наследника: атрибутом или console_output=... .
+    CONSOLE_OUTPUT: Optional[Callable[[str], Any]] = None
+
+    # Общие выводы класса: функции или словари для add_output (func, level, background,
+    # formatter, queue_size). Один обработчик на класс для всех его логгеров.
+    OUTPUTS: Tuple[Any, ...] = ()
+
+    def __init_subclass__(
+        cls,
+        console_output: Optional[Callable[[str], Any]] = None,
+        outputs: Optional[Sequence[Any]] = None,
+        log_format: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Настройка наследника прямо в объявлении класса.
+
+        Что делает:
+            * своему наследнику — свой реестр ``_instances``, если он не объявлен явно.
+              До 2026-10-14 наследник без ``_instances = {}`` делил реестр с родителем:
+              ``get_instance('x')`` у разных классов возвращал один и тот же объект;
+            * ``console_output`` → ``CONSOLE_OUTPUT``: функция вместо ``sys.stderr``;
+            * ``outputs`` → ``OUTPUTS``: общие выводы класса (см. ``_class_output_handlers``);
+            * ``log_format`` → ``LOG_FORMAT``: формат строки для консоли, файла и выводов.
+
+        То же можно задать атрибутами класса — параметры удобнее для коротких наследников.
+
+        Args:
+            console_output: Функция вида ``print(text)`` для вывода «в консоль».
+            outputs: Функции или словари описаний общих выводов.
+            log_format: Формат ``logging`` (``'%(asctime)s %(levelname)s %(message)s'``).
+            **kwargs: Передаются дальше по цепочке ``__init_subclass__``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> def send_tg(text: str) -> None:
+            ...     bot.send_message(CHAT_ID, text)
+            >>> class BotLogger(AppLogger, console_output=send_tg,
+            ...                 outputs=[{'func': print, 'level': 'ERROR'}]):
+            ...     pass
+            >>> BotLogger.get_instance('bot').info('в Telegram вместо консоли')
+        """
+        super().__init_subclass__(**kwargs)
+        if '_instances' not in cls.__dict__:
+            cls._instances = {}
+        if console_output is not None:
+            cls.CONSOLE_OUTPUT = console_output
+        if outputs is not None:
+            cls.OUTPUTS = tuple(outputs)
+        if log_format is not None:
+            cls.LOG_FORMAT = log_format
 
     level_map = {
         'DEBUG': logging.DEBUG,

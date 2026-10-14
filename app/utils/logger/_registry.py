@@ -1127,3 +1127,6 @@ class _RegistryMixin:
             for instance in cls._instances.values():
                 instance.close()
             cls._instances.clear()
+
+        # Общие выводы класса (OUTPUTS): доставить остаток и закрыть
+        cls.close_class_outputs()

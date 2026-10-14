@@ -51,30 +51,35 @@ def test_missing_env_file_is_created(config_sandbox):
     assert (config_sandbox / '.env').exists()
 
 
-def test_empty_value_rewrites_env_on_every_call_current(env_file, set_key_calls):
-    """E1, как есть: пустое значение считается отсутствующим — .env переписывается каждый раз."""
+def test_empty_value_does_not_rewrite_env(env_file, set_key_calls):
+    """E1: ключ с пустым значением есть в файле — .env не переписывается.
+
+    До 2026-10-14 переписывался при каждом чтении (17 раз за старт GUI).
+    """
     _write_env(env_file, "GITHUB_TOKEN=''\n")
     for _ in range(3):
         assert get_getenv('GITHUB_TOKEN', start_value='') == ''
-    assert len(set_key_calls) == 3
-
-
-@pytest.mark.xfail(strict=True, reason=(
-    "E1: пустое значение (GITHUB_TOKEN='') считается отсутствующим, "
-    ".env переписывается при каждом чтении (17 раз за старт GUI)"
-))
-def test_empty_value_does_not_rewrite_env(env_file, set_key_calls):
-    _write_env(env_file, "GITHUB_TOKEN=''\n")
-    get_getenv('GITHUB_TOKEN', start_value='')
     assert set_key_calls == []
 
 
+def test_empty_value_returns_start_value(env_file, set_key_calls):
+    """Пустое значение по-прежнему означает «взять значение по умолчанию» (без записи)."""
+    _write_env(env_file, "APP_CONFIG_PATH=''\n")
+    assert get_getenv('APP_CONFIG_PATH', start_value='config.msgpack') == 'config.msgpack'
+    assert set_key_calls == []
+
+
+def test_empty_process_env_var_but_missing_in_file_is_written(env_file, set_key_calls, monkeypatch):
+    """Ключа нет в файле, а в окружении процесса он пустой — дописывается значение по умолчанию."""
+    _write_env(env_file, '')
+    monkeypatch.setenv('SOME_KEY', '')
+    assert get_getenv('SOME_KEY', start_value='d') == 'd'
+    assert [k for _, k, _ in set_key_calls] == ['SOME_KEY']
+
+
 @pytest.mark.skipif(os.name != 'nt', reason='атрибут «только чтение» проверяется на Windows')
-@pytest.mark.xfail(strict=True, reason=(
-    "E2: .env только для чтения + пустой ключ → PermissionError при чтении конфига — "
-    "приложение не запускается"
-))
 def test_readonly_env_does_not_crash(env_file):
+    """E2: раньше PermissionError при чтении конфига — приложение не запускалось."""
     _write_env(env_file, "APP_CONFIG_PATH='config.msgpack'\nGITHUB_TOKEN=''\n")
     os.chmod(env_file, stat.S_IREAD)
     try:
@@ -84,15 +89,31 @@ def test_readonly_env_does_not_crash(env_file):
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='атрибут «только чтение» проверяется на Windows')
-def test_readonly_env_crashes_current(env_file):
-    """E2, как есть."""
-    _write_env(env_file, "APP_CONFIG_PATH='config.msgpack'\nGITHUB_TOKEN=''\n")
+def test_readonly_env_missing_key_warns_and_uses_default(env_file, capsys):
+    """E2: ключа нет, .env только для чтения — предупреждение, значение по умолчанию, без падения."""
+    _write_env(env_file, "APP_CONFIG_PATH='config.msgpack'\n")
     os.chmod(env_file, stat.S_IREAD)
     try:
-        with pytest.raises(PermissionError):
-            old_get_config_env()
+        assert get_getenv('NEW_KEY', start_value='по умолчанию') == 'по умолчанию'
     finally:
         os.chmod(env_file, stat.S_IREAD | stat.S_IWRITE)
+    err = capsys.readouterr().err
+    assert "не удалось записать 'NEW_KEY'" in err
+
+
+def test_unwritable_env_dir_does_not_crash(config_sandbox, monkeypatch, capsys):
+    """E2: .env нельзя создать (нет прав на папку) — чтение не падает."""
+    import builtins
+    real_open = builtins.open
+
+    def deny(path, mode='r', *a, **k):
+        if str(path).endswith('.env') and 'w' in mode:
+            raise PermissionError('нет прав')
+        return real_open(path, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, 'open', deny)
+    assert get_getenv('ANY', start_value='x') == 'x'
+    assert 'не удалось создать' in capsys.readouterr().err
 
 
 def test_values_loaded_into_os_environ(env_file):
@@ -162,9 +183,9 @@ def test_old_get_config_env_custom_default_path(env_file):
     assert old_get_config_env('x/conf.msgpack')['APP_CONFIG_PATH'] == 'x/conf.msgpack'
 
 
-def test_old_get_config_env_writes_twice_on_each_call_current(env_file, set_key_calls):
-    """E1 + E6, как есть: при пустом GITHUB_TOKEN каждый вызов переписывает .env."""
+def test_old_get_config_env_does_not_rewrite(env_file, set_key_calls):
+    """E1: при пустом GITHUB_TOKEN .env больше не переписывается (раньше — на каждом вызове)."""
     _write_env(env_file, "APP_CONFIG_PATH='config.msgpack'\nGITHUB_TOKEN=''\n")
     old_get_config_env()
     old_get_config_env()
-    assert [k for _, k, _ in set_key_calls] == ['GITHUB_TOKEN', 'GITHUB_TOKEN']
+    assert set_key_calls == []

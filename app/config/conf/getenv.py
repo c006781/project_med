@@ -5,13 +5,60 @@ import os  # Импорт модуля os для работы с путями ф
 
 # from pathlib import Path
 
+import sys
 import threading
 
 # Сторонние библиотеки
-from dotenv import load_dotenv, set_key, find_dotenv # pip install python-dotenv
+from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values # pip install python-dotenv
 
 # Глобальная блокировка для операций записи в .env файл
 _env_write_lock = threading.RLock()
+
+
+def _report(message: str) -> None:
+    """
+    Сообщает о проблеме с .env в stderr.
+
+    Логгер здесь не используется: .env читается ДО настройки логирования
+    (setup_logging сам читает конфиг), сообщение должно быть видно в любом случае.
+
+    Args:
+        message: Текст сообщения.
+
+    Returns:
+        None
+
+    Пример:
+        >>> _report('не удалось записать .env')
+        WARNING [config/.env]: не удалось записать .env
+    """
+    print(f"WARNING [config/.env]: {message}", file=sys.stderr)
+
+def _key_in_file(dotenv_path: str, key: str) -> bool:
+    """
+    Есть ли ключ в самом файле .env (с любым значением, в том числе пустым).
+
+    В отличие от ``os.getenv`` не зависит от переменных окружения процесса и от того,
+    пустое ли значение. Нужен, чтобы не дописывать ключ, который в файле уже есть (E1).
+
+    Args:
+        dotenv_path: Путь к .env.
+        key: Имя ключа.
+
+    Returns:
+        ``True``, если ключ записан в файле; ``False``, если ключа или файла нет.
+
+    Пример:
+        >>> _key_in_file('.env', 'GITHUB_TOKEN')     # в файле GITHUB_TOKEN=''
+        True
+    """
+    if not dotenv_path or not os.path.exists(dotenv_path):
+        return False
+    try:
+        return key in dotenv_values(dotenv_path)
+    except OSError:
+        return False
+
 
 def get_dotenv_path(
     name:str = None
@@ -64,28 +111,40 @@ def get_getenv(
     # Получение значения ключа
     thec = os.getenv(key)
 
-    # Если ключа нет в .env, то добавляем его с start_value
-    if (not thec) and (start_value is not None):
+    # # Если ключа нет в .env, то добавляем его с start_value
+    # if (not thec) and (start_value is not None):
+    # ↑ до E1 (2026-10-14): ключ с пустым значением (GITHUB_TOKEN='') ЕСТЬ в файле, но
+    #   «not ''» считал его отсутствующим — .env переписывался при каждом чтении конфига
+    #   (17 раз за старт GUI). Теперь дописываем только ключ, которого нет в самом файле.
+    #   Возвращаемое значение не меняется: пустое → start_value (как раньше).
+    if (not thec) and (start_value is not None) and not _key_in_file(dotenv_path, key):
         # Сохраняем в .env под блокировкой
-        with _env_write_lock:
-            save_env_file( # внесение новых ключей
-                env_key = {
-                    key : start_value
-                },
-                dotenv_path = dotenv_path,
-            )
+        try:
+            with _env_write_lock:
+                save_env_file( # внесение новых ключей
+                    env_key = {
+                        key : start_value
+                    },
+                    dotenv_path = dotenv_path,
+                )
 
-        # И снова загружаем .env, чтобы обновить os.environ
-        load_dotenv( 
-            dotenv_path = dotenv_path, 
-            override    = True
-        )
+            # И снова загружаем .env, чтобы обновить os.environ
+            load_dotenv(
+                dotenv_path = dotenv_path,
+                override    = True
+            )
+        except OSError as e:
+            # E2 (2026-10-14): .env только для чтения (Program Files, антивирус) —
+            # раньше PermissionError ронял запуск приложения. Теперь работаем со значением
+            # по умолчанию в памяти и сообщаем.
+            _report(f"не удалось записать '{key}' в {dotenv_path}: {e}. "
+                    f"Используется значение по умолчанию: {start_value!r}")
         thec = os.getenv(key)
         
     # Если ключа нет, то выбрасываем ошибку
     if not thec:
         if start_value is not None:
-            thec = start_value 
+            thec = start_value
         else:
             raise ValueError(f"{key} is required")
     
@@ -105,8 +164,14 @@ def crete_env_file(
         dotenv_path = get_dotenv_path() # ищем .env в текущей директории или стандарт   
 
     if not os.path.exists(dotenv_path) :
-        with open(dotenv_path, 'w') as f:
-            f.write(f"")
+        # with open(dotenv_path, 'w') as f:
+        #     f.write(f"")
+        # ↑ до E2 (2026-10-14): нет прав на папку → исключение и падение запуска.
+        try:
+            with open(dotenv_path, 'w') as f:
+                f.write("")
+        except OSError as e:
+            _report(f"не удалось создать {dotenv_path}: {e}")
 
 def save_env_file(
     env_key     :  dict,  # набор ключей для внесения

@@ -157,14 +157,17 @@ def test_get_instance_without_path_takes_path_from_env(env_file, config_sandbox)
     assert m._config_path == 'from_env.msgpack'
 
 
-def test_get_instance_without_path_reads_env_every_time_current(env_ok, monkeypatch):
-    """E6, как есть: путь к конфигу перечитывается из .env при каждом вызове."""
+def test_get_instance_without_path_reads_env_once(env_ok, monkeypatch):
+    """E6: путь к конфигу читается из .env один раз (раньше — при каждом вызове)."""
     calls = []
     real = manager_module._old_get_config_env
     monkeypatch.setattr(manager_module, '_old_get_config_env', lambda *a, **k: calls.append(1) or real(*a, **k))
     for _ in range(3):
         AppConfigManager.get_instance()
-    assert len(calls) == 3
+    assert len(calls) == 1
+    AppConfigManager.reset_default_config_path()
+    AppConfigManager.get_instance()
+    assert len(calls) == 2
 
 
 def test_get_config_env_returns_copy(env_ok):

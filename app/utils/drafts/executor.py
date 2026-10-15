@@ -211,7 +211,12 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
             fk = store.schema.parent_field(draft.entity)
             if fk is not None:
                 data[fk] = _real_id(store, draft.entity, draft.parent_id, id_map)
-            id_map[draft.key] = adapter.create(draft.entity, data, tx)
+            new_id = adapter.create(draft.entity, data, tx)
+            # F4 (проверка ядра 3): адаптер обязан вернуть id созданной записи; None
+            # разнёс бы по детям ссылку на None. Исключение внутри транзакции — откат.
+            if new_id is None:
+                raise PlanError(f"адаптер не вернул id созданной записи {draft.entity}")
+            id_map[draft.key] = new_id
         for draft in plan.updates:
             changes = dict(draft.data)
             fk = store.schema.parent_field(draft.entity)

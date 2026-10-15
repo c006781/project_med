@@ -1575,8 +1575,18 @@ class MainWindow(
         # создал новый со значениями по умолчанию. Сообщаем, где битый файл, и открываем
         # настройки как при первом запуске (окно — после показа главного окна).
         if config_manager.broken_config_message:
-            QTimer.singleShot(0, lambda: QMessageBox.warning(
-                self, "Конфигурация восстановлена", config_manager.broken_config_message))
+            # QTimer.singleShot(0, lambda: QMessageBox.warning(
+            #     self, "Конфигурация восстановлена", config_manager.broken_config_message))
+            # ↑ до M15 (проверка конфига 3, 2026-10-15): тот же заголовок и для файла,
+            #   который не удалось ПРОЧИТАТЬ (заблокирован, нет прав) — он не
+            #   восстанавливался и не тронут (broken_config_backup = None).
+            title = ("Конфигурация восстановлена" if config_manager.broken_config_backup
+                     else "Конфигурация не загружена")
+            # M10a (проверка конфига 3): текст берём СЕЙЧАС. Окно показывается позже, а
+            # экран настроек при входе (ниже) вызывает load(), который сбрасывает
+            # broken_config_message (M10) — окно выходило пустым.
+            message = config_manager.broken_config_message
+            QTimer.singleShot(0, lambda: QMessageBox.warning(self, title, message))
             self.page_manager.switch_to(
                 'settings',
                 add_to_history=False,

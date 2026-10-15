@@ -151,7 +151,8 @@ class DraftEvent:
     Attributes:
         kind: Что произошло: ``'created'``, ``'modified'``, ``'deleted'``,
             ``'undeleted'``, ``'discarded'``, ``'reparented'``, ``'remapped'``,
-            ``'saved'``, ``'cleared'``.
+            ``'saved'``, ``'cleared'``, ``'restored'`` (undo/redo), ``'linked'``
+            (узнали родителя записи, у которой есть черновики в ветке).
         node: Узел, которого касается событие (у ``'cleared'`` — ``None``).
         affected: Узлы, чьё состояние «есть изменения у себя/в ветке» могло
             поменяться: сам узел и все его предки (у ``'reparented'`` — и старые

@@ -257,7 +257,7 @@ def test_random_operations_keep_invariants(schema, seed):
     steps = 0
     for _ in range(150):
         op = rnd.choice(['modify', 'create_app', 'create_photo', 'delete', 'undelete', 'discard',
-                         'move', 'revert', 'undo', 'redo'])
+                         'move', 'revert', 'undo', 'redo', 'remember'])
         if op == 'modify':
             entity, eid = rnd.choice([('patient', rnd.choice([1, 2])), ('appointment', rnd.choice(appointments)),
                                       ('photo', rnd.choice(photos))])
@@ -288,6 +288,8 @@ def test_random_operations_keep_invariants(schema, seed):
                     store.revert_field(*node, 'f')
                 except ValueError:
                     pass
+        elif op == 'remember':
+            store.remember_parent('appointment', rnd.choice([10, 11, 20, 21]), rnd.choice([1, 2]))
         elif op == 'undo':
             store.undo()
         elif op == 'redo':
@@ -300,3 +302,68 @@ def test_random_operations_keep_invariants(schema, seed):
     while store.undo():
         pass
     assert store.is_empty
+
+
+
+# ---------------------------------------------------------------------------
+# Финальный проход (R4, R6, R7, R11)
+# ---------------------------------------------------------------------------
+
+def test_r4_remember_parent_reports_new_ancestors(store, events):
+    """Строки приёмов загрузились ПОСЛЕ правки фото — пациент получает значок (событие)."""
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    store.remember_parent('appointment', 12, 1)
+    assert events[-1].kind == 'linked' and ('patient', 1) in events[-1].affected
+    assert store.status('patient', 1) == 'child'
+    count = len(events)
+    store.remember_parent('appointment', 12, 1)            # то же самое — без события
+    store.remember_parent('appointment', 99, 1)            # нет черновиков — без события
+    assert len(events) == count
+
+
+def test_r4_reparent_known_reports_old_ancestors(store, events):
+    store.remember_parent('appointment', 12, 1)
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    store.remember_parent('appointment', 12, 2)            # приём «переехал» к пациенту 2
+    assert ('patient', 1) in events[-1].affected and ('patient', 2) in events[-1].affected
+    assert store.status('patient', 1) is None and store.status('patient', 2) == 'child'
+
+
+def test_r6_empty_operations_are_silent(store, events):
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    version, count, steps = store.version, len(events), len(store._undo)
+    store.modify('photo', 7, {})
+    store.revert_field('photo', 7, 'nope')
+    assert (store.version, len(events), len(store._undo)) == (version, count, steps)
+    store.modify('photo', 8, {}, parent_id=13)             # только сведения о родителе
+    assert store.parent_of('photo', 8) == ('appointment', 13) and not store.has_draft('photo', 8)
+
+
+def test_r7_undo_drops_links_to_vanished_new_records(store):
+    store.remember_parent('appointment', 12, 1)
+    a = store.create('appointment', {}, parent_id=1)
+    store.modify('photo', 7, {'appointment_id': a}, original={'appointment_id': 12})
+    store.undo()                                           # перенос
+    store.undo()                                           # создание приёма
+    assert store.parent_of('photo', 7) != ('appointment', a)
+    store.modify('photo', 7, {'b': 1}, parent_id=12)
+    assert store.status('appointment', 12) == 'child'
+
+
+def test_r11_status_cache_invalidated(store):
+    store.remember_parent('appointment', 12, 1)
+    assert store.status('patient', 1) is None              # закешировано
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    assert store.status('patient', 1) == 'child'           # версия сменилась
+    store.remember_parent('appointment', 12, 2)
+    assert store.status('patient', 1) is None              # связи сменились
+
+
+def test_r11_status_computed_once_per_state(store, monkeypatch):
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    calls = []
+    real = store.has_descendant_changes
+    monkeypatch.setattr(store, 'has_descendant_changes', lambda *a: calls.append(a) or real(*a))
+    for _ in range(50):                                  # 50 ячеек строки при перерисовке
+        store.status('appointment', 12)
+    assert len(calls) == 1

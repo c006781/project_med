@@ -259,16 +259,26 @@ class Patient(Base):
         """
 
         try:
-            temp = ' '.join([
-                self.last_name,
-                self.first_name,
-                self.middle_name   
-            ]).strip()
+            # temp = ' '.join([
+            #     self.last_name,
+            #     self.first_name,
+            #     self.middle_name
+            # ]).strip()
+            # ↑ до B1 (2026-10-15): без отчества (None) join падал TypeError — а repr
+            #   вызывается логом репозитория при КАЖДОМ add: создание пациента без
+            #   отчества падало целиком.
+            temp = ' '.join(
+                part for part in (self.last_name, self.first_name, self.middle_name) if part
+            ).strip()
 
             id_val = getattr(self, 'id', None)
 
-            rezult = f"<Patient(id={id_val}, "
-            f"name={temp})>"
+            # rezult = f"<Patient(id={id_val}, "
+            # f"name={temp})>"
+            # ↑ до B1: вторая f-строка была отдельной инструкцией (не продолжением) —
+            #   repr возвращал обрубок "<Patient(id=1, ".
+            rezult = (f"<Patient(id={id_val}, "
+                      f"name={temp})>")
 
             return rezult
         

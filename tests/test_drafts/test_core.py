@@ -623,3 +623,13 @@ def test_f3_policy_cannot_delete_new(store):
 def test_f3_policy_node_without_draft(store):
     with pytest.raises(PlanError, match='без черновика'):
         build_plan(store, delete_policy=_FixedPolicy(dropped=(('photo', 99),)))
+
+
+def test_f4_adapter_must_return_id(store, adapter):
+    """F4: create без id — откат, черновики на месте."""
+    a = store.create('appointment', {}, parent_id=1)
+    store.create('photo', {}, parent_id=a)
+    adapter.create = lambda entity, data, tx: None
+    with pytest.raises(PlanError, match='не вернул id'):
+        execute_plan(store, build_plan(store), adapter)
+    assert len(store.drafted_nodes()) == 2

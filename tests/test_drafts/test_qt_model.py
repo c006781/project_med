@@ -150,3 +150,17 @@ def test_undo_existing_row_edit_refreshes(photos, store):
     store.undo()
     assert photos.data(photos.index(0, 0)) == 'a.jpg'
     assert photos.row_status(0) is None
+
+
+def test_q2_no_data_changed_inside_reset(qapp, store):
+    """Q2: связи сообщаются после сброса модели — dataChanged не посреди reset."""
+    model = DraftTableModel(store, 'appointment', [Column('cost', 'Стоимость')])
+    store.modify('photo', 7, {'a': 1}, parent_id=12)          # черновик в ветке приёма 12
+    log, state = [], {'resetting': False}
+    model.modelAboutToBeReset.connect(lambda: state.update(resetting=True))
+    model.modelReset.connect(lambda: state.update(resetting=False))
+    model.dataChanged.connect(lambda a, b: log.append(state['resetting']))
+    model.set_rows([{'id': 12, 'patient_id': 1, 'cost': 1}], parent_id=1)
+    assert log and not any(log)                               # были, но не во время сброса
+    assert store.status('patient', 1) == 'child'
+    model.detach()

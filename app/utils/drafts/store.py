@@ -241,6 +241,9 @@ class DraftStore:
         # для КАЖДОЙ ячейки при каждой перерисовке, а он считается обходом потомков.
         # Сбрасывается при любом изменении черновиков (версия) или связей.
         self._links_version = 0
+        # Q3 (финальный проход 2): изменения САМИХ черновиков (без 'linked') — по ним
+        # считается шаг отмены; версия (_version) растёт и от связей (план устаревает).
+        self._drafts_changes = 0
         self._status_cache: Dict[NodeKey, Optional[str]] = {}
         self._status_cache_key: Tuple[int, int] = (-1, -1)
 
@@ -327,6 +330,8 @@ class DraftStore:
             >>> store._emit('modified', ('photo', 3))
         """
         self._version += 1
+        if kind != 'linked':
+            self._drafts_changes += 1
         affected: List[NodeKey] = []
         if node is not None:
             affected.append(node)
@@ -1087,13 +1092,16 @@ class DraftStore:
         """
         outer = self._undo_depth == 0 and not self._history_suspended and self.history_limit > 0
         snapshot = self._snapshot() if outer else None
-        version = self._version
+        # version = self._version
+        # ↑ до Q3: шаг считался по общей версии — 'linked' (загрузка строк) давал пустой
+        #   шаг отмены. Теперь — только изменения самих черновиков.
+        changes = self._drafts_changes
         self._undo_depth += 1
         try:
             yield
         finally:
             self._undo_depth -= 1
-            if outer and self._version != version:
+            if outer and self._drafts_changes != changes:
                 self._undo.append(snapshot)
                 del self._undo[:-self.history_limit]
                 self._redo.clear()

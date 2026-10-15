@@ -1,5 +1,18 @@
 # app/config/conf/getenv.py
 
+"""
+Чтение и запись файла .env (``python-dotenv``).
+
+.env — «загрузочный» уровень конфигурации: путь к ``config.msgpack``
+(``APP_CONFIG_PATH``) и токен GitHub для обновлений. Остальные настройки — в
+``config.msgpack`` (см. ``app/config/IMPLEMENTATION.md``).
+
+Пример:
+    >>> from app.config.conf.getenv import get_getenv
+    >>> get_getenv('APP_CONFIG_PATH', start_value='config.msgpack')
+    'config.msgpack'
+"""
+
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 
@@ -7,6 +20,7 @@ import os  # Импорт модуля os для работы с путями ф
 
 import sys
 import threading
+from typing import Dict, Optional
 
 # Сторонние библиотеки
 from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values # pip install python-dotenv
@@ -61,14 +75,24 @@ def _key_in_file(dotenv_path: str, key: str) -> bool:
 
 
 def get_dotenv_path(
-    name:str = None
-):
+    name: Optional[str] = None
+) -> str:
     """
-    .env в текущей директории или стандарт
-    
-    Args:
-        name : (str) путь к .env
+    Путь к файлу .env: найденный ``find_dotenv()`` или ``name`` (по умолчанию ``'.env'``).
 
+    ВНИМАНИЕ (E3, не исправлено — решение отложено): ``find_dotenv()`` ищет от папки
+    МОДУЛЯ вверх, а не от текущей папки. При разработке находится .env проекта, откуда бы
+    ни запускали; в собранном exe — не находится, и берётся ``name`` в текущей папке.
+
+    Args:
+        name: Путь по умолчанию, если .env не найден.
+
+    Returns:
+        Путь к .env.
+
+    Пример:
+        >>> get_dotenv_path()
+        'C:\\Git\\project_med\\.env'
     """
     if not name:
         name =  '.env' # .env  стандарт
@@ -77,17 +101,36 @@ def get_dotenv_path(
 
 
 def get_getenv(
-    key:str,
-    start_value:str = None,
-    dotenv_path:str = None,
-):
+    key: str,
+    start_value: Optional[str] = None,
+    dotenv_path: Optional[str] = None,
+) -> str:
     """
-    Обработчик получение заначений из окружения
+    Значение ключа из окружения/.env; при отсутствии — значение по умолчанию.
+
+    Порядок:
+        1. Загрузить .env в ``os.environ`` (существующие переменные окружения не
+           перезаписываются); если .env нет — создать пустой.
+        2. Пустое или отсутствующее значение → ``start_value``. Если ключа нет в самом
+           ФАЙЛЕ — дописать его со ``start_value`` (с 2026-10-14 ключ с пустым значением
+           не дописывается повторно — E1).
+        3. Записать .env не удалось (только чтение, нет прав) — предупреждение в stderr и
+           ``start_value`` в памяти, без исключения (E2).
 
     Args:
-        key : (str) наименование ключа
-        dotenv_path : (str) путь к .env
-        start_value : (str) Начальное значение ключа (если ключа нет в dotenv_path)
+        key: Имя ключа.
+        start_value: Значение по умолчанию; ``None`` — ключ обязателен.
+        dotenv_path: Путь к .env; ``None`` — ``get_dotenv_path()``.
+
+    Returns:
+        Значение ключа (строка).
+
+    Raises:
+        ValueError: Ключа нет (или пустой) и ``start_value`` не задан.
+
+    Пример:
+        >>> get_getenv('APP_CONFIG_PATH', start_value='config.msgpack')
+        'config.msgpack'
     """
 
     # Если не передан путь к .env, то ищем .env в текущей директории или стандарт
@@ -151,13 +194,21 @@ def get_getenv(
     return thec
 
 def crete_env_file(
-    dotenv_path:str = None,
-):
+    dotenv_path: Optional[str] = None,
+) -> None:
     """
-    Проверяет наличие .env, если нет – создаём.
+    Создаёт пустой .env, если его нет (имя функции историческое, с опечаткой).
+
+    Ошибка создания (нет прав) — предупреждение в stderr, без исключения (E2).
 
     Args:
-        dotenv_path : (str) путь к .env
+        dotenv_path: Путь к .env; ``None`` — ``get_dotenv_path()``.
+
+    Returns:
+        None
+
+    Пример:
+        >>> crete_env_file('.env')
     """
 
     if not dotenv_path:
@@ -174,17 +225,29 @@ def crete_env_file(
             _report(f"не удалось создать {dotenv_path}: {e}")
 
 def save_env_file(
-    env_key     :  dict,  # набор ключей для внесения
-    dotenv_path :str    = None,  # путь к .env
-    if_update:   bool   = False,  # принудительное обновление ключа в .env
-):
+    env_key: Dict[str, str],  # набор ключей для внесения
+    dotenv_path: Optional[str] = None,  # путь к .env
+    if_update: bool = False,  # принудительное обновление ключа в .env
+) -> None:
     """
-    Внесение ключей в .env
+    Записывает ключи в .env и перезагружает их в ``os.environ``.
+
+    Без ``if_update`` записывает только ключи, которых нет в окружении (или они пустые).
 
     Args:
-        env_key     : (dict) набор ключей для внесения
-        dotenv_path : (str) путь к .env
-        if_update   : (bool) Принудительное обновление ключа в .env
+        env_key: Ключи и значения для записи.
+        dotenv_path: Путь к .env; ``None`` — ``get_dotenv_path()``.
+        if_update: Перезаписать и уже существующие ключи.
+
+    Returns:
+        None
+
+    Raises:
+        ValueError: ``python-dotenv`` не смог записать ключ.
+        OSError: .env нельзя записать (обрабатывается в ``get_getenv``).
+
+    Пример:
+        >>> save_env_file({'GITHUB_TOKEN': 'ghp_...'}, if_update=True)
     """
 
     with _env_write_lock:

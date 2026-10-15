@@ -1,9 +1,34 @@
 # app/config/__init__.py
+
+"""
+Пакет конфигурации приложения.
+
+Экспортирует ``APP_VERSION`` (из файла ``VERSION``) и ``GITHUB_REPO_SLUG``.
+Устройство конфигурации — ``app/config/IMPLEMENTATION.md``.
+
+Пример:
+    >>> from app.config import APP_VERSION
+    >>> APP_VERSION
+    '1.4.2'
+"""
+
 import os
 import sys
 
 def _get_version() -> str:
-    """Возвращает версию из файла VERSION (лежит рядом с исполняемым файлом или в корне проекта)."""
+    """
+    Версия приложения из файла ``VERSION``.
+
+    Ищется рядом с exe (``sys._MEIPASS`` в сборке PyInstaller) или в корне проекта.
+    Файла нет или он не читается — ``'0.0.0-dev'``.
+
+    Returns:
+        Строка версии.
+
+    Пример:
+        >>> _get_version()
+        '1.4.2'
+    """
     base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     version_file = os.path.join(base_dir, 'VERSION')
     try:

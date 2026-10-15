@@ -1,0 +1,17 @@
+# app/utils/drafts_qt/__init__.py
+
+"""
+Таблицы Qt (PySide6) поверх черновиков ``drafts`` — переносимый пакет.
+
+Зависимости: PySide6 и пакет ``drafts`` (лежит рядом, в том же родительском пакете,
+или установлен как пакет верхнего уровня ``drafts``). Код приложения не используется:
+данные — через ``RowSource``, сохранение — через переданную функцию.
+
+Пример:
+    >>> from app.utils.drafts_qt import Column, DraftTableModel
+    >>> model = DraftTableModel(store, 'patient', [Column('last_name', 'Фамилия')])
+"""
+
+from .model import DEFAULT_COLORS, Column, DraftTableModel, NodeRole, StatusRole
+
+__all__ = ['DEFAULT_COLORS', 'Column', 'DraftTableModel', 'NodeRole', 'StatusRole']

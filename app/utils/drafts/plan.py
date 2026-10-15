@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from ._model import Draft, NodeKey
+from ._model import Draft, NodeKey, PlanError
 from .policies import CascadeDeletePolicy, DeletePolicy
 from .scope import SaveScope, select_nodes
 
@@ -45,6 +45,8 @@ class SavePlan:
             объёма. Пока список не пуст, план не исполняется: спросить пользователя и
             построить заново с ``include_new_ancestors=True`` (требование 6).
         version: Версия хранилища при построении (устаревший план не исполняется).
+        store_token: Метка хранилища, по которому построен план (F2: план другого
+            хранилища не исполняется, даже если номера версий совпали).
 
     Пример:
         >>> plan.is_empty, plan.needs_confirmation
@@ -59,6 +61,7 @@ class SavePlan:
     blocked: Tuple[NodeKey, ...] = ()
     missing_new_ancestors: Tuple[NodeKey, ...] = ()
     version: int = 0
+    store_token: object = None
 
     @property
     def is_empty(self) -> bool:
@@ -145,6 +148,20 @@ def build_plan(
     resolution = policy.resolve(store, selected)
     by_delete = set(resolution.deletes) | set(resolution.dropped)
     writable = selected - by_delete - set(resolution.blocked)
+    # F1 (проверка ядра 1): гарантии НЕ зависят от политики — помеченное на удаление
+    # никогда не создаётся и не изменяется, а потомок удаляемой записи вне её ветки не
+    # пишется. Раньше это полностью доверялось политике: своя политика могла пропустить
+    # удалённую запись в creates/updates.
+    unhandled = [n for n in writable if store.get(*n).deleted]
+    if unhandled:
+        raise PlanError(
+            "политика удаления не обработала записи, помеченные на удаление: "
+            + ", ".join(f"{t}:{i}" for t, i in sorted(unhandled, key=str))
+        )
+    extra_blocked = [n for n in writable
+                     if any((a := store.get(*x)) is not None and a.deleted for x in store.ancestors(n))]
+    writable.difference_update(extra_blocked)
+    blocked = tuple(resolution.blocked) + tuple(n for n in extra_blocked if n not in resolution.blocked)
 
     missing: List[NodeKey] = []
     for node in sorted(writable, key=lambda n: store.get(*n).order):
@@ -184,6 +201,6 @@ def build_plan(
     return SavePlan(
         creates=tuple(creates), updates=tuple(updates), deletes=tuple(deletes),
         dropped=tuple(dropped), deleted_branches=resolution.branches,
-        blocked=resolution.blocked, missing_new_ancestors=tuple(missing),
-        version=store.version,
+        blocked=blocked, missing_new_ancestors=tuple(missing),
+        version=store.version, store_token=store.token,
     )

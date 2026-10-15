@@ -555,3 +555,38 @@ def test_custom_temp_id_factory(schema):
     import uuid
     store = DraftStore(schema, temp_id_factory=lambda: f'tmp-{uuid.uuid4().hex[:6]}')
     assert str(store.create('patient', {})).startswith('tmp-')
+
+
+# ---------------------------------------------------------------------------
+# Проверка ядра, проход 1 (F1, F2)
+# ---------------------------------------------------------------------------
+
+class _NoopPolicy:
+    """Политика, которая ничего не делает с удалёнными (ошибочная своя политика)."""
+
+    def resolve(self, store, selected):
+        from app.utils.drafts import DeleteResolution
+        return DeleteResolution()
+
+
+def test_f1_builder_rejects_unhandled_deleted(store):
+    store.delete('appointment', 12, parent_id=1)
+    with pytest.raises(PlanError, match='не обработала'):
+        build_plan(store, delete_policy=_NoopPolicy())
+
+
+def test_f1_builder_blocks_child_of_deleted_even_with_custom_policy(store):
+    store.delete('appointment', 12, parent_id=1)
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    plan = build_plan(store, [('photo', 7)], SaveScope.SELF, delete_policy=_NoopPolicy())
+    assert plan.blocked == (('photo', 7),) and plan.is_empty
+
+
+def test_f2_plan_of_other_store_rejected(schema, adapter):
+    a, b = DraftStore(schema), DraftStore(schema)
+    a.modify('photo', 7, {'x': 1}, parent_id=12)
+    b.modify('photo', 7, {'x': 2}, parent_id=12)
+    plan = build_plan(a)
+    assert plan.version == b.version
+    with pytest.raises(PlanError, match='другому хранилищу'):
+        execute_plan(b, plan, adapter)

@@ -167,6 +167,7 @@ class DraftStore:
         self._listeners: List[Listener] = []
         self._order = itertools.count(1)
         self._version = 0
+        self._token = object()   # метка этого хранилища для планов (F2)
         self._batch_depth = 0
         self._pending: List[DraftEvent] = []
 
@@ -296,6 +297,20 @@ class DraftStore:
             True
         """
         return self._version
+
+    @property
+    def token(self) -> object:
+        """
+        Уникальная метка хранилища: план помнит, по какому хранилищу построен (F2).
+
+        Returns:
+            Объект-метка.
+
+        Пример:
+            >>> DraftStore(schema).token is DraftStore(schema).token
+            False
+        """
+        return self._token
 
     # ------------------------------------------------------------------
     # Связи дерева

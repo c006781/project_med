@@ -130,3 +130,23 @@ def test_headers_and_colors(appointments):
     appointments.setData(appointments.index(0, 0), 1)
     assert cell(appointments, 0, 0, Qt.BackgroundRole) is not None
     assert cell(appointments, 1, 0, Qt.BackgroundRole) is None
+
+
+def test_q1_undo_redo_new_row(photos, store):
+    """Q1: отмена создания убирает строку, повтор возвращает; правка новой — откатывается."""
+    new_id = photos.add_row({'file_path': 'n.jpg'})
+    assert photos.rowCount() == 2
+    store.undo()
+    assert photos.rowCount() == 1 and photos.row_of(new_id) == -1
+    store.redo()
+    assert photos.row_of(new_id) == 1
+    photos.setData(photos.index(1, 0), 'm.jpg')
+    store.undo()
+    assert photos.data(photos.index(1, 0)) == 'n.jpg'
+
+
+def test_undo_existing_row_edit_refreshes(photos, store):
+    photos.setData(photos.index(0, 0), 'b.jpg')
+    store.undo()
+    assert photos.data(photos.index(0, 0)) == 'a.jpg'
+    assert photos.row_status(0) is None

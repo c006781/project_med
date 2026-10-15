@@ -237,6 +237,12 @@ class DraftStore:
         self._redo: List[_Snapshot] = []
         self._undo_depth = 0
         self._history_suspended = 0
+        # R11 (финальный проход 2026-10-16): кеш значков. Таблица спрашивает статус строки
+        # для КАЖДОЙ ячейки при каждой перерисовке, а он считается обходом потомков.
+        # Сбрасывается при любом изменении черновиков (версия) или связей.
+        self._links_version = 0
+        self._status_cache: Dict[NodeKey, Optional[str]] = {}
+        self._status_cache_key: Tuple[int, int] = (-1, -1)
 
     # ------------------------------------------------------------------
     # События
@@ -434,7 +440,28 @@ class DraftStore:
         self._parents[node] = parent_id
         if parent_id is not None:
             self._children.setdefault((parent_type, parent_id), set()).add(node)
+        self._links_version += 1
         return old_parent
+
+    def _parent_node(self, node: NodeKey, parent_id: Optional[Hashable]) -> Optional[NodeKey]:
+        """
+        Узел-родитель по id родителя (тип — из схемы).
+
+        Args:
+            node: Узел-ребёнок.
+            parent_id: Id родителя.
+
+        Returns:
+            Узел-родитель или ``None``.
+
+        Пример:
+            >>> store._parent_node(('photo', 7), 12)
+            ('appointment', 12)
+        """
+        parent_type = self.schema.parent_type(node[0])
+        if parent_type is None or parent_id is None:
+            return None
+        return (parent_type, parent_id)
 
     def _parent_key(self, node: NodeKey) -> Optional[NodeKey]:
         """
@@ -462,7 +489,8 @@ class DraftStore:
         поднимались до неё и выше.
 
         Интерфейс вызывает при загрузке строк: «приём 12 принадлежит пациенту 1».
-        Черновик не создаётся; событий нет (статусы не меняются).
+        Черновик не создаётся. Если у записи или её потомков есть черновики и связь
+        новая/другая — событие ``'linked'`` (значки предков поменялись); иначе событий нет.
 
         Args:
             entity: Тип записи.
@@ -476,7 +504,18 @@ class DraftStore:
             >>> store.remember_parent('appointment', 12, 1)
         """
         self._check_type(entity)
-        self._set_link((entity, entity_id), parent_id)
+        # self._set_link((entity, entity_id), parent_id)
+        # ↑ до R4 (финальный проход 2026-10-16): связь менялась молча — если у записи или
+        #   её потомков есть черновики, значки новых предков не обновлялись (строки
+        #   приёмов загрузились ПОСЛЕ правки фото — пациент без значка).
+        node = (entity, entity_id)
+        known = node in self._parents
+        if known and self._parents[node] == parent_id:
+            return
+        old_ancestors = self.ancestors(node) if known else []
+        self._set_link(node, parent_id)
+        if node in self._records or self.has_descendant_changes(entity, entity_id):
+            self._emit('linked', node, old_ancestors)
 
     def parent_of(self, entity: str, entity_id: Hashable) -> Optional[NodeKey]:
         """
@@ -714,6 +753,13 @@ class DraftStore:
         """
         entity_type = self.schema.get(entity)
         node = (entity, entity_id)
+        if not changes:
+            # R6 (финальный проход 2026-10-16): пустое изменение раньше рассылало событие,
+            #   делало план устаревшим и добавляло пустой шаг отмены. Теперь — только
+            #   сведения о родителе.
+            if parent_id is not MISSING:
+                self.remember_parent(entity, entity_id, parent_id)
+            return
         record = self._records.get(node)
         created = record is None
         if record is None:
@@ -940,6 +986,7 @@ class DraftStore:
             if not self._children[parent]:
                 del self._children[parent]
         self._parents.pop(node, None)
+        self._links_version += 1
 
     @_undoable
     def clear(self) -> None:
@@ -956,6 +1003,7 @@ class DraftStore:
         self._records.clear()
         self._parents.clear()
         self._children.clear()
+        self._links_version += 1
         self._emit('cleared', None)
 
     @_undoable
@@ -994,6 +1042,8 @@ class DraftStore:
             if fk not in record.original:
                 raise ValueError(f"исходное значение '{fk}' неизвестно — перенос не отменить")
         old_parents: List[NodeKey] = []
+        if not any(name in record.data for name in fields):
+            return                      # R6: нечего отменять — ни события, ни шага истории
         for name in fields:
             if name not in record.data:
                 continue
@@ -1148,9 +1198,16 @@ class DraftStore:
         merged = {n: p for n, p in self._parents.items()
                   if not (n in self._records and self._records[n].is_new and n not in records)}
         merged.update(parents)
+        # R7 (финальный проход 2026-10-16): связи, указывающие на НОВЫЕ записи, которых
+        #   после восстановления нет, отбрасываются — иначе существующая запись, перенесённая
+        #   в отменённую новую, осталась бы привязанной к несуществующему родителю.
+        gone_new = {n for n, r in self._records.items() if r.is_new and n not in records}
+        merged = {n: p for n, p in merged.items()
+                  if n not in gone_new and self._parent_node(n, p) not in gone_new}
         self._records = {k: r.copy() for k, r in records.items()}
         self._parents = {}
         self._children = {}
+        self._links_version += 1
         for node, parent_id in merged.items():
             self._set_link(node, parent_id)
         self._history_suspended += 1
@@ -1342,15 +1399,25 @@ class DraftStore:
             >>> store.status('patient', 1)
             'child'
         """
-        own = (entity, entity_id) in self._records
+        key = (self._version, self._links_version)
+        if key != self._status_cache_key:
+            self._status_cache = {}
+            self._status_cache_key = key
+        node = (entity, entity_id)
+        if node in self._status_cache:
+            return self._status_cache[node]
+        own = node in self._records
         child = self.has_descendant_changes(entity, entity_id)
         if own and child:
-            return 'both'
-        if own:
-            return 'own'
-        if child:
-            return 'child'
-        return None
+            status = 'both'
+        elif own:
+            status = 'own'
+        elif child:
+            status = 'child'
+        else:
+            status = None
+        self._status_cache[node] = status
+        return status
 
     def has_changes(
         self,

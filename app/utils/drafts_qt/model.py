@@ -572,6 +572,36 @@ class DraftTableModel(QAbstractTableModel):
             return False
         return self._parent_id is MISSING or draft.parent_id == self._parent_id
 
+    def _sync_new_row(self, node: NodeKey, row: int) -> None:
+        """
+        Приводит строку новой записи в соответствие с хранилищем: нет черновика — строка
+        убирается; черновик появился (и относится к этой таблице) — строка добавляется;
+        есть — данные обновляются.
+
+        Args:
+            node: Узел этой таблицы.
+            row: Текущий номер строки или -1.
+
+        Returns:
+            None
+
+        Пример:
+            >>> model._sync_new_row(('photo', -1), -1)     # после redo создания
+        """
+        draft = self.store.get(*node)
+        if row >= 0 and node[1] in self._new_ids and draft is None:
+            self.beginRemoveRows(QModelIndex(), row, row)
+            del self._rows[row]
+            self._new_ids.discard(node[1])
+            self.endRemoveRows()
+        elif row < 0 and draft is not None and draft.is_new and self._belongs_here(node[1]):
+            self.beginInsertRows(QModelIndex(), len(self._rows), len(self._rows))
+            self._rows.append({**draft.data, self.id_field: draft.id})
+            self._new_ids.add(draft.id)
+            self.endInsertRows()
+        elif row >= 0 and draft is not None and draft.is_new:
+            self._rows[row] = {**draft.data, self.id_field: draft.id}
+
     def _schedule_reload(self) -> None:
         """
         Одна просьба перечитать страницу на всю пачку событий: сохранение 50 записей —
@@ -674,6 +704,11 @@ class DraftTableModel(QAbstractTableModel):
                 draft = self.store.get(*node)
                 if draft is not None and draft.is_new:
                     self._rows[row] = {**draft.data, self.id_field: draft.id}
+            elif event.kind == 'restored':
+                # Q1 (финальный проход 2026-10-16): отмена/повтор (undo/redo) — новая
+                # запись могла исчезнуть или появиться снова; раньше строка оставалась
+                # призраком / не появлялась.
+                self._sync_new_row(node, row)
         if event.kind in ('saved', 'remapped'):
             self._schedule_reload()
         for entity, entity_id in event.affected:

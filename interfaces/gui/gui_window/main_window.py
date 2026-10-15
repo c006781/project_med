@@ -1493,6 +1493,85 @@ class MainWindow(
     Наследует QMainWindow и все миксины, предоставляющие готовую функциональность.
     """
 
+    def _init_drafts(self) -> None:
+        """
+        Создаёт черновики приложения (``self.drafts``) и мост сигналов Qt
+        (``self.drafts_bridge``).
+
+        Ошибка создания не роняет окно: черновики будут недоступны (``None``), в лог —
+        трассировка.
+
+        Returns:
+            None
+
+        Пример:
+            >>> window._init_drafts(); window.drafts.store.is_empty
+            True
+        """
+        from app.draft.integration import create_app_drafts
+        from interfaces.gui.gui_window.drafts_qt import DraftsQtBridge
+        try:
+            self.drafts = create_app_drafts()
+            self.drafts_bridge = DraftsQtBridge(self.drafts.store, parent=self)
+        except Exception as e:
+            self.logger.exception(f"Не удалось создать черновики: {e}")
+            self.drafts = None
+            self.drafts_bridge = None
+
+    def save_drafts(self, targets=None, scope=None) -> bool:
+        """
+        Сохраняет черновики с вопросами пользователю (новые родители, удаляемые ветки).
+
+        Args:
+            targets: Узлы цели (``None`` — всё).
+            scope: Направления (``SaveScope``; по умолчанию ``BRANCH``).
+
+        Returns:
+            ``True`` — сохранено (или нечего сохранять); ``False`` — отказ или ошибка
+            (сообщение пользователю уже показано).
+
+        Пример:
+            >>> window.save_drafts()
+            True
+        """
+        from interfaces.gui.gui_window.drafts_qt import make_confirmations
+        if self.drafts is None:
+            return True
+        ask_new, ask_delete = make_confirmations(self, self.drafts.schema)
+        try:
+            result = self.drafts.save(targets, scope, ask_new, ask_delete)
+        except Exception as e:
+            self.logger.exception(f"Ошибка сохранения черновиков: {e}")
+            QMessageBox.critical(self, "Ошибка сохранения",
+                                 f"Изменения не сохранены (в базе ничего не поменялось):\n{e}")
+            return False
+        return result is not None
+
+    def closeEvent(self, event) -> None:
+        """
+        Закрытие окна: при несохранённых черновиках — вопрос «сохранить / не сохранять /
+        отмена» (требование 8: черновики только в памяти).
+
+        Args:
+            event: Событие закрытия Qt.
+
+        Returns:
+            None
+
+        Пример:
+            >>> window.close()      # с изменениями — диалог
+        """
+        from interfaces.gui.gui_window.drafts_qt import ask_on_close
+        drafts = getattr(self, 'drafts', None)
+        if drafts is not None and not drafts.store.is_empty:
+            choice = ask_on_close(self)
+            if choice == 'cancel' or (choice == 'save' and not self.save_drafts()):
+                event.ignore()
+                return
+        if getattr(self, 'drafts_bridge', None) is not None:
+            self.drafts_bridge.detach()
+        super().closeEvent(event)
+
 
     @AppLogger.get_instance(
         name='MainWindow',
@@ -1543,6 +1622,12 @@ class MainWindow(
 
         # Подключение обработчика логов к виджету LogViewer
         self._setup_log_viewer()
+
+        # Черновики (несохранённые изменения): ОДНО хранилище на всё окно — изменения со
+        # всех экранов сохраняются вместе (D1, app/draft/IMPLEMENTATION.md). Создаётся ДО
+        # страниц, чтобы они могли его получить. Пока страницы работают со старым
+        # реестром (перевод — этап 5), хранилище пустое.
+        self._init_drafts()
 
         # Создание страниц и менеджера страниц
         self._init_page_manager()

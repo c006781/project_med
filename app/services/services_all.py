@@ -445,7 +445,10 @@ class BaseService(
         )
 
         # Подписываемся на изменения конфигурации
-        AppConfigManager.add_change_listener(self._on_config_changed)
+        # AppConfigManager.add_change_listener(self._on_config_changed)
+        # ↑ до 2026-10-14 (M4): каждый save() — даже без изменений или только логирования —
+        #   переоткрывал БД во всех сервисах. Теперь настройки применяет только
+        #   ConfigApplier.apply_changes() (app/config/IMPLEMENTATION.md).
 
     @AppLogger.get_instance(
         name='BaseService',

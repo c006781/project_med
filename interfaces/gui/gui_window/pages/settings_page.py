@@ -974,22 +974,26 @@ class SettingsPage(BasePage):
             # from app.config.config_applier import ConfigApplier
             changed_blocks = ConfigApplier.get_changed_blocks(old_config, new_config)
 
-            # Применяем только изменённые блоки
+            # # Применяем только изменённые блоки
+            # applier = ConfigApplier()
+            # if 'database' in changed_blocks:
+            #     applier.apply_database(new_config)
+            #
+            # if 'photos' in changed_blocks:
+            #     applier.apply_photos_storage(new_config)
+            #
+            # if 'sync' in changed_blocks:
+            #     applier.apply_sync(new_config)
+            #
+            # if any(block.startswith('logging') for block in changed_blocks):
+            #     applier.apply_logging(new_config)
+            #
+            # if 'backup' in changed_blocks:
+            #     applier.apply_backup(new_config)
+            # ↑ до 2026-10-14: методы сравнивали с уже сохранённым менеджером и ничего не
+            #   применяли (A1). Теперь — один вызов со снимком ДО сохранения.
             applier = ConfigApplier()
-            if 'database' in changed_blocks:
-                applier.apply_database(new_config)
-
-            if 'photos' in changed_blocks:
-                applier.apply_photos_storage(new_config)
-
-            if 'sync' in changed_blocks:
-                applier.apply_sync(new_config)
-
-            if any(block.startswith('logging') for block in changed_blocks):
-                applier.apply_logging(new_config)
-
-            if 'backup' in changed_blocks:
-                applier.apply_backup(new_config)
+            changed_blocks = applier.apply_changes(old_config, new_config)
 
 
             # # ----------------------------------------------------------

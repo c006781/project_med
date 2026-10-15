@@ -643,10 +643,26 @@ class ConfigApplier:
         # ↑ до AP2 (проверка 2026-10-15): без LOG_ARGS и общих флагов
         logging_keys = LOGGING_KEYS
 
+        # changed = any(
+        #     new_config.get(k) != current_full.get(k)
+        #     for k in logging_keys
+        #     if k in new_config
+        # )
+        # ↑ до AP7 (проверка 4, 2026-10-15): персональные уровни логгеров
+        #   (``<имя>_LEVEL``, например ``ConfigApplier_LEVEL`` — логгер их понимает)
+        #   не сравнивались: правка в файле + ``cli apply_settings`` не применялась.
+        #   Для них сравниваются ОБА конфига (ключ могли и удалить из файла).
+        personal_levels = {
+            k for k in set(new_config) | set(current_full)
+            if isinstance(k, str) and k.endswith('_LEVEL') and k not in logging_keys
+        }
         changed = any(
             new_config.get(k) != current_full.get(k)
             for k in logging_keys
             if k in new_config
+        ) or any(
+            new_config.get(k) != current_full.get(k)
+            for k in personal_levels
         )
         if changed:
             self.logger.info("Применение новых настроек логирования")

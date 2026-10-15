@@ -1291,7 +1291,16 @@ def create_cli():
         config = manager.get_all()
         applier = ConfigApplier()
         applier.apply_full_config(config)
-        click.echo("Настройки применены.")
+        # click.echo("Настройки применены.")
+        # ↑ до CLI1 (проверка конфига 4, 2026-10-15): после AP4 сбой блока не бросает
+        #   исключение, а попадает в applier.errors — без проверки команда сообщала
+        #   «применены» и при ошибке.
+        if applier.errors:
+            for block, err in applier.errors.items():
+                click.echo(f"Не удалось применить блок '{block}': {err}", err=True)
+            click.echo("Настройки применены частично (подробности — в журнале).", err=True)
+        else:
+            click.echo("Настройки применены.")
 
     # @click.command()
     @cli.command()

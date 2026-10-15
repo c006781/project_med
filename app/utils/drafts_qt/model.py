@@ -203,14 +203,22 @@ class DraftTableModel(QAbstractTableModel):
         self._rows = [dict(row) for row in rows]
         self._new_ids = set()
         known = {row.get(self.id_field) for row in self._rows}
-        for row in self._rows:
-            if self._fk and row.get(self._fk) is not None:
-                self.store.remember_parent(self.entity, row[self.id_field], row[self._fk])
+        # for row in self._rows:
+        #     if self._fk and row.get(self._fk) is not None:
+        #         self.store.remember_parent(self.entity, row[self.id_field], row[self._fk])
+        # ↑ до Q2 (финальный проход 2, 2026-10-16): с R4 remember_parent может прислать
+        #   событие 'linked' → dataChanged ПОСРЕДИ beginResetModel/endResetModel (для Qt
+        #   недопустимо). Теперь родители сообщаются после сброса, одной пачкой.
         for draft in self.store.drafts(self.entity, parent_id=parent_id, new_only=True):
             if draft.id not in known:
                 self._rows.append({**draft.data, self.id_field: draft.id})
                 self._new_ids.add(draft.id)
         self.endResetModel()
+        if self._fk:
+            with self.store.batch():
+                for row in list(self._rows):
+                    if row.get(self._fk) is not None and row[self.id_field] not in self._new_ids:
+                        self.store.remember_parent(self.entity, row[self.id_field], row[self._fk])
 
     def clear(self) -> None:
         """

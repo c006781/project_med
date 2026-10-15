@@ -367,3 +367,16 @@ def test_r11_status_computed_once_per_state(store, monkeypatch):
     for _ in range(50):                                  # 50 ячеек строки при перерисовке
         store.status('appointment', 12)
     assert len(calls) == 1
+
+
+def test_q3_linking_does_not_create_undo_step(store):
+    """Q3: загрузка строк (remember_parent → 'linked') не добавляет пустой шаг отмены."""
+    store.modify('photo', 7, {'a': 1}, parent_id=12)
+    steps = len(store._undo)
+    version = store.version
+    with store.batch():
+        store.remember_parent('appointment', 12, 1)
+    assert store.version > version                       # план устаревает (связи поменялись)
+    assert len(store._undo) == steps                     # а шага отмены нет
+    store.modify('photo', 8, {}, parent_id=13)
+    assert len(store._undo) == steps

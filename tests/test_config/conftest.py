@@ -33,6 +33,9 @@ def config_sandbox(tmp_path, monkeypatch):
         return str(env_file) if env_file.exists() else ''
 
     monkeypatch.setattr(getenv_module, 'find_dotenv', fake_find_dotenv)
+    # ↑ до E3 изоляция шла через find_dotenv; оставлено на случай старых вызовов.
+    # С E3 папку .env задаёт переменная окружения (см. getenv.get_dotenv_path):
+    monkeypatch.setenv(getenv_module.ENV_DIR_VAR, str(tmp_path))
     for key in ('GITHUB_TOKEN', 'APP_CONFIG_PATH'):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(AppConfigManager, '_instances', {})

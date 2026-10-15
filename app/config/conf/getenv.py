@@ -24,6 +24,7 @@ from typing import Dict, Optional
 
 # Сторонние библиотеки
 from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values # pip install python-dotenv
+# (find_dotenv с E3 не используется — импорт оставлен: на него ссылаются старые тесты/заглушки)
 
 # Глобальная блокировка для операций записи в .env файл
 _env_write_lock = threading.RLock()
@@ -74,30 +75,75 @@ def _key_in_file(dotenv_path: str, key: str) -> bool:
         return False
 
 
+# Переменная окружения: папка с .env (приоритет над папкой запуска). Для тестов и
+# отладки — направить программу/модуль на нужный .env, не трогая рабочий (E3).
+ENV_DIR_VAR = 'PROJECT_MED_ENV_DIR'
+
+
+def get_launch_dir() -> str:
+    """
+    Папка «запущенного»: там лежит .env (E3, решение владельца 2026-10-15).
+
+    Порядок:
+        1. Собранная программа (PyInstaller, ``sys.frozen``) — папка exe/бинарника.
+           Одинаково для Windows и Linux; не зависит от «рабочей папки» ярлыка.
+        2. Запуск скрипта — папка файла ``__main__``: ``main_gui_window.py`` → корень
+           проекта (боевой .env); модуль, запущенный напрямую для отладки, — ЕГО папка
+           (свой .env, боевой не трогается). ``python -m пакет.модуль`` — тоже папка модуля.
+        3. Нет файла ``__main__`` (интерактивный Python, ``python -c``) — текущая папка.
+
+    Пути строятся через ``os.path`` — разделители Windows/Linux не важны.
+
+    Returns:
+        Абсолютный путь к папке.
+
+    Пример:
+        >>> get_launch_dir()          # python main_gui_window.py
+        'C:\\Git\\project_med'
+        >>> get_launch_dir()          # MedicalApp.exe в D:\\Clinic
+        'D:\\Clinic'
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    main_file = getattr(sys.modules.get('__main__'), '__file__', None)
+    if main_file:
+        return os.path.dirname(os.path.abspath(main_file))
+    return os.getcwd()
+
+
 def get_dotenv_path(
     name: Optional[str] = None
 ) -> str:
     """
-    Путь к файлу .env: найденный ``find_dotenv()`` или ``name`` (по умолчанию ``'.env'``).
+    Путь к файлу .env: ``<папка>/<name>`` (по умолчанию ``name='.env'``).
 
-    ВНИМАНИЕ (E3, не исправлено — решение отложено): ``find_dotenv()`` ищет от папки
-    МОДУЛЯ вверх, а не от текущей папки. При разработке находится .env проекта, откуда бы
-    ни запускали; в собранном exe — не находится, и берётся ``name`` в текущей папке.
+    Папка — ``$PROJECT_MED_ENV_DIR``, если задана, иначе ``get_launch_dir()`` (папка exe
+    или запущенного скрипта). Вверх по папкам .env НЕ ищется: раньше ``find_dotenv()``
+    мог подхватить чужой .env выше проекта.
+
+    До E3 (2026-10-15): ``find_dotenv()`` искал от папки МОДУЛЯ getenv вверх (в exe —
+    от ТЕКУЩЕЙ папки): .env зависел от способа запуска и «рабочей папки» ярлыка, а модуль,
+    запущенный для отладки, работал с боевым .env.
 
     Args:
-        name: Путь по умолчанию, если .env не найден.
+        name: Имя файла (или путь относительно папки; абсолютный путь — как есть).
 
     Returns:
-        Путь к .env.
+        Абсолютный путь к .env.
 
     Пример:
-        >>> get_dotenv_path()
+        >>> get_dotenv_path()                     # python main_gui_window.py
         'C:\\Git\\project_med\\.env'
+        >>> os.environ['PROJECT_MED_ENV_DIR'] = '/tmp/dbg'; get_dotenv_path()
+        '/tmp/dbg/.env'
     """
     if not name:
         name =  '.env' # .env  стандарт
 
-    return find_dotenv() or name # ищем .env в текущей директории или стандарт
+    # return find_dotenv() or name # ищем .env в текущей директории или стандарт
+    # ↑ до E3 (2026-10-15): поиск от папки модуля вверх (в exe — от текущей папки).
+    base_dir = os.environ.get(ENV_DIR_VAR) or get_launch_dir()
+    return os.path.join(base_dir, name)  # абсолютный name join вернёт как есть
 
 
 def get_getenv(

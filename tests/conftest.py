@@ -137,6 +137,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # load_dotenv не переопределяет уже заданные переменные, поэтому .env не трогается.
 os.environ.setdefault('GITHUB_TOKEN', 'test-placeholder')
 
+# E3 (2026-10-15): .env ищется в папке ЗАПУЩЕННОГО файла, а под pytest это сам pytest
+# (site-packages). Направляем .env всего набора во временную папку — тесты не создают
+# файлов в venv и не читают/не пишут боевой .env проекта (раньше find_dotenv находил его).
+import tempfile as _tempfile
+os.environ.setdefault('PROJECT_MED_ENV_DIR', _tempfile.mkdtemp(prefix='project_med_env_'))
+
 from app.repositories import (
     PatientRepository, AppointmentRepository,
     AppointmentNoteRepository, PhotoRepository

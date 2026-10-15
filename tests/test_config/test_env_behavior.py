@@ -134,22 +134,23 @@ def test_environment_variable_wins_over_env_file(env_file, monkeypatch):
 # get_dotenv_path / save_env_file
 # ---------------------------------------------------------------------------
 
-def test_get_dotenv_path_falls_back_to_cwd_name(config_sandbox):
-    assert get_dotenv_path() == '.env'
-    assert get_dotenv_path('custom.env') == 'custom.env'
+# def test_get_dotenv_path_falls_back_to_cwd_name(config_sandbox):
+#     assert get_dotenv_path() == '.env'
+#     assert get_dotenv_path('custom.env') == 'custom.env'
+# ↑ до E3 (2026-10-15): без найденного .env возвращалось относительное имя (текущая папка).
+
+def test_get_dotenv_path_in_env_dir(config_sandbox):
+    """E3: .env — в папке из PROJECT_MED_ENV_DIR (песочница задаёт tmp_path)."""
+    assert get_dotenv_path() == os.path.join(str(config_sandbox), '.env')
+    assert get_dotenv_path('custom.env') == os.path.join(str(config_sandbox), 'custom.env')
 
 
-def test_real_find_dotenv_searches_from_module_dir(monkeypatch):
-    """E3: настоящий find_dotenv ищет от папки МОДУЛЯ вверх — находит .env проекта,
-    даже когда текущая папка другая (здесь — tmp_path без .env)."""
-    from dotenv import find_dotenv as real_find_dotenv
-    found = real_find_dotenv()
-    project_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), '.env')
-    if not os.path.exists(project_env):
-        pytest.skip('в проекте нет .env')
-    # find_dotenv вызван из тестового модуля → ищет от tests/test_config вверх
-    assert os.path.normcase(found) == os.path.normcase(project_env)
+# def test_real_find_dotenv_searches_from_module_dir(monkeypatch):
+#     """E3: настоящий find_dotenv ищет от папки МОДУЛЯ вверх — находит .env проекта,
+#     даже когда текущая папка другая (здесь — tmp_path без .env)."""
+#     ...
+# ↑ характеризовал проблему E3 (поиск от папки модуля вверх); с E3 find_dotenv не
+#   используется — новые проверки в test_env_location.py.
 
 
 def test_save_env_file_keeps_existing_without_update(env_file):

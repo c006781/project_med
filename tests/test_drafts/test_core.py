@@ -590,3 +590,36 @@ def test_f2_plan_of_other_store_rejected(schema, adapter):
     assert plan.version == b.version
     with pytest.raises(PlanError, match='другому хранилищу'):
         execute_plan(b, plan, adapter)
+
+
+# ---------------------------------------------------------------------------
+# Проверка ядра, проход 2 (F3)
+# ---------------------------------------------------------------------------
+
+class _FixedPolicy:
+    """Политика, возвращающая заранее заданное решение."""
+
+    def __init__(self, **kwargs):
+        from app.utils.drafts import DeleteResolution
+        self.resolution = DeleteResolution(**kwargs)
+
+    def resolve(self, store, selected):
+        return self.resolution
+
+
+def test_f3_policy_cannot_delete_unmarked(store):
+    store.modify('appointment', 12, {'c': 1}, parent_id=1)
+    with pytest.raises(PlanError, match='не помечена'):
+        build_plan(store, delete_policy=_FixedPolicy(deletes=(('appointment', 12),)))
+
+
+def test_f3_policy_cannot_delete_new(store):
+    a = store.create('appointment', {}, parent_id=1)
+    store.delete('appointment', a)
+    with pytest.raises(PlanError, match='не помечена на удаление или ещё не сохранена'):
+        build_plan(store, delete_policy=_FixedPolicy(deletes=(('appointment', a),)))
+
+
+def test_f3_policy_node_without_draft(store):
+    with pytest.raises(PlanError, match='без черновика'):
+        build_plan(store, delete_policy=_FixedPolicy(dropped=(('photo', 99),)))

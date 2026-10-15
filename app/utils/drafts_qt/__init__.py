@@ -13,5 +13,7 @@
 """
 
 from .model import DEFAULT_COLORS, Column, DraftTableModel, NodeRole, StatusRole
+from .page import DraftTablePage, RowSource
 
-__all__ = ['DEFAULT_COLORS', 'Column', 'DraftTableModel', 'NodeRole', 'StatusRole']
+__all__ = ['DEFAULT_COLORS', 'Column', 'DraftTableModel', 'NodeRole', 'StatusRole',
+           'DraftTablePage', 'RowSource']

@@ -13,7 +13,7 @@
 | [config_applier.py](config_applier.py) | `ConfigApplier` — применение изменённых настроек после сохранения |
 | [logging_setup.py](logging_setup.py) | `setup_logging()` — передать конфиг логгерам (см. `app/utils/logger/IMPLEMENTATION.md`) |
 | [\_\_init\_\_.py](__init__.py) | `APP_VERSION` (из файла `VERSION`), `GITHUB_REPO_SLUG` |
-| [tests/test_config/](../../tests/test_config/) | Тесты |
+| [tests/test_config/](../../tests/test_config/) | Тесты (покрытие модуля 99% — не покрыты только блоки `if __name__ == "__main__"`, замер 2026-10-15) |
 
 ---
 

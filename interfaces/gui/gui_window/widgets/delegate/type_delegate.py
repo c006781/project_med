@@ -386,7 +386,11 @@ class TextEditPopupDelegate(QStyledItemDelegate):
 
         try:
             # Движение мыши по viewport – скрываем кнопку, если под курсором другой делегат
-            if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+            # if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+            # ↑ до B3 (2026-10-16): родитель делегата бывает обычным виджетом (не таблицей)
+            #   — viewport() нет, AttributeError на каждом движении мыши.
+            viewport = getattr(self.parent(), 'viewport', None)
+            if callable(viewport) and obj == viewport() and event.type() == QEvent.MouseMove:
                 pos = event.pos()
                 index = self.parent().indexAt(pos)
                 if index.isValid():
@@ -397,7 +401,14 @@ class TextEditPopupDelegate(QStyledItemDelegate):
                     self._hide_button()
                 return False
         except Exception as e:
-            self.logger.exception(f"Ошибка : {e}")
+            # self.logger.exception(f"Ошибка : {e}")
+            # ↑ до B4 (2026-10-16): у делегата нет self.logger — обработчик ошибки сам падал
+            #   AttributeError и трассировка уходила в Qt.
+            AppLogger.get_instance(
+                name='gui.TextEditPopupDelegate',
+                enable_file_logging='system',
+                use_name_in_filename=False,
+            ).exception(f"Ошибка : {e}")
             return False
 
         return super().eventFilter(obj, event)
@@ -629,7 +640,10 @@ class TextPopupDelegate(QStyledItemDelegate):
             return False
 
         # Обработка движения мыши по viewport (глобальный мониторинг)
-        if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+        # if obj == self.parent().viewport() and event.type() == QEvent.MouseMove:
+        # ↑ до B3 (2026-10-16): родитель — не таблица (нет viewport) → AttributeError.
+        viewport = getattr(self.parent(), 'viewport', None)
+        if callable(viewport) and obj == viewport() and event.type() == QEvent.MouseMove:
             pos = event.pos()
             index = self.parent().indexAt(pos)
             if index.isValid():

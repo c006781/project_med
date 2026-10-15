@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Hashable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Signal
@@ -43,6 +44,8 @@ try:
     from typing import Protocol
 except ImportError:  # pragma: no cover
     Protocol = object  # type: ignore
+
+_log = logging.getLogger(__name__)
 
 
 class RowSource(Protocol):
@@ -82,6 +85,8 @@ class DraftTablePage(QWidget):
     Сигналы:
         current_changed(object): id текущей строки (``None`` — нет).
         save_requested(): нажата «Сохранить» (если не задан ``save_handler``).
+        load_failed(str): источник строк упал — таблица показывает только черновики
+            (контекст родителя при этом выставлен, «Добавить» работает правильно).
 
     Пример:
         >>> page = DraftTablePage(store, 'patient', [Column('last_name', 'Фамилия')], source)
@@ -90,6 +95,7 @@ class DraftTablePage(QWidget):
 
     current_changed = Signal(object)
     save_requested = Signal()
+    load_failed = Signal(str)
 
     def __init__(
         self,
@@ -246,8 +252,7 @@ class DraftTablePage(QWidget):
         """
         rows = self.selected_rows()
         statuses = [self.model.row_status(r) for r in rows]
-        has_context = not (self.requires_parent and self._parent_id is MISSING)
-        self.add_btn.setEnabled(has_context)
+        self.add_btn.setEnabled(self.can_add())
         self.delete_btn.setEnabled(any(s != 'deleted' for s in statuses))
         self.undelete_btn.setEnabled(any(s == 'deleted' for s in statuses))
         self.discard_btn.setEnabled(any(s is not None for s in statuses))
@@ -325,8 +330,15 @@ class DraftTablePage(QWidget):
             self.model.clear()
             self._total = 0
         else:
-            rows, self._total = self.source.load(self._page * self.page_size, self.page_size,
-                                                 self._parent_id)
+            try:
+                rows, self._total = self.source.load(self._page * self.page_size, self.page_size,
+                                                     self._parent_id)
+            except Exception as e:
+                # Контекст родителя выставляется ВСЁ РАВНО: иначе модель осталась бы без
+                # родителя и «Добавить» создало бы запись не под тем родителем.
+                _log.exception("Не удалось загрузить строки %s", self.entity)
+                rows, self._total = [], 0
+                self.load_failed.emit(str(e))
             self.model.set_rows(rows, parent_id=self._parent_id)
         if current is not None:
             self.select_id(current)
@@ -432,6 +444,24 @@ class DraftTablePage(QWidget):
     # Действия
     # ------------------------------------------------------------------
 
+    def can_add(self) -> bool:
+        """
+        Можно ли добавить строку: у таблицы детей нужен родитель; у типа с обязательным
+        родителем (по схеме) — тоже, даже если таблица показывает «все» записи.
+
+        Returns:
+            ``True``, если «Добавить» доступно.
+
+        Пример:
+            >>> page.set_parent(None); page.can_add()
+            False
+        """
+        if self._parent_id is not MISSING:
+            return True
+        entity_type = self.store.schema.get(self.entity)
+        needs_parent = entity_type.parent is not None and entity_type.parent_required
+        return not (self.requires_parent or needs_parent)
+
     def add_row(self) -> Optional[Hashable]:
         """
         Новая строка под текущим родителем; становится текущей.
@@ -443,7 +473,7 @@ class DraftTablePage(QWidget):
             >>> page.add_row()
             -1
         """
-        if self.requires_parent and self._parent_id is MISSING:
+        if not self.can_add():
             return None
         new_id = self.model.add_row(dict(self.default_row() if self.default_row else {}))
         self.select_id(new_id)

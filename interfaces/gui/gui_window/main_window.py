@@ -108,10 +108,21 @@ class PagesCreationMixin:
         #     # save_directly=True,   
         # )
 
-        self.patient_list_page = PatientListPage(
-            parent=self,
-            shared_registry=None   # можно оставить None, будет создан локальный реестр
-        )
+        # self.patient_list_page = PatientListPage(
+        #     parent=self,
+        #     shared_registry=None   # можно оставить None, будет создан локальный реестр
+        # )
+        # ↑ до 2026-10-16: своя таблица со своим реестром черновиков — изменения разных
+        #   экранов нельзя было сохранить вместе (D1, app/draft/IMPLEMENTATION.md). Теперь —
+        #   новый экран на общем хранилище окна; старый класс не тронут и остаётся запасным,
+        #   если хранилище не создалось.
+        if getattr(self, 'drafts', None) is not None:
+            from interfaces.gui.gui_window.pages.draft_pages import PatientsDraftPage
+            self.patient_list_page = PatientsDraftPage(
+                self.drafts.store, save_handler=self._save_from_draft_page, parent=self,
+            )
+        else:
+            self.patient_list_page = PatientListPage(parent=self, shared_registry=None)
 
         # Страница редактирования пациента
         self.patient_edit_page = DynamicEditPage(
@@ -262,10 +273,19 @@ class PagesCreationMixin:
         self.settings_page = SettingsPage(page_title="Настройки")
 
         # Создаём новую страницу "Приёмы и фото"
-        self.appointment_photo_page = AppointmentPhotoFrame(
-            parent=self,
-            shared_registry=None   # или self._shared_draft_registry, если используется глобальный
-        )
+        # self.appointment_photo_page = AppointmentPhotoFrame(
+        #     parent=self,
+        #     shared_registry=None   # или self._shared_draft_registry, если используется глобальный
+        # )
+        # ↑ до 2026-10-16: свой реестр, приёмы и фото сохранялись двумя транзакциями (D1, D2).
+        #   Теперь — новый фрейм на общем хранилище окна; старый — запасной.
+        if getattr(self, 'drafts', None) is not None:
+            from interfaces.gui.gui_window.pages.draft_pages import AppointmentsPhotosDraftFrame
+            self.appointment_photo_page = AppointmentsPhotosDraftFrame(
+                self.drafts.store, save_handler=self._save_from_draft_page, parent=self,
+            )
+        else:
+            self.appointment_photo_page = AppointmentPhotoFrame(parent=self, shared_registry=None)
 
         # Словарь всех страниц с их идентификаторами
         pages = {
@@ -1517,6 +1537,25 @@ class MainWindow(
             self.logger.exception(f"Не удалось создать черновики: {e}")
             self.drafts = None
             self.drafts_bridge = None
+
+    def _save_from_draft_page(self, page) -> bool:
+        """
+        «Сохранить» на экране с новыми черновиками: вопрос «всё / текущее», затем
+        ``save_drafts``. Цель «текущее» — выделенные строки, а если ничего не выделено —
+        вся выборка страницы.
+
+        Args:
+            page: Страница (``DraftTablePage``), где нажали «Сохранить».
+
+        Returns:
+            ``True`` — сохранено.
+
+        Пример:
+            >>> window._save_from_draft_page(frame.appointments)
+            True
+        """
+        from interfaces.gui.gui_window.pages.draft_pages import save_from_page
+        return save_from_page(self, page, frame_nodes=page.page_nodes)
 
     def save_drafts(self, targets=None, scope=None) -> bool:
         """

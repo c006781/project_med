@@ -1075,7 +1075,11 @@ class BaseService(
             # Пагинация
             results = loaded_query.offset(offset).limit(limit).all()
 
-            if extra_columns:
+            # if extra_columns:
+            # ↑ до B2 (2026-10-16): пустой результат (например, приёмы пациента без приёмов)
+            #   → results[0] → IndexError: любой запрос страницы с вычисляемыми колонками
+            #   (has_photos у приёмов), по которому ничего не нашлось, падал.
+            if extra_columns and results:
                 self.logger.debug(f"[DEBUG] First result type: {type(results[0])}, len: {len(results[0]) if hasattr(results[0], '__len__') else 'N/A'}")
                 self.logger.debug(f"[DEBUG] First result: {results[0]}")
 

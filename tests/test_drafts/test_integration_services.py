@@ -136,3 +136,35 @@ def test_b1_patient_repr_without_middle_name():
     from app.database.database_shema.clinic import Patient
     text = repr(Patient(first_name='Иван', last_name='Петров', middle_name=None))
     assert text == '<Patient(id=None, name=Петров Иван)>'
+
+
+def test_transaction_factory_used(services, image):
+    """Транзакция берётся из переданной фабрики (не из закрытого метода сервиса)."""
+    used = []
+    db = services['db']
+
+    def factory():
+        used.append(1)
+        return db.session_scope()
+
+    adapter = ServiceAdapter({
+        'patient': (lambda: services['patient'], PatientDTO),
+        'appointment': (lambda: services['appointment'], AppointmentDTO),
+        'photo': (lambda: services['photo'], PhotoDTO),
+    }, transaction_factory=factory)
+    store = DraftStore(build_app_schema())
+    store.create('patient', {'first_name': 'А', 'last_name': 'Б', 'birth_date': datetime.date(1990, 1, 1)})
+    execute_plan(store, build_plan(store), adapter)
+    assert used == [1] and len(services['patient'].get_all()) == 1
+
+
+def test_conflict_detected_on_real_db(services, store, adapter):
+    """Запись изменили в БД в обход черновика — конфликт виден до сохранения."""
+    from app.utils.drafts import find_conflicts
+    patient = _patient(services)
+    store.modify('patient', patient.id, {'phone': '111'}, original={'phone': patient.phone})
+    changed = patient.model_copy(update={'phone': '999'})
+    services['patient'].update(changed)                       # «другой пользователь»
+    conflicts = find_conflicts(build_plan(store), adapter.read)
+    assert [(c.field, c.current) for c in conflicts] == [('phone', '999')]
+    assert adapter.read('patient', 10**6) is None

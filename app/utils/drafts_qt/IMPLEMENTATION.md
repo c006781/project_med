@@ -7,6 +7,8 @@
 | Файл | Назначение |
 |---|---|
 | [model.py](model.py) | `Column`, `DraftTableModel` — модель таблицы: показ с учётом черновиков, правка → черновик, цвета по статусу, реакция на события хранилища |
+| [bridge.py](bridge.py) | `DraftsQtBridge` — события хранилища → сигналы Qt (значки строк и предков, замена id, «есть изменения») |
+| [dialogs.py](dialogs.py) | `ask_save_target`, `make_confirmations`, `ask_on_close`, `describe_nodes` — диалоги сохранения |
 | [page.py](page.py) | `RowSource` (протокол источника строк), `DraftTablePage` — таблица + действия + листание + контекст родителя |
 | [tests/test_drafts/test_qt_model.py, test_qt_page.py](../../../tests/test_drafts/) | тесты (offscreen Qt) |
 
@@ -53,4 +55,5 @@ appointments.current_changed.connect(photos.set_parent)   # дети выбра�
 
 | Дата | Что |
 |---|---|
+| 2026-10-16 | Мост и диалоги перенесены из `interfaces/gui/gui_window/drafts_qt.py` (там — переходник для старых импортов): в них нет ничего от приложения |
 | 2026-10-16 | Первая версия. При проверке: новые строки — по множеству, а не по знаку id; одно перечитывание на пачку; запасной импорт `drafts`; «Добавить» по правилу схемы; устойчивость к ошибке источника (найдено запуском окна — B2 приложения) |

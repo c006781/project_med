@@ -96,7 +96,9 @@ from app.draft.draft_registry import DraftRegistry
 
 from PySide6.QtCore import QObject, Signal
 
-from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
+# from interfaces.gui.gui_window.controllers.list_controller import QABCMeta
+# ↑ до 2026-10-16: слой приложения импортировал из слоя интерфейса
+from app.utils.qt_meta import QABCMeta
 
 # class QABCMeta(type(QObject), ABCMeta):
 #     """Метакласс, объединяющий метакласс QObject и ABCMeta."""

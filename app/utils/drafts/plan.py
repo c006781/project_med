@@ -146,6 +146,18 @@ def build_plan(
     policy = delete_policy or CascadeDeletePolicy()
     selected: Set[NodeKey] = select_nodes(store, targets, scope)
     resolution = policy.resolve(store, selected)
+    # F3 (проверка ядра 2): решение политики проверяется — ошибочная политика не должна
+    # удалить из БД запись, которую никто не помечал, или подсунуть узел без черновика.
+    for node in (*resolution.deletes, *resolution.dropped, *resolution.blocked):
+        if not store.has_draft(*node):
+            raise PlanError(f"политика удаления вернула узел без черновика: {node[0]}:{node[1]}")
+    for node in resolution.deletes:
+        draft = store.get(*node)
+        if not draft.deleted or draft.is_new:
+            raise PlanError(
+                f"политика удаления хочет удалить из БД {node[0]}:{node[1]}, "
+                "но запись не помечена на удаление или ещё не сохранена"
+            )
     by_delete = set(resolution.deletes) | set(resolution.dropped)
     writable = selected - by_delete - set(resolution.blocked)
     # F1 (проверка ядра 1): гарантии НЕ зависят от политики — помеченное на удаление

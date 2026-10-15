@@ -13,7 +13,12 @@
     - Централизовать логику применения настроек для повторного использования в GUI, CLI и других интерфейсах.
     - Упростить добавление новых блоков настроек в будущем.
 
-Пример использования в GUI:
+Пример использования в GUI (с 2026-10-15 — один вызов apply_changes):
+    old_config = config_manager.get_all().copy()
+    config_manager.save()
+    changed_blocks = ConfigApplier().apply_changes(old_config, config_manager.get_all())
+
+Как было до 2026-10-15 (методы по блокам; без old_config они теперь применяют принудительно):
     old_config = config_manager.get_all().copy()
     # ... сохранить новые значения в config_manager ...
     config_manager.save()
@@ -49,6 +54,30 @@ from app.dependencies import (
     # get_db,
     get_patient_service,
     get_appointment_service, get_note_service, get_photo_service
+)
+
+
+# Блоки настроек и их ключи — единый источник для get_changed_blocks и apply_logging.
+# AP2 (проверка 2026-10-15): раньше ключи логирования были перечислены в двух местах,
+# и в обоих не было LOG_ARGS и общих флагов enabled/console_enabled/file_enabled —
+# их изменение не применялось.
+SETTINGS_BLOCKS: Dict[str, Tuple[str, ...]] = {
+    'database': ('database_local_path', 'database_remote_path'),
+    'photos': ('PHOTOS_STORAGE_PATH',),
+    'sync': ('YANDEX_TOKEN', 'database_remote_path', 'database_local_path'),
+    'logging_system': ('system_enabled', 'system_console_enabled',
+                       'system_file_enabled', 'system_LEVEL'),
+    'logging_user': ('user_enabled', 'user_console_enabled',
+                     'user_file_enabled', 'user_LEVEL'),
+    'logging_common': ('LOG_DIR', 'LOG_LEVEL', 'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT',
+                       'LOG_ARGS', 'use_timestamp', 'show_call_depth',
+                       'enabled', 'console_enabled', 'file_enabled'),
+    'backup': ('BACKUP_PATH', 'BACKUP_COUNT'),
+}
+
+# Все ключи логирования (блоки logging_*)
+LOGGING_KEYS: Tuple[str, ...] = tuple(
+    key for block, keys in SETTINGS_BLOCKS.items() if block.startswith('logging') for key in keys
 )
 
 
@@ -128,7 +157,9 @@ class ConfigApplier:
             {'database'}
         """
 
-        blocks = {
+        # AP2: ключи — из SETTINGS_BLOCKS (модуль); прежний словарь сохранён ниже
+        blocks = SETTINGS_BLOCKS
+        _old_blocks = {
             'database': [
                 'database_local_path', 'database_remote_path',
             ],
@@ -278,8 +309,17 @@ class ConfigApplier:
         # ↑ до 2026-10-14: очистка кэша давала НОВЫЕ объекты сервисов, а страницы GUI
         #   держат старые — они оставались со старой БД (раньше это маскировали слушатели
         #   save(), перезагружавшие все экземпляры).
+        # for provider in _SERVICE_PROVIDERS:
+        #     provider().reload_config()
+        # ↑ до AP3 (проверка 2026-10-15): сбой одного сервиса прерывал цикл — остальные
+        #   оставались на старой БД. Теперь сбой пишется в лог, остальные перезагружаются.
         for provider in _SERVICE_PROVIDERS:
-            provider().reload_config()
+            try:
+                provider().reload_config()
+            except Exception as e:
+                self.logger.exception(
+                    f"Не удалось перезагрузить сервис {getattr(provider, '__name__', provider)}: {e}"
+                )
 
         return True
 
@@ -569,12 +609,14 @@ class ConfigApplier:
         current_full = AppLogger.current_app_config()
 
         # Определяем, изменился ли хотя бы один параметр логирования
-        logging_keys = [
-            'system_enabled', 'system_console_enabled', 'system_file_enabled', 'system_LEVEL',
-            'user_enabled', 'user_console_enabled', 'user_file_enabled', 'user_LEVEL',
-            'LOG_DIR', 'LOG_LEVEL', 'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT', 'use_timestamp',
-            'show_call_depth'
-        ]
+        # logging_keys = [
+        #     'system_enabled', 'system_console_enabled', 'system_file_enabled', 'system_LEVEL',
+        #     'user_enabled', 'user_console_enabled', 'user_file_enabled', 'user_LEVEL',
+        #     'LOG_DIR', 'LOG_LEVEL', 'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT', 'use_timestamp',
+        #     'show_call_depth'
+        # ]
+        # ↑ до AP2 (проверка 2026-10-15): без LOG_ARGS и общих флагов
+        logging_keys = LOGGING_KEYS
 
         changed = any(
             new_config.get(k) != current_full.get(k)

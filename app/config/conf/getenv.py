@@ -114,8 +114,9 @@ def get_getenv(
         2. Пустое или отсутствующее значение → ``start_value``. Если ключа нет в самом
            ФАЙЛЕ — дописать его со ``start_value`` (с 2026-10-14 ключ с пустым значением
            не дописывается повторно — E1).
-        3. Записать .env не удалось (только чтение, нет прав) — предупреждение в stderr и
-           ``start_value`` в памяти, без исключения (E2).
+        3. Записать .env не удалось (только чтение, нет прав, ошибка python-dotenv) —
+           предупреждение в stderr и ``start_value`` в памяти, без исключения (E2, G2).
+        4. Переменные окружения системы имеют приоритет над .env и не перезаписываются (G1).
 
     Args:
         key: Имя ключа.
@@ -171,12 +172,18 @@ def get_getenv(
                     dotenv_path = dotenv_path,
                 )
 
-            # И снова загружаем .env, чтобы обновить os.environ
-            load_dotenv(
-                dotenv_path = dotenv_path,
-                override    = True
-            )
-        except OSError as e:
+            # # И снова загружаем .env, чтобы обновить os.environ
+            # load_dotenv(
+            #     dotenv_path = dotenv_path,
+            #     override    = True
+            # )
+            # ↑ до G1 (проверка 2026-10-15): override=True загружал ВСЕ ключи .env поверх
+            #   переменных окружения — заданные в системе APP_CONFIG_PATH/GITHUB_TOKEN молча
+            #   подменялись значениями из файла, как только дописывался любой ключ.
+            #   save_env_file сам кладёт записанный ключ в os.environ.
+        # except OSError as e:
+        # ↑ до G2: ValueError (set_key вернул неуспех) не перехватывался — падение при старте
+        except (OSError, ValueError) as e:
             # E2 (2026-10-14): .env только для чтения (Program Files, антивирус) —
             # раньше PermissionError ронял запуск приложения. Теперь работаем со значением
             # по умолчанию в памяти и сообщаем.
@@ -230,9 +237,11 @@ def save_env_file(
     if_update: bool = False,  # принудительное обновление ключа в .env
 ) -> None:
     """
-    Записывает ключи в .env и перезагружает их в ``os.environ``.
+    Записывает ключи в .env и кладёт записанные в ``os.environ``.
 
     Без ``if_update`` записывает только ключи, которых нет в окружении (или они пустые).
+    Остальные переменные окружения не трогаются (до G1 весь .env перезагружался с
+    перезаписью — системные переменные подменялись значениями из файла).
 
     Args:
         env_key: Ключи и значения для записи.
@@ -262,6 +271,7 @@ def save_env_file(
         )
 
         iterated = False
+        written = []   # ключи, записанные в файл (G1: только они попадают в os.environ)
 
         # Перебрать все ключи в env_key
         for key, value in env_key.items():
@@ -283,13 +293,20 @@ def save_env_file(
                     raise ValueError(
                         f"Ошибка при записи {key}: {message}"
                     )
+                written.append(key)
 
-        # Принудительно перезагружаем переменные в os.environ если было хобя бы 1но изменение
+        # # Принудительно перезагружаем переменные в os.environ если было хобя бы 1но изменение
+        # if iterated:
+        #     load_dotenv(
+        #         dotenv_path =   dotenv_path,
+        #         override    =   True,
+        #     )
+        # ↑ до G1 (проверка 2026-10-15): перезагрузка всего .env с override=True
+        #   перезаписывала переменные окружения системы. Теперь в os.environ кладутся
+        #   только записанные ключи.
         if iterated:
-            load_dotenv(
-                dotenv_path =   dotenv_path,
-                override    =   True,
-            )
+            for key in written:
+                os.environ[key] = str(env_key[key])
 
 
 

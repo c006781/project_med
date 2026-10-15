@@ -132,15 +132,16 @@ def test_m11_two_breaks_same_second_both_kept(cfg_path, monkeypatch):
 
 def test_m12_unique_temp_files_and_no_leftovers(cfg_path, monkeypatch):
     """M12: временный файл уникальный (не общий '<путь>.tmp') и не остаётся после save()."""
+    # (до M12a spy стоял на tempfile.mkstemp; теперь имя строится в save() — смотрим,
+    #  ЧТО подменяет конфиг через os.replace)
     names = []
-    real_mkstemp = manager_module.tempfile.mkstemp
+    real_replace = manager_module.os.replace
 
-    def spy(*args, **kwargs):
-        fd, path = real_mkstemp(*args, **kwargs)
-        names.append(path)
-        return fd, path
+    def spy(src, dst):
+        names.append(os.path.abspath(src))
+        return real_replace(src, dst)
 
-    monkeypatch.setattr(manager_module.tempfile, 'mkstemp', spy)
+    monkeypatch.setattr(manager_module.os, 'replace', spy)
     m = AppConfigManager.get_instance(config_path=cfg_path)
     m.save()
     m.save()

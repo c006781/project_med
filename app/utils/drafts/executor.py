@@ -197,6 +197,8 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
             "сначала нужно решить с новыми родителями вне объёма: "
             + ", ".join(f"{t}:{i}" for t, i in plan.missing_new_ancestors)
         )
+    if plan.store_token is not store.token:
+        raise PlanError("план построен по другому хранилищу черновиков")
     if plan.version != store.version:
         raise StalePlanError("черновики изменились после построения плана — постройте план заново")
     if plan.is_empty:

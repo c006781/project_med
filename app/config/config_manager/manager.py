@@ -19,6 +19,8 @@
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 
+import tempfile
+import threading
 import time
 import weakref
 from typing import Any, Callable, Dict, Optional
@@ -216,7 +218,9 @@ class BaseConfigManager:
             'dark'
         """
         self._config_path = config_path or self._config_path
-        self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
+        # self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
+        # ↑ до M7 (проверка 2026-10-15): явный defaults={} заменялся умолчаниями класса
+        self._defaults = (self._defaults if defaults is None else defaults).copy() # копируем, чтобы не изменять оригинал
         self._config = self._defaults.copy()  # начинаем с умолчаний
 
         # M1: если файл оказался повреждён — путь к его копии и текст сообщения
@@ -305,7 +309,14 @@ class BaseConfigManager:
             >>> m.broken_config_backup
             'config.msgpack.broken-20261014_230512'
         """
+        # backup = f"{self._config_path}.broken-{time.strftime('%Y%m%d_%H%M%S')}"
+        # ↑ до M11 (проверка 2026-10-15): вторая поломка в ту же секунду перезаписывала
+        #   первую копию. Теперь при совпадении добавляется номер.
         backup = f"{self._config_path}.broken-{time.strftime('%Y%m%d_%H%M%S')}"
+        n = 1
+        while os.path.exists(backup):
+            backup = f"{self._config_path}.broken-{time.strftime('%Y%m%d_%H%M%S')}-{n}"
+            n += 1
         try:
             os.replace(self._config_path, backup)
         except OSError as e:
@@ -332,8 +343,8 @@ class BaseConfigManager:
         """
         Сохраняет текущие значения в файл и уведомляет слушателей.
 
-        Атомарно (M2): запись во временный ``<путь>.tmp`` и подмена ``os.replace`` — сбой
-        посередине не портит конфиг. Родительские папки создаются.
+        Атомарно (M2): запись в уникальный временный файл рядом (M12) и подмена
+        ``os.replace`` — сбой посередине не портит конфиг. Родительские папки создаются.
 
         Returns:
             None
@@ -358,9 +369,16 @@ class BaseConfigManager:
         # ↑ до M2 (2026-10-14): файл обнулялся до записи — сбой посередине (диск,
         #   питание) оставлял пустой/битый конфиг. Теперь: пишем во временный файл
         #   рядом и подменяем им старый одной операцией (os.replace).
-        tmp_path = f"{self._config_path}.tmp"
+        # tmp_path = f"{self._config_path}.tmp"
+        # ↑ до M12 (проверка 2026-10-15): одно имя на всех — два окна программы,
+        #   сохраняющие одновременно, писали в один временный файл. Теперь имя уникальное
+        #   (в той же папке — os.replace атомарен только в пределах одного диска).
+        fd, tmp_path = tempfile.mkstemp(
+            prefix=os.path.basename(self._config_path) + '.', suffix='.tmp',
+            dir=os.path.dirname(os.path.abspath(self._config_path)),
+        )
         try:
-            with open(tmp_path, 'wb') as f:
+            with os.fdopen(fd, 'wb') as f:
                 msgpack.pack(self._config, f)
             os.replace(tmp_path, self._config_path)
         except BaseException:
@@ -377,6 +395,9 @@ class BaseConfigManager:
         """
         Перечитывает файл (например, после ручной правки) и возвращает копию значений.
 
+        Значения строятся заново: умолчания + файл. Изменения в памяти без ``save()``
+        теряются; ключ, удалённый из файла, возвращается к умолчанию.
+
         Returns:
             Копия всех значений.
 
@@ -384,6 +405,14 @@ class BaseConfigManager:
             >>> m.load()['LOG_LEVEL']
             'INFO'
         """
+        # self._load()
+        # ↑ до M9/M10 (проверка 2026-10-15): значения из файла накладывались на текущие в
+        #   памяти — ключ, удалённый из файла, оставался; при битом файле «восстановление»
+        #   сохраняло значения из памяти, а сообщение говорило «по умолчанию»; флаги
+        #   битого файла от прошлой загрузки не сбрасывались.
+        self._config = self._defaults.copy()
+        self.broken_config_backup = None
+        self.broken_config_message = None
         self._load()
         return self.get_all()
 
@@ -475,9 +504,12 @@ class BaseConfigManager:
 
 class AppConfigManager(BaseConfigManager):
     """
-    Менеджер конфигурации для конкретного приложения.
-    Определяет набор настроек по умолчанию, которые берутся из текущей
-    конфигурации .env (старый способ), но могут быть переопределены в файле.
+    Менеджер конфигурации приложения: значения по умолчанию (``_defaults``) + файл
+    ``config.msgpack``. Путь к файлу по умолчанию берётся из .env (``APP_CONFIG_PATH``)
+    один раз (E6). Значения из файла имеют приоритет над умолчаниями.
+
+    (До 2026-10-15 здесь было написано, что умолчания «берутся из .env» — это давно
+    не так: .env хранит только путь к файлу и токен GitHub.)
 
     Атрибуты класса:
         _config_path (str): Путь к файлу конфигурации (по умолчанию 'config.msgpack').
@@ -589,6 +621,9 @@ class AppConfigManager(BaseConfigManager):
 
     # Хранилище для экземпляров (Multiton)
     _instances = {}
+    # M13 (проверка 2026-10-15): get_instance вызывается и из фоновых потоков —
+    # без блокировки два потока создавали два менеджера для одного файла.
+    _instances_lock = threading.RLock()
 
     # Путь к конфигу из .env (APP_CONFIG_PATH), прочитанный один раз (E6)
     _resolved_default_path: Optional[str] = None
@@ -669,25 +704,26 @@ class AppConfigManager(BaseConfigManager):
             >>> token = manager.get('YANDEX_TOKEN')
         """
 
-        if config_path is None:
-            # # Получаем путь из старой конфигурации (там он уже должен быть)
-            # config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
-            # ↑ до E6 (2026-10-14): .env перечитывался при КАЖДОМ вызове (34 чтения за старт
-            #   GUI). Путь к конфигу за время работы не меняется — читаем один раз.
-            config_path = cls._default_config_path()
+        with cls._instances_lock:  # M13
+            if config_path is None:
+                # # Получаем путь из старой конфигурации (там он уже должен быть)
+                # config_path = _old_get_config_env().get('APP_CONFIG_PATH', cls._config_path)
+                # ↑ до E6 (2026-10-14): .env перечитывался при КАЖДОМ вызове (34 чтения за старт
+                #   GUI). Путь к конфигу за время работы не меняется — читаем один раз.
+                config_path = cls._default_config_path()
 
-        # Если не требуем новый экземпляр и такой уже есть – возвращаем его
-        if not force_new and config_path in cls._instances:
-            return cls._instances[config_path]
+            # Если не требуем новый экземпляр и такой уже есть – возвращаем его
+            if not force_new and config_path in cls._instances:
+                return cls._instances[config_path]
 
-        # Создаём новый экземпляр
-        instance = cls(config_path)
-        cls._instances[config_path] = instance
+            # Создаём новый экземпляр
+            instance = cls(config_path)
+            cls._instances[config_path] = instance
 
-        if create_if_missing and not instance.config_exists:  # config_exists добавим позже
-            instance.save()  # сохраняем умолчания
+            if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+                instance.save()  # сохраняем умолчания
 
-        return instance
+            return instance
 
 # ----------------------------------------------------------------------
 # Функция для обратной совместимости со старым кодом

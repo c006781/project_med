@@ -19,9 +19,10 @@
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 
-import tempfile
+# import tempfile   # до M12a: mkstemp давал права 0600 — см. save()
 import threading
 import time
+import uuid
 import weakref
 from typing import Any, Callable, Dict, Optional
 
@@ -373,12 +374,18 @@ class BaseConfigManager:
         # ↑ до M12 (проверка 2026-10-15): одно имя на всех — два окна программы,
         #   сохраняющие одновременно, писали в один временный файл. Теперь имя уникальное
         #   (в той же папке — os.replace атомарен только в пределах одного диска).
-        fd, tmp_path = tempfile.mkstemp(
-            prefix=os.path.basename(self._config_path) + '.', suffix='.tmp',
-            dir=os.path.dirname(os.path.abspath(self._config_path)),
-        )
+        # fd, tmp_path = tempfile.mkstemp(
+        #     prefix=os.path.basename(self._config_path) + '.', suffix='.tmp',
+        #     dir=os.path.dirname(os.path.abspath(self._config_path)),
+        # )
+        # ↑ до M12a (проверка 2, 2026-10-15): mkstemp создаёт файл с правами 0600, и после
+        #   os.replace они доставались config.msgpack — на Linux конфиг становился
+        #   недоступен другим пользователям/группе. Обычный open() берёт права по umask,
+        #   как до M2; 'x' — ошибка, если такое имя вдруг уже есть (не перезапишем чужой).
+        tmp_path = f"{self._config_path}.{os.getpid()}-{uuid.uuid4().hex[:12]}.tmp"
         try:
-            with os.fdopen(fd, 'wb') as f:
+            # with os.fdopen(fd, 'wb') as f:
+            with open(tmp_path, 'xb') as f:
                 msgpack.pack(self._config, f)
             os.replace(tmp_path, self._config_path)
         except BaseException:

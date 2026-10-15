@@ -1009,7 +1009,20 @@ class SettingsPage(BasePage):
                     changed_blocks
                 )
 
-            QMessageBox.information(self, "Успех", "Настройки сохранены.")
+            # QMessageBox.information(self, "Успех", "Настройки сохранены.")
+            # ↑ до AP4 (проверка конфига 2, 2026-10-15): сбой применения блока прерывал
+            #   остальные и показывался как «не удалось сохранить», хотя файл сохранён.
+            #   Теперь ConfigApplier применяет блоки независимо, ошибки — в applier.errors.
+            if applier.errors:
+                details = '\n'.join(f"• {block}: {err}" for block, err in applier.errors.items())
+                QMessageBox.warning(
+                    self, "Настройки сохранены частично",
+                    "Настройки сохранены, но применить удалось не всё:\n"
+                    f"{details}\n\nПодробности — в журнале; изменения вступят в силу "
+                    "после перезапуска программы.",
+                )
+            else:
+                QMessageBox.information(self, "Успех", "Настройки сохранены.")
             self.logger.info("Настройки сохранены, логгеры перезагружены")
 
             self._update_create_db_button_visibility()

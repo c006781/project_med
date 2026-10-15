@@ -40,7 +40,7 @@
 from typing import (
     Dict, Any, Set,
     # Optional
-    Optional, Tuple,
+    Optional, Tuple, Callable,
 )
 
 from app.utils.logger.logger import AppLogger
@@ -119,7 +119,17 @@ class ConfigApplier:
 
         self.manager = AppConfigManager.get_instance()
 
-        self.logger = AppLogger.get_instance('config_applier')
+        # self.logger = AppLogger.get_instance('config_applier')
+        # ↑ до AP5 (проверка 2, 2026-10-15): логгер без файла — ошибки применения
+        #   настроек (AP3, AP4) в собранном exe (без консоли) терялись. Пишем в файл
+        #   system, как декораторы этого класса.
+        self.logger = AppLogger.get_instance(
+            'config_applier',
+            enable_file_logging = 'system',
+            use_name_in_filename = False,
+        )
+        # Ошибки последнего apply_changes / apply_full_config по блокам (AP4)
+        self.errors: Dict[str, Exception] = {}
 
     @staticmethod
     @AppLogger.get_instance(
@@ -137,7 +147,8 @@ class ConfigApplier:
         """
         Определяет, какие блоки настроек изменились между двумя конфигурациями.
 
-        Блоки определяются по набору ключей (см. внутренний словарь `blocks`).
+        Блоки определяются по набору ключей (``SETTINGS_BLOCKS`` на уровне модуля).
+        Один ключ может входить в несколько блоков: путь к БД — в ``database`` и ``sync``.
         Если хотя бы один ключ из блока отличается в `new_config` по сравнению с
         `old_config`, весь блок считается изменённым.
 
@@ -154,39 +165,42 @@ class ConfigApplier:
             >>> old = {'database_local_path': './clinic.db', 'PHOTOS_STORAGE_PATH': './photos'}
             >>> new = {'database_local_path': './clinic_new.db', 'PHOTOS_STORAGE_PATH': './photos'}
             >>> ConfigApplier.get_changed_blocks(old, new)
-            {'database'}
+            {'database', 'sync'}
         """
 
-        # AP2: ключи — из SETTINGS_BLOCKS (модуль); прежний словарь сохранён ниже
+        # AP2: ключи — из SETTINGS_BLOCKS (модуль); прежний словарь — в комментарии ниже
         blocks = SETTINGS_BLOCKS
-        _old_blocks = {
-            'database': [
-                'database_local_path', 'database_remote_path',
-            ],
-            'photos': [
-                'PHOTOS_STORAGE_PATH',
-            ],
-            'sync': [
-                'YANDEX_TOKEN',
-                'database_remote_path', 'database_local_path',
-            ],
-            'logging_system': [
-                'system_enabled', 'system_console_enabled',
-                'system_file_enabled', 'system_LEVEL',
-            ],
-            'logging_user': [
-                'user_enabled', 'user_console_enabled',
-                'user_file_enabled', 'user_LEVEL',
-            ],
-            'logging_common': [
-                'LOG_DIR', 'LOG_LEVEL',
-                'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT',
-                'use_timestamp', 'show_call_depth',
-            ],
-            'backup': [
-                'BACKUP_PATH', 'BACKUP_COUNT',
-            ],
-        }
+        # blocks = {
+        #     'database': [
+        #         'database_local_path', 'database_remote_path',
+        #     ],
+        #     'photos': [
+        #         'PHOTOS_STORAGE_PATH',
+        #     ],
+        #     'sync': [
+        #         'YANDEX_TOKEN',
+        #         'database_remote_path', 'database_local_path',
+        #     ],
+        #     'logging_system': [
+        #         'system_enabled', 'system_console_enabled',
+        #         'system_file_enabled', 'system_LEVEL',
+        #     ],
+        #     'logging_user': [
+        #         'user_enabled', 'user_console_enabled',
+        #         'user_file_enabled', 'user_LEVEL',
+        #     ],
+        #     'logging_common': [
+        #         'LOG_DIR', 'LOG_LEVEL',
+        #         'LOG_MAX_BYTES', 'LOG_BACKUP_COUNT',
+        #         'use_timestamp', 'show_call_depth',
+        #     ],
+        #     'backup': [
+        #         'BACKUP_PATH', 'BACKUP_COUNT',
+        #     ],
+        # }
+        # ↑ до AP2 (проверка 2026-10-15): ключи логирования без LOG_ARGS и общих флагов.
+        #   (В проходе 1 словарь был оставлен как неиспользуемая переменная — AP2a,
+        #   проход 2: перенесён в комментарий.)
 
         changed = set()
 
@@ -780,11 +794,18 @@ class ConfigApplier:
         if old_config is not None:
             self.apply_changes(old_config, new_config)
             return
-        self.apply_logging(new_config)
-        self.apply_database(new_config)
-        self.apply_photos_storage(new_config)
-        self.apply_sync(new_config)
-        self.apply_backup(new_config)
+        # self.apply_logging(new_config)
+        # self.apply_database(new_config)
+        # self.apply_photos_storage(new_config)
+        # self.apply_sync(new_config)
+        # self.apply_backup(new_config)
+        # ↑ до AP4 (проверка 2): сбой одного блока прерывал остальные
+        self.errors = {}
+        self._run_block('logging', self.apply_logging, new_config)
+        self._run_block('database', self.apply_database, new_config)
+        self._run_block('photos', self.apply_photos_storage, new_config)
+        self._run_block('sync', self.apply_sync, new_config)
+        self._run_block('backup', self.apply_backup, new_config)
 
     def apply_changes(
         self,
@@ -804,6 +825,8 @@ class ConfigApplier:
         Returns:
             Множество изменившихся блоков (``'database'``, ``'photos'``, ``'sync'``,
             ``'logging_*'``, ``'backup'``) — для ``MainWindow.on_settings_changed``.
+            Блоки, которые применить не удалось, — в ``self.errors`` (AP4): сбой одного
+            не прерывает остальные.
 
         Пример:
             >>> old = manager.get_all().copy()
@@ -812,14 +835,57 @@ class ConfigApplier:
             {'database', 'sync'}
         """
         blocks = self.get_changed_blocks(old_config, new_config)
+        # if 'database' in blocks:
+        #     self.apply_database(new_config, old_config)
+        # if 'photos' in blocks:
+        #     self.apply_photos_storage(new_config, old_config)
+        # if 'sync' in blocks:
+        #     self.apply_sync(new_config, old_config)
+        # if any(block.startswith('logging') for block in blocks):
+        #     self.apply_logging(new_config)
+        # if 'backup' in blocks:
+        #     self.apply_backup(new_config, old_config)
+        # ↑ до AP4 (проверка 2, 2026-10-15): сбой одного блока (нет диска для папки
+        #   фото) прерывал применение остальных, а экран настроек сообщал «не удалось
+        #   сохранить», хотя файл уже сохранён. Теперь каждый блок — отдельно, ошибки —
+        #   в self.errors и в лог.
+        self.errors = {}
         if 'database' in blocks:
-            self.apply_database(new_config, old_config)
+            self._run_block('database', self.apply_database, new_config, old_config)
         if 'photos' in blocks:
-            self.apply_photos_storage(new_config, old_config)
+            self._run_block('photos', self.apply_photos_storage, new_config, old_config)
         if 'sync' in blocks:
-            self.apply_sync(new_config, old_config)
+            self._run_block('sync', self.apply_sync, new_config, old_config)
         if any(block.startswith('logging') for block in blocks):
-            self.apply_logging(new_config)
+            self._run_block('logging', self.apply_logging, new_config)
         if 'backup' in blocks:
-            self.apply_backup(new_config, old_config)
+            self._run_block('backup', self.apply_backup, new_config, old_config)
         return blocks
+
+    def _run_block(self, name: str, func: Callable[..., Any], *args: Any) -> Any:
+        """
+        Применяет один блок настроек; ошибка не прерывает остальные блоки (AP4).
+
+        Исключение записывается в лог (с трассировкой) и в ``self.errors[name]``;
+        вызывающий (экран настроек) показывает пользователю, что применилось не всё.
+
+        Args:
+            name: Имя блока для сообщения (``'database'``, ``'photos'`` …).
+            func: Метод ``apply_*``.
+            *args: Аргументы метода.
+
+        Returns:
+            Результат ``func`` или ``None`` при ошибке.
+
+        Пример:
+            >>> applier._run_block('photos', applier.apply_photos_storage, new, old)
+            True
+            >>> applier.errors            # {'photos': OSError(...)} при ошибке
+            {}
+        """
+        try:
+            return func(*args)
+        except Exception as e:
+            self.errors[name] = e
+            self.logger.exception(f"Не удалось применить настройки блока '{name}': {e}")
+            return None

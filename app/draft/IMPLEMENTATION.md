@@ -145,6 +145,19 @@ drafts.build_plan(targets=frame.selection_nodes(), scope=SaveScope.ANCESTORS | S
 
 ---
 
+### 3.0 Связи с другими модулями (развязка 2026-10-16)
+
+| Было | Стало |
+|---|---|
+| `save_with_confirmation` (общая логика) — в `app/draft/integration.py` | переносимый `app/utils/drafts/workflow.py`; здесь — импорт для совместимости |
+| Мост Qt и диалоги — в `interfaces/gui/gui_window/drafts_qt.py` | переносимый `app/utils/drafts_qt/bridge.py`, `dialogs.py`; старый файл — переходник |
+| `ServiceAdapter.transaction` — закрытый `_session_scope` сервиса | `transaction_factory` (приложение передаёт `get_db().session_scope`); старый путь — запасной |
+| Исполнитель вызывал закрытый `store._commit` | открытый `store.apply_saved` (`_commit` — синоним) |
+| `app/draft/editable_component.py` (слой приложения) импортировал `QABCMeta` из `interfaces/…/list_controller.py` | `app/utils/qt_meta.py`; оба импортируют один объект (без конфликта метаклассов) |
+
+Остаётся по делу: `integration.py` знает о сервисах и DTO приложения — это и есть его
+работа (связка). Старый `DraftRegistry`/`DraftTreeMixin` нужны старым экранам — не трогаем.
+
 ### 3.1 Найдено попутно вне модуля
 
 | # | Где | Что | Статус |

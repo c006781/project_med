@@ -227,7 +227,9 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
             adapter.delete(draft.entity, draft.id, tx)
 
     deleted = tuple(d.key for d in plan.deletes)
-    store._commit(plan.consumed, id_map, removed=deleted)
+    # store._commit(plan.consumed, id_map, removed=deleted)
+    # ↑ до 2026-10-16: закрытый метод хранилища; теперь открытый apply_saved
+    store.apply_saved(plan.consumed, id_map, removed=deleted)
     return SaveResult(
         id_map=id_map,
         created=tuple((d.entity, id_map[d.key]) for d in plan.creates),

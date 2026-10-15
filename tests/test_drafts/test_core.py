@@ -633,3 +633,49 @@ def test_f4_adapter_must_return_id(store, adapter):
     with pytest.raises(PlanError, match='не вернул id'):
         execute_plan(store, build_plan(store), adapter)
     assert len(store.drafted_nodes()) == 2
+
+
+QT_PKG = os.path.join(os.path.dirname(PKG), 'drafts_qt')
+
+
+def test_qt_package_imports_only_pyside_and_drafts():
+    """drafts_qt — только стандартная библиотека, PySide6 и соседний пакет drafts."""
+    allowed = set(sys.stdlib_module_names) | {'PySide6', 'drafts'}
+    for name in os.listdir(QT_PKG):
+        if not name.endswith('.py'):
+            continue
+        tree = ast.parse(open(os.path.join(QT_PKG, name), encoding='utf-8').read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots = [a.name.split('.')[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and not node.level:
+                roots = [node.module.split('.')[0]]
+            else:
+                continue
+            assert all(r in allowed for r in roots), (name, roots)
+
+
+def test_both_packages_work_when_copied_elsewhere(tmp_path):
+    """drafts + drafts_qt, скопированные в чужой пакет, работают (модель + мост)."""
+    import shutil
+    lib = tmp_path / 'mylib'
+    lib.mkdir()
+    (lib / '__init__.py').write_text('', encoding='utf-8')
+    for src in (PKG, QT_PKG):
+        shutil.copytree(src, lib / os.path.basename(src), ignore=shutil.ignore_patterns('__pycache__'))
+    code = (
+        "import os; os.environ['QT_QPA_PLATFORM'] = 'offscreen'\n"
+        "from PySide6.QtWidgets import QApplication; app = QApplication([])\n"
+        "from mylib.drafts import DraftStore, EntityType, TreeSchema\n"
+        "from mylib.drafts_qt import Column, DraftTableModel, DraftsQtBridge\n"
+        "s = DraftStore(TreeSchema([EntityType('a'), EntityType('b', 'a', 'a_id')]))\n"
+        "got = []\n"
+        "b = DraftsQtBridge(s); b.row_status_changed.connect(lambda e, i, st: got.append((e, i, st)))\n"
+        "m = DraftTableModel(s, 'b', [Column('x', 'X')]); m.set_rows([], parent_id=1)\n"
+        "m.add_row({'x': 1})\n"
+        "print(m.rowCount(), got[-1])\n"
+    )
+    out = subprocess.run([sys.executable, '-c', code], cwd=str(tmp_path), capture_output=True,
+                         text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1 ('a', 1, 'child')"

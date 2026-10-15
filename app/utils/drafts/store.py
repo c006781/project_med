@@ -26,11 +26,12 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import itertools
 import logging
 from dataclasses import dataclass, field
 from typing import (
-    Any, Callable, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Set,
+    Any, Callable, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Set, Tuple,
 )
 
 from ._model import MISSING, Draft, DraftEvent, NodeKey
@@ -67,6 +68,46 @@ def negative_ids(start: int = -1) -> Callable[[], int]:
     return lambda: next(counter)
 
 
+def _undoable(method: Callable[..., Any]) -> Callable[..., Any]:
+    """
+    Делает публичную операцию хранилища одним шагом истории отмены (undo).
+
+    Вложенные вызовы (операция внутри ``batch`` или другой операции) — тот же шаг.
+
+    Args:
+        method: Метод ``DraftStore``.
+
+    Returns:
+        Обёртка.
+
+    Пример:
+        >>> class DraftStore:
+        ...     @_undoable
+        ...     def modify(self, ...): ...
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: 'DraftStore', *args: Any, **kwargs: Any) -> Any:
+        """
+        Выполняет операцию как шаг истории.
+
+        Args:
+            self: Хранилище.
+            *args: Аргументы операции.
+            **kwargs: Именованные аргументы.
+
+        Returns:
+            Результат операции.
+
+        Пример:
+            >>> store.modify('photo', 3, {'a': 1})
+        """
+        with self._undo_step():
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 @dataclass
 class _Record:
     """
@@ -99,6 +140,20 @@ class _Record:
         """
         return self.is_new or self.deleted or bool(self.data)
 
+    def copy(self) -> '_Record':
+        """
+        Независимая копия (для истории отмены).
+
+        Returns:
+            Копия записи.
+
+        Пример:
+            >>> _Record('photo', 3, data={'a': 1}).copy().data
+            {'a': 1}
+        """
+        return _Record(self.entity, self.id, self.is_new, self.deleted, dict(self.data),
+                       dict(self.original), self.order)
+
     def snapshot(self, parent_id: Optional[Hashable] = None) -> Draft:
         """
         Неизменяемая копия.
@@ -118,6 +173,10 @@ class _Record:
             deleted=self.deleted, data=dict(self.data), original=dict(self.original),
             order=self.order,
         )
+
+
+# Снимок для истории отмены: (черновики, связи узел -> id родителя)
+_Snapshot = Tuple[Dict[NodeKey, _Record], Dict[NodeKey, Optional[Hashable]]]
 
 
 class DraftStore:
@@ -142,6 +201,7 @@ class DraftStore:
         schema: TreeSchema,
         parent_resolver: Optional[ParentResolver] = None,
         temp_id_factory: Optional[Callable[[], Hashable]] = None,
+        history_limit: int = 100,
     ) -> None:
         """
         Создаёт пустое хранилище.
@@ -151,6 +211,7 @@ class DraftStore:
             parent_resolver: Определитель родителя записи без черновика (необязательно).
             temp_id_factory: Генератор временных id новых записей; по умолчанию
                 ``negative_ids()``.
+            history_limit: Сколько шагов отмены (undo) помнить; 0 — история выключена.
 
         Пример:
             >>> DraftStore(TreeSchema([EntityType('patient')])).is_empty
@@ -170,6 +231,12 @@ class DraftStore:
         self._token = object()   # метка этого хранилища для планов (F2)
         self._batch_depth = 0
         self._pending: List[DraftEvent] = []
+        # История отмены: снимки (черновики, связи) ДО каждого шага
+        self.history_limit = max(0, history_limit)
+        self._undo: List[_Snapshot] = []
+        self._redo: List[_Snapshot] = []
+        self._undo_depth = 0
+        self._history_suspended = 0
 
     # ------------------------------------------------------------------
     # События
@@ -213,8 +280,9 @@ class DraftStore:
     def batch(self) -> Iterator['DraftStore']:
         """
         Группа изменений: события копятся и рассылаются в конце (одной пачкой, по
-        порядку). Вложенные ``batch`` допустимы. При исключении внутри события всё
-        равно рассылаются — изменения, сделанные до ошибки, уже в хранилище.
+        порядку); вся группа — ОДИН шаг отмены (undo). Вложенные ``batch`` допустимы.
+        При исключении внутри события всё равно рассылаются — изменения, сделанные до
+        ошибки, уже в хранилище (и отменяются одним ``undo``).
 
         Returns:
             Контекстный менеджер (отдаёт само хранилище).
@@ -226,7 +294,8 @@ class DraftStore:
         """
         self._batch_depth += 1
         try:
-            yield self
+            with self._undo_step():
+                yield self
         finally:
             self._batch_depth -= 1
             if self._batch_depth == 0:
@@ -558,6 +627,7 @@ class DraftStore:
             return None
         return self._set_link((record.entity, record.id), parent_id)
 
+    @_undoable
     def create(
         self,
         entity: str,
@@ -608,6 +678,7 @@ class DraftStore:
         self._emit('created', node)
         return new_id
 
+    @_undoable
     def modify(
         self,
         entity: str,
@@ -673,6 +744,7 @@ class DraftStore:
             return
         self._emit('reparented' if old_parents else 'modified', node, old_parents)
 
+    @_undoable
     def delete(self, entity: str, entity_id: Hashable, parent_id: Any = MISSING) -> None:
         """
         Помечает запись на удаление (новую или существующую). Изменения записи и её
@@ -700,6 +772,7 @@ class DraftStore:
         record.deleted = True
         self._emit('deleted', node)
 
+    @_undoable
     def undelete(self, entity: str, entity_id: Hashable) -> None:
         """
         Снимает пометку удаления; изменения записи возвращаются. Запись без
@@ -724,6 +797,7 @@ class DraftStore:
             del self._records[node]
         self._emit('undeleted', node)
 
+    @_undoable
     def discard(
         self,
         targets: Optional[Iterable[NodeKey]] = None,
@@ -747,11 +821,36 @@ class DraftStore:
             {('appointment', 12), ('photo', -1)}
         """
         selected = select_nodes(self, targets, scope)
+        # for node in list(selected):
+        #     record = self._records.get(node)
+        #     if record is not None and record.is_new:
+        #         selected.update(n for n in self.descendants(node) if n in self._records)
+        # ↑ до N2 (2026-10-16): существующая запись, перенесённая в отменяемую НОВУЮ,
+        #   отменялась целиком (со всеми своими правками). Теперь у неё откатывается только
+        #   перенос (поле внешнего ключа) — если исходный родитель известен.
+        moved_back: List[NodeKey] = []
         for node in list(selected):
             record = self._records.get(node)
-            if record is not None and record.is_new:
-                selected.update(n for n in self.descendants(node) if n in self._records)
+            if record is None or not record.is_new:
+                continue
+            for child in self.descendants(node):
+                child_record = self._records.get(child)
+                if child_record is None or child in selected:
+                    continue
+                if child_record.is_new:
+                    selected.add(child)               # родитель так и не появится
+                    continue
+                parent = self._parent_key(child)
+                parent_record = self._records.get(parent) if parent is not None else None
+                if parent_record is None or not parent_record.is_new:
+                    continue                          # глубже — уйдёт вместе с родителем
+                if self._can_move_back(child):
+                    moved_back.append(child)          # вернуть к исходному родителю
+                else:
+                    selected.add(child)               # исходный родитель неизвестен
         with self.batch():
+            for child in moved_back:
+                self._move_back(child)
             for node in sorted(selected, key=lambda n: self._records[n].order):
                 # предки — ДО удаления: у новой записи _drop убирает и связь, и без этого
                 # событие не сообщило бы родителям, что их значок изменился
@@ -759,6 +858,51 @@ class DraftStore:
                 self._drop(node)
                 self._emit('discarded', node, ancestors)
         return selected
+
+    def _can_move_back(self, node: NodeKey) -> bool:
+        """
+        Можно ли вернуть существующую запись к исходному родителю: поле внешнего ключа
+        изменено и его исходное значение известно (N2).
+
+        Args:
+            node: Узел.
+
+        Returns:
+            ``True``, если можно.
+
+        Пример:
+            >>> store._can_move_back(('photo', 7))
+            True
+        """
+        record = self._records.get(node)
+        fk = self.schema.parent_field(node[0])
+        return (record is not None and not record.is_new and fk is not None
+                and fk in record.data and fk in record.original)
+
+    def _move_back(self, node: NodeKey) -> None:
+        """
+        Откатывает перенос существующей записи (поле внешнего ключа → исходное
+        значение); черновик без других изменений удаляется (N2).
+
+        Args:
+            node: Узел.
+
+        Returns:
+            None
+
+        Пример:
+            >>> store._move_back(('photo', 7))
+        """
+        record = self._records[node]
+        fk = self.schema.parent_field(node[0])
+        old_parents = self.ancestors(node)
+        record.data.pop(fk, None)
+        self._set_link(node, record.original[fk])
+        if not record.has_own_changes:
+            del self._records[node]
+            self._emit('discarded', node, old_parents)
+        else:
+            self._emit('reparented', node, old_parents)
 
     def _drop(self, node: NodeKey) -> None:
         """
@@ -797,6 +941,7 @@ class DraftStore:
                 del self._children[parent]
         self._parents.pop(node, None)
 
+    @_undoable
     def clear(self) -> None:
         """
         Удаляет все черновики и связи.
@@ -812,6 +957,209 @@ class DraftStore:
         self._parents.clear()
         self._children.clear()
         self._emit('cleared', None)
+
+    @_undoable
+    def revert_field(self, entity: str, entity_id: Hashable, *fields: str) -> None:
+        """
+        Отменяет изменение отдельных полей записи (остальные правки остаются).
+
+        Существующая запись: поле убирается из черновика; поле внешнего ключа — запись
+        возвращается к исходному родителю (нужно известное исходное значение). Новая
+        запись: поле убирается из данных (родителя новой записи так не отменить —
+        отмените запись). Черновик без изменений удаляется.
+
+        Args:
+            entity: Тип.
+            entity_id: Id.
+            *fields: Имена полей.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: Отмена поля внешнего ключа без известного исходного значения
+                или у новой записи.
+
+        Пример:
+            >>> store.revert_field('appointment', 12, 'cost')
+        """
+        node = (entity, entity_id)
+        record = self._records.get(node)
+        if record is None:
+            return
+        fk = self.schema.parent_field(entity)
+        if fk in fields and fk in record.data:
+            if record.is_new:
+                raise ValueError("у новой записи родитель не отменяется — отмените саму запись")
+            if fk not in record.original:
+                raise ValueError(f"исходное значение '{fk}' неизвестно — перенос не отменить")
+        old_parents: List[NodeKey] = []
+        for name in fields:
+            if name not in record.data:
+                continue
+            record.data.pop(name)
+            if name == fk:
+                old_parents = self.ancestors(node)
+                self._set_link(node, record.original[fk])
+        if not record.has_own_changes:
+            del self._records[node]
+            self._emit('discarded', node, old_parents)
+        else:
+            self._emit('reparented' if old_parents else 'modified', node, old_parents)
+
+    # ------------------------------------------------------------------
+    # История отмены (undo / redo)
+    # ------------------------------------------------------------------
+
+    def _snapshot(self) -> '_Snapshot':
+        """
+        Снимок черновиков и связей (копии).
+
+        Returns:
+            ``(записи, связи)``.
+
+        Пример:
+            >>> records, parents = store._snapshot()
+        """
+        return ({k: r.copy() for k, r in self._records.items()}, dict(self._parents))
+
+    @contextlib.contextmanager
+    def _undo_step(self) -> Iterator[None]:
+        """
+        Шаг истории: снимок ДО внешней операции; если она что-то изменила (версия
+        выросла) — снимок в стек отмены, стек повтора очищается.
+
+        Returns:
+            Контекстный менеджер.
+
+        Пример:
+            >>> with store._undo_step(): store._records.clear()
+        """
+        outer = self._undo_depth == 0 and not self._history_suspended and self.history_limit > 0
+        snapshot = self._snapshot() if outer else None
+        version = self._version
+        self._undo_depth += 1
+        try:
+            yield
+        finally:
+            self._undo_depth -= 1
+            if outer and self._version != version:
+                self._undo.append(snapshot)
+                del self._undo[:-self.history_limit]
+                self._redo.clear()
+
+    @property
+    def can_undo(self) -> bool:
+        """
+        Есть что отменить.
+
+        Returns:
+            ``True``, если есть шаг.
+
+        Пример:
+            >>> store.can_undo
+            False
+        """
+        return bool(self._undo)
+
+    @property
+    def can_redo(self) -> bool:
+        """
+        Есть что повторить.
+
+        Returns:
+            ``True``, если есть шаг.
+
+        Пример:
+            >>> store.can_redo
+            False
+        """
+        return bool(self._redo)
+
+    def undo(self) -> bool:
+        """
+        Отменяет последний шаг (операцию или ``batch``).
+
+        Returns:
+            ``True``, если было что отменять.
+
+        Пример:
+            >>> store.modify('photo', 3, {'a': 1}); store.undo(); store.has_draft('photo', 3)
+            False
+        """
+        if not self._undo:
+            return False
+        self._redo.append(self._snapshot())
+        self._restore(self._undo.pop())
+        return True
+
+    def redo(self) -> bool:
+        """
+        Повторяет отменённый шаг.
+
+        Returns:
+            ``True``, если было что повторять.
+
+        Пример:
+            >>> store.undo(); store.redo()
+            True
+        """
+        if not self._redo:
+            return False
+        self._undo.append(self._snapshot())
+        self._restore(self._redo.pop())
+        return True
+
+    def clear_history(self) -> None:
+        """
+        Забывает историю отмены (например, после сохранения — делается автоматически).
+
+        Returns:
+            None
+
+        Пример:
+            >>> store.clear_history(); store.can_undo
+            False
+        """
+        self._undo.clear()
+        self._redo.clear()
+
+    def _restore(self, snapshot: '_Snapshot') -> None:
+        """
+        Восстанавливает снимок; события ``'restored'`` по изменившимся узлам (с прежними
+        и новыми предками — значки обновятся).
+
+        Связи, узнанные позже снимка (``remember_parent``, ``parent_resolver``),
+        сохраняются; связи новых записей, которых в снимке нет, забываются.
+
+        Args:
+            snapshot: ``(записи, связи)``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> store._restore(store._snapshot())
+        """
+        records, parents = snapshot
+        changed = [n for n in set(self._records) | set(records)
+                   if self._records.get(n) != records.get(n)]
+        old_ancestors = {n: self.ancestors(n) for n in changed}
+        merged = {n: p for n, p in self._parents.items()
+                  if not (n in self._records and self._records[n].is_new and n not in records)}
+        merged.update(parents)
+        self._records = {k: r.copy() for k, r in records.items()}
+        self._parents = {}
+        self._children = {}
+        for node, parent_id in merged.items():
+            self._set_link(node, parent_id)
+        self._history_suspended += 1
+        try:
+            with self.batch():
+                for node in sorted(changed, key=str):
+                    self._emit('restored', node, old_ancestors[node])
+        finally:
+            self._history_suspended -= 1
 
     # ------------------------------------------------------------------
     # Чтение
@@ -936,6 +1284,29 @@ class DraftStore:
             result.update(record.data)
         return result
 
+    def counts(self) -> Dict[str, Dict[str, int]]:
+        """
+        Сводка черновиков по типам: сколько новых, изменённых, помеченных на удаление
+        (для диалогов и строки состояния).
+
+        Returns:
+            ``{тип: {'new': n, 'modified': m, 'deleted': d}}`` — только типы с черновиками.
+
+        Пример:
+            >>> store.counts()
+            {'appointment': {'new': 1, 'modified': 2, 'deleted': 0}}
+        """
+        result: Dict[str, Dict[str, int]] = {}
+        for record in self._records.values():
+            bucket = result.setdefault(record.entity, {'new': 0, 'modified': 0, 'deleted': 0})
+            if record.deleted:
+                bucket['deleted'] += 1
+            elif record.is_new:
+                bucket['new'] += 1
+            else:
+                bucket['modified'] += 1
+        return result
+
     def has_descendant_changes(self, entity: str, entity_id: Hashable) -> bool:
         """
         Есть ли черновики у потомков записи.
@@ -1044,13 +1415,18 @@ class DraftStore:
             self._records[new_node] = record
         self._emit('remapped', new_node, old_id=old_id)
 
-    def _commit(self, consumed: Iterable[NodeKey], id_map: Mapping[NodeKey, Hashable],
-                removed: Iterable[NodeKey] = ()) -> None:
+    def apply_saved(self, consumed: Iterable[NodeKey], id_map: Mapping[NodeKey, Hashable],
+                    removed: Iterable[NodeKey] = ()) -> None:
         """
         Отражает успешное сохранение: черновики ``consumed`` удаляются, временные id
         созданных записей заменяются настоящими, удалённые из БД узлы забываются.
 
-        Вызывается исполнителем плана (``executor``) только после успешной транзакции.
+        Вызывается исполнителем плана (``executor``) только после успешной транзакции;
+        свой исполнитель (другое хранилище данных) вызывает так же. История отмены
+        очищается: вернуть отменой то, что уже записано в БД, нельзя.
+
+        (До 2026-10-16 метод был закрытым ``_commit`` — исполнитель лез во внутренности
+        хранилища; имя ``_commit`` оставлено как синоним.)
 
         Args:
             consumed: Узлы, чьи черновики сохранены (или отброшены как часть удалённой
@@ -1062,7 +1438,33 @@ class DraftStore:
             None
 
         Пример:
-            >>> store._commit({('photo', -1)}, {('photo', -1): 77})
+            >>> store.apply_saved({('photo', -1)}, {('photo', -1): 77})
+        """
+        self._history_suspended += 1
+        try:
+            self._apply_saved(consumed, id_map, removed)
+        finally:
+            self._history_suspended -= 1
+        self.clear_history()
+
+    # Синоним прежнего закрытого имени (до 2026-10-16)
+    _commit = apply_saved
+
+    def _apply_saved(self, consumed: Iterable[NodeKey], id_map: Mapping[NodeKey, Hashable],
+                     removed: Iterable[NodeKey]) -> None:
+        """
+        Тело ``apply_saved`` (без истории).
+
+        Args:
+            consumed: Сохранённые/поглощённые узлы.
+            id_map: Временный ключ → настоящий id.
+            removed: Удалённые из БД узлы.
+
+        Returns:
+            None
+
+        Пример:
+            >>> store._apply_saved({('photo', -1)}, {('photo', -1): 77}, ())
         """
         with self.batch():
             for node in consumed:

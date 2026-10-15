@@ -13,7 +13,10 @@
 """
 
 from .model import DEFAULT_COLORS, Column, DraftTableModel, NodeRole, StatusRole
+from .bridge import DraftsQtBridge
+from .dialogs import ask_on_close, ask_save_target, describe_nodes, make_confirmations
 from .page import DraftTablePage, RowSource
 
 __all__ = ['DEFAULT_COLORS', 'Column', 'DraftTableModel', 'NodeRole', 'StatusRole',
-           'DraftTablePage', 'RowSource']
+           'DraftTablePage', 'RowSource', 'DraftsQtBridge', 'ask_on_close', 'ask_save_target',
+           'describe_nodes', 'make_confirmations']

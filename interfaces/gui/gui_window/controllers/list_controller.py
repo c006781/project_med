@@ -9,9 +9,12 @@ from typing import Set
 from PySide6.QtCore import QObject
 
 # Создаём метакласс, совместимый с QObjectMeta и ABCMeta
-class QABCMeta(type(QObject), ABCMeta):
-    """Метакласс, объединяющий метакласс QObject и ABCMeta."""
-    pass
+# class QABCMeta(type(QObject), ABCMeta):
+#     """Метакласс, объединяющий метакласс QObject и ABCMeta."""
+#     pass
+# ↑ до 2026-10-16: определялся здесь, и app/draft импортировал его из слоя интерфейса.
+#   Теперь — app/utils/qt_meta.py (один объект для всех; имя здесь оставлено).
+from app.utils.qt_meta import QABCMeta  # noqa: E402
 
 class IDynamicListController(ABC, metaclass=QABCMeta):
     """

@@ -213,7 +213,9 @@ def test_ap3_failing_service_does_not_stop_others(monkeypatch, caplog):
     monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [bad_provider, lambda: good])
     a = ca.ConfigApplier.__new__(ca.ConfigApplier)
     a.logger = logging.getLogger('test.applier')
+    # (до AP3a, проход 3: apply_database возвращал True — сбой не доходил до экрана)
     with caplog.at_level(logging.ERROR, logger='test.applier'):
-        assert a.apply_database({'database_local_path': 'b'}, {'database_local_path': 'a'}) is True
+        with pytest.raises(RuntimeError, match='bad_provider'):
+            a.apply_database({'database_local_path': 'b'}, {'database_local_path': 'a'})
     assert reloaded == [1]
     assert 'db locked' in caplog.text

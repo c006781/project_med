@@ -243,8 +243,10 @@ class BaseConfigManager:
         """
         Читает файл и накладывает его значения на умолчания.
 
-        Файла нет — остаются умолчания (файл создастся при первом ``save()``). Файл не
-        читается или содержит не словарь — ``_recover_broken_file()`` (M1).
+        Файла нет — остаются умолчания (файл создастся при первом ``save()``).
+        Содержимое не разбирается или это не словарь — ``_recover_broken_file()`` (M1).
+        Файл не открывается/не читается (``OSError``: заблокирован, нет прав) —
+        ``_report_unreadable_file()``: файл НЕ трогается (M15).
 
         Returns:
             None
@@ -268,6 +270,13 @@ class BaseConfigManager:
         try:
             with open(self._config_path, 'rb') as f:
                 data = msgpack.unpack(f, raw=False)  # raw=False для получения строк, а не байт
+        except OSError as e:
+            # M15 (проверка 3, 2026-10-15): ошибка ЧТЕНИЯ (файл заблокирован другим
+            # процессом или антивирусом, нет прав) — это не повреждение. Раньше она
+            # попадала в except Exception ниже: исправный файл объявлялся «повреждённым»
+            # и переименовывался в .broken-…. Теперь файл не трогаем.
+            self._report_unreadable_file(e)
+            return
         except Exception as e:  # msgpack бросает разные исключения на мусор
             detail = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
             self._recover_broken_file(f"не читается — {detail}")
@@ -283,6 +292,34 @@ class BaseConfigManager:
         #     # В случае ошибки чтения (повреждённый файл) оставляем defaults
         #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
         #     pass
+
+    def _report_unreadable_file(self, error: OSError) -> None:
+        """
+        Файл конфигурации есть, но прочитать его не удалось (M15).
+
+        В отличие от ``_recover_broken_file`` файл не переименовывается и не
+        перезаписывается: он может быть исправен (заблокирован антивирусом или другим
+        процессом, временно нет прав). Работа идёт на значениях по умолчанию в памяти;
+        сообщение — в лог и в ``broken_config_message`` (главное окно его покажет).
+
+        Args:
+            error: Исключение чтения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> m = AppConfigManager.get_instance()     # config.msgpack заблокирован
+            >>> m.broken_config_backup is None, bool(m.broken_config_message)
+            (True, True)
+        """
+        self.broken_config_backup = None
+        message = (f"Не удалось прочитать файл конфигурации {os.path.abspath(self._config_path)} "
+                   f"({type(error).__name__}: {error}). Файл не тронут, используются значения "
+                   f"по умолчанию. Закройте программу и проверьте доступ к файлу: сохранение "
+                   f"настроек сейчас перезапишет его.")
+        _log.error(message)
+        self.broken_config_message = message
 
     def _recover_broken_file(self, reason: str) -> None:
         """

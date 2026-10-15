@@ -35,6 +35,7 @@
 from typing import (
     Dict, Any, Set,
     # Optional
+    Optional, Tuple,
 )
 
 from app.utils.logger.logger import AppLogger
@@ -169,6 +170,69 @@ class ConfigApplier:
     # Применение отдельных блоков
     # ----------------------------------------------------------------------
 
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def apply_database(self, new_config: Dict[str, Any]) -> bool:
+    #     """Применяет настройки БД (путь к файлу). Возвращает True, если БД была пересоздана."""
+    #     """
+    #     Применяет настройки, связанные с путём к файлу базы данных.
+    #
+    #     Если путь `database_local_path` изменился, перезагружает все сервисы,
+    #     зависящие от БД (PatientService, AppointmentService, NoteService, PhotoService).
+    #     Сервисы вызывают `reload_config()`, который закрывает старый `Database`
+    #     и создаёт новый с обновлённым путём.
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками (должен содержать ключ 'database_local_path').
+    #
+    #     Returns:
+    #         bool: `True`, если путь изменился и БД была перезагружена;
+    #               `False`, если путь не изменился (или отсутствует).
+    #
+    #     Примечание:
+    #         Сервисы также подписаны на изменения конфигурации через
+    #         `AppConfigManager.add_change_listener`, поэтому этот метод может
+    #         вызывать `reload_config()` дважды. Однако это не ломает логику,
+    #         а лишь добавляет небольшой оверхед.
+    #     """
+    #
+    #     old_path = self.manager.get('database_local_path')
+    #     new_path = new_config.get('database_local_path')
+    #
+    #     if new_path is None or new_path == old_path:
+    #         return False
+    #
+    #     self.logger.info(f"Изменение пути к БД: {old_path} -> {new_path}")
+    #
+    #     # Обновляем менеджер (это уже сделано до вызова)
+    #
+    #     # # Перезагружаем сервисы, использующие БД
+    #     # # from app.dependencies import get_db, get_patient_service, get_appointment_service, get_note_service, get_photo_service
+    #     # # Закрываем старую БД и создаём новую
+    #     # следующее - ненужно, так как в reload_config - есть
+    #     # db = get_db()
+    #     # db.close()
+    #
+    #     # Новая БД будет создана при следующем get_db()
+    #
+    #
+    #     # Сбрасываем кэш синглтон-сервисов, чтобы при следующем вызове get_* создались новые экземпляры
+    #     from app.dependencies import clear_services_cache # оставить тут, так как циклы
+    #     clear_services_cache()
+    #
+    #     # Перезагружаем все сервисы, зависящие от БД
+    #     # for i in [
+    #     #     get_patient_service,
+    #     #     get_appointment_service,
+    #     #     get_note_service,
+    #     #     get_photo_service,
+    #     # ]:
+    #     for i in _SERVICE_PROVIDERS:
+    #         i().reload_config()
+    #
+    #     return True
+
     @AppLogger.get_instance(
         name = 'ConfigApplier',
         # share_file_with = 'system',
@@ -177,65 +241,88 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def apply_database(self, new_config: Dict[str, Any]) -> bool:
-        """Применяет настройки БД (путь к файлу). Возвращает True, если БД была пересоздана."""
+    def apply_database(
+        self,
+        new_config: Dict[str, Any],
+        old_config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """
-        Применяет настройки, связанные с путём к файлу базы данных.
+        Применяет новый путь к БД: перезагружает все сервисы из кэша ``dependencies``.
 
-        Если путь `database_local_path` изменился, перезагружает все сервисы,
-        зависящие от БД (PatientService, AppointmentService, NoteService, PhotoService).
-        Сервисы вызывают `reload_config()`, который закрывает старый `Database`
-        и создаёт новый с обновлённым путём.
+        Перезагружаются ТЕ ЖЕ объекты сервисов, которыми пользуются страницы GUI
+        (они получили их из кэша при создании главного окна), поэтому кэш НЕ очищается —
+        иначе страницы остались бы со старой БД. Сервис в ``reload_config()`` закрывает
+        старую ``Database`` и открывает новую по пути из менеджера.
 
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками (должен содержать ключ 'database_local_path').
+        Args:
+            new_config: Конфиг после сохранения.
+            old_config: Конфиг до сохранения; ``None`` — применить без сравнения.
 
         Returns:
-            bool: `True`, если путь изменился и БД была перезагружена;
-                  `False`, если путь не изменился (или отсутствует).
+            ``True``, если путь изменился и сервисы перезагружены.
 
-        Примечание:
-            Сервисы также подписаны на изменения конфигурации через
-            `AppConfigManager.add_change_listener`, поэтому этот метод может
-            вызывать `reload_config()` дважды. Однако это не ломает логику,
-            а лишь добавляет небольшой оверхед.
+        Пример:
+            >>> applier.apply_database(new_config, old_config)
+            True
         """
-
-        old_path = self.manager.get('database_local_path')
-        new_path = new_config.get('database_local_path')
-
-        if new_path is None or new_path == old_path:
+        changed, new_path = self._thec_update_key_config(new_config, 'database_local_path', old_config)
+        if not changed:
             return False
 
+        old_path = (old_config or {}).get('database_local_path')
         self.logger.info(f"Изменение пути к БД: {old_path} -> {new_path}")
 
-        # Обновляем менеджер (это уже сделано до вызова)
-
-        # # Перезагружаем сервисы, использующие БД
-        # # from app.dependencies import get_db, get_patient_service, get_appointment_service, get_note_service, get_photo_service
-        # # Закрываем старую БД и создаём новую
-        # следующее - ненужно, так как в reload_config - есть
-        # db = get_db()
-        # db.close()
-
-        # Новая БД будет создана при следующем get_db()
-        
-
-        # Сбрасываем кэш синглтон-сервисов, чтобы при следующем вызове get_* создались новые экземпляры
-        from app.dependencies import clear_services_cache # оставить тут, так как циклы
-        clear_services_cache()
-
-        # Перезагружаем все сервисы, зависящие от БД
-        # for i in [
-        #     get_patient_service,
-        #     get_appointment_service,
-        #     get_note_service,
-        #     get_photo_service,
-        # ]:
-        for i in _SERVICE_PROVIDERS:
-            i().reload_config()
+        # from app.dependencies import clear_services_cache # оставить тут, так как циклы
+        # clear_services_cache()
+        # ↑ до 2026-10-14: очистка кэша давала НОВЫЕ объекты сервисов, а страницы GUI
+        #   держат старые — они оставались со старой БД (раньше это маскировали слушатели
+        #   save(), перезагружавшие все экземпляры).
+        for provider in _SERVICE_PROVIDERS:
+            provider().reload_config()
 
         return True
+
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def apply_photos_storage(
+    #     self,
+    #     new_config: Dict[str, Any]
+    # ) -> bool:
+    #     """
+    #     Применяет новый путь к хранилищу фотографий.
+    #
+    #     Обновляет путь в `PhotoService` (через свойство `_storage_path`)
+    #     и создаёт новую директорию, если она не существует.
+    #     Сами виджеты фотографий (`PhotoUploaderWidget`) обновляют пути отдельно
+    #     через `MainWindow.on_settings_changed` (по сигналу).
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками (должен содержать
+    #                                     ключ 'PHOTOS_STORAGE_PATH').
+    #
+    #     Returns:
+    #         bool: `True`, если путь изменился и хранилище обновлено;
+    #               `False`, если путь не изменился (или отсутствует).
+    #     """
+    #
+    #     old_path = self.manager.get('PHOTOS_STORAGE_PATH')
+    #     new_path = new_config.get('PHOTOS_STORAGE_PATH')
+    #
+    #     if new_path is None or new_path == old_path:
+    #         return False
+    #
+    #     self.logger.info(f"Изменение пути к фото: {old_path} -> {new_path}")
+    #
+    #     # Обновляем путь в сервисе и виджетах
+    #     photo_service = get_photo_service()
+    #
+    #     photo_service._storage_path = new_path
+    #     photo_service._ensure_storage_exists()
+    #
+    #     # Сигнал для виджетов будет отправлен из MainWindow отдельно
+    #
+    #     return True
 
     @AppLogger.get_instance(
         name = 'ConfigApplier',
@@ -247,72 +334,150 @@ class ConfigApplier:
     )
     def apply_photos_storage(
         self,
-        new_config: Dict[str, Any]
+        new_config: Dict[str, Any],
+        old_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        Применяет новый путь к хранилищу фотографий.
+        Применяет новую папку фото к сервису фото (и создаёт её при необходимости).
 
-        Обновляет путь в `PhotoService` (через свойство `_storage_path`)
-        и создаёт новую директорию, если она не существует.
-        Сами виджеты фотографий (`PhotoUploaderWidget`) обновляют пути отдельно
-        через `MainWindow.on_settings_changed` (по сигналу).
+        Виджеты фото обновляет ``MainWindow.on_settings_changed`` (блок ``'photos'``).
 
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками (должен содержать
-                                        ключ 'PHOTOS_STORAGE_PATH').
+        Args:
+            new_config: Конфиг после сохранения.
+            old_config: Конфиг до сохранения; ``None`` — применить без сравнения.
 
         Returns:
-            bool: `True`, если путь изменился и хранилище обновлено;
-                  `False`, если путь не изменился (или отсутствует).
+            ``True``, если путь изменился и применён.
+
+        Пример:
+            >>> applier.apply_photos_storage({'PHOTOS_STORAGE_PATH': 'D:/photos'}, old_config)
+            True
         """
-
-        old_path = self.manager.get('PHOTOS_STORAGE_PATH')
-        new_path = new_config.get('PHOTOS_STORAGE_PATH')
-
-        if new_path is None or new_path == old_path:
+        changed, new_path = self._thec_update_key_config(new_config, 'PHOTOS_STORAGE_PATH', old_config)
+        if not changed:
             return False
 
+        old_path = (old_config or {}).get('PHOTOS_STORAGE_PATH')
         self.logger.info(f"Изменение пути к фото: {old_path} -> {new_path}")
 
-        # Обновляем путь в сервисе и виджетах
+        # Обновляем путь в сервисе (свойство _storage_path сервиса фото — с сеттером)
         photo_service = get_photo_service()
-
         photo_service._storage_path = new_path
         photo_service._ensure_storage_exists()
-
-        # Сигнал для виджетов будет отправлен из MainWindow отдельно
-
         return True
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def _thec_update_key_config(
+    #     self,
+    #     new_config: Dict[str, Any],
+    #     key: str,
+    # ) -> tuple[bool, Any]:
+    #     """
+    #     Вспомогательный метод для проверки изменения значения по ключу.
+    #
+    #     Сравнивает значение ключа в `new_config` с текущим значением в менеджере.
+    #     Если изменилось, возвращает `(True, новое_значение)`, иначе `(False, None)`.
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками.
+    #         key (str): Имя ключа для проверки.
+    #
+    #     Returns:
+    #         tuple[bool, Any]: (изменилось, новое_значение). Если не изменилось, новое_значение равно `None`.
+    #     """
+    #
+    #     changed = False
+    #     rezult = None
+    #
+    #     old_token = self.manager.get(key)
+    #     new_token = new_config.get(key)
+    #
+    #     if new_token is not None and new_token != old_token:
+    #         rezult = new_token
+    #         changed = True
+    #
+    #     return changed, rezult
+
     def _thec_update_key_config(
         self,
         new_config: Dict[str, Any],
         key: str,
-    ) -> tuple[bool, Any]:
+        old_config: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, Any]:
         """
-        Вспомогательный метод для проверки изменения значения по ключу.
+        Изменился ли ключ: сравнение снимка ДО сохранения с новым конфигом.
 
-        Сравнивает значение ключа в `new_config` с текущим значением в менеджере.
-        Если изменилось, возвращает `(True, новое_значение)`, иначе `(False, None)`.
-
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками.
-            key (str): Имя ключа для проверки.
+        Args:
+            new_config: Новый конфиг.
+            key: Ключ.
+            old_config: Конфиг до сохранения; ``None`` — считать изменившимся
+                (принудительное применение, если значение задано).
 
         Returns:
-            tuple[bool, Any]: (изменилось, новое_значение). Если не изменилось, новое_значение равно `None`.
+            Кортеж ``(изменился, новое_значение)``; при ``(False, None)`` — применять нечего.
+
+        Пример:
+            >>> applier._thec_update_key_config({'YANDEX_TOKEN': 'b'}, 'YANDEX_TOKEN', {'YANDEX_TOKEN': 'a'})
+            (True, 'b')
         """
+        new_value = new_config.get(key)
+        if new_value is None:
+            return False, None
+        if old_config is not None and old_config.get(key) == new_value:
+            return False, None
+        return True, new_value
 
-        changed = False
-        rezult = None
-
-        old_token = self.manager.get(key)
-        new_token = new_config.get(key)
-
-        if new_token is not None and new_token != old_token:
-            rezult = new_token
-            changed = True
-
-        return changed, rezult
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def apply_sync(self, new_config: Dict[str, Any]) -> bool:
+    #     """
+    #     Применяет настройки синхронизации с Яндекс.Диском.
+    #
+    #     Проверяет изменения в ключах 'YANDEX_TOKEN', 'database_remote_path'
+    #     и 'database_local_path'. При изменении обновляет соответствующие атрибуты
+    #     в глобальном экземпляре `SyncService`.
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками.
+    #
+    #     Returns:
+    #         bool: `True`, если хотя бы один параметр синхронизации изменился;
+    #               `False` в противном случае.
+    #     """
+    #
+    #     changed = False
+    #     sync_service = get_sync_service()
+    #
+    #     # Токен
+    #     rez, changed_ = self._thec_update_key_config(
+    #         new_config, 'YANDEX_TOKEN'
+    #     )
+    #     if changed_:
+    #         sync_service.token = rez
+    #         changed = changed_
+    #
+    #     # Удалённый путь БД
+    #     rez, changed_ = self._thec_update_key_config(
+    #         new_config, 'database_remote_path'
+    #     )
+    #     if changed_:
+    #         sync_service.remote_path = rez
+    #         changed = changed_
+    #
+    #     # Локальный путь БД
+    #     rez, changed_ = self._thec_update_key_config(
+    #         new_config, 'database_local_path'
+    #     )
+    #     if changed_:
+    #         sync_service.local_path = rez
+    #         changed = changed_
+    #
+    #     if changed:
+    #         self.logger.info("Настройки синхронизации обновлены")
+    #
+    #     return changed
 
     @AppLogger.get_instance(
         name = 'ConfigApplier',
@@ -322,52 +487,38 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def apply_sync(self, new_config: Dict[str, Any]) -> bool:
+    def apply_sync(
+        self,
+        new_config: Dict[str, Any],
+        old_config: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """
-        Применяет настройки синхронизации с Яндекс.Диском.
+        Применяет токен Яндекс.Диска и пути синхронизации к ``SyncService``.
 
-        Проверяет изменения в ключах 'YANDEX_TOKEN', 'database_remote_path'
-        и 'database_local_path'. При изменении обновляет соответствующие атрибуты
-        в глобальном экземпляре `SyncService`.
-
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками.
+        Args:
+            new_config: Конфиг после сохранения.
+            old_config: Конфиг до сохранения; ``None`` — применить без сравнения.
 
         Returns:
-            bool: `True`, если хотя бы один параметр синхронизации изменился;
-                  `False` в противном случае.
+            ``True``, если изменился хотя бы один параметр.
+
+        Пример:
+            >>> applier.apply_sync({'YANDEX_TOKEN': 'новый'}, {'YANDEX_TOKEN': 'старый'})
+            True
         """
-
-        changed = False
         sync_service = get_sync_service()
-
-        # Токен
-        rez, changed_ = self._thec_update_key_config(
-            new_config, 'YANDEX_TOKEN'
-        )
-        if changed_:
-            sync_service.token = rez
-            changed = changed_
-
-        # Удалённый путь БД
-        rez, changed_ = self._thec_update_key_config(
-            new_config, 'database_remote_path'
-        )
-        if changed_:
-            sync_service.remote_path = rez
-            changed = changed_
-
-        # Локальный путь БД
-        rez, changed_ = self._thec_update_key_config(
-            new_config, 'database_local_path'
-        )
-        if changed_:
-            sync_service.local_path = rez
-            changed = changed_
+        changed = False
+        for key, attr in (('YANDEX_TOKEN', 'token'),
+                          ('database_remote_path', 'remote_path'),
+                          ('database_local_path', 'local_path')):
+            # A2: порядок (changed, value) — раньше распаковывалось наоборот
+            key_changed, value = self._thec_update_key_config(new_config, key, old_config)
+            if key_changed:
+                setattr(sync_service, attr, value)
+                changed = True
 
         if changed:
             self.logger.info("Настройки синхронизации обновлены")
-
         return changed
 
     @AppLogger.get_instance(
@@ -438,6 +589,41 @@ class ConfigApplier:
 
         return changed
 
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def apply_backup(
+    #     self,
+    #     new_config: Dict[str, Any]
+    # ) -> bool:
+    #     """
+    #     Применяет настройки бекапов (путь и количество).
+    #
+    #     На данный момент только логирует изменённые параметры.
+    #     В будущем здесь можно добавить реальную логику (например, очистку старых бекапов).
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками (ключи
+    #                                     'BACKUP_PATH' и 'BACKUP_COUNT').
+    #
+    #     Returns:
+    #         bool: `True`, если хотя бы один параметр бекапов изменился;
+    #               `False` в противном случае.
+    #     """
+    #
+    #     old_path = self.manager.get('BACKUP_PATH')
+    #     new_path = new_config.get('BACKUP_PATH')
+    #
+    #     old_count = self.manager.get('BACKUP_COUNT')
+    #     new_count = new_config.get('BACKUP_COUNT')
+    #
+    #     if new_path != old_path or new_count != old_count:
+    #         self.logger.info(f"Обновлены настройки бекапов: путь={new_path}, кол-во={new_count}")
+    #         # Здесь можно добавить вызов метода для применения (например, очистка старых бекапов)
+    #         return True
+    #
+    #     return False
+
     @AppLogger.get_instance(
         name = 'ConfigApplier',
         # share_file_with = 'system',
@@ -448,39 +634,76 @@ class ConfigApplier:
     )
     def apply_backup(
         self,
-        new_config: Dict[str, Any]
+        new_config: Dict[str, Any],
+        old_config: Optional[Dict[str, Any]] = None,
     ) -> bool:
         """
-        Применяет настройки бекапов (путь и количество).
+        Отмечает изменение настроек резервных копий (путь, количество).
 
-        На данный момент только логирует изменённые параметры.
-        В будущем здесь можно добавить реальную логику (например, очистку старых бекапов).
+        Применять сейчас нечего — значения читаются при создании копии; метод пишет в лог.
 
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками (ключи
-                                        'BACKUP_PATH' и 'BACKUP_COUNT').
+        Args:
+            new_config: Конфиг после сохранения.
+            old_config: Конфиг до сохранения; ``None`` — считать изменившимися.
 
         Returns:
-            bool: `True`, если хотя бы один параметр бекапов изменился;
-                  `False` в противном случае.
+            ``True``, если путь или количество изменились.
+
+        Пример:
+            >>> applier.apply_backup({'BACKUP_COUNT': 10}, {'BACKUP_COUNT': 5})
+            True
         """
-
-        old_path = self.manager.get('BACKUP_PATH')
-        new_path = new_config.get('BACKUP_PATH')
-
-        old_count = self.manager.get('BACKUP_COUNT')
-        new_count = new_config.get('BACKUP_COUNT')
-
-        if new_path != old_path or new_count != old_count:
-            self.logger.info(f"Обновлены настройки бекапов: путь={new_path}, кол-во={new_count}")
-            # Здесь можно добавить вызов метода для применения (например, очистка старых бекапов)
+        path_changed, _ = self._thec_update_key_config(new_config, 'BACKUP_PATH', old_config)
+        count_changed, _ = self._thec_update_key_config(new_config, 'BACKUP_COUNT', old_config)
+        if path_changed or count_changed:
+            self.logger.info(f"Обновлены настройки бекапов: путь={new_config.get('BACKUP_PATH')}, "
+                             f"кол-во={new_config.get('BACKUP_COUNT')}")
             return True
-
         return False
 
     # ----------------------------------------------------------------------
     # Главный метод применения полного конфига (для CLI/веб)
     # ----------------------------------------------------------------------
+
+    # ↓ Версия до 2026-10-14 (A1/A2: сравнение с уже сохранённым менеджером — изменения
+    #   «не находились»; в apply_sync перепутан порядок (changed, value)). Сохранена
+    #   по правилу проекта; новая версия — ниже.
+    # def apply_full_config(self, new_config: Dict[str, Any]) -> None:
+    #     """
+    #     Применяет все настройки из словаря, вызывая все методы `apply_xxx`.
+    #
+    #     Этот метод полезен для CLI или веб-приложений, когда нет необходимости
+    #     различать изменившиеся блоки (или когда конфигурация полностью перезаписывается).
+    #
+    #     Каждый метод-применитель сам проверяет, изменились ли его параметры,
+    #     и выполняет действия только при необходимости.
+    #
+    #     (Вызывается после того, как новые значения уже сохранены в менеджере)
+    #
+    #     Параметры:
+    #         new_config (Dict[str, Any]): Словарь с новыми настройками (полная конфигурация).
+    #
+    #     Returns:
+    #         None
+    #
+    #     Пример:
+    #         manager = AppConfigManager.get_instance()
+    #         manager.save()  # предполагаем, что новые значения уже установлены
+    #         applier = ConfigApplier()
+    #         applier.apply_full_config(manager.get_all())
+    #     """
+    #
+    #     # Определяем, какие блоки изменились по сравнению с менеджером до сохранения?
+    #     # Для этого нужен старый конфиг. Проще: сохранить старый конфиг перед вызовом,
+    #     # но в данном методе мы будем полагаться на то, что изменения уже в менеджере,
+    #     # а вызывающий код знает, что изменилось. Поэтому здесь просто применяем всё
+    #     # подряд, но методы проверяют изменения сами.
+    #
+    #     self.apply_logging(new_config)
+    #     self.apply_database(new_config)
+    #     self.apply_photos_storage(new_config)
+    #     self.apply_sync(new_config)
+    #     self.apply_backup(new_config)
 
     @AppLogger.get_instance(
         name = 'ConfigApplier',
@@ -490,39 +713,70 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def apply_full_config(self, new_config: Dict[str, Any]) -> None:
+    def apply_full_config(
+        self,
+        new_config: Dict[str, Any],
+        old_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """
-        Применяет все настройки из словаря, вызывая все методы `apply_xxx`.
+        Применяет все блоки настроек.
 
-        Этот метод полезен для CLI или веб-приложений, когда нет необходимости
-        различать изменившиеся блоки (или когда конфигурация полностью перезаписывается).
+        Без ``old_config`` (CLI ``apply_settings`` после ручной правки файла) — каждый
+        блок применяется принудительно; с ``old_config`` — то же, что ``apply_changes``.
 
-        Каждый метод-применитель сам проверяет, изменились ли его параметры,
-        и выполняет действия только при необходимости.
-
-        (Вызывается после того, как новые значения уже сохранены в менеджере)
-
-        Параметры:
-            new_config (Dict[str, Any]): Словарь с новыми настройками (полная конфигурация).
+        Args:
+            new_config: Конфиг после сохранения.
+            old_config: Конфиг до сохранения или ``None``.
 
         Returns:
             None
 
         Пример:
-            manager = AppConfigManager.get_instance()
-            manager.save()  # предполагаем, что новые значения уже установлены
-            applier = ConfigApplier()
-            applier.apply_full_config(manager.get_all())
+            >>> ConfigApplier().apply_full_config(AppConfigManager.get_instance().get_all())
         """
-
-        # Определяем, какие блоки изменились по сравнению с менеджером до сохранения?
-        # Для этого нужен старый конфиг. Проще: сохранить старый конфиг перед вызовом,
-        # но в данном методе мы будем полагаться на то, что изменения уже в менеджере,
-        # а вызывающий код знает, что изменилось. Поэтому здесь просто применяем всё
-        # подряд, но методы проверяют изменения сами.
-
+        if old_config is not None:
+            self.apply_changes(old_config, new_config)
+            return
         self.apply_logging(new_config)
         self.apply_database(new_config)
         self.apply_photos_storage(new_config)
         self.apply_sync(new_config)
         self.apply_backup(new_config)
+
+    def apply_changes(
+        self,
+        old_config: Dict[str, Any],
+        new_config: Dict[str, Any],
+    ) -> Set[str]:
+        """
+        Единая точка применения сохранённых настроек: только изменившиеся блоки.
+
+        С 2026-10-14 — единственный механизм применения: сервисы больше не подписаны
+        на ``save()`` (раньше каждое сохранение переоткрывало БД во всех сервисах).
+
+        Args:
+            old_config: Снимок ``manager.get_all()`` ДО ``save()``.
+            new_config: ``manager.get_all()`` ПОСЛЕ ``save()``.
+
+        Returns:
+            Множество изменившихся блоков (``'database'``, ``'photos'``, ``'sync'``,
+            ``'logging_*'``, ``'backup'``) — для ``MainWindow.on_settings_changed``.
+
+        Пример:
+            >>> old = manager.get_all().copy()
+            >>> manager.set('database_local_path', 'new.db'); manager.save()
+            >>> ConfigApplier().apply_changes(old, manager.get_all())
+            {'database', 'sync'}
+        """
+        blocks = self.get_changed_blocks(old_config, new_config)
+        if 'database' in blocks:
+            self.apply_database(new_config, old_config)
+        if 'photos' in blocks:
+            self.apply_photos_storage(new_config, old_config)
+        if 'sync' in blocks:
+            self.apply_sync(new_config, old_config)
+        if any(block.startswith('logging') for block in blocks):
+            self.apply_logging(new_config)
+        if 'backup' in blocks:
+            self.apply_backup(new_config, old_config)
+        return blocks

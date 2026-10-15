@@ -146,7 +146,8 @@ class SyncService:
         )
 
         # Подписываемся на изменения конфига
-        AppConfigManager.add_change_listener(self.reload_config)
+        # AppConfigManager.add_change_listener(self.reload_config)
+        # ↑ до 2026-10-14 (M4): применение настроек — только ConfigApplier.apply_sync().
 
     @AppLogger.get_instance(
         name='SyncService',

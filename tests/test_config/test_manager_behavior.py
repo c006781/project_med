@@ -334,49 +334,96 @@ def test_get_changed_blocks():
     ('apply_photos_storage', 'PHOTOS_STORAGE_PATH'),
     ('apply_backup', 'BACKUP_PATH'),
 ])
-def test_apply_after_save_does_nothing_current(applier, method, key):
-    """A1, как есть: менеджер уже сохранил новое значение → «изменений нет»."""
+def test_apply_compares_with_snapshot_before_save(applier, method, key):
+    """A1: сравнение со снимком ДО сохранения (раньше — с уже сохранённым менеджером)."""
     make, *_ = applier
-    new = {key: 'new'}
-    assert getattr(make(saved=new), method)(new) is False
+    a = make(saved={key: 'new'})                      # менеджер уже сохранён
+    assert getattr(a, method)({key: 'new'}, {key: 'old'}) is True
+    assert getattr(a, method)({key: 'same'}, {key: 'same'}) is False
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "A1: apply_* сравнивают с уже сохранённым менеджером (как R1 у логирования) — "
-    "после сохранения изменения не применяются"
-))
 @pytest.mark.parametrize('method, key', [
     ('apply_database', 'database_local_path'),
     ('apply_photos_storage', 'PHOTOS_STORAGE_PATH'),
     ('apply_backup', 'BACKUP_PATH'),
 ])
-def test_apply_after_save_applies(applier, method, key):
+def test_apply_without_snapshot_forces(applier, method, key):
+    """Без снимка (CLI apply_settings после ручной правки) — применяется принудительно."""
     make, *_ = applier
-    new = {key: 'new'}
-    assert getattr(make(saved=new), method)(new) is True
+    assert getattr(make(saved={key: 'x'}), method)({key: 'x'}) is True
 
 
-def test_apply_database_before_save_reloads_services(applier):
+def test_apply_database_reloads_cached_services_without_clearing(applier, monkeypatch):
+    """Перезагружаются те же объекты сервисов, что держат страницы; кэш не очищается."""
+    import app.config.config_applier as ca
     make, _, _, reloads = applier
-    assert make(saved={'database_local_path': 'old.db'}).apply_database({'database_local_path': 'new.db'}) is True
+    cleared = []
+    import app.dependencies as deps
+    monkeypatch.setattr(deps, 'clear_services_cache', lambda: cleared.append(1), raising=False)
+    service = type('S', (), {'reload_config': lambda self: reloads.append(id(self))})()
+    monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [lambda: service, lambda: service])
+    assert make({}).apply_database({'database_local_path': 'b.db'}, {'database_local_path': 'a.db'})
+    assert reloads == [id(service), id(service)]
+    assert cleared == []
+
+
+def test_apply_sync_sets_values(applier):
+    """A2: раньше в token записывался True (перепутан порядок (changed, value))."""
+    make, sync, _, _ = applier
+    old = {'YANDEX_TOKEN': 'old', 'database_remote_path': 'r1', 'database_local_path': 'l'}
+    new = {'YANDEX_TOKEN': 'new', 'database_remote_path': 'r2', 'database_local_path': 'l'}
+    assert make(saved=new).apply_sync(new, old) is True
+    assert (sync.token, sync.remote_path, sync.local_path) == ('new', 'r2', None)
+
+
+def test_apply_sync_nothing_changed(applier):
+    make, sync, _, _ = applier
+    cfg = {'YANDEX_TOKEN': 't'}
+    assert make(saved=cfg).apply_sync(cfg, dict(cfg)) is False
+    assert sync.token is None
+
+
+def test_apply_changes_only_changed_blocks(applier, monkeypatch):
+    make, sync, photo, reloads = applier
+    a = make({})
+    logging_calls = []
+    monkeypatch.setattr(a, 'apply_logging', lambda cfg: logging_calls.append(cfg) or True)
+    old = {'database_local_path': 'a.db', 'system_LEVEL': 'DEBUG', 'PHOTOS_STORAGE_PATH': 'p'}
+
+    # только логирование — БД, фото, синхронизация не трогаются
+    blocks = a.apply_changes(old, dict(old, system_LEVEL='ERROR'))
+    assert blocks == {'logging_system'}
+    assert reloads == [] and sync.token is None and len(logging_calls) == 1
+
+    # без изменений — ничего
+    assert a.apply_changes(old, dict(old)) == set()
+    assert reloads == [] and len(logging_calls) == 1
+
+    # смена БД — сервисы перезагружены, путь синхронизации обновлён
+    blocks = a.apply_changes(old, dict(old, database_local_path='b.db'))
+    assert blocks == {'database', 'sync'}
     assert reloads == [1]
+    assert sync.local_path == 'b.db'
 
 
-def test_apply_sync_swapped_tuple_current(applier):
-    """A2, как есть: при видимом изменении токена в sync_service.token попадает True."""
-    make, sync, _, _ = applier
-    make(saved={'YANDEX_TOKEN': 'old'}).apply_sync({'YANDEX_TOKEN': 'new'})
-    assert sync.token is True
+def test_apply_full_config_with_snapshot_uses_apply_changes(applier, monkeypatch):
+    make, *_ = applier
+    a = make({})
+    seen = []
+    monkeypatch.setattr(a, 'apply_changes', lambda old, new: seen.append((old, new)) or set())
+    a.apply_full_config({'x': 2}, {'x': 1})
+    assert seen == [({'x': 1}, {'x': 2})]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "A2: _thec_update_key_config возвращает (changed, value), а apply_sync распаковывает "
-    "как (value, changed) — в токен записывается True"
-))
-def test_apply_sync_sets_new_token(applier):
-    make, sync, _, _ = applier
-    make(saved={'YANDEX_TOKEN': 'old'}).apply_sync({'YANDEX_TOKEN': 'new'})
-    assert sync.token == 'new'
+def test_services_do_not_subscribe_to_save():
+    """M4: сервисы больше не подписаны на save() — применяет только ConfigApplier."""
+    import ast
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    for rel in ('app/services/services_all.py', 'app/services/sync_service.py'):
+        tree = ast.parse(open(os.path.join(root, rel), encoding='utf-8').read())
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr == 'add_change_listener']
+        assert calls == [], rel
 
 
 def test_apply_photos_sets_private_attr(applier):

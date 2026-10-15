@@ -310,4 +310,4 @@ AP3a, AP7, CLI1, M12a, AP2a) и 6 расхождений в описаниях (
 
 Замечено вне модуля:`TextEditPopupDelegate.eventFilter` обращается к `self.logger`,
 которого нет (`interfaces/gui/gui_window/widgets/delegate/type_delegate.py:400`) —
-AttributeError в обработчике событий Qt.
+AttributeError в обработчике событий Qt. — ✅ исправлено 2026-10-16 (B3/B4, `app/draft/IMPLEMENTATION.md` §3.1).

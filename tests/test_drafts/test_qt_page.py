@@ -140,3 +140,36 @@ def test_selection_kept_after_save_remap(frame, store, adapter):
     photos.source.rows.append({'id': real, 'appointment_id': 12, 'file_path': ''})
     QCoreApplication.processEvents()                   # отложенное перечитывание
     assert photos.current_id() == real
+
+
+def test_add_disabled_when_schema_requires_parent(qapp, store):
+    """«Все приёмы» (без пациента): приёму нужен пациент — «Добавить» недоступно."""
+    page = DraftTablePage(store, 'appointment', [Column('cost', 'Стоимость')], ListSource([]))
+    page.reload()
+    assert not page.add_btn.isEnabled() and page.add_row() is None
+    page.set_parent(1)
+    assert page.add_btn.isEnabled() and page.add_row() is not None
+    page.model.detach()
+
+
+def test_root_table_can_add_without_parent(qapp, store):
+    page = DraftTablePage(store, 'patient', [Column('last_name', 'Фамилия')], ListSource([]))
+    page.reload()
+    assert page.add_btn.isEnabled() and page.add_row() == -1
+    page.model.detach()
+
+
+def test_source_failure_keeps_parent_context(qapp, store):
+    """Источник упал — пусто, сигнал об ошибке, но новые строки — под правильным родителем."""
+    class Broken:
+        def load(self, offset, limit, parent_id):
+            raise IndexError('list index out of range')
+
+    page = DraftTablePage(store, 'appointment', [Column('cost', 'Стоимость')], Broken())
+    errors = []
+    page.load_failed.connect(errors.append)
+    page.set_parent(-1)
+    assert errors == ['list index out of range']
+    new_id = page.add_row()
+    assert store.get('appointment', new_id).parent_id == -1
+    page.model.detach()

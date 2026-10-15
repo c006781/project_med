@@ -190,17 +190,30 @@ class BaseConfigManager:
 
                 
     def __init__(
-        self, 
-        config_path: str = None, 
-        defaults: Dict[str, Any] = None,
+        self,
+        config_path: Optional[str] = None,
+        defaults: Optional[Dict[str, Any]] = None,
         # logger:logging = None,
         encrypt: bool = True, # по умолчанию включено шифрование
-    ):
+    ) -> None:
         """
-        Инициализирует менеджер.
+        Создаёт менеджер: умолчания + значения из файла (если он есть).
 
-        :param config_path: путь к файлу конфигурации.
-        :param defaults: словарь значений по умолчанию.
+        Напрямую обычно не вызывается — используйте ``AppConfigManager.get_instance()``.
+        Повреждённый файл не роняет создание: см. ``_recover_broken_file`` (M1).
+
+        Args:
+            config_path: Путь к файлу MessagePack; ``None`` — ``_config_path`` класса.
+            defaults: Значения по умолчанию; ``None`` — ``_defaults`` класса (копируются).
+            encrypt: Не используется (шифрование закомментировано).
+
+        Returns:
+            None
+
+        Пример:
+            >>> m = BaseConfigManager('my.msgpack', defaults={'theme': 'dark'})
+            >>> m.get('theme')
+            'dark'
         """
         self._config_path = config_path or self._config_path
         self._defaults = (defaults or self._defaults).copy() # копируем, чтобы не изменять оригинал
@@ -223,9 +236,16 @@ class BaseConfigManager:
     
     def _load(self) -> None:
         """
-        Загружает конфигурацию из файла и обновляет кеш (_config).
-        Если файл не существует или повреждён, остаются значения по умолчанию.
-        При успешной загрузке значения из файла имеют приоритет над defaults.
+        Читает файл и накладывает его значения на умолчания.
+
+        Файла нет — остаются умолчания (файл создастся при первом ``save()``). Файл не
+        читается или содержит не словарь — ``_recover_broken_file()`` (M1).
+
+        Returns:
+            None
+
+        Пример:
+            Вызывается из ``__init__`` и ``load()``.
         """
         if not os.path.exists(self._config_path):
             # Файла нет – используем defaults, файл не создаём до первого сохранения
@@ -310,8 +330,19 @@ class BaseConfigManager:
 
     def save(self) -> None:
         """
-        Сохраняет текущий кеш конфигурации в файл (формат MessagePack).
-        Создаёт родительские папки, если их нет.
+        Сохраняет текущие значения в файл и уведомляет слушателей.
+
+        Атомарно (M2): запись во временный ``<путь>.tmp`` и подмена ``os.replace`` — сбой
+        посередине не портит конфиг. Родительские папки создаются.
+
+        Returns:
+            None
+
+        Raises:
+            OSError: Записать не удалось (старый файл остаётся целым).
+
+        Пример:
+            >>> m.set('LOG_LEVEL', 'DEBUG'); m.save()
         """
         # # # Создаём директорию, если не существует
         # os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -344,46 +375,102 @@ class BaseConfigManager:
 
     def load(self) -> Dict[str, Any]:
         """
-        Принудительно перезагружает конфигурацию из файла и возвращает копию кеша.
-        Используется, если файл мог быть изменён внешними средствами.
+        Перечитывает файл (например, после ручной правки) и возвращает копию значений.
+
+        Returns:
+            Копия всех значений.
+
+        Пример:
+            >>> m.load()['LOG_LEVEL']
+            'INFO'
         """
         self._load()
         return self.get_all()
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        Возвращает значение по ключу. Если ключ отсутствует, возвращает default.
+        Значение по ключу.
+
+        Args:
+            key: Ключ.
+            default: Значение, если ключа нет.
+
+        Returns:
+            Значение или ``default``.
+
+        Пример:
+            >>> m.get('database_local_path')
+            '.\\clinic.db'
         """
         return self._config.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
         """
-        Устанавливает значение в кеше. Не сохраняет в файл автоматически.
-        Чтобы сохранить, нужно вызвать save().
+        Меняет значение в памяти. В файл — только после ``save()``.
+
+        Args:
+            key: Ключ.
+            value: Новое значение.
+
+        Returns:
+            None
+
+        Пример:
+            >>> m.set('YANDEX_TOKEN', 'y0_...'); m.save()
         """
         self._config[key] = value
 
     def update(self, data: Dict[str, Any]) -> None:
         """
-        Обновляет кеш несколькими значениями (аналог dict.update).
+        Меняет несколько значений в памяти (как ``dict.update``). В файл — после ``save()``.
+
+        Args:
+            data: Ключи и значения.
+
+        Returns:
+            None
+
+        Пример:
+            >>> m.update({'LOG_LEVEL': 'INFO', 'LOG_DIR': 'logs'})
         """
         self._config.update(data)
 
     def reset_to_defaults(self) -> None:
         """
-        Сбрасывает кеш к значениям по умолчанию (без сохранения в файл).
+        Сбрасывает значения в памяти к умолчаниям (файл не меняется до ``save()``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> m.reset_to_defaults(); m.save()
         """
         self._config = self._defaults.copy()
 
     def get_all(self) -> Dict[str, Any]:
         """
-        Возвращает копию текущего кеша (словарь).
+        Копия всех текущих значений (изменения копии не влияют на менеджер).
+
+        Returns:
+            Словарь значений.
+
+        Пример:
+            >>> old = m.get_all()      # снимок до save() для ConfigApplier.apply_changes
         """
         return self._config.copy()
     
     @property
     def config_exists(self) -> bool:
-        """Возвращает True, если файл конфигурации существует на диске."""
+        """
+        Есть ли файл конфигурации на диске (нет — первый запуск).
+
+        Returns:
+            ``True``, если файл существует.
+
+        Пример:
+            >>> AppConfigManager.get_instance().config_exists
+            True
+        """
         return os.path.exists(self._config_path)
 
 class AppConfigManager(BaseConfigManager):
@@ -540,10 +627,20 @@ class AppConfigManager(BaseConfigManager):
         """
         cls._resolved_default_path = None
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: Optional[str] = None) -> None:
         """
-        Инициализирует менеджер с путём к файлу и значениями по умолчанию.
-        Вызывать напрямую не рекомендуется – используйте get_instance().
+        Менеджер с умолчаниями приложения (``_defaults``).
+
+        Напрямую не вызывайте — используйте ``get_instance()`` (один экземпляр на путь).
+
+        Args:
+            config_path: Путь к файлу; ``None`` — ``'config.msgpack'``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> AppConfigManager.get_instance(config_path='config.msgpack')
         """
         super().__init__(config_path or self._config_path, self._defaults)
 
@@ -598,15 +695,21 @@ class AppConfigManager(BaseConfigManager):
 
 def get_config_env(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Возвращает словарь с текущей конфигурацией, используя новый менеджер.
+    Все настройки приложения одним словарём (копия).
 
-    Ранее мы использовали функцию get_config_env из conf.get_config, которая
-    возвращала словарь с конфигурацией. Теперь мы используем новый менеджер
-    AppConfigManager, который хранит конфигурацию в формате MessagePack.
+    Совместимость со старым кодом: раньше настройки читались из .env, теперь — из
+    ``config.msgpack`` через ``AppConfigManager``. Путь к файлу по умолчанию берётся из
+    .env один раз (E6).
 
-    Мы получаем экземпляр менеджера с помощью AppConfigManager.get_instance(),
-    а затем вызываем у него метод get_all(), который возвращает копию текущего
-    кеша конфигурации.
+    Args:
+        config_path: Путь к файлу; ``None`` — по умолчанию.
+
+    Returns:
+        Копия всех настроек.
+
+    Пример:
+        >>> get_config_env()['database_local_path']
+        '.\\clinic.db'
     """
     manager = AppConfigManager.get_instance(
         config_path=config_path,

@@ -76,15 +76,16 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self):
+    def __init__(self) -> None:
         """
-        Инициализирует объект ConfigApplier.
-
-        Получает текущий экземпляр `AppConfigManager` и создаёт логгер с именем
-        'config_applier'. Логгер будет использовать системные настройки логирования.
+        Берёт менеджер конфигурации по умолчанию и логгер.
 
         Returns:
             None
+
+        Пример:
+            >>> applier = ConfigApplier()
+            >>> applier.apply_changes(old_config, new_config)
         """
 
         self.manager = AppConfigManager.get_instance()

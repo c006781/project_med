@@ -1,5 +1,16 @@
 # app/config/conf/get_config.py
 
+"""
+«Загрузочный» конфиг из .env: ``APP_CONFIG_PATH`` и ``GITHUB_TOKEN``.
+
+Пример:
+    >>> from app.config.conf.get_config import get_config_env
+    >>> get_config_env()['APP_CONFIG_PATH']
+    'config.msgpack'
+"""
+
+from typing import Dict, Optional
+
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
@@ -90,21 +101,22 @@ from app.config.conf.getenv import get_getenv as get_getenv
 #         pass #  raise # e # pass
 # del temp_from
 
-def get_config_env(path: str = None)-> dict:
+def get_config_env(path: Optional[str] = None) -> Dict[str, str]:
     """
-    Получение конфигураций из  .env, если нет – создаём.
-    Возвращает словарь с конфигурациями:
-        APP_CONFIG_PATH - путь к файлу конфигурации (например, config/msgpack)
-        # password - пароль пользователя
-        # host - хост
-        # port - порт
+    «Загрузочный» конфиг из .env: где лежит ``config.msgpack`` и токен GitHub.
 
-    Если конфигурация не найдена в .env, то создаём ее с значениями по умолчанию:
-        APP_CONFIG_PATH - путь к файлу лога (например, logs/app.log)
-        # password - www3
-        # host - www4
-        # port - www5
+    Отсутствующие ключи дописываются в .env значениями по умолчанию (см. ``get_getenv``).
+    Вызывается ``AppConfigManager`` один раз за работу программы (E6) и ``app/updater.py``.
 
+    Args:
+        path: Путь к ``config.msgpack`` по умолчанию; ``None`` — ``'config.msgpack'``.
+
+    Returns:
+        ``{'APP_CONFIG_PATH': ..., 'GITHUB_TOKEN': ...}``.
+
+    Пример:
+        >>> get_config_env()
+        {'APP_CONFIG_PATH': 'config.msgpack', 'GITHUB_TOKEN': ''}
     """
     if not path:
         path = os.path.join(*['config.msgpack']) # путь к файлу лога (например, logs/app.log)

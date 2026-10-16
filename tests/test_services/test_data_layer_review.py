@@ -513,3 +513,16 @@ def test_dyn10_generic_delete_of_patient_cleans_files_and_notes(svc):
     assert not stored.exists()
     with pytest.raises(AppointmentNoteNotFoundError):
         svc['note'].get_note(a.procedure_id)
+
+
+def test_dyn11_used_note_cannot_be_deleted(svc):
+    from app.exceptions.exceptions_all import AppointmentNoteValidationError
+    p = _patient(svc)
+    a = _appointment(svc, p.id, procedure_text='Чистка')
+    with pytest.raises(AppointmentNoteValidationError, match='appointments: 1'):
+        svc['note'].delete_note(a.procedure_id)
+    assert svc['appointment'].get_by_id(a.id).procedure_text == 'Чистка'
+    free = svc['note'].create_note('свободная')
+    svc['note'].delete_note(free.id)
+    with pytest.raises(AppointmentNoteNotFoundError):
+        svc['note'].get_note(free.id)

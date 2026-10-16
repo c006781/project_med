@@ -33,7 +33,7 @@ import functools
 import os
 import shutil
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from alembic import command
 from alembic.autogenerate import compare_metadata
@@ -329,11 +329,15 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
                   if n != 'alembic_version' and not n.startswith('sqlite_')]
         if current == head:
             return head                       # обновила другая копия программы
+        legacy_backup = None
         if current is None and tables:
-            current = _repair_legacy(engine, conn, backup)
+            current, legacy_backup = _repair_legacy(engine, conn, backup)
             if current == head:
                 return head
-        backup_path = _backup(engine, current) if (backup and tables) else None
+        # M6 (2026-10-17): копия старой базы уже сделана в этой же транзакции — до фиксации
+        # файл тот же, вторая копия была бы дублем с неверной меткой версии.
+        need_backup = backup and tables and legacy_backup is None
+        backup_path = _backup(engine, current) if need_backup else None
         if backup_path:
             _log.info(f"Резервная копия базы перед миграцией: {backup_path}")
         command.upgrade(alembic_config(conn), 'head')
@@ -341,7 +345,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
     return head
 
 
-def _repair_legacy(engine: Engine, conn, backup: bool) -> str:
+def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[str]]:
     """
     Старая база без отметки: приведение к исходной схеме и отметка ``BASELINE``
     (внутри транзакции с блокировкой).
@@ -352,14 +356,15 @@ def _repair_legacy(engine: Engine, conn, backup: bool) -> str:
         backup: Делать резервную копию.
 
     Returns:
-        ``BASELINE``.
+        ``(BASELINE, путь копии или None)`` — путь нужен ``_upgrade``, чтобы не делать
+        вторую копию того же файла (M6).
 
     Raises:
         MigrationError: Небезопасное отличие (см. ``_plan_legacy_repair``).
 
     Пример:
         >>> _repair_legacy(engine, conn, True)
-        '0001_baseline'
+        ('0001_baseline', '/data/clinic.db.bak-20261017_101500-legacy')
     """
     added, ignored = _plan_legacy_repair(conn)
     legacy_backup = _backup(engine, 'legacy') if (backup and added) else None
@@ -371,7 +376,7 @@ def _repair_legacy(engine: Engine, conn, backup: bool) -> str:
         _log.warning(f"Старая база: {line} — оставлено как есть (данные не трогаем)")
     _log.info(f"Старая база приведена к исходной схеме ({len(added)} дописано, "
               f"{len(ignored)} оставлено) и отмечена {BASELINE}")
-    return BASELINE
+    return BASELINE, legacy_backup
 
 
 def _baseline_metadata():

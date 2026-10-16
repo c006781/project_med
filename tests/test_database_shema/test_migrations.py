@@ -1,0 +1,221 @@
+# tests/test_database_shema/test_migrations.py
+
+"""
+Миграции схемы БД (``app/database/migrate.py`` + Alembic в ``app/database/migrations``).
+
+Все базы — временные файлы. Проверяется: новая база, старые базы без отметки версии
+(разных «лет»: без индекса, с лишними столбцами/таблицами, без столбца), отказ на
+небезопасном, резервные копии, «модели = миграции», откат, ``Database``/``init_db``.
+"""
+
+import datetime
+import os
+
+import pytest
+from sqlalchemy import MetaData, create_engine, inspect, text
+
+from app.database import Database
+from app.database.database_shema.clinic import Base
+from app.database.migrate import (
+    BASELINE, MigrationError, alembic_config, current_revision, describe_differences,
+    head_revision, schema_differences, upgrade_database,
+)
+
+APP_TABLES = ('patients', 'appointments', 'appointments_notes', 'photos')
+
+
+def app_metadata() -> MetaData:
+    """Схема моделей ПРИЛОЖЕНИЯ (без тестовых моделей других тестов)."""
+    meta = MetaData()
+    for name in APP_TABLES:
+        Base.metadata.tables[name].to_metadata(meta)
+    return meta
+
+
+def legacy_db(tmp_path, name='legacy.db', drop_index=True, extra_sql=()):
+    """Старая база, как её строил create_all (без alembic_version), с данными."""
+    path = tmp_path / name
+    engine = create_engine(f"sqlite:///{path}")
+    app_metadata().create_all(engine)
+    with engine.begin() as conn:
+        if drop_index:
+            conn.execute(text('DROP INDEX ix_appointment_note_text'))
+        conn.execute(text("INSERT INTO appointments_notes (id, text) VALUES (1, 'Чистка')"))
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name, comment_id) VALUES (1, 'И', 'П', 1)"))
+        conn.execute(text("INSERT INTO appointments (id, patient_id, date) VALUES (1, 1, '2026-01-01')"))
+        for sql in extra_sql:
+            conn.execute(text(sql))
+    return path, engine
+
+
+def counts(engine):
+    with engine.connect() as conn:
+        return {t: conn.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in APP_TABLES}
+
+
+def backups(tmp_path):
+    return sorted(p.name for p in tmp_path.iterdir() if '.bak-' in p.name)
+
+
+# ---------------------------------------------------------------------------
+# Цепочка и «модели = миграции»
+# ---------------------------------------------------------------------------
+
+def test_single_head():
+    assert head_revision() == BASELINE or head_revision()
+
+
+def test_models_match_migrations(tmp_path):
+    """Модели приложения = схема после всех миграций (иначе — нужна новая миграция)."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    upgrade_database(engine)
+    diffs = schema_differences(engine, app_metadata())
+    assert diffs == [], f"модели расходятся с миграциями: {describe_differences(diffs)} — " \
+                        "создайте миграцию (alembic revision --autogenerate)"
+
+
+# ---------------------------------------------------------------------------
+# Новая база
+# ---------------------------------------------------------------------------
+
+def test_new_database_created_by_migrations(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    assert upgrade_database(engine) == head_revision()
+    assert current_revision(engine) == head_revision()
+    assert set(APP_TABLES) <= set(inspect(engine).get_table_names())
+    assert backups(tmp_path) == []                         # нечего было сохранять
+
+
+def test_up_to_date_database_untouched(tmp_path):
+    path = tmp_path / 'db.db'
+    engine = create_engine(f"sqlite:///{path}")
+    upgrade_database(engine)
+    before = path.read_bytes()
+    upgrade_database(engine)
+    assert path.read_bytes() == before and backups(tmp_path) == []
+
+
+def test_downgrade_to_empty_and_back(tmp_path):
+    from alembic import command
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        command.downgrade(alembic_config(conn), 'base')
+    assert not set(APP_TABLES) & set(inspect(engine).get_table_names())
+    upgrade_database(engine)
+    assert set(APP_TABLES) <= set(inspect(engine).get_table_names())
+
+
+# ---------------------------------------------------------------------------
+# Старые базы без отметки версии
+# ---------------------------------------------------------------------------
+
+def test_legacy_missing_index_repaired_and_stamped(tmp_path):
+    path, engine = legacy_db(tmp_path)
+    before = counts(engine)
+    upgrade_database(engine)
+    assert current_revision(engine) == head_revision()
+    assert 'ix_appointment_note_text' in {i['name'] for i in inspect(engine).get_indexes('appointments_notes')}
+    assert counts(engine) == before                        # данные на месте
+    assert len(backups(tmp_path)) == 1                     # копия перед изменением
+
+
+def test_legacy_identical_schema_only_stamped(tmp_path):
+    path, engine = legacy_db(tmp_path, drop_index=False)
+    upgrade_database(engine)
+    assert current_revision(engine) == head_revision()
+    assert backups(tmp_path) == []                         # дописывать было нечего
+
+
+def test_legacy_extras_kept_with_warning(tmp_path):
+    """Лишнее (старый столбец email, посторонняя таблица) не трогается, данные целы."""
+    path, engine = legacy_db(tmp_path, extra_sql=(
+        "ALTER TABLE patients ADD COLUMN email VARCHAR(100)",
+        "UPDATE patients SET email = 'a@b.ru'",
+        "CREATE TABLE old_stuff (id INTEGER PRIMARY KEY, x TEXT)",
+        "INSERT INTO old_stuff (x) VALUES ('старое')",
+    ))
+    import app.database.migrate as migrate_module
+    got = []
+    handler = migrate_module._log.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+    try:
+        upgrade_database(engine)
+    finally:
+        migrate_module._log.remove_output(handler)
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT email FROM patients')).scalar() == 'a@b.ru'
+        assert conn.execute(text('SELECT x FROM old_stuff')).scalar() == 'старое'
+    warnings = [line for line in got if line.startswith('WARNING|')]
+    assert any('email' in w for w in warnings) and any('old_stuff' in w for w in warnings)
+
+
+def test_legacy_missing_nullable_column_added(tmp_path):
+    """Старая база без необязательного столбца (phone) — столбец дописан, данные целы."""
+    path = tmp_path / 'old.db'
+    engine = create_engine(f"sqlite:///{path}")
+    meta = app_metadata()
+    meta.tables['patients']._columns.remove(meta.tables['patients'].c.phone)
+    meta.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
+    upgrade_database(engine)
+    assert 'phone' in {c['name'] for c in inspect(engine).get_columns('patients')}
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT first_name FROM patients')).scalar() == 'И'
+
+
+def test_legacy_missing_required_column_refused_untouched(tmp_path):
+    """Не хватает ОБЯЗАТЕЛЬНОГО столбца без значения по умолчанию — отказ, база не изменена."""
+    path = tmp_path / 'bad.db'
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE patients (id INTEGER PRIMARY KEY, first_name VARCHAR(50) NOT NULL)"))
+        conn.execute(text("INSERT INTO patients (id, first_name) VALUES (1, 'И')"))
+    engine.dispose()
+    before = path.read_bytes()
+    with pytest.raises(MigrationError, match='last_name'):
+        upgrade_database(engine)
+    engine.dispose()
+    assert path.read_bytes() == before and current_revision(engine) is None
+
+
+def test_failed_migration_rolls_back(tmp_path, monkeypatch):
+    """Сбой посреди приведения старой базы — транзакция откатывается, отметки нет."""
+    import app.database.migrate as migrate_module
+    path, engine = legacy_db(tmp_path)
+
+    def boom(connection, added):
+        connection.execute(text("CREATE TABLE half_done (id INTEGER)"))
+        raise RuntimeError('сбой')
+
+    monkeypatch.setattr(migrate_module, '_apply_legacy_repair', boom)
+    with pytest.raises(RuntimeError):
+        upgrade_database(engine)
+    assert current_revision(engine) is None
+    assert 'half_done' not in inspect(engine).get_table_names()
+
+
+# ---------------------------------------------------------------------------
+# Database / init_db
+# ---------------------------------------------------------------------------
+
+def test_database_class_runs_migrations(tmp_path):
+    db = Database(f"sqlite:///{tmp_path / 'clinic.db'}")
+    try:
+        assert current_revision(db.engine) == head_revision()
+        db.create_tables(recreate=True)
+        assert current_revision(db.engine) == head_revision()
+        assert set(APP_TABLES) <= set(inspect(db.engine).get_table_names())
+    finally:
+        db.close()
+
+
+def test_database_on_legacy_file_keeps_data(tmp_path):
+    path, engine = legacy_db(tmp_path, name='clinic.db')
+    engine.dispose()
+    db = Database(f"sqlite:///{path}")
+    try:
+        assert counts(db.engine)['patients'] == 1
+        assert current_revision(db.engine) == head_revision()
+    finally:
+        db.close()

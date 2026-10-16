@@ -84,6 +84,7 @@
 #     except ImportError as e:
 #         pass
 
+from datetime import date  # 2026-10-16: дата рождения обязательна
 from app.dto import PatientDTO
 from app.exceptions import PatientNotFoundError, PatientValidationError
 
@@ -148,7 +149,8 @@ def test_create_patient(patient_service):
         id=None,
         first_name="Анна",
         last_name="Смирнова",
-        birth_date=None,
+        # birth_date=None,  # до 2026-10-16: birth_date=None — дата рождения теперь обязательна
+        birth_date=date(1990, 1, 1),
         phone="",
         email=""
     )
@@ -156,9 +158,11 @@ def test_create_patient(patient_service):
     assert dto_out.id is not None, "ID should be assigned"
     assert dto_out.first_name == "Анна", "First name should be 'Анна'"
     assert dto_out.last_name == "Смирнова", "Last name should be 'Смирнова'"
-    assert dto_out.birth_date is None, "Birth date should be None"
+    # assert dto_out.birth_date is None, "Birth date should be None"  # до 2026-10-16: birth_date=None — дата рождения теперь обязательна
+    assert dto_out.birth_date == date(1990, 1, 1)
     assert dto_out.phone == "", "Phone should be empty"
-    assert dto_out.email == "", "Email should be empty"
+    # assert dto_out.email == "", "Email should be empty"
+    # ↑ до 2026-10-16: поля email в схеме Patient нет
 
 def test_create_patient_validation_error(patient_service):
     """
@@ -183,7 +187,8 @@ def test_update_patient(patient_service, sample_patient):
         id=sample_patient.id,
         first_name="Пётр",
         last_name="Петров",
-        birth_date=None,
+        # birth_date=None,  # до 2026-10-16: birth_date=None — дата рождения теперь обязательна
+        birth_date=date(1980, 5, 5),
         phone="+79999999999",
         email="petr@test.ru"
     )

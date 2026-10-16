@@ -75,10 +75,10 @@ def test_two_appointments_same_note(appointment_service, note_service, db_sessio
     from app.dto import AppointmentDTO
     from datetime import date, time
     app1 = appointment_service.create_appointment(
-        AppointmentDTO(id=None, patient_id=sample_patient.id, date=date.today(), time=time(10,0), note_id=note_dto.id)
+        AppointmentDTO(id=None, patient_id=sample_patient.id, date=date.today(), note_id=note_dto.id)  # до 2026-10-16: time=… — поля time в схеме Appointment нет
     )
     app2 = appointment_service.create_appointment(
-        AppointmentDTO(id=None, patient_id=sample_patient.id, date=date.today(), time=time(11,0), note_id=note_dto.id)
+        AppointmentDTO(id=None, patient_id=sample_patient.id, date=date.today(), note_id=note_dto.id)  # до 2026-10-16: time=… — поля time в схеме Appointment нет
     )
 
     # Удаляем один приём

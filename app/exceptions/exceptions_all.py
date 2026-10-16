@@ -32,7 +32,10 @@ class PatientNotFoundError(AppException):
         # Код ошибки можно задать, например, 1001
         super().__init__(message, code=1001)
 
-class PatientValidationError(AppException):
+# class PatientValidationError(AppException):
+# ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
+#   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
+class PatientValidationError(AppException, ValueError):
     """
     Выбрасывается при ошибке валидации данных пациента (например, пустое имя).
     """
@@ -47,7 +50,10 @@ class AppointmentNotFoundError(AppException):
         message = f"Приём с идентификатором {appointment_id} не найден."
         super().__init__(message, code=2001)
 
-class AppointmentValidationError(AppException):
+# class AppointmentValidationError(AppException):
+# ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
+#   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
+class AppointmentValidationError(AppException, ValueError):
     def __init__(self, field: str, reason: str):
         message = f"Ошибка валидации приёма, поле '{field}': {reason}."
         super().__init__(message, code=2002)
@@ -59,7 +65,10 @@ class AppointmentNoteNotFoundError(AppException):
         message = f"Заметка приёма с идентификатором {note_id} не найдена."
         super().__init__(message, code=3001)
 
-class AppointmentNoteValidationError(AppException):
+# class AppointmentNoteValidationError(AppException):
+# ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
+#   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
+class AppointmentNoteValidationError(AppException, ValueError):
     def __init__(self, field: str, reason: str):
         message = f"Ошибка валидации заметки, поле '{field}': {reason}."
         super().__init__(message, code=3002)
@@ -71,7 +80,10 @@ class PhotoNotFoundError(AppException):
         message = f"Фотография с идентификатором {photo_id} не найдена."
         super().__init__(message, code=4001)
 
-class PhotoValidationError(AppException):
+# class PhotoValidationError(AppException):
+# ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
+#   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
+class PhotoValidationError(AppException, ValueError):
     def __init__(self, field: str, reason: str):
         message = f"Ошибка валидации фотографии, поле '{field}': {reason}."
         super().__init__(message, code=4002)

@@ -75,6 +75,13 @@ def logger_cls(log_dir):
         '_show_call_depth_global': BaseAppLogger._show_call_depth_global,
     }
 
+    # Состояние стандартных логгеров до теста (уровень, propagate, disabled) — восстановить
+    std_state = {
+        name: (lg.level, lg.propagate, lg.disabled)
+        for name, lg in logging.root.manager.loggerDict.items()
+        if isinstance(lg, logging.Logger)
+    }
+
     class IsolatedLogger(BaseAppLogger):
         _instances: Dict[str, BaseAppLogger] = {}
         default_config: Dict[str, Any] = make_config(log_dir)
@@ -93,6 +100,17 @@ def logger_cls(log_dir):
             except Exception:
                 pass
             inst.logger.removeHandler(handler)
+        # 2026-10-16: имена изолированных логгеров ('system', 'user', 'gui' …) — те же
+        # стандартные логгеры, что у приложения. Раньше оставались их уровень, propagate и
+        # disabled: например, 'gui' без propagate глушил 'gui.PhotoService' в следующих
+        # тестах (test_photo_service_missing_file_on_disk падал в полном наборе).
+        state = std_state.get(inst.logger.name)
+        if state is None:
+            inst.logger.setLevel(logging.NOTSET)
+            inst.logger.propagate = True
+            inst.logger.disabled = False
+        else:
+            inst.logger.level, inst.logger.propagate, inst.logger.disabled = state
     IsolatedLogger._instances.clear()
 
     BaseAppLogger._global_handlers[:] = saved['_global_handlers']

@@ -230,31 +230,39 @@ def database(db_session):
     return TestDatabase()
 
 @pytest.fixture
-def patient_service(database):
+def patient_service(database, appointment_service):
+    # (до 2026-10-16 — без appointment_service: каскадное удаление пациента падало
+    #  RuntimeError «AppointmentService не передан»)
     """
     Фикстура сервиса пациентов.
 
     Возвращает экземпляр PatientService, инициализированный с помощью Database.
     """
-    return PatientService(database)
+    # return PatientService(database)
+    # ↑ до 2026-10-16: без field_configs сервис не знает полей — пациент записывался с
+    #   пустыми полями (NOT NULL first_name). Собираем как app/dependencies.py.
+    from app.dto.field_configs import PATIENT_CONFIG
+    return PatientService(database, field_configs=PATIENT_CONFIG,
+                          appointment_service=appointment_service)
 
-@pytest.fixture
-def appointment_service(database, note_service):
-    """
-    Фикстура сервиса приёмов.
-
-    Возвращает экземпляр AppointmentService, инициализированный с помощью Database и NoteService.
-    """
-    return AppointmentService(database, note_service=note_service)
-
-@pytest.fixture
-def note_service(database):
-    """
-    Фикстура сервиса заметок.
-
-    Возвращает экземпляр NoteService, инициализированный с помощью Database.
-    """
-    return NoteService(database)
+# @pytest.fixture
+# def appointment_service(database, note_service):
+#     """
+#     Фикстура сервиса приёмов.
+#
+#     Возвращает экземпляр AppointmentService, инициализированный с помощью Database и NoteService.
+#     """
+#     return AppointmentService(database, note_service=note_service)
+#
+# @pytest.fixture
+# def note_service(database):
+#     """
+#     Фикстура сервиса заметок.
+#
+#     Возвращает экземпляр NoteService, инициализированный с помощью Database.
+#     """
+#     return NoteService(database)
+# ↑ до 2026-10-16: обе перекрывались одноимёнными фикстурами ниже (pytest берёт последнюю).
 
 @pytest.fixture
 def photo_service(database, tmp_path):
@@ -267,7 +275,10 @@ def photo_service(database, tmp_path):
     """
     storage = tmp_path / "photos"
     storage.mkdir(parents=True, exist_ok=True)
-    return PhotoService(database, str(storage))
+    # return PhotoService(database, str(storage))
+    # ↑ до 2026-10-16: без field_configs (см. patient_service)
+    from app.dto.field_configs import PHOTO_CONFIG
+    return PhotoService(database, str(storage), field_configs=PHOTO_CONFIG)
 
 
 @pytest.fixture
@@ -283,7 +294,9 @@ def sample_patient(db_session):
         last_name="Петров",  # фамилия
         birth_date=None,  # дата рождения
         phone="+71234567890",  # телефон
-        email="ivan@test.ru"  # электронная почта
+        # email="ivan@test.ru"  # электронная почта
+        # ↑ до 2026-10-16: поля email в схеме Patient нет — TypeError в каждой зависящей
+        #   фикстуре (43 ошибки подготовки тестов)
     )
     db_session.add(patient)
     db_session.commit()  # коммитим, чтобы получить id
@@ -325,7 +338,11 @@ def appointment_service(database, note_service, photo_service):
     Фикстура сервиса приёмов.
     Возвращает AppointmentService с уже созданным Database и сервисами NoteService и PhotoService.
     """
-    return AppointmentService(database, note_service=note_service, photo_service=photo_service)
+    # return AppointmentService(database, note_service=note_service, photo_service=photo_service)
+    # ↑ до 2026-10-16: без field_configs (см. patient_service)
+    from app.dto.field_configs import APPOINTMENT_CONFIG
+    return AppointmentService(database, note_service=note_service, photo_service=photo_service,
+                              field_configs=APPOINTMENT_CONFIG)
 
 @pytest.fixture
 def note_service(database):
@@ -334,7 +351,10 @@ def note_service(database):
 
     Возвращает экземпляр NoteService, инициализированный с помощью Database.
     """
-    return NoteService(database)
+    # return NoteService(database)
+    # ↑ до 2026-10-16: без field_configs (см. patient_service)
+    from app.dto.field_configs import NOTE_CONFIG
+    return NoteService(database, field_configs=NOTE_CONFIG)
 
 @pytest.fixture
 def sync_service():
@@ -361,7 +381,8 @@ def sample_appointment(db_session, sample_patient, sample_note):
     app = Appointment(
         patient_id=sample_patient.id,
         date=date.today(),
-        time=time(10, 0),
+        # time=time(10, 0),
+        # ↑ до 2026-10-16: поля time в схеме Appointment нет
         note_id=sample_note.id
     )
     db_session.add(app)

@@ -120,7 +120,7 @@ def test_patient_appointment_relationship(db_session, sample_patient):
     app = Appointment(
         patient_id=sample_patient.id,
         date=date.today(),
-        time=time(10, 0),
+        # time=time(10, 0),  # до 2026-10-16: time=… — поля time в схеме Appointment нет
         note_id=note.id
     )
     # Добавляем приём в сессию

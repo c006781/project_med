@@ -205,6 +205,8 @@ from app.exceptions import (
     AppointmentNotFoundError, AppointmentNoteNotFoundError, 
     PhotoNotFoundError, PhotoFileError, 
     #   AppException
+    # DATA9 (2026-10-16): исключения валидации сущностей
+    AppointmentValidationError, AppointmentNoteValidationError, PhotoValidationError,
 )
 # except ImportError as e:
 #     try:
@@ -1073,7 +1075,15 @@ class BaseService(
                 loaded_query = loaded_query.add_columns(*extra_columns)
 
             # Пагинация
-            results = loaded_query.offset(offset).limit(limit).all()
+            # results = loaded_query.offset(offset).limit(limit).all()
+            # ↑ до DATA7 (2026-10-16): с нечётким поиском (fuzzy — отбор ПОСЛЕ запроса)
+            #   страница резалась ДО отбора, а total считался без него: на странице
+            #   оказывалось меньше строк, число страниц было неверным. Теперь при fuzzy
+            #   берутся все строки SQL-отбора, затем fuzzy, затем total и нарезка.
+            if post_filters:
+                results = loaded_query.all()
+            else:
+                results = loaded_query.offset(offset).limit(limit).all()
 
             # if extra_columns:
             # ↑ до B2 (2026-10-16): пустой результат (например, приёмы пациента без приёмов)
@@ -1124,6 +1134,8 @@ class BaseService(
             if post_filters:
                 # from app.utils.filtering.filtering import apply_post_filters
                 items = apply_post_filters(items, post_filters, self._model_class)
+                total = len(items)                       # DATA7: счёт после fuzzy
+                items = items[offset:offset + limit]     # DATA7: нарезка после fuzzy
 
             # Пост-обработка (например, добавление временных атрибутов для подсчётов)
             items = self._post_process_items(items, sess)
@@ -1654,7 +1666,9 @@ class BaseService(
             
             note_repo = AppointmentNoteRepository(sess)
             
-            # Обновляем заметки
+            # Обновляем заметки (прежние id — для очистки после записи новых ссылок, DATA1)
+            old_note_ids = {m['orm_id_field']: getattr(entity, m['orm_id_field'])
+                            for m in self._get_note_field_mappings()}
             new_note_ids = self._apply_note_updates(
                 dto,
                 sess,
@@ -1668,6 +1682,11 @@ class BaseService(
             self._apply_simple_updates(entity, dto, session = sess)
 
             sess.flush()
+            self._cleanup_replaced_notes(old_note_ids, new_note_ids, sess)
+            # DATA5 (2026-10-16): после смены внешних ключей заметок связи в объекте
+            # оставались старыми — возвращённый DTO противоречил сам себе (id None, а текст
+            # старый). Перечитываем объект.
+            sess.refresh(entity)
             return self.get_dto_out(entity)
 
 
@@ -1931,7 +1950,9 @@ class BaseService(
                     # Вариант 1: пропустить (оставить старое значение)
                     # continue
                     # Вариант 2: выбросить исключение
-                    raise ValueError(f"Обязательное поле '{title}' не может быть пустым")
+                    # raise ValueError(f"Обязательное поле '{title}' не может быть пустым")
+                    # ↑ до DATA9: простой ValueError
+                    raise self._validation_error(title, "обязательное поле не может быть пустым")
                 else:
                     setattr(model_obj, field_name, None)
 
@@ -2026,6 +2047,28 @@ class BaseService(
 
         return kwargs
 
+    # Исключение валидации сущности (DATA9): наследники задают свой *ValidationError
+    _validation_exception: Optional[type] = None
+
+    def _validation_error(self, field: str, reason: str) -> Exception:
+        """
+        Исключение валидации для этой сущности: ``_validation_exception(field, reason)``
+        (``PatientValidationError`` и т. п. — они же ``ValueError``), иначе ``ValueError``.
+
+        Args:
+            field: Поле (или перечень названий полей).
+            reason: Причина.
+
+        Returns:
+            Исключение (вызывающий его бросает).
+
+        Пример:
+            >>> raise self._validation_error('Фамилия', 'обязательные поля не заполнены')
+        """
+        if self._validation_exception is not None:
+            return self._validation_exception(field, reason)
+        return ValueError(f"{reason}: {field}")
+
     @AppLogger.get_instance(
         name = 'BaseService',
         # share_file_with = 'system',
@@ -2064,7 +2107,11 @@ class BaseService(
         
         if missing:
             titles = [self._field_configs.get(f, {}).get('title', f) for f in missing]
-            raise ValueError(f"Обязательные поля не заполнены: {', '.join(titles)}")
+            # raise ValueError(f"Обязательные поля не заполнены: {', '.join(titles)}")
+            # ↑ до DATA9 (2026-10-16): всегда ValueError, хотя у сущностей есть свои
+            #   *ValidationError (и документация методов обещала их). Теперь — исключение
+            #   сущности (оно же ValueError — интерфейс ловит как раньше).
+            raise self._validation_error(', '.join(titles), "обязательные поля не заполнены")
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -2189,6 +2236,63 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _cleanup_replaced_notes(self, old_ids: Dict[str, Optional[int]],
+                                new_ids: Dict[str, Optional[int]], session: Session) -> None:
+        """
+        Удаляет заметки, на которые запись больше не ссылается, если ими не пользуется
+        никто другой (DATA1, 2026-10-16). Вызывать ПОСЛЕ записи новых ссылок (flush) —
+        иначе запись ещё «держит» старую заметку.
+
+        Args:
+            old_ids: Поле внешнего ключа → прежний id заметки.
+            new_ids: Поле внешнего ключа → новый id.
+            session: Сессия.
+
+        Returns:
+            None
+
+        Пример:
+            >>> self._cleanup_replaced_notes({'procedure_id': 5}, {'procedure_id': 9}, sess)
+        """
+        note_service = self._get_note_service()
+        if not note_service:
+            return
+        for orm_field, old_id in old_ids.items():
+            if old_id is not None and old_id != new_ids.get(orm_field, old_id):
+                note_service.cleanup_unused_note(old_id, session)
+
+    def _note_id_for_text(self, note_repo: Any, session: Session, text: str,
+                          current_id: Optional[int]) -> int:
+        """
+        Id заметки с этим текстом: текущая (если текст тот же), иначе существующая с таким
+        же текстом, иначе новая. Существующие заметки НЕ меняются (DATA1, 2026-10-16) —
+        они общие для многих записей.
+
+        Args:
+            note_repo: Репозиторий заметок (``AppointmentNoteRepository``).
+            session: Сессия.
+            text: Текст заметки (непустой).
+            current_id: Id заметки, на которую запись ссылается сейчас.
+
+        Returns:
+            Id заметки.
+
+        Пример:
+            >>> self._note_id_for_text(note_repo, sess, 'Чистка', 12)
+            12
+        """
+        if current_id is not None:
+            current = note_repo.get_by_id(current_id)
+            if current is not None and current.text == text:
+                return current_id
+        existing = note_repo.get_by_text_exact(text)
+        if existing is not None:
+            return existing.id
+        note = AppointmentNote(text=text)
+        note_repo.add(note)
+        session.flush()
+        return note.id
+
     def _apply_note_updates(self, dto, session, note_repo, model_obj=None) -> Dict[str, Optional[int]]:
         """
         Общая логика создания/обновления заметок.
@@ -2218,31 +2322,52 @@ class BaseService(
             old_id = getattr(model_obj, orm_field) if model_obj else None
             old_ids[orm_field] = old_id
 
-            if text is not None and text.strip():
-                new_id, _ = self._update_note_field(
-                    session, 
-                    note_repo, 
-                    old_id, 
-                    text, 
-                    create_if_missing=False
-                )
-                new_ids[orm_field] = new_id
+            # if text is not None and text.strip():
+            #     new_id, _ = self._update_note_field(
+            #         session,
+            #         note_repo,
+            #         old_id,
+            #         text,
+            #         create_if_missing=False
+            #     )
+            #     new_ids[orm_field] = new_id
+            # else:
+            #     # new_ids[orm_field] = old_id
+            #
+            #      # Текст очищен – удаляем связь с заметкой
+            #     new_ids[orm_field] = None
+            #     # Если была старая заметка, она будет удалена позже в блоке очистки
+            # ↑ до DATA1/DATA2 (2026-10-16):
+            #   DATA1 — _update_note_field правил текст СУЩЕСТВУЮЩЕЙ заметки на месте, а
+            #     заметки общие (одна запись у многих приёмов: get_or_create_note,
+            #     автодополнение) — правка у одного приёма меняла её у всех;
+            #   DATA2 — «текст не передан» (None) и «очищен» ('') не различались: ссылка
+            #     обнулялась в обоих случаях — приём, созданный с готовой note_id, терял
+            #     заметку, обновление DTO без текстов стирало все заметки.
+            #   Теперь заметки неизменяемы: новый текст — другая заметка (существующая с
+            #   тем же текстом или новая); старая удаляется ниже, если больше не нужна.
+            explicit_id = getattr(dto, mapping['id_field'], None)
+            if text is None:
+                # не передан: ссылка из DTO (если задана), иначе — как было
+                new_ids[orm_field] = explicit_id if explicit_id is not None else old_id
+            elif not text.strip():
+                new_ids[orm_field] = None          # очищен — связи нет
             else:
-                # new_ids[orm_field] = old_id
+                new_ids[orm_field] = self._note_id_for_text(note_repo, session, text, old_id)
 
-                 # Текст очищен – удаляем связь с заметкой
-                new_ids[orm_field] = None
-                # Если была старая заметка, она будет удалена позже в блоке очистки
-
-        # если обновление - чистим старые заметки
-        if model_obj:
-            note_service = self._get_note_service()
-            if note_service:
-                for orm_field, old_id in old_ids.items():
-                    new_id = new_ids.get(orm_field)
-                    if old_id is not None and old_id != new_id:
-                        # self._get_note_service().cleanup_unused_note(old_id, session)
-                        note_service.cleanup_unused_note(old_id, session)
+        # # если обновление - чистим старые заметки
+        # if model_obj:
+        #     note_service = self._get_note_service()
+        #     if note_service:
+        #         for orm_field, old_id in old_ids.items():
+        #             new_id = new_ids.get(orm_field)
+        #             if old_id is not None and old_id != new_id:
+        #                 # self._get_note_service().cleanup_unused_note(old_id, session)
+        #                 note_service.cleanup_unused_note(old_id, session)
+        # ↑ до DATA1 (2026-10-16): очистка шла ЗДЕСЬ, когда запись ещё ссылалась на старую
+        #   заметку (новые ссылки ставит вызывающий после возврата) — старая всегда
+        #   считалась занятой и не удалялась. Теперь очистка — в _update_entity после
+        #   записи новых ссылок (_cleanup_replaced_notes).
 
 
         return new_ids
@@ -3151,6 +3276,8 @@ class PatientService(
         patient = service.create_patient(patient_dto)
     """
 
+    _validation_exception = PatientValidationError   # DATA9: исключение валидации сущности
+
     @AppLogger.get_instance(
         name = 'PatientService',
         # share_file_with = 'system',
@@ -3851,6 +3978,8 @@ class NoteService(
         - ручного удаления сирот (обычно не требуется).
     """
 
+    _validation_exception = AppointmentNoteValidationError   # DATA9: исключение валидации сущности
+
     @AppLogger.get_instance(
         name = 'NoteService',
         # share_file_with = 'system',
@@ -4439,6 +4568,8 @@ class AppointmentService(
         # Удаление фото
         appointment_service.remove_child(photo_id, 'photos')
     """
+
+    _validation_exception = AppointmentValidationError   # DATA9: исключение валидации сущности
 
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -5711,7 +5842,11 @@ class AppointmentService(
             all_filters = [base_filter]
 
         # Подгружаем все необходимые связи
-        relations = self._get_eager_loading_options()
+        # relations = self._get_eager_loading_options()
+        # ↑ до DATA3 (2026-10-16): get_page ждёт ИМЕНА связей, а сюда попадали готовые
+        #   опции загрузки SQLAlchemy → getattr(model, <опция>) → TypeError: страница
+        #   приёмов пациента не открывалась никогда.
+        relations = self._get_relations_for_eager_loading()
 
         # Вызываем базовый метод get_page
         return self.get_page(
@@ -5775,6 +5910,8 @@ class PhotoService(
     Примечание:
         Не используйте `create` напрямую для фото – используйте `add_photo_to_appointment`.
     """
+
+    _validation_exception = PhotoValidationError   # DATA9: исключение валидации сущности
 
     # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
     _class_storage_path: Optional[str] = None
@@ -5864,6 +6001,12 @@ class PhotoService(
         """
         Создаёт фото. file_path – копирует в хранилище.
         """
+        # DATA6 (2026-10-16): без переданной сессии копирование файла и регистрация его
+        # удаления при откате получали session=None → AttributeError ('is_active'):
+        # создание фото без сессии падало всегда. Теперь открываем свою транзакцию.
+        if session is None:
+            with self._session_scope(None) as sess:
+                return self.create(dto, session=sess)
         if dto.file_path and os.path.isabs(dto.file_path):
             # Определяем целевую директорию: self._storage_path/app_{appointment_id}
             app_id = dto.appointment_id
@@ -5894,6 +6037,11 @@ class PhotoService(
         if dto.id is None:
             raise ValueError("ID фото не указан")
 
+        # DATA6: без сессии — своя транзакция (иначе репозиторий и файлы без сессии)
+        if session is None:
+            with self._session_scope(None) as sess:
+                return self.update(dto, session=sess)
+
         # Загружаем старую запись, чтобы получить старый путь
         repo = self._get_repo(session)
         old_photo = repo.get_by_id(dto.id)
@@ -5908,9 +6056,19 @@ class PhotoService(
         # Обрабатываем файл
         if new_path and os.path.isabs(new_path):
             # Новый временный файл – копируем, старый удалим при коммите
-            rel_path = self._update_file_field(
-                old_path=old_path,
-                new_source_path=new_path,
+            # rel_path = self._update_file_field(
+            #     old_path=old_path,
+            #     new_source_path=new_path,
+            #     dest_dir=dest_dir,
+            #     naming_func=None,
+            #     session=session
+            # )
+            # ↑ до DATA8 (2026-10-16): _update_file_field удаляет старый файл от dest_dir
+            #   (папки приёма), а старый путь хранится от корня — удалялся несуществующий
+            #   файл, старое фото оставалось на диске. Старый — от корня, новый — в папку.
+            self._delete_file_field(old_path, self._storage_path, session)
+            rel_path = self._new_file_field(
+                source_path=new_path,
                 dest_dir=dest_dir,
                 naming_func=None,
                 session=session
@@ -5918,7 +6076,9 @@ class PhotoService(
             dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
         elif new_path is None and old_path:
             # Файл удалён – помечаем старый на удаление при коммите
-            self._delete_file_field(old_path, dest_dir, session)
+            # self._delete_file_field(old_path, dest_dir, session)
+            # ↑ до DATA8: путь от корня склеивался с папкой приёма
+            self._delete_file_field(old_path, self._storage_path, session)
             dto.file_path = None
         # else: путь не изменился – ничего не делаем
 
@@ -5947,9 +6107,14 @@ class PhotoService(
             # Текущая реализация удаляет файл один раз (через _del_file), а затем запись и заметки
             # через _delete_entity (который не трогает файл). Это корректно и атомарн
 
-            dest_dir = os.path.join(self._storage_path, f"app_{photo.appointment_id}")
-            # Помечаем файл на удаление при коммите
-            self._delete_file_field(photo.file_path, dest_dir, sess)
+            # dest_dir = os.path.join(self._storage_path, f"app_{photo.appointment_id}")
+            # # Помечаем файл на удаление при коммите
+            # self._delete_file_field(photo.file_path, dest_dir, sess)
+            # ↑ до DATA8 (2026-10-16): file_path хранится ОТ КОРНЯ хранилища
+            #   ("app_<id>/<uuid>.jpg"), а склеивался с папкой приёма → удалялся
+            #   несуществующий "app_<id>/app_<id>/<uuid>.jpg": файлы фото с диска
+            #   не удалялись никогда.
+            self._delete_file_field(photo.file_path, self._storage_path, sess)
 
             # Удаляем запись из БД
             self._delete_entity(photo_id, sess)

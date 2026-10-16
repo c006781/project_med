@@ -163,7 +163,9 @@ def test_appointment_repository_get_by_id(appointment_repo, sample_appointment):
 def test_appointment_repository_get_by_patient_with_relations(appointment_repo, sample_appointment, sample_patient, db_session):
     # Добавим ещё один приём для того же пациента
     from datetime import date, time
-    app2 = Appointment(patient_id=sample_patient.id, date=date.today(), time=time(11, 0))
+    # app2 = Appointment(patient_id=sample_patient.id, date=date.today(), time=time(11, 0))
+    # ↑ до 2026-10-16: поля time в схеме Appointment нет
+    app2 = Appointment(patient_id=sample_patient.id, date=date.today())
     db_session.add(app2)
     db_session.commit()
     apps = appointment_repo.get_by_patient_with_relations(sample_patient.id)

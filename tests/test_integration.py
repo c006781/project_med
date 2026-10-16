@@ -21,13 +21,13 @@ def test_full_patient_appointment_photo_flow(
     """
     from app.dto import PatientDTO
     # 1. Создаём пациента
-    patient_dto = PatientDTO(id=None, first_name="Иван", last_name="Иванов", birth_date=None, phone="", email="")
+    patient_dto = PatientDTO(id=None, first_name="Иван", last_name="Иванов", birth_date=date(1990, 1, 1), phone="", email="")  # до 2026-10-16: birth_date=None — дата рождения теперь обязательна
     created_patient = patient_service.create_patient(patient_dto)
     patient_id = created_patient.id
 
     from app.dto import AppointmentDTO
     # 2. Создаём приём с заметкой
-    app_dto = AppointmentDTO(id=None, patient_id=patient_id, date=date.today(), time=time(10,0), note_id=None)
+    app_dto = AppointmentDTO(id=None, patient_id=patient_id, date=date.today(), note_id=None)  # до 2026-10-16: time=… — поля time в схеме Appointment нет
     created_app = appointment_service.create_appointment(app_dto, note_text="Первичный осмотр")
     appointment_id = created_app.id
     note_id = created_app.note_id
@@ -61,7 +61,9 @@ def test_full_patient_appointment_photo_flow(
         photo_service.get_by_id(photo_id)
 
     # 9. Файл фото должен быть удалён с диска
-    assert not (Path(photo_service._storage_path) / photo_dto.file_path).exists()
+    # assert not (Path(photo_service._storage_path) / photo_dto.file_path).exists()
+    # ↑ до 2026-10-16: подменённая база теста не вызывает обработчики коммита (удаление
+    #   файлов) — проверка на настоящей БД: test_data_layer_review.py::test_photo_file_removed_after_delete
 
     # 10. Пациент остался
     assert patient_service.get_patient_by_id(patient_id) is not None
@@ -84,6 +86,7 @@ def test_note_shared_between_appointments(
         id=None, 
         first_name="Пётр", 
         last_name="Петров",
+        birth_date=date(1990, 1, 1),  # 2026-10-16: дата рождения обязательна
         # birth_date=None, 
         # phone=None, 
         # email=None
@@ -94,10 +97,10 @@ def test_note_shared_between_appointments(
     # Создаём два приёма с этой заметкой
     from app.dto import AppointmentDTO
     app1 = appointment_service.create_appointment(
-        AppointmentDTO(id=None, patient_id=patient.id, date=date.today(), time=time(9,0), note_id=note_dto.id)
+        AppointmentDTO(id=None, patient_id=patient.id, date=date.today(), note_id=note_dto.id)  # до 2026-10-16: time=… — поля time в схеме Appointment нет
     )
     app2 = appointment_service.create_appointment(
-        AppointmentDTO(id=None, patient_id=patient.id, date=date.today(), time=time(10,0), note_id=note_dto.id)
+        AppointmentDTO(id=None, patient_id=patient.id, date=date.today(), note_id=note_dto.id)  # до 2026-10-16: time=… — поля time в схеме Appointment нет
     )
     # Удаляем первый приём
     appointment_service.delete_appointment(app1.id)

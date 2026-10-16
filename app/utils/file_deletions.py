@@ -343,6 +343,13 @@ def schedule_deletion(
             enable_file_logging = 'user',
             use_name_in_filename = False, # 'system',
         )
+    # DATA6 (2026-10-16): контекст без сессии раньше падал на ctx.session.is_active.
+    # Удаление «при откате» без сессии бессмысленно (откатывать нечего) — НЕ удаляем:
+    # иначе только что скопированный файл удалился бы сразу. «После коммита» — сразу.
+    if ctx is not None and ctx.session is None:
+        if ctx.deletion_type == DeletionType.ROLLBACK:
+            return True, None
+        ctx = None
     if ctx is None or not ctx.session.is_active:
         # Немедленное удаление
         return del_file_and_parent_dir(path, remove_parent_if_empty, force, logger)

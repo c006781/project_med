@@ -32,7 +32,7 @@ from sqlalchemy import (
     exists, select
 )
 from sqlalchemy.orm import Query
-from sqlalchemy import or_, and_
+from sqlalchemy import or_, and_, true  # true — «истина» для узла fuzzy (DATA4)
 
 
 @AppLogger.get_instance(
@@ -43,9 +43,10 @@ from sqlalchemy import or_, and_
     level=AppLogger._parse_log_level('DEBUG')
 )
 def _build_filter_condition(
-    filter_node: Union[Dict, List], 
-    model, 
+    filter_node: Union[Dict, List],
+    model,
     note_mappings: Optional[Dict] = None,
+    _inside_or: bool = False,
 ) -> Any:
     """
     Рекурсивно строит SQLAlchemy условие из узла фильтра.
@@ -78,7 +79,13 @@ def _build_filter_condition(
         Для полей-заметок возвращает exists(subquery).
 
     Raises:
-        ValueError: Если оператор неизвестен или столбец (не заметка) не найден в модели.
+        ValueError: Если оператор неизвестен или столбец (не заметка) не найден в модели;
+            оператор 'fuzzy' внутри 'or' (DATA4b).
+
+    Оператор 'fuzzy' в SQL не переводится: узел даёт «истину», а сам нечёткий отбор
+    делает apply_post_filters ПОСЛЕ запроса (DATA4, 2026-10-16 — раньше 'fuzzy' падал
+    здесь «Неизвестный оператор»). Поэтому 'fuzzy' допустим только на уровне «И»:
+    внутри «ИЛИ» результат был бы неверным — явная ошибка.
     """
     
     # if isinstance(filter_node, list):
@@ -96,15 +103,15 @@ def _build_filter_condition(
 
     if isinstance(filter_node, list):
         # старый формат – список листьев, объединяем через AND
-        conditions = [_build_filter_condition(item, model, note_mappings) for item in filter_node]
+        conditions = [_build_filter_condition(item, model, note_mappings, _inside_or) for item in filter_node]
         return and_(*conditions) if conditions else True
 
     if 'and' in filter_node:
-        subconds = [_build_filter_condition(sub, model, note_mappings) for sub in filter_node['and']]
+        subconds = [_build_filter_condition(sub, model, note_mappings, _inside_or) for sub in filter_node['and']]
         return and_(*subconds)
 
     if 'or' in filter_node:
-        subconds = [_build_filter_condition(sub, model, note_mappings) for sub in filter_node['or']]
+        subconds = [_build_filter_condition(sub, model, note_mappings, True) for sub in filter_node['or']]
         return or_(*subconds)
 
     # Узел-лист
@@ -112,6 +119,15 @@ def _build_filter_condition(
     op = filter_node['operator']
     value = filter_node.get('value')
     value2 = filter_node.get('value2')
+
+    # DATA4: нечёткий поиск — после запроса (apply_post_filters); в SQL — «истина»
+    if op == 'fuzzy':
+        if _inside_or:
+            raise ValueError(
+                f"Оператор fuzzy ({column_name}) нельзя использовать внутри 'or': нечёткий "
+                "отбор выполняется после запроса и применяется как 'и'"
+            )
+        return true()
 
     
     # Обработка поля-заметки
@@ -242,8 +258,12 @@ def apply_filters(
         if condition is not True:
             query = query.filter(condition)
 
-        # Пост-фильтры (fuzzy) извлекаем из filters 
-        post_filters = [f for f in filters if f.get('operator') == 'fuzzy']
+        # Пост-фильтры (fuzzy) извлекаем из filters
+        # post_filters = [f for f in filters if f.get('operator') == 'fuzzy']
+        # ↑ до DATA4 (2026-10-16): отдавались словари, а apply_post_filters распаковывает
+        #   кортежи (колонка, значение, порог) — и порог fuzzy_threshold терялся.
+        post_filters = _post_filter_tuples(
+            [f for f in filters if f.get('operator') == 'fuzzy'], fuzzy_threshold)
         return query, post_filters
     
     else:
@@ -253,8 +273,29 @@ def apply_filters(
             query = query.filter(condition)
 
         # Пост-фильтры нужно собрать рекурсивно
-        post_filters = _collect_post_filters(filters)
+        # post_filters = _collect_post_filters(filters)
+        # ↑ до DATA4: словари вместо кортежей (см. выше)
+        post_filters = _post_filter_tuples(_collect_post_filters(filters), fuzzy_threshold)
         return query, post_filters
+
+
+def _post_filter_tuples(nodes: List[Dict], fuzzy_threshold: int) -> List[Tuple[str, Any, int]]:
+    """
+    Узлы 'fuzzy' → кортежи для apply_post_filters: (колонка, значение, порог). Порог —
+    'threshold' узла или общий fuzzy_threshold (DATA4, 2026-10-16).
+
+    Args:
+        nodes: Узлы с оператором 'fuzzy'.
+        fuzzy_threshold: Порог по умолчанию (0–100).
+
+    Returns:
+        Список кортежей.
+
+    Пример:
+        >>> _post_filter_tuples([{'column': 'last_name', 'operator': 'fuzzy', 'value': 'Иванов'}], 70)
+        [('last_name', 'Иванов', 70)]
+    """
+    return [(n['column'], n.get('value'), n.get('threshold', fuzzy_threshold)) for n in nodes]
     
 @AppLogger.get_instance(
     name = 'filtering.py',

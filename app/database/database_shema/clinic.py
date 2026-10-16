@@ -465,9 +465,14 @@ class Appointment(Base):
             patient_id_val = getattr(self, 'patient_id', None)
             date_val = getattr(self, 'date', None)
 
-            rezult = f"<Appointment(id={id_val}, "
-            f"patient_id={patient_id_val}, "
-            f"date={date_val})>"
+            # rezult = f"<Appointment(id={id_val}, "
+            # f"patient_id={patient_id_val}, "
+            # f"date={date_val})>"
+            # ↑ до DB1 (2026-10-16): вторая и третья f-строки — отдельные инструкции, repr
+            #   был обрезан: "<Appointment(id=1, "
+            rezult = (f"<Appointment(id={id_val}, "
+                      f"patient_id={patient_id_val}, "
+                      f"date={date_val})>")
 
             return rezult
         
@@ -573,9 +578,13 @@ class Photo(Base):
             appointment_id_val = getattr(self, 'appointment_id', None)
             file_path_val = getattr(self, 'file_path', None)
 
-            rezult = f"<Photo(id={id_val}, "
-            f"appointment_id={appointment_id_val}, "
-            f"file={file_path_val})>"
+            # rezult = f"<Photo(id={id_val}, "
+            # f"appointment_id={appointment_id_val}, "
+            # f"file={file_path_val})>"
+            # ↑ до DB1 (2026-10-16): repr был обрезан (отдельные инструкции)
+            rezult = (f"<Photo(id={id_val}, "
+                      f"appointment_id={appointment_id_val}, "
+                      f"file={file_path_val})>")
 
             return rezult
         
@@ -665,9 +674,16 @@ class AppointmentNote(Base):
             id_val = getattr(self, 'id', None)
             text_val = getattr(self, 'text', None)
 
-            rezult = f"<Note(id={id_val}, "
-            f"text_preview={text_val[:30]}...)>"
-            return text_val
+            # rezult = f"<Note(id={id_val}, "
+            # f"text_preview={text_val[:30]}...)>"
+            # return text_val
+            # ↑ до DB1 (2026-10-16): text[:30] падал на заметке без текста (None), вторая
+            #   f-строка была отдельной инструкцией, а возвращался сам текст (repr = None →
+            #   TypeError) — лог репозитория вызывает repr при каждом add.
+            preview = (text_val or '')[:30]
+            more = '...' if text_val and len(text_val) > 30 else ''
+            rezult = f"<Note(id={id_val}, text_preview={preview}{more})>"
+            return rezult
     
         except Exception as e:
             # tt = str(e)

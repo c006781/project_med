@@ -29,6 +29,7 @@ create_all умеет только СОЗДАТЬ недостающие таб�
 
 from __future__ import annotations
 
+import functools
 import os
 import shutil
 import time
@@ -89,12 +90,17 @@ def alembic_config(connection=None) -> Config:
     return cfg
 
 
+@functools.lru_cache(maxsize=1)
 def head_revision() -> str:
     """
     Последняя версия схемы (голова цепочки миграций).
 
     Returns:
         Идентификатор ревизии.
+
+    Результат запоминается (M4, 2026-10-16): миграции за время работы не меняются, а
+    Database открывается многократно (тесты, пересоздание сервисов). Сбросить —
+    ``head_revision.cache_clear()``.
 
     Raises:
         MigrationError: Цепочка разветвилась (несколько голов) — нужна миграция-слияние.
@@ -148,8 +154,12 @@ def schema_differences(engine: Engine, metadata=None) -> List:
     if metadata is None:
         from app.database.database_shema.clinic import Base
         metadata = Base.metadata
-    with engine.connect() as conn:
-        ctx = MigrationContext.configure(conn, opts={'compare_type': True})
+    if hasattr(engine, 'connect') and not hasattr(engine, 'in_transaction'):
+        with engine.connect() as conn:
+            ctx = MigrationContext.configure(conn, opts={'compare_type': True})
+            diffs = compare_metadata(ctx, metadata)
+    else:   # уже соединение (внутри транзакции миграции)
+        ctx = MigrationContext.configure(engine, opts={'compare_type': True})
         diffs = compare_metadata(ctx, metadata)
     # таблица версий Alembic — служебная, не отличие
     return [d for d in diffs if not _is_alembic_table(d)]
@@ -250,8 +260,13 @@ def _migration_engine(engine: Engine) -> Engine:
 
     @event.listens_for(migration, 'begin')
     def _explicit_begin(connection):
-        """Транзакция начинается явно — DDL откатывается вместе с остальным."""
-        connection.exec_driver_sql('BEGIN')
+        """
+        Транзакция начинается явно — DDL откатывается вместе с остальным.
+
+        IMMEDIATE (M3, 2026-10-16): блокировка записи берётся СРАЗУ — вторая копия
+        программы, открывающая ту же базу одновременно, ждёт, а не меняет её параллельно.
+        """
+        connection.exec_driver_sql('BEGIN IMMEDIATE')
 
     return migration
 
@@ -276,62 +291,87 @@ def upgrade_database(engine: Engine, backup: bool = True) -> str:
         '0001_baseline'
     """
     head = head_revision()
-    current = current_revision(engine)
-    tables = _user_tables(engine)
+    if current_revision(engine) == head:
+        return head                           # обычный случай — без блокировки и копий
     target = _migration_engine(engine)        # M1: транзакции, в которых откатывается и DDL
     try:
-        return _upgrade(engine, target, head, current, tables, backup)
+        return _upgrade(engine, target, head, backup)
     finally:
         if target is not engine:
             target.dispose()
 
 
-def _upgrade(engine: Engine, target: Engine, head: str, current: Optional[str],
-             tables: List[str], backup: bool) -> str:
+def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
     """
     Тело ``upgrade_database``: изменения — через ``target`` (движок миграций).
+
+    Всё — в ОДНОЙ транзакции движка миграций с блокировкой записи (M3): версия и таблицы
+    базы читаются уже под блокировкой — если другая копия программы только что обновила
+    базу, здесь это видно, и повторно ничего не делается.
 
     Args:
         engine: Движок приложения (резервная копия, закрытие соединений).
         target: Движок миграций.
         head: Последняя ревизия.
-        current: Текущая ревизия базы.
-        tables: Пользовательские таблицы базы.
         backup: Делать резервную копию.
 
     Returns:
         Ревизия после обновления.
 
     Пример:
-        >>> _upgrade(engine, target, '0001_baseline', None, [], True)
+        >>> _upgrade(engine, target, '0001_baseline', True)
         '0001_baseline'
     """
-
-    if current is None and tables:
-        # Старая база (create_all): привести к исходной схеме и отметить её версией
-        added, ignored = _plan_legacy_repair(engine)
-        legacy_backup = _backup(engine, 'legacy') if (backup and added) else None
-        if legacy_backup:
-            _log.info(f"Резервная копия старой базы перед приведением к схеме: {legacy_backup}")
-        with target.begin() as conn:
-            _apply_legacy_repair(conn, added)
-            command.stamp(alembic_config(conn), BASELINE)
-        for line in ignored:
-            _log.warning(f"Старая база: {line} — оставлено как есть (данные не трогаем)")
-        _log.info(f"Старая база приведена к исходной схеме ({len(added)} дописано, "
-                  f"{len(ignored)} оставлено) и отмечена {BASELINE}")
-        current = BASELINE
-
-    if current == head:
-        return head
-
-    backup_path = _backup(engine, current) if (backup and tables) else None
-    if backup_path:
-        _log.info(f"Резервная копия базы перед миграцией: {backup_path}")
+    engine.dispose()                          # соединения приложения не держат базу
     with target.begin() as conn:
+        current = MigrationContext.configure(conn).get_current_revision()
+        tables = [n for n in inspect(conn).get_table_names()
+                  if n != 'alembic_version' and not n.startswith('sqlite_')]
+        if current == head:
+            return head                       # обновила другая копия программы
+        if current is None and tables:
+            current = _repair_legacy(engine, conn, backup)
+            if current == head:
+                return head
+        backup_path = _backup(engine, current) if (backup and tables) else None
+        if backup_path:
+            _log.info(f"Резервная копия базы перед миграцией: {backup_path}")
         command.upgrade(alembic_config(conn), 'head')
     _log.info(f"Схема базы обновлена: {current or 'пусто'} → {head}")
     return head
+
+
+def _repair_legacy(engine: Engine, conn, backup: bool) -> str:
+    """
+    Старая база без отметки: приведение к исходной схеме и отметка ``BASELINE``
+    (внутри транзакции с блокировкой).
+
+    Args:
+        engine: Движок приложения (для резервной копии).
+        conn: Соединение движка миграций (в транзакции).
+        backup: Делать резервную копию.
+
+    Returns:
+        ``BASELINE``.
+
+    Raises:
+        MigrationError: Небезопасное отличие (см. ``_plan_legacy_repair``).
+
+    Пример:
+        >>> _repair_legacy(engine, conn, True)
+        '0001_baseline'
+    """
+    added, ignored = _plan_legacy_repair(conn)
+    legacy_backup = _backup(engine, 'legacy') if (backup and added) else None
+    if legacy_backup:
+        _log.info(f"Резервная копия старой базы перед приведением к схеме: {legacy_backup}")
+    _apply_legacy_repair(conn, added)
+    command.stamp(alembic_config(conn), BASELINE)
+    for line in ignored:
+        _log.warning(f"Старая база: {line} — оставлено как есть (данные не трогаем)")
+    _log.info(f"Старая база приведена к исходной схеме ({len(added)} дописано, "
+              f"{len(ignored)} оставлено) и отмечена {BASELINE}")
+    return BASELINE
 
 
 def _baseline_metadata():
@@ -384,7 +424,7 @@ def _plan_legacy_repair(engine: Engine):
         ['add_index']
     """
     added, ignored = [], []
-    for diff in schema_differences(engine, _baseline_metadata()):
+    for diff in schema_differences(engine, _baseline_metadata()):   # engine — движок или соединение
         items = diff if isinstance(diff, list) else [diff]
         for item in items:
             kind = item[0]

@@ -219,3 +219,54 @@ def test_database_on_legacy_file_keeps_data(tmp_path):
         assert current_revision(db.engine) == head_revision()
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Проверочный проход 1 (M3, M4)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('legacy', [True, False])
+def test_m3_concurrent_upgrades(tmp_path, legacy):
+    """M3: две копии программы одновременно открывают одну базу — обе успешно, одна отметка."""
+    import threading
+    if legacy:
+        path, engine = legacy_db(tmp_path)
+        engine.dispose()
+    else:
+        path = tmp_path / 'new.db'
+    errors, results = [], []
+    barrier = threading.Barrier(2)
+
+    def run():
+        try:
+            barrier.wait()
+            results.append(upgrade_database(create_engine(f"sqlite:///{path}")))
+        except Exception as e:                 # pragma: no cover — должно не случиться
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert errors == [] and results == [head_revision()] * 2
+    engine = create_engine(f"sqlite:///{path}")
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT count(*) FROM alembic_version')).scalar() == 1
+    if legacy:
+        assert counts(engine)['patients'] == 1
+        assert len(backups(tmp_path)) == 1                 # копия — одна, у той копии, что приводила
+
+
+def test_m4_head_cached():
+    from app.database import migrate
+    migrate.head_revision.cache_clear()
+    calls = []
+    real = migrate.ScriptDirectory.from_config
+    migrate.ScriptDirectory.from_config = staticmethod(lambda cfg: calls.append(1) or real(cfg))
+    try:
+        for _ in range(5):
+            migrate.head_revision()
+    finally:
+        migrate.ScriptDirectory.from_config = real
+    assert calls == [1]

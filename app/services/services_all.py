@@ -4436,7 +4436,15 @@ class NoteService(
         self.logger.debug(f"Удаление заметки id={note_id}")
 
         # super().delete(note_id, session=session)
-        self._delete_entity(note_id, session) # чтобы соответствовать единому универсальному подходу
+        # DYN11 (2026-10-16): заметки общие — удаление используемой оставляло в записях
+        # «висячие» ссылки (SQLite их не проверяет): текст пропадал без предупреждения.
+        # Используемую заметку удалить нельзя — сообщаем, где она используется.
+        with self._session_scope(session) as sess:
+            usage = self._note_usage(note_id, sess)
+            if usage:
+                where = ', '.join(f"{table}: {count}" for table, count in usage.items())
+                raise self._validation_error('id', f"заметка {note_id} используется ({where}) — удалить нельзя")
+            self._delete_entity(note_id, sess) # чтобы соответствовать единому универсальному подходу
 
     @AppLogger.get_instance(
         name = 'NoteService',
@@ -4753,6 +4761,30 @@ class NoteService(
                 if fk.column.table is notes_table:
                     refs.append((table, fk.parent))
         return refs
+
+    def _note_usage(self, note_id: int, session: Session) -> Dict[str, int]:
+        """
+        Где используется заметка: таблица → число ссылок (по схеме БД, DYN2/DYN11).
+
+        Args:
+            note_id: Id заметки.
+            session: Сессия.
+
+        Returns:
+            Только таблицы со ссылками (пусто — не используется).
+
+        Пример:
+            >>> note_service._note_usage(5, sess)
+            {'appointments': 2}
+        """
+        usage: Dict[str, int] = {}
+        for table, column in self._note_references():
+            count = session.execute(
+                select(sa_func.count()).select_from(table).where(column == note_id)
+            ).scalar()
+            if count:
+                usage[table.name] = usage.get(table.name, 0) + count
+        return usage
 
     def cleanup_unused_note(self, note_id: int, session: Optional[Session] = None) -> None:
         if note_id is None:

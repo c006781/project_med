@@ -125,11 +125,30 @@ note_service=…)` без подкласса и без своего репози
 `NoteService` по-прежнему без сервиса заметок для себя; оформление новых функций (описание с
 примером, типы) — без замечаний. Цикл проходов по замыслу завершён.
 
+## 3.2 Репозитории (2026-10-16)
+
+По замыслу репозиторий — тонкий доступ к данным; сборка запросов (фильтры, заметки,
+вычисляемые поля, сортировка) — в `BaseService`. Сервисы действительно используют у
+репозиториев только простое: `add`, `delete`, `get_by_id`, `get_with_relations`,
+`get_by_id_with_relations`, `get_unique_values`, `AppointmentNoteRepository.get_by_text_exact`,
+`PhotoRepository.get_by_appointment`. `get_page`, `count`, `get_all_with_relations` и набор
+`AppointmentRepository` (`get_page`, `get_page_by_patient`, `count_by_patient`,
+`get_by_patient_with_relations`) приложение НЕ вызывает — параллельный путь, живой в тестах.
+
+| # | Где | Что было | Чем плохо | Исправление |
+|---|---|---|---|---|
+| REPO1 | `BaseRepository.get_unique_values` | `err_.message` у `NotImplementedError` | Вместо понятной ошибки — `AttributeError` | `str(err_)` |
+| REPO2 | `BaseRepository.get_with_relations` | Неизвестная связь молча пропускалась | Опечатка в `source_attr` — данные просто не загружаются | Предупреждение в лог |
+| REPO3 | `BaseRepository.get_page`, `AppointmentRepository.get_page` | Сортировка сырыми строками (`'-date'` — ошибка SQL); у приёмов — точная копия базового метода | Параллельный путь со своими ошибками | `_order_clauses` (как в сервисе), копия → `super()`; метод помечен «приложением не используется» |
+
+Тесты: [`tests/test_repositories/test_repositories_review.py`](../../tests/test_repositories/test_repositories_review.py)
+(падают на коде до исправления).
+
 ## 4. Дальше
 
 * ✅ Карта ключей `field_configs` (2026-10-16): все ключи используются, кроме
   `sql_compute.result_type`; `counts` — устаревший дубль `sql_compute` (DYN4).
 * ✅ Тесты общего механизма по ключам и новой таблицей; каскадное удаление (DATA14, DYN7, DYN10).
-* Осталось: репозитории (`AppointmentRepository` — свои `get_page`/`get_page_by_patient`
-  рядом с общим механизмом сервиса), CLI-тесты (7 давно падающих).
+* ✅ Репозитории (§3.2).
+* Осталось: CLI-тесты (7 давно падающих).
 * Замеченное: `sql_compute.result_type` нигде не читается.

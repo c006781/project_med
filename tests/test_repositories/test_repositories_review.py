@@ -58,3 +58,35 @@ def test_repo3_unknown_order_field_warned(db_session, sample_patient):
     finally:
         repo.logger.remove_output(handler)
     assert any('опечатка' in line for line in got)
+
+
+# ---------------------------------------------------------------------------
+# Проход 2: характеризующие тесты непокрытых веток (параллельный путь репозиториев)
+# ---------------------------------------------------------------------------
+
+def test_all_with_relations_and_unique_values(db_session, sample_patient, sample_appointment):
+    from sqlalchemy.orm import selectinload
+    repo = AppointmentRepository(db_session)
+    items = repo.get_all_with_relations([selectinload(Appointment.photos)])
+    assert [a.id for a in items] == [sample_appointment.id]
+    assert repo.get_unique_values('patient_id') == [sample_patient.id]
+    assert repo.get_unique_values('нет_колонки') == []
+
+
+def test_page_filters_relations_and_counts_by_patient(db_session, sample_patient):
+    from sqlalchemy.orm import selectinload
+    other = Patient(first_name='А', last_name='Б')
+    db_session.add(other)
+    db_session.commit()
+    for day in (1, 2, 3):
+        db_session.add(Appointment(patient_id=sample_patient.id, date=date(2026, 1, day)))
+    db_session.add(Appointment(patient_id=other.id, date=date(2026, 1, 1)))
+    db_session.commit()
+    repo = AppointmentRepository(db_session)
+    late = [{'column': 'date', 'operator': 'ge', 'value': date(2026, 1, 2)}]
+    page = repo.get_page_by_patient(sample_patient.id, 0, 10, filters=late,
+                                    relations=[selectinload(Appointment.photos)])
+    assert sorted(a.date.day for a in page) == [2, 3]
+    assert repo.count_by_patient(sample_patient.id) == 3
+    assert repo.count_by_patient(sample_patient.id, filters=late) == 2
+    assert len(repo.get_by_patient_with_relations(sample_patient.id, [selectinload(Appointment.photos)])) == 3

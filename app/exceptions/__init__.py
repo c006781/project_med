@@ -14,6 +14,7 @@ from app.exceptions.exceptions_all import(
     # Импортируем исключения пациентов
 
     PatientNotFoundError, PatientValidationError,
+    EntityNotFoundError,  # DYN9 (2026-10-16): общее «не найдено»
     # Импортируем исключения приёмов
     AppointmentNotFoundError, AppointmentValidationError,
 
@@ -33,6 +34,7 @@ from app.exceptions.exceptions_all import(
 
 # Определяем, что экспортируется при импорте *
 __all__ = [
+    'EntityNotFoundError',
     'AppException',
     'PatientNotFoundError', 'PatientValidationError',
     'AppointmentNotFoundError', 'AppointmentValidationError',

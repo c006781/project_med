@@ -22,6 +22,20 @@ class AppException(Exception):
             return f"[{self.code}] {self.message}"
         return self.message
 
+class EntityNotFoundError(AppException, LookupError):
+    """
+    Запись не найдена — общее исключение для сущностей без своего (DYN9, 2026-10-16):
+    новая таблица, подключённая описанием, не обязана заводить свой класс исключения.
+
+    Пример:
+        >>> raise EntityNotFoundError('Prescription', 5)
+        Traceback (most recent call last):
+        EntityNotFoundError: [9001] Prescription с идентификатором 5 не найден(а).
+    """
+    def __init__(self, entity: str, entity_id: int):
+        super().__init__(f"{entity} с идентификатором {entity_id} не найден(а).", code=9001)
+
+
 class PatientNotFoundError(AppException):
     """
     Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.

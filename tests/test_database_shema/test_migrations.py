@@ -270,3 +270,110 @@ def test_m4_head_cached():
     finally:
         migrate.ScriptDirectory.from_config = real
     assert calls == [1]
+
+
+# ---------------------------------------------------------------------------
+# Проверочный проход 2: СЛЕДУЮЩАЯ миграция (0002) — как будет в работе
+# ---------------------------------------------------------------------------
+
+MIGRATION_0002 = '''
+from alembic import op
+import sqlalchemy as sa
+
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+branch_labels = None
+depends_on = None
+
+
+def upgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.add_column(sa.Column('email', sa.String(100), nullable=True))
+    op.execute("UPDATE patients SET phone = '' WHERE phone IS NULL")
+    with op.batch_alter_table('patients') as batch:      # пересборка таблицы (SQLite)
+        batch.alter_column('phone', existing_type=sa.String(20), nullable=False)
+    FAIL
+
+
+def downgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.alter_column('phone', existing_type=sa.String(20), nullable=True)
+        batch.drop_column('email')
+'''
+
+
+@pytest.fixture
+def with_0002(tmp_path, monkeypatch):
+    """Копия папки миграций + миграция 0002; fail=True — сбой в конце upgrade()."""
+    import shutil
+    from app.database import migrate
+
+    def make(fail=False):
+        target = tmp_path / ('migrations_fail' if fail else 'migrations_ok')
+        shutil.copytree(migrate.MIGRATIONS_DIR, target, ignore=shutil.ignore_patterns('__pycache__'))
+        code = MIGRATION_0002.replace('    FAIL\n', "    raise RuntimeError('сбой в 0002')\n" if fail else '')
+        (target / 'versions' / '0002_test_change.py').write_text(code, encoding='utf-8')
+        monkeypatch.setattr(migrate, 'MIGRATIONS_DIR', str(target))
+        migrate.head_revision.cache_clear()
+        return target
+
+    yield make
+    migrate.head_revision.cache_clear()
+
+
+def test_next_migration_on_baseline_db(tmp_path, with_0002):
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)                                  # 0001
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
+    with_0002()
+    assert upgrade_database(engine) == '0002_test_change'
+    cols = {c['name']: c for c in inspect(engine).get_columns('patients')}
+    assert 'email' in cols and cols['phone']['nullable'] is False
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT first_name, phone FROM patients')).one() == ('И', '')
+    assert len(backups(tmp_path)) == 1                        # копия перед 0002
+
+
+def test_next_migration_on_legacy_db(tmp_path, with_0002):
+    with_0002()
+    path, engine = legacy_db(tmp_path)
+    assert upgrade_database(engine) == '0002_test_change'
+    assert counts(engine)['patients'] == 1
+    assert 'email' in {c['name'] for c in inspect(engine).get_columns('patients')}
+    # M6: одна копия (-legacy); до исправления — две одинаковые (-legacy и -0001_baseline)
+    assert len(backups(tmp_path)) == 1 and backups(tmp_path)[0].endswith('-legacy')
+
+
+def test_next_migration_on_new_db(tmp_path, with_0002):
+    with_0002()
+    engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
+    assert upgrade_database(engine) == '0002_test_change'
+
+
+def test_failed_next_migration_rolls_back_everything(tmp_path, with_0002):
+    """Сбой в конце 0002 (после пересборки таблицы) — откат всего, база на 0001, данные целы."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
+    with_0002(fail=True)
+    with pytest.raises(RuntimeError, match='сбой в 0002'):
+        upgrade_database(engine)
+    assert current_revision(engine) == BASELINE
+    cols = {c['name']: c for c in inspect(engine).get_columns('patients')}
+    assert 'email' not in cols and cols['phone']['nullable'] is True
+    with engine.connect() as conn:
+        assert conn.execute(text('SELECT first_name, phone FROM patients')).one() == ('И', None)
+
+
+def test_next_migration_downgrade(tmp_path, with_0002):
+    from alembic import command
+    from app.database.migrate import alembic_config
+    with_0002()
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        command.downgrade(alembic_config(conn), BASELINE)
+    assert current_revision(engine) == BASELINE
+    assert 'email' not in {c['name'] for c in inspect(engine).get_columns('patients')}

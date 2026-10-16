@@ -140,10 +140,14 @@ def _build_filter_condition(
         text_column = getattr(note_model, note_info['text_column'])
         
         if op == 'ilike':
-            subq = select(text_column).where(text_column.ilike(f"%{value}%")).where(note_model.id == fk_column)
+            # subq = select(text_column).where(text_column.ilike(f"%{value}%")).where(note_model.id == fk_column)
+            # ↑ до DYN6 (2026-10-16): % и _ из поиска работали как шаблоны (у обычных полей — экранируются)
+            subq = select(text_column).where(text_column.ilike(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
             return exists(subq)
         elif op == 'like':
-            subq = select(text_column).where(text_column.like(f"%{value}%")).where(note_model.id == fk_column)
+            # subq = select(text_column).where(text_column.like(f"%{value}%")).where(note_model.id == fk_column)
+            # ↑ до DYN6: без экранирования
+            subq = select(text_column).where(text_column.like(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
             return exists(subq)
         elif op == 'eq':
             subq = select(text_column).where(text_column == value).where(note_model.id == fk_column)

@@ -485,3 +485,15 @@ def test_dyn6_note_filter_escapes_wildcards(svc):
     found, total = svc['appointment'].get_page(
         0, 10, filters=[{'column': 'procedure_text', 'operator': 'ilike', 'value': '50%'}])
     assert total == 1 and found[0].procedure_text == 'скидка 50%'
+
+
+def test_dyn7_generic_delete_cascades_through_child_services(svc):
+    """DYN7: общий _delete_entity удаляет детей через их сервисы (файлы фото — тоже)."""
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    stored = svc['storage'] / photo.file_path
+    svc['appointment']._delete_entity(a.id)          # не delete_appointment — общий механизм
+    assert svc['photo'].get_all() == [] and not stored.exists()

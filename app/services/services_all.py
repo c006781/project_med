@@ -1867,6 +1867,10 @@ class BaseService(
                     note_ids.add(note_id)
             
             # Удаляем саму запись
+            # DYN7 (2026-10-16): дети, у которых есть свой сервис, удаляются ЧЕРЕЗ него (их
+            # файлы и заметки чистятся) — раньше это было вручную в delete_patient и
+            # delete_appointment; новая таблица-ребёнок не требует ручного кода удаления.
+            self._delete_children(entity, sess)
             repo.delete(entity)
             sess.flush()
             
@@ -2416,6 +2420,35 @@ class BaseService(
                 f"{', '.join(ignored)} не изменяются (updatable=False) — новое значение не сохранено"
             )
         return ignored
+
+    def _delete_children(self, entity: Any, session: Session) -> None:
+        """
+        Удаляет детей записи через их сервисы (DYN7, 2026-10-16): для каждой связи
+        «один-ко-многим» с каскадным удалением, для которой ``_get_child_service`` даёт
+        сервис, — ``сервис.delete(id)`` по каждому ребёнку; коллекция затем забывается
+        (иначе каскад ORM удалил бы тех же детей второй раз — DATA14). Связи без сервиса
+        удаляет каскад ORM (без файлов/заметок детей).
+
+        Args:
+            entity: Удаляемая запись.
+            session: Сессия.
+
+        Returns:
+            None
+
+        Пример:
+            >>> patient_service._delete_children(patient, sess)   # приёмы → их фото и файлы
+        """
+        from sqlalchemy.orm import ONETOMANY, class_mapper
+        for rel in class_mapper(self._model_class).relationships:
+            if rel.direction is not ONETOMANY or not rel.cascade.delete:
+                continue
+            child_service = self._get_child_service(rel.key)
+            if child_service is None:
+                continue
+            for child in list(getattr(entity, rel.key)):
+                child_service.delete(child.id, session=session)
+            session.expire(entity, [rel.key])
 
     def _cleanup_replaced_notes(self, old_ids: Dict[str, Optional[int]],
                                 new_ids: Dict[str, Optional[int]], session: Session) -> None:
@@ -3969,6 +4002,24 @@ class PatientService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
+    def _get_child_service(self, relation_name: str) -> Optional['BaseService']:
+        """
+        Сервис детей пациента: приёмы (DYN7, 2026-10-16 — для общего каскадного удаления).
+
+        Args:
+            relation_name: Имя связи модели.
+
+        Returns:
+            Сервис приёмов для ``'appointments'``, иначе — как в базовом классе.
+
+        Пример:
+            >>> patient_service._get_child_service('appointments') is appointment_service
+            True
+        """
+        if relation_name == 'appointments':
+            return self._appointment_service
+        return super()._get_child_service(relation_name)
+
     def delete_patient(self, patient_id: int, session: Optional[Session] = None) -> None:
         """
         Удаляет пациента и все связанные приёмы (каскадно). Удаляет неиспользуемые заметки.
@@ -4044,16 +4095,18 @@ class PatientService(
             # sess.delete(patient)
             # sess.flush() # принудительно выполняем удаление, чтобы обновить состояние БД
 
-            # Удаляем все приёмы через сервис
-            for app in patient.appointments[:]:
-                try:
-                    self._appointment_service.delete_appointment(app.id, session=sess)
-                except Exception as e:
-                    self.logger.exception(f"Ошибка удаления приёма {app.id}: {e}")
-                    raise e
-            # DATA14 (2026-10-16): коллекция приёмов осталась загруженной — каскад удаления
-            # пациента удалял те же приёмы ещё раз («expected 1 row, 0 matched»). Забываем её.
-            sess.expire(patient, ['appointments'])
+            # # Удаляем все приёмы через сервис
+            # for app in patient.appointments[:]:
+            #     try:
+            #         self._appointment_service.delete_appointment(app.id, session=sess)
+            #     except Exception as e:
+            #         self.logger.exception(f"Ошибка удаления приёма {app.id}: {e}")
+            #         raise e
+            # # DATA14 (2026-10-16): коллекция приёмов осталась загруженной — каскад удаления
+            # # пациента удалял те же приёмы ещё раз («expected 1 row, 0 matched»). Забываем её.
+            # sess.expire(patient, ['appointments'])
+            # ↑ до DYN7 (2026-10-16): ручной каскад. Теперь приёмы удаляет общий
+            #   _delete_entity через сервис детей (_get_child_service('appointments')).
 
             # Теперь удаляем самого пациента (базовый метод удалит его заметки)
             self._delete_entity(patient_id, session=sess)
@@ -5993,14 +6046,16 @@ class AppointmentService(
             #     raise AppointmentNotFoundError(appointment_id)
 
             # Удаляем фото, если есть сервис
-            if self._photo_service is not None:
-                # for photo in appointment.photos:
-                # ↑ до DATA14 (2026-10-16): обход живой коллекции, а после удаления фото она
-                #   оставалась загруженной — каскад удаления приёма удалял те же фото ещё раз
-                #   («DELETE ... expected 1 row, 0 matched»). Обходим копию и забываем коллекцию.
-                for photo in list(appointment.photos):
-                    self._photo_service.delete_photo(photo.id, session=sess)
-                sess.expire(appointment, ['photos'])
+            # if self._photo_service is not None:
+            #     # for photo in appointment.photos:
+            #     # ↑ до DATA14 (2026-10-16): обход живой коллекции, а после удаления фото она
+            #     #   оставалась загруженной — каскад удаления приёма удалял те же фото ещё раз
+            #     #   («DELETE ... expected 1 row, 0 matched»). Обходим копию и забываем коллекцию.
+            #     for photo in list(appointment.photos):
+            #         self._photo_service.delete_photo(photo.id, session=sess)
+            #     sess.expire(appointment, ['photos'])
+            # ↑ до DYN7 (2026-10-16): ручной каскад. Теперь фото удаляет общий _delete_entity
+            #   через сервис детей (_get_child_service('photos')).
 
             # else:
             #     self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      

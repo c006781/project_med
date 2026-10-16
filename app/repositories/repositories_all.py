@@ -240,7 +240,13 @@ class BaseRepository(Generic[ModelType], ABC):
                     joinedload(
                         getattr(self.model_class, rel)
                     )
-                )   
+                )
+            else:
+                # REPO2 (2026-10-16): раньше неизвестная связь (опечатка в source_attr)
+                # молча пропускалась — данные просто не загружались
+                self.logger.warning(
+                    f"get_with_relations: у {self.model_class.__name__} нет связи '{rel}' — пропущена"
+                )
                         
         return query.filter(self.model_class.id == entity_id).first()
 
@@ -363,7 +369,10 @@ class BaseRepository(Generic[ModelType], ABC):
         self.logger.debug(f"get_unique_values: column_name = {column_name}")
         if self.model_class is None:
             err_ = NotImplementedError("model_class не определён в репозитории")
-            self.logger.exception(err_.message)
+            # self.logger.exception(err_.message)
+            # ↑ до REPO1 (2026-10-16): у NotImplementedError нет .message — вместо понятной
+            #   ошибки вылетал AttributeError
+            self.logger.error(str(err_))
             raise err_
         try:
             column = getattr(self.model_class, column_name, None)
@@ -385,13 +394,16 @@ class BaseRepository(Generic[ModelType], ABC):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def get_page(
-        self, 
-        offset: int, 
+        self,
+        offset: int,
         limit: int,
         filters: Optional[List[Dict[str, Any]]] = None,
         order_by: Optional[List] = None,
-        relations: Optional[List] = None, 
+        relations: Optional[List] = None,
     ) -> List[ModelType]:
+        # ВНИМАНИЕ (REPO3, 2026-10-16): приложение этот метод НЕ использует — страницы
+        # собирает BaseService.get_page (фильтры по заметкам, fuzzy, sql_compute,
+        # сортировка по заметкам). Здесь — простой путь для тестов и скриптов.
         """
         Возвращает страницу записей с учётом SQL-фильтров.
 
@@ -417,8 +429,39 @@ class BaseRepository(Generic[ModelType], ABC):
             if sql_filters:
                 query, _ = apply_filters(query, self.model_class, sql_filters)
         if order_by:
-            query = query.order_by(*order_by)
+            # query = query.order_by(*order_by)
+            # ↑ до REPO3 (2026-10-16): строки передавались как есть — '-date' (по убыванию,
+            #   как в BaseService) давал ошибку SQL. Теперь — как в BaseService.
+            query = query.order_by(*self._order_clauses(order_by))
         return query.offset(offset).limit(limit).all()
+
+    def _order_clauses(self, order_by: List[Any]) -> List[Any]:
+        """
+        Сортировка: строки 'поле' / '-поле' → выражения SQLAlchemy; готовые выражения —
+        как есть; неизвестное поле — предупреждение и пропуск (REPO3, 2026-10-16).
+
+        Args:
+            order_by: Поля или выражения.
+
+        Returns:
+            Выражения для ``order_by``.
+
+        Пример:
+            >>> repo._order_clauses(['-date', 'id'])
+            [<desc date>, <asc id>]
+        """
+        clauses = []
+        for spec in order_by:
+            if not isinstance(spec, str):
+                clauses.append(spec)
+                continue
+            name = spec[1:] if spec.startswith('-') else spec
+            column = getattr(self.model_class, name, None)
+            if column is None:
+                self.logger.warning(f"Сортировка: у {self.model_class.__name__} нет поля '{name}' — пропущено")
+                continue
+            clauses.append(column.desc() if spec.startswith('-') else column.asc())
+        return clauses
 
     @AppLogger.get_instance(
         name = 'BaseRepository',
@@ -660,20 +703,23 @@ class AppointmentRepository(BaseRepository):
         #     # joinedload(Appointment.note)
         #     *self._get_joinedload_Appointment()
         # )
-        query = self._session.query(Appointment)
-
-        if relations:
-            query = query.options(*relations)
-
-        if filters:
-            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
-            if sql_filters:
-                query, _ = apply_filters(query, Appointment, sql_filters)
-
-        if order_by:
-            query = query.order_by(*order_by)
-            
-        return query.offset(offset).limit(limit).all()
+        # query = self._session.query(Appointment)
+        #
+        # if relations:
+        #     query = query.options(*relations)
+        #
+        # if filters:
+        #     sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+        #     if sql_filters:
+        #         query, _ = apply_filters(query, Appointment, sql_filters)
+        #
+        # if order_by:
+        #     query = query.order_by(*order_by)
+        #
+        # return query.offset(offset).limit(limit).all()
+        # ↑ до REPO3 (2026-10-16): точная копия BaseRepository.get_page (с Appointment вместо
+        #   model_class). Теперь — базовый метод.
+        return super().get_page(offset, limit, filters=filters, order_by=order_by, relations=relations)
 
     @AppLogger.get_instance(
         name = 'AppointmentRepository',

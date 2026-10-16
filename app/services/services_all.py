@@ -1679,6 +1679,7 @@ class BaseService(
                 setattr(entity, orm_field, value)
             
             # Обновляем простые поля
+            self._warn_ignored_changes(entity, dto)
             self._apply_simple_updates(entity, dto, session = sess)
 
             sess.flush()
@@ -1880,9 +1881,20 @@ class BaseService(
             title = config.get('title', None)  or field_name
             
             # Удаление старого файла для полей с фото (widget_type='image_thumbnail')
-            if config.get('widget_type') == 'image_thumbnail':
-                
-                storage_path = AppConfigManager.get_instance().get(
+            # if config.get('widget_type') == 'image_thumbnail':
+            #
+            #     storage_path = AppConfigManager.get_instance().get(
+            #         'PHOTOS_STORAGE_PATH',
+            #         os.path.join('.', 'photos')
+            #     )
+            # ↑ до DATA10 (2026-10-16): (1) папка бралась из ГЛОБАЛЬНОГО конфига приложения,
+            #   а не у сервиса — сервис с другой папкой (тесты, второй экземпляр) удалял бы по
+            #   чужому пути; (2) PhotoService сам заменяет/удаляет файлы — здесь удаление
+            #   регистрировалось второй раз. Теперь: папка — у сервиса (конфиг — запасной
+            #   путь), сервис, управляющий файлами (_manages_files), здесь не трогается.
+            if config.get('widget_type') == 'image_thumbnail' and not self._manages_files:
+
+                storage_path = getattr(self, '_storage_path', None) or AppConfigManager.get_instance().get(
                     'PHOTOS_STORAGE_PATH',
                     os.path.join('.', 'photos')
                 )
@@ -2049,6 +2061,8 @@ class BaseService(
 
     # Исключение валидации сущности (DATA9): наследники задают свой *ValidationError
     _validation_exception: Optional[type] = None
+    # Сервис сам копирует/удаляет файлы своих полей (DATA10): общий механизм их не трогает
+    _manages_files: bool = False
 
     def _validation_error(self, field: str, reason: str) -> Exception:
         """
@@ -2236,6 +2250,39 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _warn_ignored_changes(self, entity: Any, dto: Any) -> List[str]:
+        """
+        Предупреждает о полях с ``updatable: False``, которые DTO пытается изменить:
+        такие изменения не сохраняются (DATA11, 2026-10-16 — раньше молча). Например,
+        перенос фото в другой приём (``appointment_id``) при текущих настройках не пишется.
+
+        Args:
+            entity: Объект модели (текущие значения).
+            dto: DTO с новыми значениями.
+
+        Returns:
+            Имена полей, изменение которых не будет сохранено.
+
+        Пример:
+            >>> self._warn_ignored_changes(photo, dto)        # dto.appointment_id другой
+            ['appointment_id']
+        """
+        ignored = []
+        for field_name, config in self._field_configs.items():
+            if config.get('updatable') is not False or field_name == 'id':
+                continue
+            if config.get('virtual') or config.get('is_note') or not hasattr(entity, field_name):
+                continue
+            new_value = getattr(dto, field_name, None)
+            if new_value is not None and new_value != getattr(entity, field_name):
+                ignored.append(field_name)
+        if ignored:
+            self.logger.warning(
+                f"{self._model_class.__name__} id={getattr(entity, 'id', None)}: поля "
+                f"{', '.join(ignored)} не изменяются (updatable=False) — новое значение не сохранено"
+            )
+        return ignored
+
     def _cleanup_replaced_notes(self, old_ids: Dict[str, Optional[int]],
                                 new_ids: Dict[str, Optional[int]], session: Session) -> None:
         """
@@ -2567,10 +2614,20 @@ class BaseService(
         """
         # Добавляем отношения, помеченные как eager_load_detail
         extra_rels = []
-        for config in self._field_configs.values():
+        # for config in self._field_configs.values():
+        #     if config.get('eager_load_detail'):         # флаг для детальных запросов
+        #         source_attr = config.get('source_attr')  # например 'photos'
+        #         if source_attr and source_attr not in relations:
+        #             extra_rels.append(source_attr)
+        # ↑ до DATA13 (2026-10-16): связь бралась только из source_attr, а у поля photos
+        #   его нет (имя связи = имя поля) — eager_load_detail не работал никогда; фото в
+        #   карточке подтягивала ленивая загрузка (та же, что давала N+1 в списках).
+        for field_name, config in self._field_configs.items():
             if config.get('eager_load_detail'):         # флаг для детальных запросов
-                source_attr = config.get('source_attr')  # например 'photos'
-                if source_attr and source_attr not in relations:
+                source_attr = config.get('source_attr') or field_name   # например 'photos'
+                attr = getattr(self._model_class, source_attr, None)
+                is_relation = hasattr(getattr(attr, 'property', None), 'mapper')
+                if is_relation and source_attr not in relations and source_attr not in extra_rels:
                     extra_rels.append(source_attr)
 
         self.logger.debug(f"_get_extra_rels: extra_rels={extra_rels if extra_rels else 'None'}")
@@ -2851,8 +2908,37 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    def _loaded_attributes(self, obj: Any) -> Any:
+        """
+        Данные ORM-объекта для DTO БЕЗ незагруженных атрибутов (DATA12): словарь полей DTO,
+        которые у объекта уже загружены. Не ORM-объект — как есть.
+
+        Args:
+            obj: Объект модели (или уже словарь/DTO).
+
+        Returns:
+            Словарь для ``model_validate`` или исходный объект.
+
+        Пример:
+            >>> self._loaded_attributes(appointment)      # photos не загружены — их нет
+            {'id': 12, 'patient_id': 1, 'date': ..., ...}
+        """
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            unloaded = sa_inspect(obj).unloaded
+        except Exception:
+            return obj
+        # Не читаем только незагруженные связи, которые конфиг просит НЕ грузить заранее
+        # (eager_load: False — например, photos в списке приёмов). Остальные при
+        # необходимости догружаются (заметки только что созданной записи и т. п.).
+        skip = {name for name, cfg in self._field_configs.items()
+                if cfg.get('eager_load') is False} & unloaded
+        fields = getattr(self._dto_class, 'model_fields', {})
+        return {name: getattr(obj, name) for name in fields
+                if name not in skip and hasattr(obj, name)}
+
     def get_dtos(
-        self, 
+        self,
         item_s: Union[List, Any]  # список объектов или один объект
     ) -> Union[List, Any]:
         """
@@ -2876,7 +2962,12 @@ class BaseService(
         
         # данные из ТБ
         try:
-            dto = self._dto_class.model_validate(item_s)  # создаем DTO из объекта
+            # dto = self._dto_class.model_validate(item_s)  # создаем DTO из объекта
+            # ↑ до DATA12 (2026-10-16): pydantic читал ВСЕ поля DTO у ORM-объекта, в том
+            #   числе НЕзагруженные связи (photos у приёма) — ленивая загрузка на каждую
+            #   запись: страница из 50 приёмов — 52 запроса. Незагруженные связи не
+            #   читаются (поле остаётся по умолчанию); нужные загружаются заранее по конфигу.
+            dto = self._dto_class.model_validate(self._loaded_attributes(item_s), from_attributes=True)
         except Exception as e:
             self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
             raise e  # выбрасываем исключение
@@ -3826,6 +3917,9 @@ class PatientService(
                 except Exception as e:
                     self.logger.exception(f"Ошибка удаления приёма {app.id}: {e}")
                     raise e
+            # DATA14 (2026-10-16): коллекция приёмов осталась загруженной — каскад удаления
+            # пациента удалял те же приёмы ещё раз («expected 1 row, 0 matched»). Забываем её.
+            sess.expire(patient, ['appointments'])
 
             # Теперь удаляем самого пациента (базовый метод удалит его заметки)
             self._delete_entity(patient_id, session=sess)
@@ -5731,8 +5825,13 @@ class AppointmentService(
 
             # Удаляем фото, если есть сервис
             if self._photo_service is not None:
-                for photo in appointment.photos:
+                # for photo in appointment.photos:
+                # ↑ до DATA14 (2026-10-16): обход живой коллекции, а после удаления фото она
+                #   оставалась загруженной — каскад удаления приёма удалял те же фото ещё раз
+                #   («DELETE ... expected 1 row, 0 matched»). Обходим копию и забываем коллекцию.
+                for photo in list(appointment.photos):
                     self._photo_service.delete_photo(photo.id, session=sess)
+                sess.expire(appointment, ['photos'])
 
             # else:
             #     self.logger.warning("PhotoService not provided, photos will not be deleted from disk")      
@@ -5912,6 +6011,7 @@ class PhotoService(
     """
 
     _validation_exception = PhotoValidationError   # DATA9: исключение валидации сущности
+    _manages_files = True   # DATA10: файлы фото — create/update/delete этого сервиса
 
     # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
     _class_storage_path: Optional[str] = None

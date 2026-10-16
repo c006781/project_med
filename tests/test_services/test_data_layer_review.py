@@ -219,3 +219,101 @@ def test_data4b_fuzzy_inside_or_rejected(svc):
                    {'column': 'last_name', 'operator': 'eq', 'value': 'Петров'}]}
     with pytest.raises(ValueError, match="внутри 'or'"):
         svc['patient'].get_page_filtered(0, 10, filters=tree)
+
+
+# ---------------------------------------------------------------------------
+# DATA12 (N+1) и B5 (вложенные DTO)
+# ---------------------------------------------------------------------------
+
+def _count_queries(db, action):
+    from sqlalchemy import event
+    count = {'n': 0}
+
+    def on_execute(*args, **kwargs):
+        count['n'] += 1
+
+    event.listen(db.engine, 'before_cursor_execute', on_execute)
+    try:
+        result = action()
+    finally:
+        event.remove(db.engine, 'before_cursor_execute', on_execute)
+    return result, count['n']
+
+
+def test_data12_page_queries_do_not_grow_with_rows(svc):
+    p = _patient(svc)
+    for i in range(3):
+        _appointment(svc, p.id, procedure_text=f'proc {i}')
+    (_, small), n_small = _count_queries(svc['db'], lambda: svc['appointment'].get_page(0, 50))
+    for i in range(30):
+        _appointment(svc, p.id, procedure_text=f'proc {i % 3}')
+    (items, total), n_big = _count_queries(svc['db'], lambda: svc['appointment'].get_page(0, 50))
+    assert total == 33 and n_big == n_small                  # не «строк + 2»
+    assert items[0].procedure_text and items[0].has_photos is not None
+
+
+def test_b5_nested_photos_are_dtos_without_warnings(svc):
+    import warnings
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    detail = svc['appointment'].get_by_id(a.id)
+    assert detail.photos and all(isinstance(ph, PhotoDTO) for ph in detail.photos)
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        detail.model_dump()
+
+
+def test_data14_cascade_delete_without_double_delete(svc):
+    """DATA14: удаление пациента → приёмы → фото и файлы, без повторного DELETE (SAWarning)."""
+    import warnings
+    from sqlalchemy.exc import SAWarning
+    p = _patient(svc)
+    a = _appointment(svc, p.id, procedure_text='Чистка')
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    stored = svc['storage'] / photo.file_path
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', SAWarning)
+        svc['patient'].delete_patient(p.id)
+    assert svc['appointment'].get_all() == [] and svc['photo'].get_all() == []
+    assert not stored.exists()
+    with pytest.raises(AppointmentNoteNotFoundError):
+        svc['note'].get_note(a.procedure_id)
+
+
+def test_data10_photo_update_uses_service_storage_not_global_config(svc, monkeypatch):
+    """DATA10: замена файла фото не обращается к глобальному конфигу и не удаляет дважды."""
+    import app.services.services_all as sa
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    first, second = svc['tmp'] / 'a.jpg', svc['tmp'] / 'b.jpg'
+    first.write_bytes(b'a')
+    second.write_bytes(b'b')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(first)))
+
+    def no_global_config(*args, **kwargs):
+        raise AssertionError('сервис полез в глобальный конфиг приложения')
+
+    monkeypatch.setattr(sa.AppConfigManager, 'get_instance', no_global_config)
+    updated = svc['photo'].update(photo.model_copy(update={'file_path': str(second)}))
+    assert (svc['storage'] / updated.file_path).exists()
+
+
+def test_data11_ignored_non_updatable_change_reported(svc):
+    p = _patient(svc)
+    a1, a2 = _appointment(svc, p.id), _appointment(svc, p.id)
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a1.id, file_path=str(src)))
+    got = []
+    handler = svc['photo'].logger.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+    try:
+        svc['photo'].update(photo.model_copy(update={'appointment_id': a2.id, 'description': 'd'}))
+    finally:
+        svc['photo'].logger.remove_output(handler)
+    assert svc['photo'].get_by_id(photo.id).appointment_id == a1.id     # как раньше — не переносится
+    assert any(line.startswith('WARNING|') and 'appointment_id' in line for line in got)

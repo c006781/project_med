@@ -375,3 +375,113 @@ def test_data11_no_false_warning_on_note_text_change(svc):
     finally:
         svc['appointment'].logger.remove_output(handler)
     assert not [line for line in got if 'updatable=False' in line]
+
+
+# ---------------------------------------------------------------------------
+# Проход по замыслу «всё из описания полей» (DYN*)
+# ---------------------------------------------------------------------------
+
+def test_dyn1_add_photo_uses_generic_create_and_cleans_on_rollback(svc):
+    """DYN1: старый путь добавления фото — через общий create: при откате файл удаляется."""
+    from app.exceptions.exceptions_all import AppointmentNotFoundError, PhotoFileError
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    dto = svc['photo'].add_photo_to_appointment(a.id, str(src), 'описание')
+    assert (svc['storage'] / dto.file_path).exists() and dto.description == 'описание'
+    with pytest.raises(PhotoFileError):
+        svc['photo'].add_photo_to_appointment(a.id, str(svc['tmp'] / 'нет.jpg'))
+    with pytest.raises(AppointmentNotFoundError):
+        svc['photo'].add_photo_to_appointment(999, str(src))
+    before = set(svc['storage'].rglob('*.jpg'))
+    with pytest.raises(RuntimeError):
+        with svc['db'].session_scope() as sess:
+            svc['photo'].add_photo_to_appointment(a.id, str(src), session=sess)
+            raise RuntimeError('сбой после копирования')
+    assert set(svc['storage'].rglob('*.jpg')) == before           # копия убрана при откате
+
+
+def test_dyn2_note_references_from_schema(svc):
+    names = sorted(c.name for _, c in svc['note']._note_references())
+    assert names == sorted(['comment_id', 'description_id', 'reason_id', 'procedure_id',
+                            'recommendations_id', 'note_id', 'cost_procedure_id'])
+
+
+def test_dyn2_note_referenced_by_unconfigured_model_kept(svc, monkeypatch):
+    """Заметка защищена ссылкой из схемы, даже если конфиг про неё «не знает»."""
+    import app.dependencies as deps
+    monkeypatch.setattr(deps, '_NOTE_USAGE_MODELS', [], raising=False)   # реестр пуст
+    p = _patient(svc)
+    a = _appointment(svc, p.id, procedure_text='Чистка')
+    svc['note'].cleanup_unused_note(a.procedure_id)
+    assert svc['note'].get_note(a.procedure_id).text == 'Чистка'
+
+
+def test_dyn3_generic_parent_check(svc):
+    """Пациент со ссылкой на несуществующую заметку — ошибка (раньше проверки не было)."""
+    from app.exceptions.exceptions_all import PatientValidationError
+    with pytest.raises(PatientValidationError, match='appointments_notes'):
+        svc['patient'].create(PatientDTO(first_name='И', last_name='П', comment_id=999,
+                                         birth_date=datetime.date(1990, 1, 1)))
+
+
+def test_dyn3_update_without_fk_change_skips_parent_queries(svc):
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    dto = svc['appointment'].get_by_id(a.id).model_copy(update={'date': datetime.date(2026, 2, 2)})
+    calls = []
+    real = svc['appointment']._validate_parents
+    svc['appointment']._validate_parents = lambda d, s: calls.append(1) or real(d, s)
+    svc['appointment'].update(dto)
+    assert calls == []
+
+
+def test_dyn4_counts_mechanism_works(svc):
+    """DYN4: старый механизм 'counts' (дублирует sql_compute) работает — характеризующий тест."""
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    svc['appointment']._field_configs = dict(svc['appointment']._field_configs,
+                                             photo_count={'virtual': True, 'counts': 'photos'})
+    items, _ = svc['appointment'].get_page(0, 10)
+    with svc['db'].session_scope() as sess:
+        obj = sess.get(Appointment, a.id)
+        svc['appointment']._add_counts_to_items([obj], svc['appointment']._get_count_mappings(), sess)
+        assert obj._count_photos == 1
+
+
+def test_dyn5_order_by_note_text_and_sql_compute(svc):
+    p = _patient(svc)
+    a1 = _appointment(svc, p.id, procedure_text='Бэ')
+    a2 = _appointment(svc, p.id, procedure_text='Аа')
+    a3 = _appointment(svc, p.id, procedure_text='Вв')
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    for _ in range(2):
+        svc['photo'].create(PhotoDTO(appointment_id=a3.id, file_path=str(src)))
+    by_note, _ = svc['appointment'].get_page(0, 10, order_by=['procedure_text'])
+    assert [a.id for a in by_note] == [a2.id, a1.id, a3.id]
+    by_photos, _ = svc['appointment'].get_page(0, 10, order_by=['-has_photos'])
+    assert by_photos[0].id == a3.id
+
+
+def test_dyn5_unknown_order_field_warns(svc):
+    got = []
+    handler = svc['patient'].logger.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+    try:
+        svc['patient'].get_page(0, 10, order_by=['фамилия_с_опечаткой'])
+    finally:
+        svc['patient'].logger.remove_output(handler)
+    assert any(line.startswith('WARNING|') and 'фамилия_с_опечаткой' in line for line in got)
+
+
+def test_dyn6_note_filter_escapes_wildcards(svc):
+    p = _patient(svc)
+    _appointment(svc, p.id, procedure_text='скидка 50%')
+    _appointment(svc, p.id, procedure_text='скидка 500')
+    found, total = svc['appointment'].get_page(
+        0, 10, filters=[{'column': 'procedure_text', 'operator': 'ilike', 'value': '50%'}])
+    assert total == 1 and found[0].procedure_text == 'скидка 50%'

@@ -950,22 +950,66 @@ class BaseService(
         if not order_by:
             return query
 
+        # order_clauses = []
+        # for field_spec in order_by:
+        #     if field_spec.startswith('-'):
+        #         field_name = field_spec[1:]
+        #         # order_clauses.append(getattr(self._model_class, field_name).desc())
+        #         if hasattr(self._model_class, field_name):
+        #             order_clauses.append(getattr(self._model_class, field_name).desc())
+        #
+        #     else:
+        #         # order_clauses.append(getattr(self._model_class, field_spec).asc())
+        #         if hasattr(self._model_class, field_spec):
+        #             order_clauses.append(getattr(self._model_class, field_spec).asc())
+        # ↑ до DYN5 (2026-10-16): только столбцы таблицы; остальное молча пропускалось —
+        #   опечатка давала несортированный список, а сортировать по заметкам и
+        #   вычисляемым в SQL полям (has_photos) было нельзя. Теперь — по описанию полей.
         order_clauses = []
         for field_spec in order_by:
-            if field_spec.startswith('-'):
-                field_name = field_spec[1:]
-                # order_clauses.append(getattr(self._model_class, field_name).desc())
-                if hasattr(self._model_class, field_name):
-                    order_clauses.append(getattr(self._model_class, field_name).desc())
-        
-            else:
-                # order_clauses.append(getattr(self._model_class, field_spec).asc())
-                if hasattr(self._model_class, field_spec):
-                    order_clauses.append(getattr(self._model_class, field_spec).asc())
+            descending = field_spec.startswith('-')
+            field_name = field_spec[1:] if descending else field_spec
+            expression = self._order_expression(field_name)
+            if expression is None:
+                self.logger.warning(
+                    f"Сортировка по '{field_name}' невозможна: нет такого поля у "
+                    f"{self._model_class.__name__} (ни столбца, ни заметки, ни sql_compute)"
+                )
+                continue
+            order_clauses.append(expression.desc() if descending else expression.asc())
         if order_clauses:
             query = query.order_by(*order_clauses)
 
         return query
+
+    def _order_expression(self, field_name: str) -> Any:
+        """
+        Выражение SQL для сортировки по полю (DYN5, 2026-10-16): столбец таблицы, текст
+        заметки (подзапрос к таблице заметок) или вычисляемое поле ``sql_compute``.
+
+        Args:
+            field_name: Поле (как в DTO / field_configs).
+
+        Returns:
+            Выражение SQLAlchemy или ``None`` (сортировать не по чему).
+
+        Пример:
+            >>> self._order_expression('procedure_text')      # текст заметки
+            <ScalarSelect ...>
+        """
+        column = getattr(self._model_class, field_name, None)
+        if column is not None and hasattr(column, 'property') and hasattr(column.property, 'columns'):
+            return column
+        note = self._get_note_field_mappings_dict().get(field_name)
+        if note is not None:
+            note_model = note['note_model']
+            return (select(getattr(note_model, note['text_column']))
+                    .where(note_model.id == getattr(self._model_class, note['foreign_key']))
+                    .scalar_subquery())
+        compute = self._get_sql_compute_fields().get(field_name)
+        if compute is not None:
+            return self._build_sql_compute_subquery(field_name, compute)
+        return None
 
 
     @AppLogger.get_instance(
@@ -1272,6 +1316,19 @@ class BaseService(
         """
         Анализирует field_configs и возвращает словарь:
             отношение -> {'attr_name': '_count_<отношение>', 'extra_key': <имя ключа из args>}.
+
+        ВНИМАНИЕ (DYN4, 2026-10-16): ключ 'counts' — второй, старый способ посчитать детей
+        (отдельный запрос с GROUP BY после выборки). Основной — 'sql_compute' (подзапрос в
+        той же выборке, им считается has_photos). Ни один конфиг 'counts' не использует;
+        механизм оставлен для совместимости (работает — проверено тестом), для новых
+        полей используйте 'sql_compute'.
+
+        Returns:
+            Словарь отношений.
+
+        Пример:
+            >>> self._get_count_mappings()       # конфиг {'n': {'counts': 'photos', ...}}
+            {'photos': {'attr_name': '_count_photos', 'extra_key': 'photos_count'}}
         """
         mappings = {}
         for field_name, config in self._field_configs.items():
@@ -1549,10 +1606,73 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _validate_parents(self, dto: DTOType, session: Session) -> None:
         """
-        Проверяет существование родительских записей для внешних ключей.
-        Переопределяется в наследниках при необходимости.
+        Проверяет, что записи, на которые указывают внешние ключи DTO, существуют.
+
+        Общая проверка по схеме модели (DYN3, 2026-10-16 — раньше здесь был ``pass``, а
+        проверки писались вручную в отдельных сервисах; у пациента и заметок их не было,
+        а SQLite в проекте внешние ключи не проверяет). Наследники могут переопределить
+        ради своего исключения (``PatientNotFoundError`` и т. п.) и вызвать ``super()``.
+
+        Args:
+            dto: DTO записи.
+            session: Сессия.
+
+        Returns:
+            None
+
+        Raises:
+            ValueError: Исключение валидации сущности — ссылка на несуществующую запись.
+
+        Пример:
+            >>> self._validate_parents(PatientDTO(..., comment_id=999), sess)
+            Traceback (most recent call last):
+            PatientValidationError: ...
         """
-        pass
+        for column, fk in self._foreign_keys():
+            value = getattr(dto, column.name, None)
+            if value is None:
+                continue
+            found = session.execute(
+                select(sa_func.count()).select_from(fk.column.table).where(fk.column == value)
+            ).scalar()
+            if not found:
+                title = self._field_configs.get(column.name, {}).get('title', column.name)
+                raise self._validation_error(title, f"нет записи {fk.column.table.name} с id={value}")
+
+    def _foreign_keys(self) -> List[Tuple[Any, Any]]:
+        """
+        Внешние ключи модели: пары (столбец, ограничение внешнего ключа).
+
+        Returns:
+            Список пар.
+
+        Пример:
+            >>> [c.name for c, _ in appointment_service._foreign_keys()]
+            ['patient_id', 'reason_id', ...]
+        """
+        table = self._model_class.__table__
+        return [(column, fk) for column in table.columns for fk in column.foreign_keys]
+
+    def _foreign_keys_changed(self, dto: DTOType, entity: Any) -> bool:
+        """
+        Меняет ли DTO какой-либо внешний ключ записи (тогда нужна проверка родителей).
+
+        Args:
+            dto: Новые значения.
+            entity: Запись (текущие значения).
+
+        Returns:
+            ``True``, если хотя бы одна ссылка меняется на другое непустое значение.
+
+        Пример:
+            >>> self._foreign_keys_changed(dto_with_other_patient, appointment)
+            True
+        """
+        for column, _ in self._foreign_keys():
+            value = getattr(dto, column.name, None)
+            if value is not None and value != getattr(entity, column.name, None):
+                return True
+        return False
 
     @AppLogger.get_instance(
         name='BaseService',
@@ -1681,8 +1801,10 @@ class BaseService(
             # Обновляем простые поля
             self._warn_ignored_changes(entity, dto)
             # Перенос к другому родителю (решение владельца 2026-10-16): новый родитель
-            # должен существовать (SQLite в проекте внешние ключи не проверяет)
-            self._validate_parents(dto, sess)
+            # должен существовать (SQLite в проекте внешние ключи не проверяет).
+            # Проверка — только если ссылки меняются (DYN3: без лишних запросов)
+            if self._foreign_keys_changed(dto, entity):
+                self._validate_parents(dto, sess)
             self._apply_simple_updates(entity, dto, session = sess)
 
             sess.flush()
@@ -4503,21 +4625,55 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     ) 
+    def _note_references(self) -> List[Tuple[Any, Any]]:
+        """
+        Все столбцы схемы БД, ссылающиеся на таблицу заметок (внешние ключи), — кто может
+        пользоваться заметкой (DYN2, 2026-10-16). Берётся из метаданных SQLAlchemy, а не из
+        field_configs: ссылка, о которой конфиг не знает, тоже защищает заметку от удаления.
+
+        Returns:
+            Список ``(таблица, столбец)``.
+
+        Пример:
+            >>> [c.name for _, c in note_service._note_references()]
+            ['comment_id', 'description_id', 'reason_id', ...]
+        """
+        notes_table = self._model_class.__table__
+        refs = []
+        for table in notes_table.metadata.sorted_tables:
+            for fk in table.foreign_keys:
+                if fk.column.table is notes_table:
+                    refs.append((table, fk.parent))
+        return refs
+
     def cleanup_unused_note(self, note_id: int, session: Optional[Session] = None) -> None:
         if note_id is None:
             return
-        from app.dependencies import _NOTE_USAGE_MODELS # так как циклы
-        # from sqlalchemy import or_
-
+        # from app.dependencies import _NOTE_USAGE_MODELS # так как циклы
+        # # from sqlalchemy import or_
+        #
+        # with self._session_scope(session) as sess:
+        #     total_usage = 0
+        #     for model_class, fields in _NOTE_USAGE_MODELS:
+        #         conditions = [getattr(model_class, field) == note_id for field in fields]
+        #         if conditions:
+        #             cnt = sess.query(model_class).filter(or_(*conditions)).count()
+        #             total_usage += cnt
+        #             if total_usage > 0:
+        #                 break   # можно прервать, если уже есть использование
+        # ↑ до DYN2 (2026-10-16): кто ссылается на заметки — из field_configs через
+        #   app.dependencies (сервисы зависели от модуля сборки приложения). Модель со
+        #   ссылкой на заметки без конфига (или с неполным) — заметка удалялась бы, хотя
+        #   используется. Теперь — из СХЕМЫ БД: все внешние ключи на таблицу заметок.
         with self._session_scope(session) as sess:
             total_usage = 0
-            for model_class, fields in _NOTE_USAGE_MODELS:
-                conditions = [getattr(model_class, field) == note_id for field in fields]
-                if conditions:
-                    cnt = sess.query(model_class).filter(or_(*conditions)).count()
-                    total_usage += cnt
-                    if total_usage > 0:
-                        break   # можно прервать, если уже есть использование
+            for table, column in self._note_references():
+                cnt = sess.execute(
+                    select(sa_func.count()).select_from(table).where(column == note_id)
+                ).scalar()
+                total_usage += cnt
+                if total_usage > 0:
+                    break   # можно прервать, если уже есть использование
 
             if total_usage == 0:
                 note_repo = self._get_repo(sess)
@@ -4742,6 +4898,7 @@ class AppointmentService(
         patient_repo = PatientRepository(session)
         if not patient_repo.get_by_id(dto.patient_id):
             raise PatientNotFoundError(dto.patient_id)
+        super()._validate_parents(dto, session)   # DYN3: остальные ссылки (заметки)
     
     @AppLogger.get_instance(
         name = 'AppointmentService',
@@ -6048,6 +6205,7 @@ class PhotoService(
         """
         if dto.appointment_id is not None and not AppointmentRepository(session).get_by_id(dto.appointment_id):
             raise AppointmentNotFoundError(dto.appointment_id)
+        super()._validate_parents(dto, session)   # DYN3: остальные ссылки
 
     # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
     _class_storage_path: Optional[str] = None
@@ -6452,62 +6610,72 @@ class PhotoService(
         # # 2. Проверка свободного места и прав (опционально)
         # file_size = os.path.getsize(source_file_path)
 
-        with self._session_scope(session) as sess:
-            # Проверяем существование приёма
-            app_repo = AppointmentRepository(sess)
-            app = app_repo.get_by_id(appointment_id)
-            if app is None:
-                err_ = AppointmentNotFoundError(appointment_id)
-                self.logger.exception(err_.message)
-
-                raise err_
-                # raise AppointmentNotFoundError(appointment_id)
-
-            # 1. Создаём запись с временным путём (помечаем как ожидающую)
-            photo = self._model_class(
-                appointment_id=appointment_id,
-                file_path='pending',  # временная метка
-                description=description
-            )
-
-            sess.add(photo)
-            sess.flush()  # получаем ID фото, нужен для имени файла
-
-            # 2. Копируем файл в хранилище
-            try:
-                # Генерируем целевой путь на основе appointment_id и photo.id
-                target_path = self._generate_target_path(source_file_path, appointment_id, photo.id)
-                # Создаём папку назначения, если её нет
-                os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                shutil.copy2(source_file_path, target_path)
-
-                self.logger.debug(
-                    f"Файл скопирован: "
-                    f"{source_file_path} -> {target_path}"
-                )
-                
-            except Exception as e:
-                # Если копирование не удалось — удаляем созданную запись
-                # sess.delete(photo) # ненужен, так как дальше должен быть rollback
-                # sess.commit()  # фиксируем удаление (чтобы не оставлять pending-запись)
-                self.logger.exception(f"Ошибка копирования файла {source_file_path}: {e}")
-
-                raise PhotoFileError(source_file_path, "копирование", str(e))
-
-            # 3. Обновляем путь в записи на реальный относительный путь
-            photo.file_path = os.path.relpath(target_path, self._storage_path)
-            # при выходе из контекста произойдёт commit, сохраняющий изменения
-
-            # dto_out = self._dto_class.from_orm(photo)
-            dto_out = self.get_dto_out(photo)
-
-            self.logger.info(
-                f"Добавлено фото "
-                f"id={dto_out.id} "
-                f"к приёму {appointment_id}"
-            )
-
-            return dto_out
+        # with self._session_scope(session) as sess:
+        #     # Проверяем существование приёма
+        #     app_repo = AppointmentRepository(sess)
+        #     app = app_repo.get_by_id(appointment_id)
+        #     if app is None:
+        #         err_ = AppointmentNotFoundError(appointment_id)
+        #         self.logger.exception(err_.message)
+        #
+        #         raise err_
+        #         # raise AppointmentNotFoundError(appointment_id)
+        #
+        #     # 1. Создаём запись с временным путём (помечаем как ожидающую)
+        #     photo = self._model_class(
+        #         appointment_id=appointment_id,
+        #         file_path='pending',  # временная метка
+        #         description=description
+        #     )
+        #
+        #     sess.add(photo)
+        #     sess.flush()  # получаем ID фото, нужен для имени файла
+        #
+        #     # 2. Копируем файл в хранилище
+        #     try:
+        #         # Генерируем целевой путь на основе appointment_id и photo.id
+        #         target_path = self._generate_target_path(source_file_path, appointment_id, photo.id)
+        #         # Создаём папку назначения, если её нет
+        #         os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        #         shutil.copy2(source_file_path, target_path)
+        #
+        #         self.logger.debug(
+        #             f"Файл скопирован: "
+        #             f"{source_file_path} -> {target_path}"
+        #         )
+        #
+        #     except Exception as e:
+        #         # Если копирование не удалось — удаляем созданную запись
+        #         # sess.delete(photo) # ненужен, так как дальше должен быть rollback
+        #         # sess.commit()  # фиксируем удаление (чтобы не оставлять pending-запись)
+        #         self.logger.exception(f"Ошибка копирования файла {source_file_path}: {e}")
+        #
+        #         raise PhotoFileError(source_file_path, "копирование", str(e))
+        #
+        #     # 3. Обновляем путь в записи на реальный относительный путь
+        #     photo.file_path = os.path.relpath(target_path, self._storage_path)
+        #     # при выходе из контекста произойдёт commit, сохраняющий изменения
+        #
+        #     # dto_out = self._dto_class.from_orm(photo)
+        #     dto_out = self.get_dto_out(photo)
+        #
+        #     self.logger.info(
+        #         f"Добавлено фото "
+        #         f"id={dto_out.id} "
+        #         f"к приёму {appointment_id}"
+        #     )
+        #
+        #     return dto_out
+        # ↑ до DYN1 (2026-10-16): второй, отдельный путь создания фото: своё имя файла
+        #   (<id>_<имя>_<uuid8>), копирование shutil.copy2 БЕЗ удаления при откате (файл
+        #   оставался на диске, если транзакция не прошла), своя частичная проверка.
+        #   Теперь — общий механизм (create): одинаковое поведение для CLI, старых и новых
+        #   экранов; ошибки — прежние (PhotoFileError выше, AppointmentNotFoundError).
+        return self.create(
+            PhotoDTO(appointment_id=appointment_id, file_path=os.path.abspath(source_file_path),
+                     description=description),
+            session=session,
+        )
         
     # def get_photos_for_appointment(self, appointment_id: int, session: Optional[Session] = None) -> List[PhotoDTO]:
     #     """

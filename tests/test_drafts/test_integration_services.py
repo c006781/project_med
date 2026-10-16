@@ -168,3 +168,16 @@ def test_conflict_detected_on_real_db(services, store, adapter):
     conflicts = find_conflicts(build_plan(store), adapter.read)
     assert [(c.field, c.current) for c in conflicts] == [('phone', '999')]
     assert adapter.read('patient', 10**6) is None
+
+
+def test_reparent_photo_through_drafts_saved(services, store, adapter, image):
+    """Перенос фото в другой приём через черновики сохраняется (раньше сервис молча
+    отбрасывал изменение appointment_id — решение владельца 2026-10-16: перенос разрешён)."""
+    patient = _patient(services)
+    a1, a2 = _appointment(services, patient.id), _appointment(services, patient.id)
+    photo = services['photo'].create(PhotoDTO(appointment_id=a1.id, file_path=image))
+    store.modify('photo', photo.id, {'appointment_id': a2.id},
+                 original={'appointment_id': a1.id}, parent_id=a1.id)
+    assert store.status('appointment', a2.id) == 'child'
+    execute_plan(store, build_plan(store), adapter)
+    assert services['photo'].get_by_id(photo.id).appointment_id == a2.id

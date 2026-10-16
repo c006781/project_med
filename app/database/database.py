@@ -353,8 +353,16 @@ class Database:
             Session
         )
 
-        # Автоматическое создание таблиц (если их нет)
-        Base.metadata.create_all(self.engine)
+        # # Автоматическое создание таблиц (если их нет)
+        # Base.metadata.create_all(self.engine)
+        # ↑ до 2026-10-16 (миграции): create_all только СОЗДАЁТ недостающие таблицы — новые
+        #   столбцы и индексы в существующую базу не добавлял (у настоящей базы проекта не
+        #   было индекса ix_appointment_note_text). Теперь база доводится до последней
+        #   версии схемы миграциями Alembic (app/database/migrate.py): новая — создаётся,
+        #   старая без отметки — приводится к исходной схеме, остальные — обновляются;
+        #   перед изменением существующей базы — резервная копия файла.
+        from app.database.migrate import upgrade_database
+        upgrade_database(self.engine)
 
     @AppLogger.get_instance(
         name = 'Database',
@@ -492,8 +500,15 @@ class Database:
             # Удаляет все существующие таблицы в БД
             Base.metadata.drop_all(self.engine)
             # pass
-        # Создает новые таблицы в БД, если они не существуют
-        Base.metadata.create_all(self.engine)
+            # (2026-10-16, миграции) и отметку версии — иначе миграции сочтут пустую базу
+            # свежей и таблицы не создадут
+            with self.engine.begin() as conn:
+                conn.exec_driver_sql('DROP TABLE IF EXISTS alembic_version')
+        # # Создает новые таблицы в БД, если они не существуют
+        # Base.metadata.create_all(self.engine)
+        # ↑ до 2026-10-16: см. __init__ — теперь миграции
+        from app.database.migrate import upgrade_database
+        upgrade_database(self.engine, backup=not recreate)
 
     @AppLogger.get_instance(
         name = 'Database',

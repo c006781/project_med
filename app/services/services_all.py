@@ -4741,11 +4741,14 @@ class NoteService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     ) 
-    def _note_references(self) -> List[Tuple[Any, Any]]:
+    def _note_references(self, session: Optional[Session] = None) -> List[Tuple[Any, Any]]:
         """
         Все столбцы схемы БД, ссылающиеся на таблицу заметок (внешние ключи), — кто может
         пользоваться заметкой (DYN2, 2026-10-16). Берётся из метаданных SQLAlchemy, а не из
         field_configs: ссылка, о которой конфиг не знает, тоже защищает заметку от удаления.
+
+        Args:
+            session: Сессия — тогда только таблицы, существующие в базе.
 
         Returns:
             Список ``(таблица, столбец)``.
@@ -4755,8 +4758,17 @@ class NoteService(
             ['comment_id', 'description_id', 'reason_id', ...]
         """
         notes_table = self._model_class.__table__
+        # (2026-10-16, миграции) при переданной сессии — только таблицы, которые ЕСТЬ в базе:
+        # модель могли добавить, а миграцию для неё ещё не применить (раньше create_all
+        # создавал таблицы всех моделей, и вопроса не было)
+        existing = None
+        if session is not None:
+            from sqlalchemy import inspect as sa_inspect
+            existing = set(sa_inspect(session.connection()).get_table_names())
         refs = []
         for table in notes_table.metadata.sorted_tables:
+            if existing is not None and table.name not in existing:
+                continue
             for fk in table.foreign_keys:
                 if fk.column.table is notes_table:
                     refs.append((table, fk.parent))
@@ -4778,7 +4790,7 @@ class NoteService(
             {'appointments': 2}
         """
         usage: Dict[str, int] = {}
-        for table, column in self._note_references():
+        for table, column in self._note_references(session):
             count = session.execute(
                 select(sa_func.count()).select_from(table).where(column == note_id)
             ).scalar()
@@ -4807,7 +4819,7 @@ class NoteService(
         #   используется. Теперь — из СХЕМЫ БД: все внешние ключи на таблицу заметок.
         with self._session_scope(session) as sess:
             total_usage = 0
-            for table, column in self._note_references():
+            for table, column in self._note_references(sess):
                 cnt = sess.execute(
                     select(sa_func.count()).select_from(table).where(column == note_id)
                 ).scalar()

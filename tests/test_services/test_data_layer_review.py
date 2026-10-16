@@ -403,9 +403,11 @@ def test_dyn1_add_photo_uses_generic_create_and_cleans_on_rollback(svc):
 
 
 def test_dyn2_note_references_from_schema(svc):
-    names = sorted(c.name for _, c in svc['note']._note_references())
-    assert names == sorted(['comment_id', 'description_id', 'reason_id', 'procedure_id',
-                            'recommendations_id', 'note_id', 'cost_procedure_id'])
+    names = {c.name for _, c in svc['note']._note_references()}
+    # «как минимум»: тестовые модели (test_new_table_by_config) тоже попадают в схему — это и
+    # есть смысл DYN2 (ссылки видны без конфига)
+    assert {'comment_id', 'description_id', 'reason_id', 'procedure_id',
+            'recommendations_id', 'note_id', 'cost_procedure_id'} <= names
 
 
 def test_dyn2_note_referenced_by_unconfigured_model_kept(svc, monkeypatch):
@@ -497,3 +499,17 @@ def test_dyn7_generic_delete_cascades_through_child_services(svc):
     stored = svc['storage'] / photo.file_path
     svc['appointment']._delete_entity(a.id)          # не delete_appointment — общий механизм
     assert svc['photo'].get_all() == [] and not stored.exists()
+
+
+def test_dyn10_generic_delete_of_patient_cleans_files_and_notes(svc):
+    """DYN10: patient_service.delete (так удаляют черновики) — как delete_patient."""
+    p = _patient(svc)
+    a = _appointment(svc, p.id, procedure_text='Чистка')
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    stored = svc['storage'] / photo.file_path
+    svc['patient'].delete(p.id)
+    assert not stored.exists()
+    with pytest.raises(AppointmentNoteNotFoundError):
+        svc['note'].get_note(a.procedure_id)

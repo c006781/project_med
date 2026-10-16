@@ -207,6 +207,7 @@ from app.exceptions import (
     #   AppException
     # DATA9 (2026-10-16): исключения валидации сущностей
     AppointmentValidationError, AppointmentNoteValidationError, PhotoValidationError,
+    EntityNotFoundError,  # DYN9: общее «не найдено»
 )
 # except ImportError as e:
 #     try:
@@ -409,7 +410,8 @@ class BaseService(
         model_class: Type[ModelType],
         dto_class: Type[DTOType],
         field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        logger_name: Optional[str] = None
+        logger_name: Optional[str] = None,
+        note_service: Optional['NoteService'] = None,
     ):
         """
         Инициализирует экземпляр сервиса.
@@ -430,10 +432,20 @@ class BaseService(
         """
 
         self._db            = db 
+        # self._repo_class    = repo_class    # репозиторий с которым работает сервис
+        # ↑ до DYN9 (2026-10-16): свой класс репозитория обязателен. Теперь repo_class=None —
+        #   общий репозиторий для модели (BaseRepository с model_class).
+        if repo_class is None:
+            repo_class = type(f"{model_class.__name__}Repository", (BaseRepository,),
+                              {'model_class': model_class})
         self._repo_class    = repo_class    # репозиторий с которым работает сервис
         self._model_class   = model_class   # ORM-модель для создания экземпляров
         self._dto_class     = dto_class     # DTO класс для преобразования
         self._field_configs = field_configs or {}  # конфигурация полей для сервиса (по умолчанию пустой словарь)
+        # DYN9 (2026-10-16): сервис заметок можно передать сразу — тогда сервису новой
+        # таблицы не нужен свой подкласс (наследники по-прежнему задают его сами)
+        if note_service is not None:
+            self._note_service = note_service
 
         # Настройка логгера: если имя не передано, используем имя класса сервиса
         if logger_name is None:
@@ -2374,7 +2386,10 @@ class BaseService(
         """
 
         # """Должен быть переопределён в наследниках, возвращая экземпляр NoteService."""
-        raise NotImplementedError
+        # raise NotImplementedError
+        # ↑ до DYN9 (2026-10-16): обязательный «крючок» в каждом сервисе. По умолчанию —
+        #   сервис заметок из атрибута _note_service (если задан).
+        return getattr(self, '_note_service', None)
         # return None
 
     @AppLogger.get_instance(
@@ -2914,7 +2929,11 @@ class BaseService(
         :raises: NotImplementedError, если метод не переопределён в наследнике
         """
 
-        raise NotImplementedError("Метод create должен быть переопределён в наследнике")
+        # raise NotImplementedError("Метод create должен быть переопределён в наследнике")
+        # ↑ до DYN9 (2026-10-16): общий механизм (_create_entity) был, а базовый create —
+        #   нет: каждый сервис писал одинаковую обёртку, новая таблица без своего кода не
+        #   работала. Наследники переопределяют только при особой логике (файлы фото).
+        return self._create_entity(dto, session=session)
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -2938,7 +2957,11 @@ class BaseService(
         :raises: NotImplementedError, если метод не переопределён в наследнике
         """
 
-        raise NotImplementedError("Метод update должен быть переопределён в наследнике")
+        # raise NotImplementedError("Метод update должен быть переопределён в наследнике")
+        # ↑ до DYN9: см. create
+        if dto.id is None:
+            raise self._validation_error('id', 'не указан id записи для обновления')
+        return self._update_entity(dto, dto.id, session=session)
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -2993,8 +3016,8 @@ class BaseService(
             # и не вызывать super().delete (или удалять файлы вручную после проверки использования).
             storage_path = None
             for field_name, config in self._field_configs.items():
-                if config.get('widget_type') != 'image_thumbnail':
-                    continue
+                if config.get('widget_type') != 'image_thumbnail' or self._manages_files:
+                    continue   # DYN10: сервис, управляющий файлами, удаляет их сам
                 
                 # Получаем значение поля (относительный путь к файлу)
                 rel_path = getattr(item, field_name, None)
@@ -3007,8 +3030,15 @@ class BaseService(
                     continue
 
                 # Получаем базовый путь к хранилищу (лениво)
+                # if storage_path is None:
+                #     storage_path = AppConfigManager.get_instance().get(
+                #         'PHOTOS_STORAGE_PATH',
+                #         os.path.join('.', 'photos')
+                #     )
+                # ↑ до DYN10 (2026-10-16): из глобального конфига (как DATA10) — у сервиса
+                #   своя папка; конфиг — запасной путь
                 if storage_path is None:
-                    storage_path = AppConfigManager.get_instance().get(
+                    storage_path = getattr(self, '_storage_path', None) or AppConfigManager.get_instance().get(
                         'PHOTOS_STORAGE_PATH',
                         os.path.join('.', 'photos')
                     )
@@ -3044,7 +3074,12 @@ class BaseService(
                 # else:
                 #     self.logger.debug(f"Файл {full_path} не существует, пропуск")
 
-            repo.delete(item)
+            # repo.delete(item)
+            # ↑ до DYN10 (2026-10-16): упрощённое удаление МИМО _delete_entity — без очистки
+            #   неиспользуемых заметок и без удаления детей через их сервисы (каскад ORM
+            #   удалял, например, фото пациента без файлов). У PatientService своего delete
+            #   не было — так удаляли пациента черновики. Теперь — общий _delete_entity.
+            self._delete_entity(entity_id, session=sess)
             self.logger.info(f"Удалена запись {self._model_class.__name__} с id={entity_id}")
 
     @AppLogger.get_instance(
@@ -3063,9 +3098,12 @@ class BaseService(
         :raises: Exception
         :return: Exception
         """
-        raise NotImplementedError(
-            f"Метод _not_found_exception не реализован для {self.__class__.__name__}"
-        )
+        # raise NotImplementedError(
+        # f"Метод _not_found_exception не реализован для {self.__class__.__name__}"
+        # )
+        # ↑ до DYN9 (2026-10-16): обязательный «крючок» в каждом сервисе. По умолчанию —
+        #   общее EntityNotFoundError (оно же LookupError).
+        return EntityNotFoundError(self._model_class.__name__, entity_id)
     
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -4002,6 +4040,23 @@ class PatientService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )  
+    def delete(self, entity_id: int, session: Optional[Session] = None) -> None:
+        """
+        Удаление пациента — как ``delete_patient`` (DYN10, 2026-10-16): раньше своего delete
+        не было, и базовый удалял пациента без очистки файлов фото и заметок.
+
+        Args:
+            entity_id: Id пациента.
+            session: Сессия.
+
+        Returns:
+            None
+
+        Пример:
+            >>> patient_service.delete(1)
+        """
+        self.delete_patient(entity_id, session=session)
+
     def _get_child_service(self, relation_name: str) -> Optional['BaseService']:
         """
         Сервис детей пациента: приёмы (DYN7, 2026-10-16 — для общего каскадного удаления).

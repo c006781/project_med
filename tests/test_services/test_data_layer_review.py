@@ -303,17 +303,75 @@ def test_data10_photo_update_uses_service_storage_not_global_config(svc, monkeyp
     assert (svc['storage'] / updated.file_path).exists()
 
 
-def test_data11_ignored_non_updatable_change_reported(svc):
+# ↓ до решения владельца 2026-10-16 («перенос разрешён»): тест фиксировал, что перенос фото
+#   не сохраняется, но об этом пишется предупреждение.
+# def test_data11_ignored_non_updatable_change_reported(svc):
+#     p = _patient(svc)
+#     a1, a2 = _appointment(svc, p.id), _appointment(svc, p.id)
+#     src = svc['tmp'] / 's.jpg'
+#     src.write_bytes(b'x')
+#     photo = svc['photo'].create(PhotoDTO(appointment_id=a1.id, file_path=str(src)))
+#     got = []
+#     handler = svc['photo'].logger.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+#     try:
+#         svc['photo'].update(photo.model_copy(update={'appointment_id': a2.id, 'description': 'd'}))
+#     finally:
+#         svc['photo'].logger.remove_output(handler)
+#     assert svc['photo'].get_by_id(photo.id).appointment_id == a1.id     # как раньше — не переносится
+#     assert any(line.startswith('WARNING|') and 'appointment_id' in line for line in got)
+
+
+# ---------------------------------------------------------------------------
+# Перенос к другому родителю (решение владельца 2026-10-16: разрешён)
+# ---------------------------------------------------------------------------
+
+def test_move_photo_to_other_appointment(svc):
     p = _patient(svc)
     a1, a2 = _appointment(svc, p.id), _appointment(svc, p.id)
     src = svc['tmp'] / 's.jpg'
     src.write_bytes(b'x')
     photo = svc['photo'].create(PhotoDTO(appointment_id=a1.id, file_path=str(src)))
+    moved = svc['photo'].update(photo.model_copy(update={'appointment_id': a2.id}))
+    assert moved.appointment_id == a2.id
+    assert (svc['storage'] / moved.file_path).exists()            # файл на месте
+    counts = {a.id: a.has_photos for a in svc['appointment'].get_page(0, 10)[0]}
+    assert counts[a2.id] != counts[a1.id]
+
+
+def test_move_appointment_to_other_patient(svc):
+    p1, p2 = _patient(svc), _patient(svc, 'Сидоров')
+    a = _appointment(svc, p1.id, procedure_text='Чистка')
+    moved = svc['appointment'].update(svc['appointment'].get_by_id(a.id).model_copy(
+        update={'patient_id': p2.id}))
+    assert moved.patient_id == p2.id and moved.procedure_text == 'Чистка'
+    assert svc['appointment'].get_appointments_by_patient_page(p1.id, 0, 10)[1] == 0
+
+
+def test_move_to_missing_parent_rejected(svc):
+    from app.exceptions.exceptions_all import AppointmentNotFoundError, PatientNotFoundError
+    p = _patient(svc)
+    a = _appointment(svc, p.id)
+    with pytest.raises(PatientNotFoundError):
+        svc['appointment'].update(svc['appointment'].get_by_id(a.id).model_copy(update={'patient_id': 999}))
+    src = svc['tmp'] / 's.jpg'
+    src.write_bytes(b'x')
+    photo = svc['photo'].create(PhotoDTO(appointment_id=a.id, file_path=str(src)))
+    with pytest.raises(AppointmentNotFoundError):
+        svc['photo'].update(photo.model_copy(update={'appointment_id': 999}))
+    with pytest.raises(AppointmentNotFoundError):
+        svc['photo'].create(PhotoDTO(appointment_id=999, file_path=str(src)))
+    assert svc['photo'].get_by_id(photo.id).appointment_id == a.id
+
+
+def test_data11_no_false_warning_on_note_text_change(svc):
+    """Ссылки на заметки меняет механизм заметок — предупреждения «не изменяется» нет."""
+    p = _patient(svc)
+    a = _appointment(svc, p.id, procedure_text='Чистка')
     got = []
-    handler = svc['photo'].logger.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
+    handler = svc['appointment'].logger.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
     try:
-        svc['photo'].update(photo.model_copy(update={'appointment_id': a2.id, 'description': 'd'}))
+        svc['appointment'].update(svc['appointment'].get_by_id(a.id).model_copy(
+            update={'procedure_text': 'Пломба'}))
     finally:
-        svc['photo'].logger.remove_output(handler)
-    assert svc['photo'].get_by_id(photo.id).appointment_id == a1.id     # как раньше — не переносится
-    assert any(line.startswith('WARNING|') and 'appointment_id' in line for line in got)
+        svc['appointment'].logger.remove_output(handler)
+    assert not [line for line in got if 'updatable=False' in line]

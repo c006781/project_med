@@ -1680,6 +1680,9 @@ class BaseService(
             
             # Обновляем простые поля
             self._warn_ignored_changes(entity, dto)
+            # Перенос к другому родителю (решение владельца 2026-10-16): новый родитель
+            # должен существовать (SQLite в проекте внешние ключи не проверяет)
+            self._validate_parents(dto, sess)
             self._apply_simple_updates(entity, dto, session = sess)
 
             sess.flush()
@@ -1868,7 +1871,13 @@ class BaseService(
         # for field_info in tt:
         for field_info in self._get_simple_updatable_fields():
 
-            if not field_info.get('editable', True) or field_info.get('updatable') is False:
+            # if not field_info.get('editable', True) or field_info.get('updatable') is False:
+            #     continue
+            # ↑ до DATA15 (2026-10-16): сервис применял и 'editable' — настройку ИНТЕРФЕЙСА
+            #   («можно ли править ячейку»): поле только для чтения в таблице нельзя было
+            #   изменить и программно (перенос к другому родителю). Сервис учитывает только
+            #   'updatable' (поля с updatable=False сюда не попадают вовсе).
+            if field_info.get('updatable') is False:
                 continue
 
             field_name = field_info['name']
@@ -2268,8 +2277,11 @@ class BaseService(
             ['appointment_id']
         """
         ignored = []
+        # ссылки на заметки меняет механизм заметок (по полям *_text) — не «игнор»
+        # (иначе каждое изменение текста заметки давало ложное предупреждение)
+        note_fks = {m['orm_id_field'] for m in self._get_note_field_mappings()}
         for field_name, config in self._field_configs.items():
-            if config.get('updatable') is not False or field_name == 'id':
+            if config.get('updatable') is not False or field_name == 'id' or field_name in note_fks:
                 continue
             if config.get('virtual') or config.get('is_note') or not hasattr(entity, field_name):
                 continue
@@ -6012,6 +6024,30 @@ class PhotoService(
 
     _validation_exception = PhotoValidationError   # DATA9: исключение валидации сущности
     _manages_files = True   # DATA10: файлы фото — create/update/delete этого сервиса
+
+    def _validate_parents(self, dto: PhotoDTO, session: Session) -> None:
+        """
+        Приём фото существует (создание и перенос в другой приём, 2026-10-16). Раньше
+        проверки не было, а SQLite внешние ключи не проверяет — фото могло ссылаться на
+        несуществующий приём.
+
+        Args:
+            dto: DTO фото.
+            session: Сессия.
+
+        Returns:
+            None
+
+        Raises:
+            AppointmentNotFoundError: Приёма нет.
+
+        Пример:
+            >>> self._validate_parents(PhotoDTO(appointment_id=999, file_path='x'), sess)
+            Traceback (most recent call last):
+            AppointmentNotFoundError: ...
+        """
+        if dto.appointment_id is not None and not AppointmentRepository(session).get_by_id(dto.appointment_id):
+            raise AppointmentNotFoundError(dto.appointment_id)
 
     # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
     _class_storage_path: Optional[str] = None

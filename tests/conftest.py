@@ -143,6 +143,46 @@ os.environ.setdefault('GITHUB_TOKEN', 'test-placeholder')
 import tempfile as _tempfile
 os.environ.setdefault('PROJECT_MED_ENV_DIR', _tempfile.mkdtemp(prefix='project_med_env_'))
 
+# T2 (2026-10-16): тесты, идущие через app.dependencies (CLI и т. п.), открывали НАСТОЯЩИЕ
+# config.msgpack и clinic.db проекта (путь к конфигу из .env — 'config.msgpack' от текущей
+# папки = корня проекта). create_all дописал в боевую базу таблицу тестовой модели.
+# Теперь весь набор работает с временным конфигом: временные база, фото и логи.
+_TEST_DATA_DIR = _tempfile.mkdtemp(prefix='project_med_data_')
+_TEST_CONFIG = os.path.join(_TEST_DATA_DIR, 'config.msgpack')
+os.environ.setdefault('APP_CONFIG_PATH', _TEST_CONFIG)
+if os.environ['APP_CONFIG_PATH'] == _TEST_CONFIG:
+    import msgpack as _msgpack
+    with open(_TEST_CONFIG, 'wb') as _f:
+        _msgpack.pack({
+            'database_local_path': os.path.join(_TEST_DATA_DIR, 'clinic.db'),
+            'PHOTOS_STORAGE_PATH': os.path.join(_TEST_DATA_DIR, 'photos'),
+            'LOG_DIR': os.path.join(_TEST_DATA_DIR, 'logs'),
+            'BACKUP_PATH': os.path.join(_TEST_DATA_DIR, 'backup'),
+        }, _f)
+
+# T2: страховка — открыть боевую базу проекта из теста нельзя (тест сразу падает)
+_REAL_DB = os.path.normcase(os.path.abspath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'clinic.db')))
+
+
+def _guard_real_db(create_engine_func):
+    """Обёртка create_engine: запрет на боевую clinic.db проекта (T2)."""
+    def guarded(url, *args, **kwargs):
+        text = str(url)
+        if text.startswith('sqlite:///'):
+            path = os.path.normcase(os.path.abspath(text[len('sqlite:///'):]))
+            if path == _REAL_DB:
+                raise RuntimeError(
+                    f"Тест пытается открыть БОЕВУЮ базу проекта {path}. Тесты должны работать "
+                    "с временной базой (tests/conftest.py, T2)."
+                )
+        return create_engine_func(url, *args, **kwargs)
+    return guarded
+
+
+import app.database.database as _database_module  # noqa: E402
+_database_module.create_engine = _guard_real_db(_database_module.create_engine)
+
 from app.repositories import (
     PatientRepository, AppointmentRepository,
     AppointmentNoteRepository, PhotoRepository

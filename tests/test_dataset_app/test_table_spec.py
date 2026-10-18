@@ -165,3 +165,23 @@ def test_total_with_where_and_sum(services, providers, filled, rx):
         built['test_prescriptions'].append({'dosage': dosage}); built['test_prescriptions'].post()
     assert built.appointments.value('long_doses') == 2
     assert built.appointments.value('max_id') == max(p.id for p in rx.get_page(0, 10)[0])
+
+
+def test_custom_total_logic_and_initial_photo_text(services, providers, filled, rx):
+    """Итоги настраиваемые: своя функция от подчинённых строк; число фото — показ как прежде («❌»/«N фото»)."""
+    built = CLINIC.build(services=providers)
+    built.open()
+    assert built.appointments.value('photo_count') == 0 and built.appointments.text('photo_count') == '❌'
+    base = [CLINIC.get(n) for n in CLINIC.names()]
+    appointments = TableSpec(**{**base[1].__dict__, 'extras': (
+        total('doses', 'Дозы', 'test_prescriptions',
+              lambda rows: ', '.join(sorted(r['dosage'] for r in rows)) or '—'),)})
+    registry = TableRegistry([base[0], appointments, TableSpec(
+        'test_prescriptions', 'prescription', 'Назначения', 'Назначение', Prescription, PrescriptionDTO,
+        PRESCRIPTION_CONFIG, service=lambda: rx)])
+    built = registry.build(services=providers)
+    built.open()
+    assert built.appointments.value('doses') == '—'
+    for dosage in ('2 т.', '1 т.'):
+        built['test_prescriptions'].append({'dosage': dosage}); built['test_prescriptions'].post()
+    assert built.appointments.value('doses') == '1 т., 2 т.'

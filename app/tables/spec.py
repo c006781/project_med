@@ -83,7 +83,7 @@ class Extra:
     value_kind: FieldKind = FieldKind.ANY
     func: Optional[Callable[..., Any]] = None
     child: Optional[str] = None
-    aggregate: AggFunc = AggFunc.COUNT
+    aggregate: Any = AggFunc.COUNT
     field: Optional[str] = None
     where: Tuple[Condition, ...] = ()
     visible: bool = True
@@ -136,7 +136,7 @@ def calc(name: str, label: str, func: Callable[..., Any], kind: FieldKind = Fiel
     return Extra(name, label, 'calc', kind, func=func, visible=visible, display=display, widget=widget)
 
 
-def total(name: str, label: str, child: str, func: AggFunc = AggFunc.COUNT,
+def total(name: str, label: str, child: str, func: Any = AggFunc.COUNT,
           field: Optional[str] = None, where: Sequence[Condition] = (), *,
           kind: Optional[FieldKind] = None, display: Optional[Callable[[Any], str]] = None) -> Extra:
     """
@@ -147,7 +147,8 @@ def total(name: str, label: str, child: str, func: AggFunc = AggFunc.COUNT,
         name: Имя.
         label: Подпись.
         child: Подчинённая таблица (по имени в реестре).
-        func: Вид итога.
+        func: Вид итога (``AggFunc``) или своя функция от списка подчинённых строк —
+            любая логика (``lambda rows: sum(r['amount'] for r in rows if r['paid'])``).
         field: Поле подчинённой строки (для суммы/мин/макс/среднего).
         where: Условия на подчинённые строки.
         kind: Тип значения (по умолчанию: число — целое, остальное — без проверки).
@@ -160,9 +161,11 @@ def total(name: str, label: str, child: str, func: AggFunc = AggFunc.COUNT,
         >>> total('photo_count', 'Фото', 'photos').aggregate
         <AggFunc.COUNT: 'count'>
     """
+    if not callable(func) or isinstance(func, AggFunc):
+        func = AggFunc(func)
     if kind is None:
-        kind = FieldKind.INTEGER if AggFunc(func) is AggFunc.COUNT else FieldKind.ANY
-    return Extra(name, label, 'total', kind, child=child, aggregate=AggFunc(func), field=field,
+        kind = FieldKind.INTEGER if func is AggFunc.COUNT else FieldKind.ANY
+    return Extra(name, label, 'total', kind, child=child, aggregate=func, field=field,
                  where=tuple(where), display=display)
 
 

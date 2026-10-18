@@ -55,6 +55,11 @@ def main():
         'app.utils.logger.logger',
         'app.config.config_manager.manager',
         'app.database.database',
+        # миграции (2026-10-18): Alembic грузит env.py и versions/*.py по пути файла (они
+        # приезжают через --add-data app), а их импорты PyInstaller сам не видит
+        'app.database.migrate',
+        'alembic', 'alembic.context', 'alembic.op', 'alembic.ddl.sqlite',
+        'alembic.runtime.migration', 'alembic.autogenerate',
         'interfaces.gui.gui_window.main',
 
         'app.utils.deferred_actions',

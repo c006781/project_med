@@ -1368,11 +1368,18 @@ class DataSet:
         self.check_browse_mode()
         self._require_modifiable()
         row = self._new_row(values)
+        # H1 (2026-10-18): сначала всё состояние (строки, номер, правка), потом события по
+        # порядку — каждый подписчик на каждом событии видит согласованное состояние
+        # (раньше в событии о вставке номер текущей строки указывал на новую пустую строку
+        # при состоянии «просмотр»)
+        old_index, old_state = self._index, self._state
         self._rows.insert(at, row)
         self._buffer = copy.deepcopy(row)
+        self._index, self._state = at, State.INSERT
         self._emit(EventKind.ROWS_INSERTED, index=at, count=1)
-        self._force_index(at)
-        self._set_state(State.INSERT)
+        self._emit(EventKind.CURRENT_CHANGED,
+                   old=old_index + 1 if 0 <= at <= old_index else old_index, new=at)
+        self._emit(EventKind.STATE_CHANGED, old=old_state, new=State.INSERT)
 
     def insert(self, values: Optional[Mapping[str, Any]] = None) -> None:
         """
@@ -1516,12 +1523,16 @@ class DataSet:
         if state is State.INSERT:
             at = self._index
             del self._rows[at]
-            # D3 (2026-10-18): событие о строках — СРАЗУ после изменения строк, до других
-            # (раньше шло после смены состояния: подписчик, сверяющий число строк, видел
-            # расхождение — таблица перестраивалась целиком, терялись выделение и прокрутка)
+            # D3 (2026-10-18): событие о строках — первым из событий (раньше шло после смены
+            # состояния: подписчик, сверяющий число строк, видел расхождение — таблица
+            # перестраивалась целиком, терялись выделение и прокрутка).
+            # H1: и состояние уже согласовано (номер не указывает на удалённую строку за
+            # концом — связь «главная → подчинённая» на этом падала)
+            self._index = min(at, len(self._rows) - 1) if self._rows else -1
+            self._state = State.BROWSE
             self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
-            self._set_state(State.BROWSE)
-            self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
+            self._emit(EventKind.STATE_CHANGED, old=State.INSERT, new=State.BROWSE)
+            self._emit(EventKind.CURRENT_CHANGED, old=at, new=self._index)
         else:
             self._set_state(State.BROWSE)
             self._emit(EventKind.ROW_CHANGED, index=self._index, fields=tuple(self._rows[self._index]))
@@ -1568,8 +1579,9 @@ class DataSet:
         if key in self._fetched_keys:
             self._fetched_keys.discard(key)
             self._fetched = max(self._fetched - 1, 0)   # следующая порция — без пропуска
+        self._index = min(at, len(self._rows) - 1) if self._rows else -1   # H1: до событий
         self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
-        self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
+        self._emit(EventKind.CURRENT_CHANGED, old=at, new=self._index)
 
     def touch(self, keys: Optional[Iterable[Hashable]] = None) -> int:
         """
@@ -1621,11 +1633,14 @@ class DataSet:
             fresh = overlaid[0] if overlaid else None
         if fresh is None:
             del self._rows[i]
-            self._emit(EventKind.ROWS_REMOVED, index=i, count=1)
+            old_index = self._index
             if i < self._index:
-                self._force_index(self._index - 1)      # та же запись, номер на 1 меньше
+                self._index -= 1                         # та же запись, номер на 1 меньше
             elif i == self._index:
-                self._force_index(min(i, len(self._rows) - 1) if self._rows else -1, i)
+                self._index = min(i, len(self._rows) - 1) if self._rows else -1
+            self._emit(EventKind.ROWS_REMOVED, index=i, count=1)       # H1: номер уже верный
+            if i <= old_index:
+                self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=self._index)
             return False
         self._rows[i] = dict(fresh)
         self._emit(EventKind.ROW_CHANGED, index=i, fields=tuple(fresh))

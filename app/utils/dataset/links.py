@@ -138,7 +138,10 @@ class MasterDetailLink:
             return None
         values = {}
         for detail_field, master_field in self.fields.items():
-            value = master.value(master_field)
+            try:
+                value = master.value(master_field)
+            except IndexError:            # страховка: строки нет — как «нет главной строки»
+                return None
             if value is None:
                 return None
             values[detail_field] = value

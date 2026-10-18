@@ -23,40 +23,46 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
-    QComboBox, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QComboBox, QDateEdit, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
 from app.dataset_app import create_clinic_datasets
 from app.utils.dataset import Condition, DataSource, FetchMode, Op
-from app.utils.dataset_qt import DataNavigator, DataSetTableModel, bind, bind_table_view
+from app.utils.dataset_qt import DataNavigator, DataSetTableModel, bind_table_view, build_form
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
-# Колонки таблиц и поля форм: (поле, виджет)
-COLUMNS: Dict[str, Tuple[str, ...]] = {
-    'patients': ('last_name', 'first_name', 'middle_name', 'birth_date', 'phone'),
-    'appointments': ('date', 'reason_text', 'date_next', 'has_photos'),
-    'photos': ('file_path', 'description'),
-}
-FORMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
-    'patients': (('last_name', 'line'), ('first_name', 'line'), ('middle_name', 'line'),
-                 ('birth_date', 'date'), ('phone', 'line'), ('description_text', 'text'),
-                 ('comment_text', 'text')),
-    'appointments': (('date', 'date'), ('date_next', 'date'), ('reason_text', 'text'),
-                     ('procedure_text', 'text'), ('recommendations_text', 'text'),
-                     ('note_text', 'text'), ('cost_procedure_text', 'text')),
-    'photos': (('image', 'image'), ('description', 'text')),
-}
-TITLES = {'patients': 'Пациенты', 'appointments': 'Приёмы', 'photos': 'Фото'}
+# # Колонки таблиц и поля форм: (поле, виджет)
+# COLUMNS: Dict[str, Tuple[str, ...]] = {
+#     'patients': ('last_name', 'first_name', 'middle_name', 'birth_date', 'phone'),
+#     'appointments': ('date', 'reason_text', 'date_next', 'has_photos'),
+#     'photos': ('file_path', 'description'),
+# }
+# FORMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
+#     'patients': (('last_name', 'line'), ('first_name', 'line'), ('middle_name', 'line'),
+#                  ('birth_date', 'date'), ('phone', 'line'), ('description_text', 'text'),
+#                  ('comment_text', 'text')),
+#     'appointments': (('date', 'date'), ('date_next', 'date'), ('reason_text', 'text'),
+#                      ('procedure_text', 'text'), ('recommendations_text', 'text'),
+#                      ('note_text', 'text'), ('cost_procedure_text', 'text')),
+#     'photos': (('image', 'image'), ('description', 'text')),
+# }
+# TITLES = {'patients': 'Пациенты', 'appointments': 'Приёмы', 'photos': 'Фото'}
+# ↑ до 2026-10-18: колонки, формы и заголовки экрана — словарями здесь, ровно на три
+#   таблицы. Теперь — из описаний таблиц (app/tables: columns, form, title), форма —
+#   build_form по описанию полей; экран показывает цепочку таблиц реестра.
 
 
 def _make_widget(kind: str) -> QWidget:
     """
+    (не используется с 2026-10-18: форма — ``build_form`` по описанию полей; оставлена по
+    правилу проекта)
+
     Виджет поля формы по виду.
 
     Args:
@@ -125,10 +131,12 @@ class DataSetPilotPage(BasePage):
         super().__init__(parent)
         self.drafts = drafts
         self._save_handler = save_handler
+        # наборы, связи, свои столбцы (отметки, итоги) — по описаниям таблиц (app.tables)
         self.clinic = create_clinic_datasets(drafts=drafts, services=services, fetch_size=fetch_size)
         self.models: Dict[str, DataSetTableModel] = {}
         self.navigators: Dict[str, DataNavigator] = {}
         self.tables: Dict[str, QTableView] = {}
+        self.forms: Dict[str, Any] = {}
         self.bindings = []
         self._opened = False
         self._ask_delete = ask_delete
@@ -150,13 +158,15 @@ class DataSetPilotPage(BasePage):
             >>> page._build_ui(50)
         """
         layout = QVBoxLayout(self)
+        self.status = QLabel('')             # раньше колонок: ошибки при построении — сюда
+        self.status.setWordWrap(True)
         layout.addLayout(self._build_toolbar(fetch_size))
         splitter = QSplitter(Qt.Horizontal)
-        for name in ('patients', 'appointments', 'photos'):
+        # for name in ('patients', 'appointments', 'photos'):
+        # ↑ до 2026-10-18: три таблицы вручную; теперь — цепочка таблиц из описаний
+        for name in self.clinic.registry.chain():
             splitter.addWidget(self._build_column(name))
         layout.addWidget(splitter, 1)
-        self.status = QLabel('')
-        self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
     def _build_toolbar(self, fetch_size: int) -> QHBoxLayout:
@@ -218,7 +228,8 @@ class DataSetPilotPage(BasePage):
             >>> page._build_column('photos')
         """
         source: DataSource = self.clinic.sources[name]
-        box = QGroupBox(TITLES[name])
+        spec = self.clinic.registry.get(name)
+        box = QGroupBox(spec.title)
         column = QVBoxLayout(box)
         navigator = DataNavigator(source, confirm_delete=self._ask_delete, show_errors=False)
         navigator.error_occurred.connect(self.show_error)
@@ -240,25 +251,35 @@ class DataSetPilotPage(BasePage):
                                  enabled=lambda: self.clinic.photos.can_modify)
         column.addWidget(navigator)
         self.navigators[name] = navigator
-        model = DataSetTableModel(source, columns=COLUMNS[name], parent=self)
+        model = DataSetTableModel(source, columns=list(spec.columns) or None, parent=self)
         model.error_occurred.connect(self.show_error)
         table = QTableView()
         table.setSelectionBehavior(QTableView.SelectRows)
         table.setSelectionMode(QTableView.SingleSelection)
         table.horizontalHeader().setStretchLastSection(True)
         bind_table_view(table, model)
+        # щелчок по заголовку; что считает программа — когда загружено всё. Указатель
+        # сортировки — снят ДО включения: иначе Qt сразу сортирует по столбцу 0 и подменяет
+        # сортировку из описания таблицы
+        table.horizontalHeader().setSortIndicator(-1, Qt.AscendingOrder)
+        table.setSortingEnabled(True)
         column.addWidget(table, 1)
         self.models[name], self.tables[name] = model, table
-        form = QFormLayout()
-        dataset = self.clinic.sources[name].dataset
-        for field, kind in FORMS[name]:
-            widget = _make_widget(kind)
-            definition = dataset.fields.get(field)
-            label = definition.label if definition is not None else field
-            self.bindings.append(bind(widget, source, field, image=kind == 'image',
-                                      on_error=self.show_error))
-            form.addRow(label, widget)
-        column.addLayout(form)
+        # form = QFormLayout()
+        # dataset = self.clinic.sources[name].dataset
+        # for field, kind in FORMS[name]:
+        #     widget = _make_widget(kind)
+        #     definition = dataset.fields.get(field)
+        #     label = definition.label if definition is not None else field
+        #     self.bindings.append(bind(widget, source, field, image=kind == 'image',
+        #                               on_error=self.show_error))
+        #     form.addRow(label, widget)
+        # column.addLayout(form)
+        # ↑ до 2026-10-18: виджеты подбирались здесь вручную; теперь — форма по описанию полей
+        form = build_form(source, list(spec.form) or None, on_error=self.show_error)
+        self.forms[name] = form
+        self.bindings.extend(form.bindings)
+        column.addLayout(form.layout)
         return box
 
     # ------------------------------------------------------------------ данные

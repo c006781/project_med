@@ -39,11 +39,12 @@ def test_page_direct_mode(qapp, services, providers, filled):
     page = DataSetPilotPage(services=providers, ask_delete=lambda: True)
     page.open_data()
     model = page.models['patients']
-    assert model.rowCount() == 2 and model.data(model.index(0, 0)) == 'Иванов'
+    name_col = model.columns.index('last_name')
+    assert model.rowCount() == 2 and model.data(model.index(0, name_col)) == 'Иванов'
     assert page.models['appointments'].rowCount() == 2
     last_name = widget_for(page, 'patients', 'last_name')
     assert isinstance(last_name, QLineEdit) and last_name.text() == 'Иванов'
-    page.tables['patients'].setCurrentIndex(model.index(1, 0))                    # щелчок по Петрову
+    page.tables['patients'].setCurrentIndex(model.index(1, name_col))             # щелчок по Петрову
     assert page.clinic.patients.current_index == 1 and last_name.text() == 'Петров'
     assert page.models['appointments'].rowCount() == 1
     last_name.textEdited.emit('Петров-Водкин')
@@ -258,3 +259,14 @@ def test_consistency_direct_mode_small_portions(qapp, services, providers, fille
     c.patients.refresh(); c.patients.last(); c.patients.first()
     assert problems == [] and unexpected_resets == []
     assert sorted(p.last_name for p in services['patient'].get_all()) == ['Иванов', 'Сидоров']
+
+
+def test_sorting_enabled_keeps_spec_order(qapp, services, providers, filled):
+    """Включение сортировки щелчком не подменяет сортировку из описания (Qt сортировал по столбцу 0)."""
+    page = DataSetPilotPage(services=providers)
+    page.open_data()
+    visits = page.clinic.appointments
+    assert [o.field for o in visits.query.order] == ['date', 'id'] and visits.query.order[0].descending
+    assert visits.value('date') == datetime.date(2026, 3, 5)       # -date: последний приём первым
+    assert page.tables['appointments'].isSortingEnabled()
+    assert 'загружено' not in page.status.text()

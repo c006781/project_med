@@ -514,6 +514,14 @@ class DraftStore:
         #   её потомков есть черновики, значки новых предков не обновлялись (строки
         #   приёмов загрузились ПОСЛЕ правки фото — пациент без значка).
         node = (entity, entity_id)
+        # L1 (2026-10-18): черновик сам меняет связь с родителем (запись перенесена) —
+        # родителя решает черновик, а «сведения» снаружи (строка из БД со СТАРЫМ родителем)
+        # её не затирают. Раньше затирали: при удалении старого родителя перенесённая
+        # запись считалась его потомком и удалялась вместе с ним.
+        fk = self.schema.parent_field(entity)
+        record = self._records.get(node)
+        if fk and record is not None and fk in record.data:
+            return
         known = node in self._parents
         if known and self._parents[node] == parent_id:
             return

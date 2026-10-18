@@ -843,3 +843,22 @@ def test_sort_by_program_side_column_only_when_all_loaded():
     assert keys(everything)[0] == 20
     everything.set_order('date')                                   # снова по полю хранилища
     assert everything.query.order[0].field == 'date' and keys(everything) == [20, 30, 10]
+
+
+def test_detail_mark_or_own_total_does_not_recalc_master():
+    """V5: отметка/итог в подчинённом — у главного итог не пересчитывается (лишние запросы)."""
+    from app.utils.dataset import AggregateDef
+    visit_backend = MemoryBackend([{'id': 10, 'patient_id': 1}, {'id': 11, 'patient_id': 1}],
+                                  fields=[FieldDef('id'), FieldDef('patient_id', references='patients')])
+    visits = DataSet(visit_backend, name='appointments', fields=[
+        FieldDef('id'), FieldDef('patient_id', references='patients'),
+        FieldDef('mark', kind=FieldKind.BOOLEAN, local=True, default=False)])
+    patients = DataSet(MemoryBackend([{'id': 1}]), name='patients', fields=[
+        FieldDef('id'), FieldDef('visits', aggregate=AggregateDef(visits, 'patient_id'))])
+    MasterDetailLink(patients, visits)
+    patients.open(); visits.open()
+    before = visit_backend.fetch_count
+    visits.set_local('mark', True); visits.set_local('mark', True, index=1)
+    assert visit_backend.fetch_count == before                    # ни одного запроса
+    visits.append(); visits.post()
+    assert patients.value('visits') == 3 and visit_backend.fetch_count == before + 1

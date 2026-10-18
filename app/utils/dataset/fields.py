@@ -113,6 +113,9 @@ class FieldDef:
         persistent: Пишется в хранилище (по умолчанию да). ``False`` — значение приходит
             из хранилища (его вычисляет само хранилище: ФИО пациента у приёма, число фото),
             но обратно не пишется и не правится (как ``ProviderFlags`` в FireDAC).
+        local: Своё поле набора (как ``InternalCalc`` в RAD Studio): значение живёт в
+            наборе по ключу строки, переживает перечитывание, в хранилище не пишется;
+            меняется сразу, без правки строки и проверок (галочка-отметка, своя метка).
         validators: Свои проверки ``(значение, строка) -> ошибка | None``.
         display: Отображение значения текстом (по умолчанию ``str``, ``None`` → '').
         extra: Свободные данные для своих виджетов и адаптеров (ширина колонки и т. п.).
@@ -135,6 +138,7 @@ class FieldDef:
     lookup: Optional['LookupDef'] = None
     references: Optional[str] = None
     persistent: bool = True
+    local: bool = False
     validators: Tuple[Validator, ...] = ()
     display: Optional[Callable[[Any], str]] = None
     extra: Mapping[str, Any] = field(default_factory=dict)
@@ -167,21 +171,22 @@ class FieldDef:
             >>> FieldDef('name').stored, FieldDef('full_name', persistent=False).stored
             (True, False)
         """
-        return self.persistent and self.calculated is None and self.lookup is None
+        return (self.persistent and not self.local and self.calculated is None
+                and self.lookup is None)
 
     @property
     def editable(self) -> bool:
         """
-        Можно ли менять значение (хранимое и не только для чтения).
+        Можно ли менять значение: хранимое или своё поле набора, не только для чтения.
 
         Returns:
             ``True`` — можно.
 
         Пример:
-            >>> FieldDef('id', read_only=True).editable
-            False
+            >>> FieldDef('id', read_only=True).editable, FieldDef('mark', local=True).editable
+            (False, True)
         """
-        return self.stored and not self.read_only
+        return (self.stored or self.local) and not self.read_only
 
     def default_value(self) -> Any:
         """
@@ -393,6 +398,19 @@ class Fields:
             'a'
         """
         return [f for f in self._items.values() if f.stored]
+
+    def local(self) -> List[FieldDef]:
+        """
+        Свои поля набора (``local``).
+
+        Returns:
+            Список ``FieldDef``.
+
+        Пример:
+            >>> Fields([FieldDef('mark', local=True)]).local()[0].name
+            'mark'
+        """
+        return [f for f in self._items.values() if f.local]
 
     def referencing(self, table: str) -> List[FieldDef]:
         """

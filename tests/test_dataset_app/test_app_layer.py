@@ -276,3 +276,21 @@ def test_save_reads_each_dataset_few_times(services, providers, filled, app_draf
     assert len(calls) <= 6, len(calls)                       # по 1–2 на набор
     assert all(k > 0 for k in keys(clinic.patients))
     clinic.close()
+
+
+def test_mark_follows_new_record_after_drafts_save(services, providers, filled, app_drafts):
+    """Отметка новой записи (временный id) после сохранения черновиков — у той же записи (настоящий id)."""
+    from app.utils.dataset import DataSet, FieldDef, FieldKind
+    fields = fields_from_config(PATIENT_CONFIG, PatientDTO)
+    backend = ServiceBackend(providers['patient'], PatientDTO, fields)
+    writer = DraftsWriter(app_drafts.store, 'patient')
+    ds = writer.attach(DataSet(backend, writer=writer, name='patients',
+                               fields=fields + [FieldDef('mark', kind=FieldKind.BOOLEAN, local=True, default=False)]))
+    ds.open()
+    ds.append({'last_name': 'Отмеченный', 'first_name': 'О', 'birth_date': datetime.date(2000, 1, 1)})
+    ds.post()
+    ds.set_local('mark', True)
+    app_drafts.save()
+    real = next(p.id for p in services['patient'].get_all() if p.last_name == 'Отмеченный')
+    assert ds.local_keys('mark') == [real]
+    assert ds.locate(real) and ds.value('mark') is True

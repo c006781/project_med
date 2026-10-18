@@ -219,6 +219,8 @@ class DataSet:
         self._exhausted = True
         self._fetched = 0                    # строк получено из источника (смещение догрузки)
         self._fetched_keys: Set[Hashable] = set()
+        # свои поля набора (local): «ключ строки → {поле: значение}» — переживают перечитывание
+        self._local: Dict[Hashable, Dict[str, Any]] = {}
         self._emitter = Emitter()
         # описание полей — сразу (связи и экран настраиваются до открытия набора)
         self._resolve_fields(())
@@ -638,7 +640,28 @@ class DataSet:
         received = len(rows)
         if isinstance(self.writer, RowOverlay):
             rows = [dict(r) for r in self.writer.overlay(self, rows, query, offset == 0)]
-        return rows, total, received
+        return [self._apply_local(r) for r in rows], total, received
+
+    def _apply_local(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Своё поле набора — в строку: запомненное значение или значение по умолчанию.
+
+        Args:
+            row: Строка (меняется на месте).
+
+        Returns:
+            Та же строка.
+
+        Пример:
+            >>> ds._apply_local({'id': 1})
+            {'id': 1, 'mark': False}
+        """
+        if not self._fields.local():
+            return row
+        remembered = self._local.get(row.get(self.key_field), {})
+        for definition in self._fields.local():
+            row[definition.name] = remembered.get(definition.name, definition.default_value())
+        return row
 
     def _load_first(self, at_least: int = 0) -> None:
         """
@@ -733,6 +756,7 @@ class DataSet:
         self._buffer = None
         self._rows, self._fetched, self._fetched_keys = [], 0, set()
         self._total, self._exhausted = None, True
+        self._local = {}                                           # свои поля — до закрытия
         old_index, old_state = self._index, self._state
         self._index, self._state = -1, State.INACTIVE           # H2: до событий
         self._emit(EventKind.CLOSED)
@@ -1330,6 +1354,9 @@ class DataSet:
         definition = self._fields[name] if len(self._fields) else None
         if definition is not None and not definition.editable:
             raise DataSetError(f"поле «{definition.label}» только для чтения")
+        if definition is not None and definition.local:
+            self.set_local(name, value)
+            return
         if not self._state.editing:
             self.edit()
         assert self._buffer is not None
@@ -1337,6 +1364,122 @@ class DataSet:
             return
         self._buffer[name] = value
         self._emit(EventKind.ROW_CHANGED, index=self._index, fields=(name,))
+
+    def set_local(self, name: str, value: Any, index: Optional[int] = None) -> None:
+        """
+        Меняет своё поле набора (``local``) — сразу, без правки строки и без проверок.
+
+        Подходит для любой загруженной строки (галочки в таблице), не только текущей.
+
+        Args:
+            name: Имя своего поля.
+            value: Значение.
+            index: Номер строки (``None`` — текущая).
+
+        Returns:
+            None
+
+        Raises:
+            DataSetError: Поле не своё (``local``).
+            IndexError: Нет строки.
+
+        Пример:
+            >>> ds.set_local('mark', True, index=3)
+        """
+        definition = self._fields[name]
+        if not definition.local:
+            raise DataSetError(f"поле «{definition.label}» не своё поле набора (local)")
+        self._require_active()
+        i = self._index if index is None else index
+        if not 0 <= i < len(self._rows):
+            raise IndexError(f"нет строки {i}")
+        row = self._rows[i]
+        targets = [row]
+        if i == self._index and self._state.editing and self._buffer is not None:
+            targets.append(self._buffer)
+        if all(t.get(name) == value for t in targets):
+            return
+        for target in targets:
+            target[name] = value
+        key = row.get(self.key_field)
+        if key is not None:
+            self._local.setdefault(key, {})[name] = value
+        self._emit(EventKind.ROW_CHANGED, index=i, fields=(name,))
+
+    def local_keys(self, name: str) -> List[Hashable]:
+        """
+        Ключи строк, у которых своё поле набора истинно (отмеченные галочкой).
+
+        Учитываются и строки, не загруженные сейчас (запомненные по ключу).
+
+        Args:
+            name: Имя своего поля.
+
+        Returns:
+            Список ключей (в порядке строк набора, затем остальные).
+
+        Пример:
+            >>> ds.local_keys('mark')
+            [3, 7]
+        """
+        loaded = [r.get(self.key_field) for r in self._rows if r.get(name)]
+        others = [k for k, v in self._local.items() if v.get(name) and k not in loaded]
+        return [k for k in loaded if k is not None] + others
+
+    def clear_local(self, name: Optional[str] = None) -> None:
+        """
+        Сбрасывает своё поле набора у всех строк (снять все отметки).
+
+        Args:
+            name: Имя поля (``None`` — все свои поля).
+
+        Returns:
+            None
+
+        Пример:
+            >>> ds.clear_local('mark')
+        """
+        names = [name] if name else [f.name for f in self._fields.local()]
+        for values in self._local.values():
+            for n in names:
+                values.pop(n, None)
+        for i, row in enumerate(self._rows):
+            changed = []
+            for n in names:
+                default = self._fields[n].default_value()
+                if row.get(n) != default:
+                    row[n] = default
+                    changed.append(n)
+            if changed:
+                self._emit(EventKind.ROW_CHANGED, index=i, fields=tuple(changed))
+
+    def rekey(self, old_key: Hashable, new_key: Hashable) -> None:
+        """
+        Ключ записи сменился (временный → настоящий после сохранения отложенной записи):
+        свои поля набора переезжают к новому ключу.
+
+        Args:
+            old_key: Прежний ключ.
+            new_key: Новый ключ.
+
+        Returns:
+            None
+
+        Пример:
+            >>> ds.rekey(-1, 55)
+        """
+        if old_key not in self._local:
+            return
+        self._local.setdefault(new_key, {}).update(self._local.pop(old_key))
+        # строку с новым ключом могли уже перечитать (сохранение: «сохранено» приходит
+        # раньше «id заменён») — у неё сейчас значения по умолчанию
+        for i, row in enumerate(self._rows):
+            if row.get(self.key_field) == new_key:
+                before = {f.name: row.get(f.name) for f in self._fields.local()}
+                self._apply_local(row)
+                changed = tuple(n for n, v in before.items() if row.get(n) != v)
+                if changed:
+                    self._emit(EventKind.ROW_CHANGED, index=i, fields=changed)
 
     def _new_row(self, values: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         """
@@ -1353,6 +1496,7 @@ class DataSet:
             {'id': None, 'name': 'А'}
         """
         row: Dict[str, Any] = {f.name: f.default_value() for f in self._fields.stored()}
+        row.update({f.name: f.default_value() for f in self._fields.local()})
         row.setdefault(self.key_field, None)
         row.update(self._master_defaults)
         row.update(dict(values or {}))
@@ -1508,6 +1652,11 @@ class DataSet:
             raise
         row = dict(buffer)
         row.update(dict(saved))
+        key = row.get(self.key_field)
+        if key is not None and self._fields.local():
+            remembered = self._local.setdefault(key, {})
+            for definition in self._fields.local():
+                remembered[definition.name] = row.get(definition.name)
         self._rows[self._index] = row
         self._buffer = None
         self._set_state(State.BROWSE)
@@ -1638,6 +1787,8 @@ class DataSet:
         if fresh is not None and isinstance(self.writer, RowOverlay):
             overlaid = self.writer.overlay(self, [dict(fresh)], self.query, False)
             fresh = overlaid[0] if overlaid else None
+        if fresh is not None:
+            fresh = self._apply_local(dict(fresh))
         if fresh is None:
             del self._rows[i]
             old_index = self._index

@@ -406,6 +406,9 @@ class DraftsWriter:
         """
         mine = [node[1] for node in (event.affected or ()) if node and node[0] == self.entity]
         own_node = event.node is not None and event.node[0] == self.entity
+        if event.kind == 'remapped' and own_node:
+            for dataset in list(self._datasets):        # отметки и т. п. — к настоящему id
+                dataset.rekey(event.old_id, event.node[1])
         if event.kind in _GLOBAL_KINDS or (own_node and not self._own):
             for dataset in list(self._datasets):
                 self._refresh(dataset)

@@ -809,3 +809,37 @@ def test_aggregate_chunks_and_errors(monkeypatch):
     assert AggregateDef(backend, 'parent', AggFunc.AVG, 'id').compute([None]) == {None: None}
     with pytest.raises(ValueError, match='укажите поле'):
         AggregateDef(backend, 'parent', AggFunc.SUM)
+
+
+# --------------------------------------------------------------------------- сортировка по вычисляемым
+
+def test_sort_by_program_side_column_only_when_all_loaded():
+    from app.utils.dataset import AggregateDef
+    photos = MemoryBackend([{'id': 1, 'appointment_id': 30}, {'id': 2, 'appointment_id': 30},
+                            {'id': 3, 'appointment_id': 10}])
+    fields = [FieldDef('id'), FieldDef('date'),
+              FieldDef('photo_count', 'Фото', aggregate=AggregateDef(photos, 'appointment_id')),
+              FieldDef('mark', local=True, default=False)]
+    rows = [{'id': 10, 'date': 3}, {'id': 20, 'date': 1}, {'id': 30, 'date': 2}]
+    portions = DataSet(MemoryBackend(rows), fields=fields, fetch_size=2)
+    portions.open()
+    assert portions.sortable('date') and not portions.sortable('photo_count')
+    with pytest.raises(DataSetError, match='загружено всё'):
+        portions.set_order('-photo_count')
+    portions.fetch_all()
+    assert portions.sortable('photo_count')
+    portions.set_order('-photo_count', 'date')                     # теперь можно — всё загружено
+    assert keys(portions) == [30, 10, 20]
+    everything = DataSet(MemoryBackend(rows), fields=fields, fetch_mode=FetchMode.ALL)
+    everything.set_order('photo_count')                            # до открытия — тоже можно
+    everything.open()
+    assert keys(everything) == [20, 10, 30]
+    assert everything.query.order == ()                            # источнику сортировка не уходит
+    photos.insert({'appointment_id': 20}); photos.insert({'appointment_id': 20}); photos.insert({'appointment_id': 20})
+    everything.refresh()
+    assert keys(everything) == [10, 30, 20]                        # после перечитывания — снова верно
+    everything.set_local('mark', True, index=2)
+    everything.set_order('-mark', 'id')
+    assert keys(everything)[0] == 20
+    everything.set_order('date')                                   # снова по полю хранилища
+    assert everything.query.order[0].field == 'date' and keys(everything) == [20, 30, 10]

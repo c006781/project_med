@@ -5,7 +5,6 @@
 для всех столбцов, запрос таблицы данных без подзапросов, поправка на черновики.
 """
 
-import datetime
 
 import pytest
 from sqlalchemy import event
@@ -86,7 +85,6 @@ def test_ignore_mode_shows_only_database(services, providers, filled, app_drafts
     base = [CLINIC.get(n) for n in CLINIC.names()]
     appointments = TableSpec(**{**base[1].__dict__, 'extras': (
         total('photo_count', 'Фото', 'photos', by='sql', unsaved='ignore'),)})
-    from app.draft.integration import AppDrafts
     built = TableRegistry([base[0], appointments, base[2]]).build(services=providers, drafts=app_drafts)
     built.open()
     image = tmp_path / 'i.png'; image.write_bytes(b'x')

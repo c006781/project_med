@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QShowEvent
@@ -449,7 +449,7 @@ class DataSetPilotPage(BasePage):
             return bool(self._ask_delete())
         return QMessageBox.question(parent or self, 'Отмеченные', text) == QMessageBox.Yes
 
-    def _save_targets(self, targets) -> bool:
+    def _save_targets(self, targets: List[Tuple[str, Any]]) -> bool:
         """
         Сохраняет черновики заданных записей (отмеченных) — с вопросами окна.
 

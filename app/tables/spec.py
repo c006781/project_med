@@ -928,7 +928,8 @@ class TableRegistry:
 
         def text(key: Any) -> str:
             """
-            Ключ ссылки → текст для показа.
+            Ключ ссылки → текст для показа (запоминается: ячейка таблицы перерисовывается
+            часто — P8, 2026-10-18; сброс — событие набора-цели или изменение черновиков).
 
             Args:
                 key: Ключ.
@@ -940,8 +941,19 @@ class TableRegistry:
                 >>> text(5)
                 'Иванов'
             """
-            row = target_row(key)
-            return '' if key is None else (str(show(row)) if row is not None else f"#{key}")
+            if key is None:
+                return ''
+            version = drafts.store.version if drafts is not None else None
+            if texts.get('__version__') != version:
+                texts.clear()
+                texts['__version__'] = version
+            if key not in texts:
+                row = target_row(key)
+                texts[key] = str(show(row)) if row is not None else f"#{key}"
+            return texts[key]
+
+        texts: Dict[Any, str] = {}
+        self._text_caches.append((link.table, texts))
 
         def choices() -> List[Tuple[Any, str]]:
             """
@@ -1001,6 +1013,7 @@ class TableRegistry:
         datasets: Dict[str, DataSet] = {}
         writers: Dict[str, Any] = {}
         sql_cache: Dict[Any, Any] = {}                     # объекты SQL-итогов этой сборки
+        self._text_caches: List[Tuple[str, Dict[Any, str]]] = []   # тексты ссылок этой сборки
         for name in reversed(wanted):                     # подчинённые раньше: итоги ссылаются на них
             spec = self._specs[name]
             provider = services.get(spec.entity, spec.service)
@@ -1023,6 +1036,10 @@ class TableRegistry:
                 writer.attach(dataset)
             datasets[name] = dataset
         ordered = {name: datasets[name] for name in wanted}
+        # тексты ссылок — заново при любом событии набора-цели (правка, перечитывание)
+        for table, texts in self._text_caches:
+            if table in ordered:
+                ordered[table].subscribe(lambda event, cache=texts: cache.clear())
         sources = {name: DataSource(ds) for name, ds in ordered.items()}
         links = [MasterDetailLink(sources[self.parent(name)], ordered[name],
                                   {self.parent_field(name): ordered[self.parent(name)].key_field})

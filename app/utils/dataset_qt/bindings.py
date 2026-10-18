@@ -91,6 +91,10 @@ class Binding:
         # например, ссылка на таблицу, куда добавили новую несохранённую запись)
         self._choices = choices
         self._shown_choices: Optional[tuple] = None
+        # P7 (2026-10-18): список-функция перечитывается не на каждое событие (переход по
+        # строкам вызывал запрос к БД на каждую строку), а когда набор перечитан или
+        # начинается правка
+        self._choices_dirty = True
         if isinstance(widget, QComboBox) and choices is not None:
             self._updating = True
             try:
@@ -269,6 +273,9 @@ class Binding:
         Пример:
             >>> binding._on_event(DataEvent(EventKind.REFRESHED, ds))
         """
+        if event.kind in (EventKind.REFRESHED, EventKind.OPENED) or (
+                event.kind is EventKind.STATE_CHANGED and getattr(event.new, 'editing', False)):
+            self._choices_dirty = True
         if event.kind in _REFRESH_EVENTS:
             self.refresh()
         elif event.kind is EventKind.ROW_CHANGED:
@@ -298,7 +305,8 @@ class Binding:
                             and (self.source.auto_edit or ds.state.editing))
         self._updating = True
         try:
-            if isinstance(self.widget, QComboBox) and callable(self._choices):
+            if isinstance(self.widget, QComboBox) and callable(self._choices) and self._choices_dirty:
+                self._choices_dirty = False
                 self._fill_choices()
             self._show(value, ds, has_row)
             self._set_editable(editable, has_row)

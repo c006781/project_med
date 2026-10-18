@@ -18,9 +18,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, FrozenSet, Iterable, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from ._model import Draft, NodeKey, PlanError
+from ._model import DeleteBlocked, Draft, NodeKey, PlanError
 from .policies import CascadeDeletePolicy, DeletePolicy
 from .scope import SaveScope, select_nodes
 
@@ -136,6 +136,41 @@ def _dependencies(store: 'DraftStore', node: NodeKey) -> List[NodeKey]:
     return result
 
 
+def _check_deleted_new_targets(store: 'DraftStore', writable: Set[NodeKey]) -> None:
+    """
+    Сохраняемая запись ссылается на НОВУЮ запись, которую удалили (она так и не будет
+    создана), — понятный отказ, а не вопрос «сохранить и новую?» с непонятной ошибкой после
+    согласия (2026-10-18).
+
+    Args:
+        store: Хранилище.
+        writable: Сохраняемые узлы.
+
+    Returns:
+        None
+
+    Raises:
+        DeleteBlocked: Есть такие ссылки (цель — удалённая новая запись).
+
+    Пример:
+        >>> _check_deleted_new_targets(store, {('appointment', -2)})
+        Traceback (most recent call last):
+        DeleteBlocked: Нельзя удалить «Врач #-1»: на неё ссылаются несохранённые изменения: «Приём #-2»
+    """
+    from .executor import _blocked_message           # здесь: executor импортирует этот модуль
+    users: Dict[NodeKey, List[NodeKey]] = {}
+    for node in sorted(writable, key=lambda n: store.get(*n).order):
+        parent = store.parent_of(*node)
+        for dep in _dependencies(store, node):
+            if dep == parent:
+                continue                               # родитель — забота политики удаления
+            draft = store.get(*dep)
+            if draft is not None and draft.is_new and draft.deleted:
+                users.setdefault(dep, []).append(node)
+    for target, referrers in users.items():
+        raise DeleteBlocked(target, referrers, _blocked_message(store, target, referrers, True))
+
+
 def _required_new(store: 'DraftStore', writable: Set[NodeKey]) -> List[NodeKey]:
     """
     Новые записи вне объёма, без которых сохраняемые записать нельзя: новые предки и
@@ -167,7 +202,7 @@ def _required_new(store: 'DraftStore', writable: Set[NodeKey]) -> List[NodeKey]:
     return missing
 
 
-def _ordered_creates(store: 'DraftStore', creates: List[Draft], depth) -> List[Draft]:
+def _ordered_creates(store: 'DraftStore', creates: List[Draft], depth: Callable[[NodeKey], int]) -> List[Draft]:
     """
     Порядок создания: запись — после всех новых записей, от которых она зависит (родитель,
     цели ссылок); среди готовых — по глубине дерева и порядку появления.
@@ -281,6 +316,7 @@ def build_plan(
     #         missing.append(ancestor)
     # ↑ до 2026-10-18: нужными считались только новые ПРЕДКИ. Теперь ещё и новые записи, на
     #   которые ссылаются (ссылки, не владение: приём → новый врач) — и их предки, рекурсивно.
+    _check_deleted_new_targets(store, writable)
     missing = _required_new(store, writable)
     if include_new_ancestors:
         writable.update(missing)

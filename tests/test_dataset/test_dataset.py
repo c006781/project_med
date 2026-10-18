@@ -517,3 +517,31 @@ def test_reload_row_removed_before_current_keeps_record():
     backend.delete(1)
     assert not ds.reload_row(0)
     assert ds.current_key == 3 and ds.current_index == 1
+
+
+def test_row_events_come_first():
+    """
+    D3: подписчик, считающий строки ТОЛЬКО по событиям о строках (как модель таблицы Qt),
+    на любом другом событии видит то же число, что у набора.
+    """
+    ds = DataSet(people(3))
+    ds.open()
+    mirror = {'rows': ds.row_count, 'bad': []}
+
+    def listener(event):
+        if event.kind is EventKind.ROWS_INSERTED:
+            mirror['rows'] += event.count
+        elif event.kind is EventKind.ROWS_REMOVED:
+            mirror['rows'] -= event.count
+        elif event.kind is EventKind.REFRESHED:
+            mirror['rows'] = ds.row_count
+        elif mirror['rows'] != ds.row_count:
+            mirror['bad'].append((event.kind, mirror['rows'], ds.row_count))
+
+    ds.subscribe(listener)
+    ds.append({'name': 'x'}); ds.cancel()
+    ds.insert({'name': 'y'}); ds.cancel()
+    ds.append({'name': 'z'}); ds.post()
+    ds.delete(); ds.first(); ds.delete()
+    ds.backend.delete(3); ds.reload_row(0)
+    assert mirror['bad'] == []

@@ -1505,8 +1505,11 @@ class DataSet:
         if state is State.INSERT:
             at = self._index
             del self._rows[at]
-            self._set_state(State.BROWSE)
+            # D3 (2026-10-18): событие о строках — СРАЗУ после изменения строк, до других
+            # (раньше шло после смены состояния: подписчик, сверяющий число строк, видел
+            # расхождение — таблица перестраивалась целиком, терялись выделение и прокрутка)
             self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
+            self._set_state(State.BROWSE)
             self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
         else:
             self._set_state(State.BROWSE)

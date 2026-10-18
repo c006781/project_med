@@ -299,8 +299,21 @@ class PagesCreationMixin:
             'photo_edit': self.photo_edit_page,
             'settings': self.settings_page,
 
-            'appointment_photo': self.appointment_photo_page,  
+            'appointment_photo': self.appointment_photo_page,
         }
+
+        # Пилотный экран на наборах данных (2026-10-18, в духе RAD Studio): пациенты →
+        # приёмы → фото. Стоит РЯДОМ со старыми экранами и их не меняет; не создался —
+        # программа работает без него (см. app/utils/dataset/IMPLEMENTATION.md).
+        try:
+            from interfaces.gui.gui_window.pages.dataset_pilot_page import DataSetPilotPage
+            self.dataset_pilot_page = DataSetPilotPage(
+                drafts=getattr(self, 'drafts', None), save_handler=self.save_drafts, parent=self,
+            )
+            pages['dataset_pilot'] = self.dataset_pilot_page
+        except Exception as e:
+            self.dataset_pilot_page = None
+            self.logger.exception(f"Пилотный экран наборов данных не создан: {e}")
 
         # Добавляем каждую страницу в стековый виджет
         for page in pages.values():
@@ -707,6 +720,21 @@ class NavigationMixin:
     def _on_settings_clicked(self):
         """Переход на страницу настроек."""
         self.page_manager.switch_to('settings')
+
+    @Slot()
+    def _on_dataset_pilot_clicked(self):
+        """
+        Переход на пилотный экран наборов данных (не создался — кнопка ничего не делает,
+        причина — в журнале).
+
+        Returns:
+            None
+
+        Пример:
+            >>> window._on_dataset_pilot_clicked()
+        """
+        if getattr(self, 'dataset_pilot_page', None) is not None:
+            self.page_manager.switch_to('dataset_pilot')
 
     @AppLogger.get_instance(
         name='NavigationMixin',
@@ -2018,6 +2046,13 @@ class MainWindow(
         self.action_combo.setCurrentIndex(0)  # по умолчанию выбран заглушечный пункт
 
         self.header_layout.addWidget(self.action_combo)
+
+        # Пилотный экран наборов данных (2026-10-18) — отдельной кнопкой, чтобы не сдвигать
+        # номера пунктов списка действий (_on_action_selected выбирает по номеру)
+        self.dataset_pilot_btn = QPushButton("Наборы данных (пилот)")
+        self.dataset_pilot_btn.setToolTip("Пациенты → приёмы → фото на наборах данных")
+        self.dataset_pilot_btn.clicked.connect(self._on_dataset_pilot_clicked)
+        self.header_layout.addWidget(self.dataset_pilot_btn)
 
         # Кнопка настроек
         # self.settings_btn = QPushButton("Настройки")

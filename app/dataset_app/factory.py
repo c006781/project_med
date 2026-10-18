@@ -21,9 +21,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
-from app.utils.dataset import DataSet, DataSource, FetchMode, MasterDetailLink
+import os
+
+from app.utils.dataset import DataSet, DataSource, FetchMode, FieldDef, MasterDetailLink
 
 from .fields import fields_from_config
 from .service_backend import ServiceBackend
@@ -52,6 +54,37 @@ def default_services() -> Dict[str, Callable[[], Any]]:
     )
     return {'patient': get_patient_service, 'appointment': get_appointment_service,
             'photo': get_photo_service}
+
+
+def photo_image_field(photo_service: Callable[[], Any]) -> FieldDef:
+    """
+    Вычисляемое поле ``image`` набора фото — полный путь к файлу снимка (для
+    предпросмотра, аналог ``TDBImage``).
+
+    В БД путь хранится относительно папки снимков сервиса (``app_51\27_….png``); у
+    нового фото (черновик, ещё не скопирован в папку снимков) путь уже полный.
+
+    Args:
+        photo_service: Поставщик сервиса фото (его папка снимков — на момент показа).
+
+    Returns:
+        ``FieldDef('image', calculated=...)``.
+
+    Пример:
+        >>> photo_image_field(get_photo_service).calculated({'file_path': 'app_1/a.png'})
+        'C:/data/photos/app_1/a.png'
+    """
+    def resolve(row: Mapping[str, Any]) -> Optional[str]:
+        path = row.get('file_path')
+        if not path:
+            return None
+        if os.path.isabs(path):
+            return path
+        # закрытое свойство сервиса: папку снимков он знает сам (из настроек)
+        storage = getattr(photo_service(), '_storage_path', None) or ''
+        return os.path.join(storage, path)
+
+    return FieldDef('image', 'Снимок', calculated=resolve, visible=False)
 
 
 def _table_parts(entity: str):
@@ -215,6 +248,8 @@ def create_clinic_datasets(
     for name, entity, order in SPECS:
         dto_class, config, model = _table_parts(entity)
         fields = fields_from_config(config, dto_class, model)
+        if entity == 'photo':
+            fields.append(photo_image_field(providers['photo']))
         backend = ServiceBackend(providers[entity], dto_class, fields)
         writer = None
         if drafts is not None:

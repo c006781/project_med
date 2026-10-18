@@ -50,7 +50,7 @@ from typing import (
 from .backend import DataBackend, DataWriter, DirectWriter, RowOverlay
 from .events import DataEvent, Emitter, EventKind, Listener
 from .fields import FieldDef, Fields
-from .query import Condition, Order, Query, apply_in_memory
+from .query import Condition, Order, Query, _sort_key, apply_in_memory
 
 _log = logging.getLogger(__name__)
 
@@ -204,6 +204,8 @@ class DataSet:
         self._given_fields = Fields(fields) if fields is not None else None
         self._fields: Fields = self._given_fields or Fields()
         self._order: Tuple[Order, ...] = tuple(_to_order(o) for o in order)
+        # сортировка по столбцу, который считает программа: в памяти по ВСЕМ строкам
+        self._client_sort = False
         self._conditions: Tuple[Condition, ...] = tuple(conditions)
         self._params: Dict[str, Any] = {}
         # связь «главная → подчинённая» (links.py): условия, значения для новых строк;
@@ -462,7 +464,7 @@ class DataSet:
             (Order(field='date', descending=True),)
         """
         return Query(conditions=self._master_conditions + self._conditions,
-                     order=self._order, params=dict(self._params))
+                     order=() if self._client_sort else self._order, params=dict(self._params))
 
     # ------------------------------------------------------------------ события
 
@@ -745,8 +747,11 @@ class DataSet:
         self._total, self._exhausted = None, True
         if self._master_blocked:
             return
-        limit = None if self.fetch_mode is FetchMode.ALL else max(self.fetch_size, at_least)
+        limit = (None if self.fetch_mode is FetchMode.ALL or self._client_sort
+                 else max(self.fetch_size, at_least))
         rows, total, received = self._read(0, limit)
+        if self._client_sort:
+            rows = self._sorted_in_memory(rows)
         self._rows = rows
         self._fetched = received
         self._fetched_keys = {r.get(self.key_field) for r in rows}
@@ -1014,7 +1019,23 @@ class DataSet:
             >>> ds.value('name')
             'А'
         """
-        row = self._row_at(index)
+        return self._value_of(self._row_at(index), name)
+
+    def _value_of(self, row: Mapping[str, Any], name: str) -> Any:
+        """
+        Значение поля для строки-словаря (общая часть ``value`` и сортировки в памяти).
+
+        Args:
+            row: Строка.
+            name: Имя поля.
+
+        Returns:
+            Значение.
+
+        Пример:
+            >>> ds._value_of({'id': 10}, 'photo_count')
+            2
+        """
         definition = self._fields.get(name)
         if definition is not None:
             if definition.aggregate is not None:
@@ -1295,8 +1316,92 @@ class DataSet:
             >>> ds.set_order('-date', 'id')
         """
         self.check_browse_mode()
-        self._order = tuple(_to_order(o) for o in order)
+        orders = tuple(_to_order(o) for o in order)
+        client = [o.field for o in orders if self.computed_by_program(o.field)]
+        if client and not self._all_loaded():
+            label = self._fields[client[0]].label
+            raise DataSetError(
+                f"сортировка по «{label}» (считает программа) — только когда загружено всё: "
+                "загрузка «всё сразу» или сначала догрузить всё (fetch_all)")
+        self._order = orders
+        self._client_sort = bool(client)
         self._reload_if_active(keep_position=True)
+
+    def computed_by_program(self, name: str) -> bool:
+        """
+        Значение поля считает программа (по строке, подстановка, итог по подчинённым,
+        своё поле набора), а не хранилище — сортировать/искать по нему источник не может.
+
+        Args:
+            name: Имя поля.
+
+        Returns:
+            ``True`` — считает программа.
+
+        Пример:
+            >>> ds.computed_by_program('photo_count'), ds.computed_by_program('date')
+            (True, False)
+        """
+        definition = self._fields.get(name)
+        return definition is not None and (
+            definition.calculated is not None or definition.lookup is not None
+            or definition.aggregate is not None or definition.local)
+
+    def _all_loaded(self) -> bool:
+        """
+        Все строки (под условиями) загружены или будут загружены сразу.
+
+        Returns:
+            ``True`` — загрузка «всё сразу» или догружать нечего.
+
+        Пример:
+            >>> ds._all_loaded()
+            True
+        """
+        return self.fetch_mode is FetchMode.ALL or (self.active and not self.has_more)
+
+    def sortable(self, name: str) -> bool:
+        """
+        Можно ли сейчас сортировать по полю, не получив неверный порядок.
+
+        Поле от хранилища — да (сортирует источник; не умеет — набор читает всё и
+        сортирует сам). Поле, которое считает программа, — только когда загружено всё
+        (сортировать в памяти часть строк — неверный порядок).
+
+        Args:
+            name: Имя поля.
+
+        Returns:
+            ``True`` — можно.
+
+        Пример:
+            >>> ds.sortable('date'), ds.sortable('photo_count')
+            (True, False)
+        """
+        return not self.computed_by_program(name) or self._all_loaded()
+
+    def _sorted_in_memory(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Сортирует строки в памяти по текущей сортировке (значения — как показывает набор:
+        итоги, подстановки, вычисляемые). Пустые — в конце.
+
+        Args:
+            rows: Строки.
+
+        Returns:
+            Новый список.
+
+        Пример:
+            >>> ds._sorted_in_memory(rows)
+        """
+        result = list(rows)
+        for o in reversed(self._order):
+            try:
+                result.sort(key=lambda r: _sort_key(self._value_of(r, o.field)), reverse=o.descending)
+            except TypeError:
+                result.sort(key=lambda r: str(self._value_of(r, o.field)), reverse=o.descending)
+            result.sort(key=lambda r: self._value_of(r, o.field) is None)
+        return result
 
     def set_params(self, **params: Any) -> None:
         """

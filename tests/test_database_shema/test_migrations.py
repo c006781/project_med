@@ -308,10 +308,11 @@ def with_0002(tmp_path, monkeypatch):
     import shutil
     from app.database import migrate
 
-    def make(fail=False):
-        target = tmp_path / ('migrations_fail' if fail else 'migrations_ok')
+    def make(fail=False, code=None):
+        target = tmp_path / ('migrations_custom' if code else 'migrations_fail' if fail else 'migrations_ok')
         shutil.copytree(migrate.MIGRATIONS_DIR, target, ignore=shutil.ignore_patterns('__pycache__'))
-        code = MIGRATION_0002.replace('    FAIL\n', "    raise RuntimeError('сбой в 0002')\n" if fail else '')
+        if code is None:
+            code = MIGRATION_0002.replace('    FAIL\n', "    raise RuntimeError('сбой в 0002')\n" if fail else '')
         (target / 'versions' / '0002_test_change.py').write_text(code, encoding='utf-8')
         monkeypatch.setattr(migrate, 'MIGRATIONS_DIR', str(target))
         migrate.head_revision.cache_clear()
@@ -453,3 +454,88 @@ def test_backup_includes_wal_changes(tmp_path):
     finally:
         reader.close()
         writer.close()
+
+
+# ---------------------------------------------------------------------------
+# Проверочный проход 5: база новее программы (M9), внешние ключи при пересборке (M10)
+# ---------------------------------------------------------------------------
+
+def test_db_newer_than_program_refused_untouched(tmp_path, with_0002):
+    """Новая версия программы обновила базу до 0002, затем запустили старую (знает до 0001)."""
+    import hashlib
+    from app.database import migrate
+    from app.database.migrate import MigrationError, startup_error_text
+    path = tmp_path / 'db.db'
+    with_0002()
+    engine = create_engine(f"sqlite:///{path}")
+    upgrade_database(engine)
+    engine.dispose()
+    migrate.MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.abspath(migrate.__file__)), 'migrations')
+    migrate.head_revision.cache_clear()
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(MigrationError) as info:
+        upgrade_database(create_engine(f"sqlite:///{path}"))
+    assert 'новее' in str(info.value)
+    assert 'нельзя безопасно обновить' in startup_error_text(info.value)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert backups(tmp_path) == []                         # копию не делали — нечего менять
+
+
+def test_table_rebuild_with_foreign_keys_on_keeps_children(tmp_path, with_0002):
+    """
+    Миграция пересобирает patients (batch). Если у приложения включены внешние ключи
+    SQLite, удаление старой таблицы при пересборке не должно трогать приёмы.
+    """
+    from sqlalchemy import event as sa_event
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+
+    @sa_event.listens_for(engine, 'connect')
+    def _fk_on(dbapi_connection, record):
+        dbapi_connection.execute('PRAGMA foreign_keys=ON')
+
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
+        conn.execute(text("INSERT INTO appointments (id, patient_id, date) VALUES (1, 1, '2026-10-18')"))
+    with_0002()
+    upgrade_database(engine)
+    assert counts(engine)['appointments'] == 1
+
+
+ORPHAN_0002 = """
+from alembic import op
+
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+
+
+def upgrade():
+    op.execute("INSERT INTO appointments (id, patient_id, date) VALUES (50, 999, '2026-10-18')")
+
+
+def downgrade():
+    op.execute("DELETE FROM appointments WHERE id = 50")
+"""
+
+
+def test_migration_leaving_broken_links_rolled_back(tmp_path, with_0002):
+    """Ошибочная миграция оставила приём без пациента — отказ, откат, база на 0001."""
+    from app.database.migrate import MigrationError
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    with_0002(code=ORPHAN_0002)
+    with pytest.raises(MigrationError, match='нарушены связи'):
+        upgrade_database(engine)
+    assert current_revision(engine) == BASELINE
+    assert counts(engine)['appointments'] == 0
+
+
+def test_old_broken_links_do_not_block_migration(tmp_path, with_0002):
+    """В старой базе уже есть «висячая» ссылка (ключи не проверялись) — обновлению не мешает."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO appointments (id, patient_id, date) VALUES (7, 404, '2026-10-18')"))
+    with_0002()
+    assert upgrade_database(engine) == '0002_test_change'
+    assert counts(engine)['appointments'] == 1

@@ -270,8 +270,17 @@ def _migration_engine(engine: Engine) -> Engine:
 
     @event.listens_for(migration, 'connect')
     def _no_driver_transactions(dbapi_connection, connection_record):
-        """Драйвер не начинает и не фиксирует транзакции сам."""
+        """
+        Драйвер не начинает и не фиксирует транзакции сам.
+
+        Внешние ключи — явно ВЫКЛ (M10, 2026-10-18): SQLite пересобирает таблицу при
+        ALTER (создать новую → скопировать → удалить старую). С включёнными ключами
+        удаление старой таблицы каскадом стёрло бы дочерние строки (или упало бы).
+        Включать/выключать ключи можно только вне транзакции — поэтому здесь, при
+        подключении. Целостность после миграции проверяет ``_check_foreign_keys``.
+        """
         dbapi_connection.isolation_level = None
+        dbapi_connection.execute('PRAGMA foreign_keys=OFF')
 
     @event.listens_for(migration, 'begin')
     def _explicit_begin(connection):
@@ -344,6 +353,8 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
                   if n != 'alembic_version' and not n.startswith('sqlite_')]
         if current == head:
             return head                       # обновила другая копия программы
+        _ensure_known_revision(current)       # M9: база новее программы — отказ до любых изменений
+        fk_before = _foreign_key_violations(conn)
         legacy_backup = None
         if current is None and tables:
             current, legacy_backup = _repair_legacy(engine, conn, backup)
@@ -356,8 +367,85 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
         if backup_path:
             _log.info(f"Резервная копия базы перед миграцией: {backup_path}")
         command.upgrade(alembic_config(conn), 'head')
+        _check_foreign_keys(conn, fk_before)  # M10: новые нарушения связей — откат всего
     _log.info(f"Схема базы обновлена: {current or 'пусто'} → {head}")
     return head
+
+
+def _ensure_known_revision(current: Optional[str]) -> None:
+    """
+    Версия базы известна этой программе (M9, 2026-10-18).
+
+    Сценарий: новая версия программы обновила базу (например, до 0003), затем запустили
+    старую (знает до 0002). Раньше Alembic падал невнятным «Can't locate revision», а
+    перед этим успевала сделаться резервная копия. Теперь — понятный отказ, база не
+    трогается.
+
+    Args:
+        current: Версия базы (``None`` — без отметки, это не ошибка).
+
+    Raises:
+        MigrationError: Версия базы неизвестна программе.
+
+    Пример:
+        >>> _ensure_known_revision('0001_baseline')      # известна — ничего
+        >>> _ensure_known_revision('0099_future')
+        Traceback (most recent call last):
+        MigrationError: версия базы 0099_future новее этой программы ...
+    """
+    if current is None:
+        return
+    try:
+        known = ScriptDirectory.from_config(alembic_config()).get_revision(current) is not None
+    except Exception:          # ResolutionError/CommandError — версии нет в миграциях программы
+        known = False
+    if not known:
+        raise MigrationError(f"версия базы {current} новее этой программы (знает до {head_revision()}) — "
+                             "запустите более новую версию программы")
+
+
+def _foreign_key_violations(connection) -> set:
+    """
+    Нарушения внешних ключей в базе SQLite (``PRAGMA foreign_key_check``).
+
+    Args:
+        connection: Соединение (может быть в транзакции).
+
+    Returns:
+        Множество ``(таблица, rowid, родительская таблица, № ключа)``; не SQLite — пусто.
+
+    Пример:
+        >>> _foreign_key_violations(conn)
+        set()
+    """
+    if connection.dialect.name != 'sqlite':
+        return set()
+    return {tuple(row) for row in connection.exec_driver_sql('PRAGMA foreign_key_check').fetchall()}
+
+
+def _check_foreign_keys(connection, before: set) -> None:
+    """
+    После миграции не появилось НОВЫХ нарушений связей (M10, 2026-10-18).
+
+    На время миграции ключи выключены (пересборка таблиц SQLite); ошибочная миграция
+    могла оставить «висячие» ссылки. Сравнение — с нарушениями ДО миграции: в старых
+    базах ключи никогда не проверялись, и их собственные нарушения не должны мешать
+    обновлению (их не создавали миграции).
+
+    Args:
+        connection: Соединение миграции (в транзакции).
+        before: Результат ``_foreign_key_violations`` до миграции.
+
+    Raises:
+        MigrationError: Есть новые нарушения — транзакция откатится.
+
+    Пример:
+        >>> _check_foreign_keys(conn, set())
+    """
+    new = _foreign_key_violations(connection) - before
+    if new:
+        sample = ', '.join(f"{t}#{rowid}→{parent}" for t, rowid, parent, _ in sorted(new, key=str)[:5])
+        raise MigrationError(f"после миграции нарушены связи ({len(new)}): {sample} — изменения отменены")
 
 
 def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[str]]:

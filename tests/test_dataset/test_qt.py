@@ -282,3 +282,97 @@ def test_qt_with_master_detail(qapp):
     assert model.data(model.index(0, 0)) == '20'
     master.append({'last_name': 'Новый'})
     assert model.rowCount() == 0 and not model.flags(model.index(0, 0)) & Qt.ItemIsEditable
+
+
+# --------------------------------------------------------------------------- галочки, сортировка, формы
+
+def marked(read_only=False, **kw):
+    from app.utils.dataset import AggregateDef
+    photos = MemoryBackend([{'id': 1, 'pid': 2}, {'id': 2, 'pid': 2}, {'id': 3, 'pid': 3}])
+    backend = MemoryBackend(
+        [{'id': i, 'last_name': f'Фам{i}', 'paid': i == 2} for i in range(1, 4)],
+        fields=[FieldDef('id', read_only=True), FieldDef('last_name', 'Фамилия', FieldKind.STRING),
+                FieldDef('paid', 'Оплачен', FieldKind.BOOLEAN),
+                FieldDef('mark', '✓', FieldKind.BOOLEAN, local=True, default=False),
+                FieldDef('photos', 'Фото', FieldKind.INTEGER, aggregate=AggregateDef(photos, 'pid'))])
+    return DataSet(backend, read_only=read_only, **kw)
+
+
+def test_checkbox_column_local_and_stored(qapp):
+    ds = marked()
+    model = DataSetTableModel(DataSource(ds), columns=['mark', 'paid', 'last_name'])
+    ds.open()
+    assert model.data(model.index(0, 0), Qt.CheckStateRole) == Qt.Unchecked
+    assert model.data(model.index(1, 1), Qt.CheckStateRole) == Qt.Checked
+    assert model.data(model.index(1, 1)) == ''                              # только галочка
+    assert model.flags(model.index(0, 0)) & Qt.ItemIsUserCheckable
+    assert model.setData(model.index(2, 0), Qt.Checked, Qt.CheckStateRole)
+    assert ds.current_index == 0 and ds.local_keys('mark') == [3]           # отметка — без смены строки
+    assert ds.state is State.BROWSE
+    assert model.setData(model.index(0, 1), 2, Qt.CheckStateRole)           # хранимое — правка строки
+    ds.post()
+    assert ds.backend.get(1)['paid'] is True
+
+
+def test_marks_allowed_in_read_only_dataset(qapp):
+    ds = marked(read_only=True)
+    model = DataSetTableModel(DataSource(ds), columns=['mark', 'paid'])
+    check = QCheckBox()
+    bind(check, DataSource(ds), 'mark')
+    ds.open()
+    assert model.flags(model.index(0, 0)) & Qt.ItemIsUserCheckable
+    assert not model.flags(model.index(0, 1)) & Qt.ItemIsUserCheckable     # хранимое — нельзя
+    assert check.isEnabled()
+    check.setChecked(True)
+    assert ds.local_keys('mark') == [1]
+
+
+def test_header_sort_respects_sortable(qapp):
+    ds = marked(fetch_size=2)
+    model = DataSetTableModel(DataSource(ds), columns=['last_name', 'photos'])
+    errors = []
+    model.error_occurred.connect(errors.append)
+    ds.open()
+    model.sort(0, Qt.DescendingOrder)
+    assert [ds.value('last_name', i) for i in range(ds.row_count)][:2] == ['Фам3', 'Фам2']
+    assert model.headerData(1, Qt.Horizontal, Qt.ToolTipRole)               # подсказка: не сейчас
+    model.sort(1, Qt.DescendingOrder)
+    assert errors and 'загружено всё' in errors[-1]
+    ds.fetch_all()
+    model.sort(1, Qt.DescendingOrder)
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [2, 3, 1]
+    assert model.headerData(1, Qt.Horizontal, Qt.ToolTipRole) is None
+    view = QTableView()
+    bind_table_view(view, model)
+    view.setSortingEnabled(True)                                            # щелчок по заголовку — то же
+
+
+def test_build_form_by_field_kinds(qapp):
+    from app.utils.dataset_qt import build_form, widget_kind
+    backend = MemoryBackend(
+        [{'id': 1, 'name': 'А', 'born': datetime.date(1990, 1, 1), 'n': 3, 'w': 1.5, 'ok': True,
+          'note': 'x', 'doc': 2}],
+        fields=[FieldDef('id', read_only=True), FieldDef('name', 'Имя', FieldKind.STRING),
+                FieldDef('born', 'Рождён', FieldKind.DATE), FieldDef('n', kind=FieldKind.INTEGER),
+                FieldDef('w', kind=FieldKind.FLOAT), FieldDef('ok', kind=FieldKind.BOOLEAN),
+                FieldDef('note', kind=FieldKind.TEXT),
+                FieldDef('doc', 'Врач', extra={'choices': [(1, 'Иванов'), (2, 'Петрова')]}),
+                FieldDef('up', 'ФИО', calculated=lambda r: r['name'].upper())])
+    ds = DataSet(backend)
+    source = DataSource(ds)
+    form = build_form(source)
+    ds.open()
+    assert list(form.widgets) == ['name', 'born', 'n', 'w', 'ok', 'note', 'doc', 'up']   # ключ — нет
+    kinds = {n: type(w).__name__ for n, w in form.widgets.items()}
+    assert kinds == {'name': 'QLineEdit', 'born': 'QDateEdit', 'n': 'QSpinBox', 'w': 'QDoubleSpinBox',
+                     'ok': 'QCheckBox', 'note': 'QPlainTextEdit', 'doc': 'QComboBox', 'up': 'QLineEdit'}
+    assert form.widgets['doc'].currentText() == 'Петрова' and form.widgets['n'].value() == 3
+    assert form.widgets['up'].isReadOnly() and form.widgets['up'].text() == 'А'
+    assert form.layout.rowCount() == 8
+    form.widgets['n'].setValue(7)
+    ds.post()
+    assert backend.get(1)['n'] == 7
+    assert widget_kind(FieldDef('pic', extra={'widget': 'image'})) == 'image'
+    form.unbind()
+    form.widgets['n'].setValue(9)
+    assert ds.value('n') == 7                                               # отвязана — не пишет

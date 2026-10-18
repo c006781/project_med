@@ -707,11 +707,15 @@ class DataSet:
             self._emit(EventKind.ERROR, error=exc)
             raise
         self._resolve_fields(self._rows)
-        self._index = -1
-        self._set_state(State.BROWSE)
+        # H2 (2026-10-18): сначала состояние, потом события (правило H1), и первыми —
+        # «открыт/перечитано»: раньше «состояние: просмотр» приходило, когда строки уже
+        # загружены, а таблица о них ещё не знала — лишняя перестройка таблицы
+        self._index = 0 if self._rows else -1
+        self._state = State.BROWSE
         self._emit(EventKind.OPENED)
         self._emit(EventKind.REFRESHED)
-        self._set_index(0 if self._rows else -1)
+        self._emit(EventKind.STATE_CHANGED, old=State.INACTIVE, new=State.BROWSE)
+        self._emit(EventKind.CURRENT_CHANGED, old=-1, new=self._index)
 
     def close(self) -> None:
         """
@@ -729,9 +733,12 @@ class DataSet:
         self._buffer = None
         self._rows, self._fetched, self._fetched_keys = [], 0, set()
         self._total, self._exhausted = None, True
-        self._set_index(-1)
-        self._set_state(State.INACTIVE)
+        old_index, old_state = self._index, self._state
+        self._index, self._state = -1, State.INACTIVE           # H2: до событий
         self._emit(EventKind.CLOSED)
+        self._emit(EventKind.STATE_CHANGED, old=old_state, new=State.INACTIVE)
+        if old_index != -1:
+            self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=-1)
 
     def refresh(self) -> None:
         """

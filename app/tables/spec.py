@@ -36,6 +36,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -48,7 +49,7 @@ if TYPE_CHECKING:
 
 from app.utils.dataset import (
     AggFunc, AggregateDef, Condition, DataSet, DataSource, FetchMode, FieldDef, FieldKind,
-    MasterDetailLink,
+    MasterDetailLink, Query,
 )
 
 
@@ -170,6 +171,58 @@ def total(name: str, label: str, child: str, func: Any = AggFunc.COUNT,
 
 
 @dataclass(frozen=True)
+class Link:
+    """
+    Связь-ссылка поля таблицы на другую таблицу реестра (не владение; 2026-10-18).
+
+    Без описания каждый внешний ключ на таблицу реестра (кроме связи с родителем) —
+    ссылка с правилом «нельзя удалить, пока ссылаются». Описание меняет правило.
+
+    Attributes:
+        field: Поле ссылки (``doctor_id``).
+        table: Таблица цели (``doctors``).
+        on_delete: Цель удаляют, а на неё ссылаются записи, которые не удаляются:
+            ``'restrict'`` — отказ, ``'set_null'`` — ссылка обнуляется, ``'cascade'`` —
+            ссылающиеся удаляются тоже.
+        collect: Цель — переиспользуемые данные: удаляется, когда больше никому не нужна.
+        display: Что показывать вместо id и в списке выбора: поле цели или функция от
+            строки цели (по умолчанию — первое строковое видимое поле цели).
+
+    Пример:
+        >>> ref('doctor_id', 'doctors', on_delete='set_null').on_delete
+        'set_null'
+    """
+
+    field: str
+    table: str
+    on_delete: str = 'restrict'
+    collect: bool = False
+    display: Any = None
+
+
+def ref(field: str, table: str, on_delete: str = 'restrict', collect: bool = False,
+        display: Any = None) -> Link:
+    """
+    Настройка связи-ссылки (см. ``Link``).
+
+    Args:
+        field: Поле ссылки.
+        table: Таблица цели.
+        on_delete: Правило удаления цели.
+        collect: Цель — переиспользуемые данные.
+        display: Показ цели (поле или функция от строки).
+
+    Returns:
+        ``Link``.
+
+    Пример:
+        >>> ref('template_id', 'templates', collect=True).collect
+        True
+    """
+    return Link(field, table, on_delete, collect, display)
+
+
+@dataclass(frozen=True)
 class TableSpec:
     """
     Описание таблицы.
@@ -190,6 +243,8 @@ class TableSpec:
         parent: Родительская таблица (по умолчанию — из внешнего ключа модели на таблицу
             реестра; задать, если таких ключей несколько).
         parent_field: Поле связи с родителем (вместе с ``parent``).
+        links: Настройки связей-ссылок (``ref(...)``); без настройки — правило
+            «нельзя удалить цель, пока на неё ссылаются».
         fetch_size: Свой размер порции загрузки.
 
     Пример:
@@ -211,6 +266,7 @@ class TableSpec:
     extras: Tuple[Extra, ...] = ()
     parent: Optional[str] = None
     parent_field: Optional[str] = None
+    links: Tuple[Link, ...] = ()
     fetch_size: Optional[int] = None
 
 
@@ -405,6 +461,8 @@ class TableRegistry:
             entities.add(spec.entity)
         self._parents: Dict[str, Tuple[Optional[str], Optional[str]]] = {
             name: self._find_parent(spec) for name, spec in self._specs.items()}
+        self._links: Dict[str, Tuple[Link, ...]] = {
+            name: self._find_links(spec) for name, spec in self._specs.items()}
         self._check_totals()
 
     # ------------------------------------------------------------------ дерево
@@ -436,11 +494,60 @@ class TableRegistry:
             if field_name is None:
                 raise SpecError(f"у {spec.name} нет поля связи с {spec.parent} (parent_field)")
             return spec.parent, field_name
-        candidates = [(t, f) for f, t in references_of(spec.model).items() if t in self._specs and t != spec.name]
+        declared = {link.field for link in spec.links}
+        candidates = [(t, f) for f, t in references_of(spec.model).items()
+                      if t in self._specs and t != spec.name and f not in declared]
         if len(candidates) > 1:
             raise SpecError(f"у {spec.name} несколько ссылок на таблицы реестра "
                             f"({', '.join(f for _, f in candidates)}) — укажите parent")
         return candidates[0] if candidates else (None, None)
+
+    def _find_links(self, spec: TableSpec) -> Tuple[Link, ...]:
+        """
+        Связи-ссылки таблицы: описанные явно + остальные внешние ключи на таблицы реестра
+        (кроме связи с родителем) с правилом по умолчанию.
+
+        Args:
+            spec: Описание.
+
+        Returns:
+            Кортеж ``Link``.
+
+        Raises:
+            SpecError: Ссылка на неописанную таблицу или на поле связи с родителем.
+
+        Пример:
+            >>> registry._find_links(orders_spec)
+            (Link(field='doctor_id', table='doctors', on_delete='restrict', ...),)
+        """
+        parent_field = self._parents[spec.name][1]
+        result: Dict[str, Link] = {}
+        for field_name, table in references_of(spec.model).items():
+            if table in self._specs and field_name != parent_field:
+                result[field_name] = Link(field_name, table)
+        for link in spec.links:
+            if link.table not in self._specs:
+                raise SpecError(f"ссылка {spec.name}.{link.field}: таблица {link.table} не описана")
+            if link.field == parent_field:
+                raise SpecError(f"ссылка {spec.name}.{link.field}: это связь с родителем, а не ссылка")
+            result[link.field] = link
+        return tuple(result.values())
+
+    def links(self, name: str) -> Tuple[Link, ...]:
+        """
+        Связи-ссылки таблицы.
+
+        Args:
+            name: Имя таблицы.
+
+        Returns:
+            Кортеж ``Link``.
+
+        Пример:
+            >>> registry.links('test_orders')[0].table
+            'test_doctors'
+        """
+        return self._links[name]
 
     def _check_totals(self) -> None:
         """
@@ -622,15 +729,18 @@ class TableRegistry:
             >>> CLINIC.drafts_schema().depth('photo')
             2
         """
-        from app.utils.drafts import EntityType, TreeSchema
+        from app.utils.drafts import EntityType, Reference, TreeSchema
         types = []
         for name in self.names():
             spec, parent = self._specs[name], self.parent(name)
+            references = [Reference(link.field, self._specs[link.table].entity, link.on_delete,
+                                    link.collect) for link in self.links(name)]
             if parent is None:
-                types.append(EntityType(spec.entity, label=spec.label))
+                types.append(EntityType(spec.entity, label=spec.label, references=references))
             else:
                 types.append(EntityType(spec.entity, parent=self._specs[parent].entity,
-                                        parent_field=self.parent_field(name), label=spec.label))
+                                        parent_field=self.parent_field(name), label=spec.label,
+                                        references=references))
         return TreeSchema(types)
 
     def service_adapter(self, transaction_factory: Optional[Callable[[], Any]] = None,
@@ -695,6 +805,100 @@ class TableRegistry:
                         visible=extra.visible, display=extra.display,
                         extra={'widget': extra.widget} if extra.widget else {})
 
+    def _link_field(self, definition: FieldDef, spec: TableSpec, drafts: Any,
+                    services: Mapping[str, Callable[[], Any]]) -> FieldDef:
+        """
+        Поле-ссылка: показ цели вместо id и список выбора (записи цели из БД + новые
+        несохранённые из черновиков). Остальные поля — как есть.
+
+        Args:
+            definition: Поле из ``field_configs``.
+            spec: Описание таблицы.
+            drafts: Черновики (``None`` — без них).
+            services: Свои поставщики сервисов.
+
+        Returns:
+            ``FieldDef`` (новое — для ссылки, то же — для остальных).
+
+        Пример:
+            >>> registry._link_field(FieldDef('doctor_id'), orders_spec, None, {}).extra['choices']()
+            [(5, 'Иванов')]
+        """
+        link = next((l for l in self.links(spec.name) if l.field == definition.name), None)
+        if link is None:
+            return definition
+        target = self._specs[link.table]
+        show = _display_of(target, link)
+        provider = services.get(target.entity, target.service)
+        target_fields = fields_from_config(target.config, target.dto, target.model)
+        backend = ServiceBackend(provider, target.dto, target_fields)
+
+        def target_row(key: Any) -> Optional[Mapping[str, Any]]:
+            """
+            Строка цели по ключу: из БД, а новая — из черновиков.
+
+            Args:
+                key: Ключ.
+
+            Returns:
+                Строка или ``None``.
+
+            Пример:
+                >>> target_row(-1)
+                {'name': 'Новый врач'}
+            """
+            if key is None:
+                return None
+            row = backend.get(key)
+            if row is None and drafts is not None:
+                draft = drafts.store.get(target.entity, key)
+                if draft is not None:
+                    row = dict(draft.data, id=key)
+            elif row is not None and drafts is not None and drafts.store.has_draft(target.entity, key):
+                row = drafts.store.effective(target.entity, key, row)
+            return row
+
+        def text(key: Any) -> str:
+            """
+            Ключ ссылки → текст для показа.
+
+            Args:
+                key: Ключ.
+
+            Returns:
+                Текст.
+
+            Пример:
+                >>> text(5)
+                'Иванов'
+            """
+            row = target_row(key)
+            return '' if key is None else (str(show(row)) if row is not None else f"#{key}")
+
+        def choices() -> List[Tuple[Any, str]]:
+            """
+            Список выбора: записи цели (из БД, с правками черновиков) + новые черновики.
+
+            Returns:
+                ``[(id, текст), …]``.
+
+            Пример:
+                >>> choices()
+                [(5, 'Иванов'), (-1, 'Новый врач')]
+            """
+            rows = list(backend.fetch(Query()).rows)
+            if drafts is not None:
+                store = drafts.store
+                rows = [store.effective(target.entity, r['id'], r) if store.has_draft(target.entity, r['id'])
+                        else r for r in rows]
+                rows = [r for r in rows if not ((d := store.get(target.entity, r['id'])) and d.deleted)]
+                rows += [dict(d.data, id=d.id) for d in store.drafts(target.entity, new_only=True)
+                         if not d.deleted]
+            return [(r['id'], str(show(r))) for r in rows]
+
+        return dataclasses.replace(definition, display=text,
+                                   extra={**definition.extra, 'choices': choices, 'link': link})
+
     def build(self, *, drafts: Any = None, services: Optional[Mapping[str, Callable[[], Any]]] = None,
               fetch_mode: FetchMode = FetchMode.ON_DEMAND, fetch_size: int = 50,
               sizes: Optional[Mapping[str, int]] = None,
@@ -732,6 +936,7 @@ class TableRegistry:
             spec = self._specs[name]
             provider = services.get(spec.entity, spec.service)
             fields = fields_from_config(spec.config, spec.dto, spec.model)
+            fields = [self._link_field(f, spec, drafts, services) for f in fields]
             for extra in spec.extras:
                 if extra.kind == 'total' and extra.child not in datasets:
                     continue                              # подчинённая таблица не собрана
@@ -754,6 +959,35 @@ class TableRegistry:
                                   {self.parent_field(name): ordered[self.parent(name)].key_field})
                  for name in wanted if self.parent(name) in ordered]
         return BuiltTables(self, ordered, sources, links, drafts, writers)
+
+
+def _display_of(target: TableSpec, link: Link) -> Callable[[Mapping[str, Any]], Any]:
+    """
+    Как показать запись цели ссылки: поле/функция из настройки или первое строковое
+    видимое поле цели (иначе — id).
+
+    Args:
+        target: Описание таблицы цели.
+        link: Связь.
+
+    Returns:
+        Функция от строки цели.
+
+    Пример:
+        >>> _display_of(doctors_spec, ref('doctor_id', 'doctors'))({'id': 5, 'name': 'Иванов'})
+        'Иванов'
+    """
+    if callable(link.display):
+        return link.display
+    name = link.display
+    if name is None:
+        for field_name, cfg in target.config.items():
+            annotation = getattr(target.dto, 'model_fields', {}).get(field_name)
+            if (annotation is not None and 'str' in str(annotation.annotation)
+                    and not cfg.get('hidden') and not cfg.get('virtual')):
+                name = field_name
+                break
+    return (lambda row: row.get(name)) if name else (lambda row: row.get('id'))
 
 
 def _is_program(definition: FieldDef) -> bool:

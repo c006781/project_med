@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Hashable, Mapping, Optional, Tuple
+from typing import Any, Hashable, List, Mapping, Optional, Tuple
 
 # Узел дерева: (тип сущности, id). id — любой хешируемый (int из БД, отрицательный
 # временный id новой строки, UUID …).
@@ -201,6 +201,38 @@ class PlanError(DraftError):
         Traceback (most recent call last):
         PlanError: план устарел
     """
+
+
+class DeleteBlocked(PlanError):
+    """
+    Удаление отменено: на удаляемую запись ещё ссылаются записи, которые не удаляются
+    (правило ``restrict``), или несохранённые черновики (2026-10-18).
+
+    Attributes:
+        target: Удаляемая запись (узел).
+        referrers: Кто ссылается: узлы ``(тип, id)``.
+
+    Пример:
+        >>> DeleteBlocked(('doctor', 5), [('appointment', 12)]).referrers
+        [('appointment', 12)]
+    """
+
+    def __init__(self, target: 'NodeKey', referrers: List['NodeKey'], message: str = '') -> None:
+        """
+        Args:
+            target: Удаляемая запись.
+            referrers: Кто на неё ссылается.
+            message: Текст (по умолчанию — собирается из узлов).
+
+        Пример:
+            >>> str(DeleteBlocked(('doctor', 5), [('appointment', 12)]))
+            'нельзя удалить doctor:5 — на неё ссылаются: appointment:12'
+        """
+        self.target = target
+        self.referrers = list(referrers)
+        shown = ', '.join(f"{t}:{i}" for t, i in self.referrers[:10])
+        more = f" и ещё {len(self.referrers) - 10}" if len(self.referrers) > 10 else ''
+        super().__init__(message or f"нельзя удалить {target[0]}:{target[1]} — на неё ссылаются: {shown}{more}")
 
 
 class StalePlanError(PlanError):

@@ -67,6 +67,16 @@ class MemoryAdapter:
         self.rows.pop((entity, entity_id), None)
         self.log.append(('delete', entity, entity_id))
 
+    def referrers(self, entity: str, field: str, ids, tx: Any) -> List[Hashable]:
+        """Кто из записей типа ``entity`` ссылается полем ``field`` на ``ids`` (ссылки, 2026-10-18)."""
+        wanted = set(ids)
+        return [i for (e, i), row in self.rows.items() if e == entity and row.get(field) in wanted]
+
+    def read(self, entity: str, entity_id: Hashable, tx: Any = None):
+        """Запись из «БД» (для переиспользуемых данных — что удалять следом)."""
+        row = self.rows.get((entity, entity_id))
+        return dict(row) if row is not None else None
+
 
 @pytest.fixture
 def schema() -> TreeSchema:

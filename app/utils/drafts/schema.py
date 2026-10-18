@@ -18,10 +18,60 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, Iterable, Iterator, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 
 from ._model import SchemaError
+
+
+# Что делать с записями, которые ссылаются на удаляемую
+ON_DELETE = ('restrict', 'set_null', 'cascade')
+
+
+@dataclass(frozen=True)
+class Reference:
+    """
+    Ссылка записи на запись другого типа, НЕ владение (2026-10-18): приём → врач,
+    приём → общий шаблон текста. В отличие от родителя (дерево черновиков), ссылка не
+    делает запись потомком: удаление цели не удаляет ссылающихся само по себе.
+
+    Attributes:
+        field: Поле записи со ссылкой (внешний ключ).
+        entity: Тип записи, на которую ссылаются.
+        on_delete: Если цель удаляют, а на неё ещё ссылаются записи, которые НЕ удаляются:
+            ``'restrict'`` — отказ (по умолчанию), ``'set_null'`` — ссылка обнуляется,
+            ``'cascade'`` — ссылающиеся удаляются тоже.
+        collect: «Переиспользуемые данные»: цель удаляется, когда на неё больше никто не
+            ссылается (после удаления ссылающейся записи), — и так рекурсивно вглубь.
+
+    Пример:
+        >>> Reference('doctor_id', 'doctor').on_delete
+        'restrict'
+    """
+
+    field: str
+    entity: str
+    on_delete: str = 'restrict'
+    collect: bool = False
+
+    def __post_init__(self) -> None:
+        """
+        Проверка правила удаления.
+
+        Returns:
+            None
+
+        Raises:
+            SchemaError: Неизвестное правило.
+
+        Пример:
+            >>> Reference('a_id', 'a', on_delete='drop')
+            Traceback (most recent call last):
+            SchemaError: ссылка a_id: правило удаления 'drop' — допустимо restrict, set_null, cascade
+        """
+        if self.on_delete not in ON_DELETE:
+            raise SchemaError(f"ссылка {self.field}: правило удаления {self.on_delete!r} — "
+                              f"допустимо {', '.join(ON_DELETE)}")
 
 
 @dataclass(frozen=True)
@@ -38,6 +88,7 @@ class EntityType:
         label: Человекочитаемое название (для сообщений и диалогов подтверждения).
         parent_required: Новую запись нельзя создать без родителя (внешний ключ
             NOT NULL). ``False`` — ссылка на родителя необязательна.
+        references: Ссылки на записи других типов (не владение) — ``Reference``.
 
     Пример:
         >>> EntityType('photo', parent='appointment', parent_field='appointment_id').is_root
@@ -49,6 +100,20 @@ class EntityType:
     parent_field: Optional[str] = None
     label: Optional[str] = None
     parent_required: bool = True
+    references: Tuple[Reference, ...] = field(default_factory=tuple)
+
+    def __post_init__(self) -> None:
+        """
+        Ссылки — кортежем (описание неизменяемо).
+
+        Returns:
+            None
+
+        Пример:
+            >>> EntityType('a', references=[Reference('b_id', 'b')]).references
+            (Reference(field='b_id', entity='b', on_delete='restrict', collect=False),)
+        """
+        object.__setattr__(self, 'references', tuple(self.references))
 
     @property
     def is_root(self) -> bool:
@@ -181,6 +246,14 @@ class TreeSchema:
                 raise SchemaError(f"тип '{entity_type.name}': родитель '{entity_type.parent}' не описан")
             if not entity_type.parent_field:
                 raise SchemaError(f"тип '{entity_type.name}': не задано поле внешнего ключа parent_field")
+        for entity_type in self._types.values():
+            for ref in entity_type.references:
+                if ref.entity not in self._types:
+                    raise SchemaError(f"тип '{entity_type.name}': ссылка {ref.field} на "
+                                      f"неописанный тип '{ref.entity}'")
+                if ref.field == entity_type.parent_field:
+                    raise SchemaError(f"тип '{entity_type.name}': поле {ref.field} — уже связь "
+                                      "с родителем, ссылкой его описывать не нужно")
         for name in self._types:
             seen = set()
             current: Optional[str] = name
@@ -269,6 +342,38 @@ class TreeSchema:
             'a'
         """
         return self.get(name).parent
+
+    def references(self, name: str) -> Tuple[Reference, ...]:
+        """
+        Ссылки типа на записи других типов.
+
+        Args:
+            name: Тип.
+
+        Returns:
+            Кортеж ``Reference``.
+
+        Пример:
+            >>> schema.references('appointment')
+            (Reference(field='doctor_id', entity='doctor', on_delete='restrict', collect=False),)
+        """
+        return self.get(name).references
+
+    def referrers(self, name: str) -> List[Tuple[str, Reference]]:
+        """
+        Кто ссылается на записи типа: ``(тип ссылающегося, ссылка)``.
+
+        Args:
+            name: Тип цели.
+
+        Returns:
+            Список пар.
+
+        Пример:
+            >>> schema.referrers('doctor')
+            [('appointment', Reference(field='doctor_id', entity='doctor', ...))]
+        """
+        return [(t.name, ref) for t in self._types.values() for ref in t.references if ref.entity == name]
 
     def parent_field(self, name: str) -> Optional[str]:
         """

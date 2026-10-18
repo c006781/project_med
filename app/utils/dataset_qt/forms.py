@@ -196,7 +196,8 @@ def build_form(source: DataSource, fields: Optional[Sequence[str]] = None, *,
         widget = widget_for(definition, parent)
         options = {'on_error': on_error, 'image': widget_kind(definition) == 'image'}
         if widget_kind(definition) == 'combo':
-            options['choices'] = list(definition.extra.get('choices') or ())
+            choices = definition.extra.get('choices') or ()
+            options['choices'] = choices if callable(choices) else list(choices)
         form.bindings.append(bind(widget, source, name, **options))
         form.widgets[name] = widget
         form.layout.addRow(definition.label, widget)

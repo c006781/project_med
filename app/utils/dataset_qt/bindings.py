@@ -70,7 +70,8 @@ class Binding:
             widget: Виджет (см. поддержанные в описании модуля).
             source: Источник набора.
             field: Имя поля.
-            choices: Для ``QComboBox`` — список ``(значение, подпись)``.
+            choices: Для ``QComboBox`` — список ``(значение, подпись)`` или функция,
+                возвращающая его (перечитывается при обновлении виджета).
             image: Для ``QLabel`` — показывать картинку (байты/путь), а не текст.
             on_error: Куда сообщать отказ (поле не прошло, набор нельзя менять);
                 по умолчанию — подсказка у виджета.
@@ -86,11 +87,16 @@ class Binding:
         self._image = image
         self._on_error = on_error
         self._updating = False
+        # список выбора: готовый или функция (перечитывается при каждом обновлении —
+        # например, ссылка на таблицу, куда добавили новую несохранённую запись)
+        self._choices = choices
+        self._shown_choices: Optional[tuple] = None
         if isinstance(widget, QComboBox) and choices is not None:
-            widget.clear()
-            widget.addItem('—', None)
-            for value, label in choices:
-                widget.addItem(label, value)
+            self._updating = True
+            try:
+                self._fill_choices()
+            finally:
+                self._updating = False
         self._connect_widget()
         source.subscribe(self._on_event)
         self.refresh()
@@ -107,6 +113,28 @@ class Binding:
             <Binding QLineEdit→name>
         """
         return f"<Binding {type(self.widget).__name__}→{self.field}>"
+
+    def _fill_choices(self) -> None:
+        """
+        Заполняет список выбора ``QComboBox`` (первый пункт «—» — пусто); если список не
+        изменился — ничего (не сбивать открытый список).
+
+        Returns:
+            None
+
+        Пример:
+            >>> binding._fill_choices()
+        """
+        items = self._choices() if callable(self._choices) else self._choices
+        items = tuple((value, str(label)) for value, label in (items or ()))
+        if items == self._shown_choices:
+            return
+        self._shown_choices = items
+        w = self.widget
+        w.clear()
+        w.addItem('—', None)
+        for value, label in items:
+            w.addItem(label, value)
 
     # ------------------------------------------------------------------ виджет → поле
 
@@ -270,6 +298,8 @@ class Binding:
                             and (self.source.auto_edit or ds.state.editing))
         self._updating = True
         try:
+            if isinstance(self.widget, QComboBox) and callable(self._choices):
+                self._fill_choices()
             self._show(value, ds, has_row)
             self._set_editable(editable, has_row)
         finally:

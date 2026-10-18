@@ -25,7 +25,8 @@
 """
 
 from ._model import (
-    MISSING, Draft, DraftError, DraftEvent, NodeKey, PlanError, SchemaError, StalePlanError,
+    MISSING, DeleteBlocked, Draft, DraftError, DraftEvent, NodeKey, PlanError, SchemaError,
+    StalePlanError,
 )
 from .conflicts import Conflict, Reader, find_conflicts
 from .executor import PersistenceAdapter, SaveResult, execute_plan
@@ -33,19 +34,19 @@ from .plan import SavePlan, build_plan
 from .policies import (
     CascadeDeletePolicy, DeletePolicy, DeleteResolution, RejectChildChangesPolicy,
 )
-from .schema import EntityType, TreeSchema
+from .schema import ON_DELETE, EntityType, Reference, TreeSchema
 from .scope import SaveScope, select_nodes
 from .store import DraftStore, negative_ids
 from .workflow import Confirm, save_with_confirmation
 
 __all__ = [
-    'MISSING', 'Draft', 'DraftError', 'DraftEvent', 'NodeKey', 'PlanError', 'SchemaError',
+    'MISSING', 'DeleteBlocked', 'Draft', 'DraftError', 'DraftEvent', 'NodeKey', 'PlanError', 'SchemaError',
     'StalePlanError',
     'Conflict', 'Reader', 'find_conflicts',
     'PersistenceAdapter', 'SaveResult', 'execute_plan',
     'SavePlan', 'build_plan',
     'CascadeDeletePolicy', 'DeletePolicy', 'DeleteResolution', 'RejectChildChangesPolicy',
-    'EntityType', 'TreeSchema',
+    'ON_DELETE', 'EntityType', 'Reference', 'TreeSchema',
     'SaveScope', 'select_nodes',
     'DraftStore', 'negative_ids',
     'Confirm', 'save_with_confirmation',

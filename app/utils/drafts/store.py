@@ -1496,6 +1496,12 @@ class DraftStore:
         if record is not None:
             record.id = new_id
             self._records[new_node] = record
+        # ссылки (не владение) других черновиков на эту запись — тоже на настоящий id
+        # (2026-10-18: раньше заменялась только связь детей с родителем)
+        for referrer_type, ref in self.schema.referrers(entity):
+            for (other_entity, _), other in self._records.items():
+                if other_entity == referrer_type and other.data.get(ref.field) == old_id:
+                    other.data[ref.field] = new_id
         self._emit('remapped', new_node, old_id=old_id)
 
     def apply_saved(self, consumed: Iterable[NodeKey], id_map: Mapping[NodeKey, Hashable],

@@ -89,6 +89,23 @@ def photo_image(row: Mapping[str, Any], service: Any) -> Optional[str]:
     return os.path.join(getattr(service, '_storage_path', None) or '', path)
 
 
+def photo_count_text(count: Any) -> str:
+    """
+    Число фото у приёма текстом — как у прежнего столбца ``has_photos``.
+
+    Args:
+        count: Число фото.
+
+    Returns:
+        ``'3 фото'`` или ``'❌'``.
+
+    Пример:
+        >>> photo_count_text(3), photo_count_text(0)
+        ('3 фото', '❌')
+    """
+    return f"{count} фото" if count else '❌'
+
+
 CLINIC = TableRegistry([
     TableSpec(
         'patients', 'patient', 'Пациенты', 'Пациент', Patient, PatientDTO, PATIENT_CONFIG,
@@ -106,7 +123,9 @@ CLINIC = TableRegistry([
         columns=('date', 'reason_text', 'date_next', 'photo_count'),
         form=('date', 'date_next', 'reason_text', 'procedure_text', 'recommendations_text',
               'note_text', 'cost_procedure_text'),
-        extras=(total('photo_count', 'Фото', 'photos'),),
+        # показ — как у прежнего столбца has_photos (formatter): «N фото» или «❌»; значение —
+        # число (сортировка по числу)
+        extras=(total('photo_count', 'Фото', 'photos', display=photo_count_text),),
     ),
     TableSpec(
         'photos', 'photo', 'Фото', 'Фото', Photo, PhotoDTO, PHOTO_CONFIG,

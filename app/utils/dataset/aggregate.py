@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, Hashable, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Hashable, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .backend import DataBackend, RowOverlay
 from .query import Condition, Op, Query, apply_in_memory
@@ -68,7 +68,9 @@ class AggregateDef:
         child: Подчинённые строки: набор (``DataSet`` — учитывается и не сохранённое) или
             источник (``DataBackend`` — только то, что в хранилище).
         link_field: Поле подчинённой строки со ссылкой на главную (``appointment_id``).
-        func: Вид итога (по умолчанию — число строк).
+        func: Вид итога (по умолчанию — число строк) или СВОЯ функция от списка
+            подчинённых строк группы — любая логика (``lambda rows: …``; для главной строки
+            без подчинённых зовётся с пустым списком).
         field: Поле подчинённой строки для суммы/минимума/максимума/среднего.
         where: Дополнительные условия на подчинённые строки (только оплаченные чеки…).
 
@@ -79,7 +81,7 @@ class AggregateDef:
 
     child: Union['DataSet', DataBackend]
     link_field: str
-    func: AggFunc = AggFunc.COUNT
+    func: Union[AggFunc, Callable[[List[Dict[str, Any]]], Any]] = AggFunc.COUNT
     field: Optional[str] = None
     where: Tuple[Condition, ...] = ()
 
@@ -98,15 +100,17 @@ class AggregateDef:
             Traceback (most recent call last):
             ValueError: для итога 'sum' укажите поле (field)
         """
-        object.__setattr__(self, 'func', AggFunc(self.func))
+        if not callable(self.func) or isinstance(self.func, AggFunc):
+            object.__setattr__(self, 'func', AggFunc(self.func))
         object.__setattr__(self, 'where', tuple(self.where))
-        if self.func is not AggFunc.COUNT and not self.field:
+        if isinstance(self.func, AggFunc) and self.func is not AggFunc.COUNT and not self.field:
             raise ValueError(f"для итога {self.func.value!r} укажите поле (field)")
 
     @property
     def empty_value(self) -> Any:
         """
-        Итог, когда подчинённых строк нет: 0 для числа, ``None`` для остальных.
+        Итог, когда подчинённых строк нет: 0 для числа, своя функция — от пустого списка,
+        ``None`` для остальных.
 
         Returns:
             Значение.
@@ -115,6 +119,8 @@ class AggregateDef:
             >>> AggregateDef(backend, 'a').empty_value
             0
         """
+        if not isinstance(self.func, AggFunc):
+            return self.func([])
         return 0 if self.func is AggFunc.COUNT else None
 
     def depends_on(self, dataset: 'DataSet') -> bool:
@@ -186,13 +192,16 @@ class AggregateDef:
         real = [k for k in wanted if k is not None]
         if not real:
             return result
+        custom = not isinstance(self.func, AggFunc)
         groups: Dict[Hashable, List[Any]] = {}
         for row in self._rows(real):
             parent = row.get(self.link_field)
             if parent in result:
-                groups.setdefault(parent, []).append(row.get(self.field) if self.field else 1)
+                # своя функция получает строки целиком; встроенные — значения поля
+                item = row if custom else (row.get(self.field) if self.field else 1)
+                groups.setdefault(parent, []).append(item)
         for parent, values in groups.items():
-            result[parent] = _apply(self.func, values)
+            result[parent] = self.func(values) if custom else _apply(self.func, values)
         return result
 
 

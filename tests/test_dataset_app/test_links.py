@@ -9,7 +9,6 @@
 (запрет / обнуление) — с откатом всего; список выбора и показ текста вместо id.
 """
 
-import datetime
 import os
 from typing import Optional
 
@@ -181,3 +180,36 @@ def test_form_combo_lists_unsaved_targets(services, providers, filled, link_serv
     assert [combo.itemText(i) for i in range(combo.count())] == ['—', 'Новый']
     combo.setCurrentIndex(1)
     assert built['test_orders'].value('doctor_id') == built['test_doctors'].current_key
+
+
+def test_link_text_and_choices_do_not_query_per_row(services, providers, filled, link_services):
+    """P7/P8: показ ссылки и список выбора — не запрос к БД на каждую перерисовку/переход по строкам."""
+    from sqlalchemy import event
+    from PySide6.QtWidgets import QApplication
+    from app.utils.dataset_qt import DataSetTableModel, build_form
+    QApplication.instance() or QApplication([])
+    doctor = link_services['doctor'].create(DoctorDTO(name='Иванова'))
+    appointment = services['appointment'].get_all()[0]
+    for i in range(5):
+        link_services['order'].create(OrderDTO(appointment_id=appointment.id, doctor_id=doctor.id, title=f'Н{i}'))
+    reg = registry(link_services, parent='appointments')
+    built = build(reg, providers, link_services)
+    orders = built['test_orders']
+    built.appointments.locate(appointment.id)
+    model = DataSetTableModel(built.sources['test_orders'], columns=['title', 'doctor_id'])
+    form = build_form(built.sources['test_orders'], ['doctor_id'])
+    statements = []
+    engine = services['db'].engine
+    listener = lambda conn, cursor, statement, *rest: statements.append(statement)  # noqa: E731
+    event.listen(engine, 'before_cursor_execute', listener)
+    try:
+        for _ in range(3):                                       # три полные «перерисовки»
+            texts = [model.data(model.index(r, 1)) for r in range(model.rowCount())]
+        for _ in range(orders.row_count - 1):
+            orders.next()                                        # переход по строкам
+    finally:
+        event.remove(engine, 'before_cursor_execute', listener)
+    assert texts == ['Иванова'] * 5
+    doctor_queries = [s for s in statements if 'test_doctors' in s]
+    assert len(doctor_queries) <= 2, doctor_queries              # было: на каждую ячейку и строку
+    assert form.widgets['doctor_id'].currentText() == 'Иванова'

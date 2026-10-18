@@ -191,3 +191,20 @@ def test_schema_without_references_works_with_plain_adapter():
     store.delete('patient', 1)
     execute_plan(store, build_plan(store), PlainAdapter(adapter))
     assert ('patient', 1) not in adapter.rows
+
+
+def test_reference_to_deleted_new_record_refused_clearly():
+    """Ссылка на новую запись, которую удалили (она не будет создана), — понятный отказ при построении плана."""
+    store, adapter = DraftStore(make()), MemoryAdapter()
+    adapter.rows[('patient', 1)] = {}
+    doctor = store.create('doctor', {'name': 'Новый'})
+    appointment = store.create('appointment', {'doctor_id': doctor}, parent_id=1)
+    store.delete('doctor', doctor)
+    with pytest.raises(DeleteBlocked) as info:
+        build_plan(store)
+    assert info.value.referrers == [('appointment', appointment)]
+    assert str(info.value) == ('Нельзя удалить «Врач #-1»: на неё ссылаются несохранённые изменения: '
+                               '«Приём #-2»')
+    store.undelete('doctor', doctor)
+    save(store, adapter)                                     # вернули врача — сохраняется
+    assert store.is_empty

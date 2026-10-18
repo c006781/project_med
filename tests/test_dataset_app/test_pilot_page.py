@@ -11,10 +11,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 from PySide6.QtWidgets import QApplication, QDateEdit, QLineEdit, QPlainTextEdit  # noqa: E402
 
-from app.dto.dto_all import PhotoDTO  # noqa: E402
 from interfaces.gui.gui_window.pages.dataset_pilot_page import DataSetPilotPage  # noqa: E402
 
-from .test_app_layer import app_drafts, filled, providers, services  # noqa: E402,F401  (фикстуры)
 
 
 @pytest.fixture(scope='module')
@@ -207,3 +205,56 @@ def test_consistency_through_full_drafts_scenario(qapp, services, providers, fil
     new = next(p for p in services['patient'].get_all() if p.last_name == 'Новый')
     appointment = next(a for a in services['appointment'].get_all() if a.patient_id == new.id)
     assert [p.description for p in services['photo'].get_by_parent(appointment.id)] == ['снимок']
+
+
+def test_consistency_direct_mode_small_portions(qapp, services, providers, filled, monkeypatch):
+    """Та же итоговая проверка — запись сразу в БД, порции по одной строке, догрузка таблицей."""
+    from app.utils.dataset import EventKind
+    from app.utils.dataset_qt import DataSetTableModel
+    unexpected_resets, problems = [], []
+    original_on_event, original_reset = DataSetTableModel._on_event, DataSetTableModel._reset
+
+    def on_event(self, event):
+        self._last_kind = event.kind
+        try:
+            return original_on_event(self, event)
+        finally:
+            self._last_kind = None
+
+    def reset(self):
+        kind = getattr(self, '_last_kind', None)
+        if kind not in (None, EventKind.REFRESHED, EventKind.OPENED, EventKind.CLOSED):
+            unexpected_resets.append((self.dataset.name if self.dataset else None, kind.value))
+        return original_reset(self)
+
+    monkeypatch.setattr(DataSetTableModel, '_on_event', on_event)
+    monkeypatch.setattr(DataSetTableModel, '_reset', reset)
+    page = DataSetPilotPage(services=providers, fetch_size=1, ask_delete=lambda: True)
+
+    def check(event):
+        ds = event.dataset
+        if ds is None or not ds.active:
+            return
+        if not (-1 <= ds.current_index < ds.row_count or (ds.row_count == 0 and ds.current_index == -1)):
+            problems.append((ds.name, event.kind.value, ds.current_index, ds.row_count))
+        model = page.models[ds.name]
+        if event.kind not in (EventKind.ROWS_INSERTED, EventKind.ROWS_REMOVED) and model.rowCount() != ds.row_count:
+            problems.append((ds.name, event.kind.value, 'таблица', model.rowCount(), ds.row_count))
+
+    for ds in page.clinic.datasets:
+        ds.subscribe(check)
+    page.open_data()
+    c, model = page.clinic, page.models['patients']
+    while model.canFetchMore():
+        model.fetchMore()                                        # прокрутка таблицы до конца
+    assert c.patients.row_count == 2
+    c.patients.append({'last_name': 'Сидоров', 'first_name': 'С', 'birth_date': datetime.date(1999, 9, 9)})
+    c.patients.post()
+    c.appointments.append({'date': datetime.date(2026, 10, 18)}); c.appointments.post()
+    c.appointments.append({'date': datetime.date(2026, 10, 19)}); c.appointments.cancel()
+    c.appointments.delete()
+    page.search.setText('сид'); page.search.setText('')
+    c.patients.locate(filled['petrov']); c.patients.delete()
+    c.patients.refresh(); c.patients.last(); c.patients.first()
+    assert problems == [] and unexpected_resets == []
+    assert sorted(p.last_name for p in services['patient'].get_all()) == ['Иванов', 'Сидоров']

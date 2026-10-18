@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (  # noqa: E402
 )
 
 from app.utils.dataset import (  # noqa: E402
-    DataSet, DataSource, FetchMode, FieldDef, FieldKind, MasterDetailLink, MemoryBackend, State,
+    DataSet, DataSource, FieldDef, FieldKind, MasterDetailLink, MemoryBackend, State,
 )
 from app.utils.dataset_qt import DataNavigator, DataSetTableModel, bind, bind_table_view  # noqa: E402
 

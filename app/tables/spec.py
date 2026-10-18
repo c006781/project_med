@@ -72,6 +72,11 @@ class Extra:
         visible: Показывать столбцом по умолчанию.
         display: Показ значения текстом.
         widget: Виджет формы (``'image'`` — картинка…; см. ``dataset_qt.forms``).
+        by: Для ``total`` — кто считает: ``'program'`` (по строкам, видит черновики) или
+            ``'sql'`` (БД, отдельным запросом ``GROUP BY`` — не мешает правке таблицы данных).
+        unsaved: Для ``total(by='sql')`` — поправка на черновики: ``'delta'`` (числа строк)
+            или ``'ignore'``.
+        sql_where: Для ``total(by='sql')`` — своё условие SQL на подчинённые строки.
 
     Пример:
         >>> mark('selected', '✓').kind
@@ -90,6 +95,9 @@ class Extra:
     visible: bool = True
     display: Optional[Callable[[Any], str]] = None
     widget: Optional[str] = None
+    by: str = 'program'
+    unsaved: str = 'delta'
+    sql_where: Optional[Callable[[Any], Any]] = None
 
 
 def mark(name: str = 'mark', label: str = '✓') -> Extra:
@@ -139,7 +147,9 @@ def calc(name: str, label: str, func: Callable[..., Any], kind: FieldKind = Fiel
 
 def total(name: str, label: str, child: str, func: Any = AggFunc.COUNT,
           field: Optional[str] = None, where: Sequence[Condition] = (), *,
-          kind: Optional[FieldKind] = None, display: Optional[Callable[[Any], str]] = None) -> Extra:
+          kind: Optional[FieldKind] = None, display: Optional[Callable[[Any], str]] = None,
+          by: str = 'program', unsaved: str = 'delta',
+          sql_where: Optional[Callable[[Any], Any]] = None) -> Extra:
     """
     Итог по подчинённой таблице реестра, который считает программа (число фото у приёма,
     сумма чеков у пациента).
@@ -154,9 +164,16 @@ def total(name: str, label: str, child: str, func: Any = AggFunc.COUNT,
         where: Условия на подчинённые строки.
         kind: Тип значения (по умолчанию: число — целое, остальное — без проверки).
         display: Показ текстом.
+        by: Кто считает: ``'program'`` (по строкам; видит черновики; любая своя функция)
+            или ``'sql'`` (БД отдельным запросом; ``func`` — count/sum/min/max/avg).
+        unsaved: Для ``by='sql'``: поправка на черновики — ``'delta'`` или ``'ignore'``.
+        sql_where: Для ``by='sql'``: своё условие SQL (``lambda table: table.c.paid``).
 
     Returns:
         ``Extra``.
+
+    Raises:
+        ValueError: Неизвестный ``by``; для ``'sql'`` — своя функция или условия ``where``.
 
     Пример:
         >>> total('photo_count', 'Фото', 'photos').aggregate
@@ -164,10 +181,14 @@ def total(name: str, label: str, child: str, func: Any = AggFunc.COUNT,
     """
     if not callable(func) or isinstance(func, AggFunc):
         func = AggFunc(func)
+    if by not in ('program', 'sql'):
+        raise ValueError(f"total {name}: by={by!r} — допустимо 'program' или 'sql'")
+    if by == 'sql' and (not isinstance(func, AggFunc) or where):
+        raise ValueError(f"total {name}: БД считает count/sum/min/max/avg; условия — sql_where")
     if kind is None:
         kind = FieldKind.INTEGER if func is AggFunc.COUNT else FieldKind.ANY
     return Extra(name, label, 'total', kind, child=child, aggregate=func, field=field,
-                 where=tuple(where), display=display)
+                 where=tuple(where), display=display, by=by, unsaved=unsaved, sql_where=sql_where)
 
 
 @dataclass(frozen=True)
@@ -245,6 +266,9 @@ class TableSpec:
         parent_field: Поле связи с родителем (вместе с ``parent``).
         links: Настройки связей-ссылок (``ref(...)``); без настройки — правило
             «нельзя удалить цель, пока на неё ссылаются».
+        skip: Поля ``field_configs``, которые набору не нужны (например, старый итог
+            ``sql_compute``, вытесненный ``total(by='sql')``: его подзапрос не утяжеляет
+            запрос таблицы данных).
         fetch_size: Свой размер порции загрузки.
 
     Пример:
@@ -267,6 +291,7 @@ class TableSpec:
     parent: Optional[str] = None
     parent_field: Optional[str] = None
     links: Tuple[Link, ...] = ()
+    skip: Tuple[str, ...] = ()
     fetch_size: Optional[int] = None
 
 
@@ -767,8 +792,46 @@ class TableRegistry:
 
     # ------------------------------------------------------------------ наборы
 
+    def _sql_totals(self, spec: TableSpec, child: str, datasets: Mapping[str, DataSet],
+                    services: Mapping[str, Callable[[], Any]], cache: Dict[Any, Any]) -> Any:
+        """
+        Общий объект SQL-итогов таблицы по подчинённой таблице (все её ``total(by='sql')`` —
+        одним запросом на окно).
+
+        Args:
+            spec: Описание главной таблицы.
+            child: Подчинённая таблица.
+            datasets: Собранные наборы.
+            services: Свои поставщики сервисов.
+            cache: Объекты этой сборки (один на пару «главная, подчинённая»; не на реестре —
+                реестр общий, старые наборы держались бы в памяти).
+
+        Returns:
+            ``SqlTotals``.
+
+        Пример:
+            >>> registry._sql_totals(appointments_spec, 'photos', datasets, {})
+            <SqlTotals ...>
+        """
+        from app.dataset_app.sql_totals import SqlTotals
+        key = (spec.name, child)
+        if key in cache:
+            return cache[key]
+        child_spec = self._specs[child]
+        extras = [e for e in spec.extras if e.kind == 'total' and e.by == 'sql' and e.child == child]
+        columns = {e.name: (e.aggregate.value, e.field) for e in extras}
+        provider = services.get(child_spec.entity, child_spec.service)
+        where = next((e.sql_where for e in extras if e.sql_where is not None), None)
+        unsaved = 'ignore' if all(e.unsaved == 'ignore' for e in extras) else 'delta'
+        totals = SqlTotals(lambda: provider()._db.engine, child_spec.model.__table__,
+                           self.parent_field(child), columns, where=where,
+                           child=datasets.get(child), unsaved=unsaved)
+        cache[key] = totals
+        return totals
+
     def _extra_field(self, spec: TableSpec, extra: Extra, datasets: Mapping[str, DataSet],
-                     service: Callable[[], Any]) -> FieldDef:
+                     service: Callable[[], Any], services: Optional[Mapping[str, Callable[[], Any]]] = None,
+                     cache: Optional[Dict[Any, Any]] = None) -> FieldDef:
         """
         ``FieldDef`` своего столбца.
 
@@ -791,8 +854,13 @@ class TableRegistry:
                             visible=extra.visible)
         if extra.kind == 'total':
             child = extra.child
-            aggregate = AggregateDef(datasets[child], self.parent_field(child), extra.aggregate,
-                                     extra.field, extra.where)
+            if extra.by == 'sql':
+                aggregate = self._sql_totals(spec, child, datasets, services or {},
+                                             cache if cache is not None else {}).column(
+                    extra.name, 0 if extra.aggregate is AggFunc.COUNT else None)
+            else:
+                aggregate = AggregateDef(datasets[child], self.parent_field(child), extra.aggregate,
+                                         extra.field, extra.where)
             return FieldDef(extra.name, label, extra.value_kind, aggregate=aggregate,
                             visible=extra.visible, display=extra.display)
         func = extra.func
@@ -932,15 +1000,16 @@ class TableRegistry:
             wanted = [n for n in wanted if n in keep]
         datasets: Dict[str, DataSet] = {}
         writers: Dict[str, Any] = {}
+        sql_cache: Dict[Any, Any] = {}                     # объекты SQL-итогов этой сборки
         for name in reversed(wanted):                     # подчинённые раньше: итоги ссылаются на них
             spec = self._specs[name]
             provider = services.get(spec.entity, spec.service)
-            fields = fields_from_config(spec.config, spec.dto, spec.model)
+            fields = fields_from_config(spec.config, spec.dto, spec.model, skip=spec.skip)
             fields = [self._link_field(f, spec, drafts, services) for f in fields]
             for extra in spec.extras:
                 if extra.kind == 'total' and extra.child not in datasets:
                     continue                              # подчинённая таблица не собрана
-                fields.append(self._extra_field(spec, extra, datasets, provider))
+                fields.append(self._extra_field(spec, extra, datasets, provider, services, sql_cache))
             backend = ServiceBackend(provider, spec.dto, [f for f in fields if not _is_program(f)])
             writer = None
             if drafts is not None:

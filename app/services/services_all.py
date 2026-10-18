@@ -55,7 +55,7 @@ import shutil
 import uuid
 
 from typing import (
-    Callable, Type, TypeVar, Generic, 
+    Callable, Type, TypeVar, Generic, Iterable,
     List, Optional, Dict, 
     Any, Tuple, Union
 )
@@ -1085,6 +1085,7 @@ class BaseService(
         relations: Optional[List] = None,
         fuzzy_threshold: int = 60,
         session: Optional[Session] = None,
+        sql_compute: Optional[Iterable[str]] = None,
     ) -> Tuple[List[DTOType], int]:
         """
         Возвращает страницу записей с учётом фильтров, сортировки и подгрузки связей,
@@ -1098,6 +1099,9 @@ class BaseService(
             relations (Optional[List]): Список имён отношений для жадной подгрузки.
             fuzzy_threshold (int): Порог схожести для нечёткого поиска.
             session (Optional[Session]): Опциональная внешняя сессия.
+            sql_compute (Optional[Iterable[str]]): Какие поля ``sql_compute`` считать
+                подзапросом (``None`` — все, как раньше; пусто — ни одного: запрос таблицы
+                данных остаётся простым — итоги считает отдельный объект, 2026-10-18).
 
         Returns:
             Tuple[List[DTOType], int]: Кортеж (список DTO на странице, общее количество).
@@ -1120,6 +1124,10 @@ class BaseService(
 
             # Добавляем SQL-вычисления
             compute_fields = self._get_sql_compute_fields()
+            if sql_compute is not None:
+                # только нужные вызывающему (наборы данных: итоги — отдельным запросом)
+                wanted = set(sql_compute)
+                compute_fields = {k: v for k, v in compute_fields.items() if k in wanted}
             self.logger.debug(f"[DEBUG] compute_fields: {compute_fields}")
             extra_columns = []
             for field_name, config in compute_fields.items():

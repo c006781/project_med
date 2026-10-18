@@ -31,7 +31,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Hashable, Mapping, Optional, Sequence, Type
+from typing import Any, Callable, Dict, Hashable, List, Mapping, Optional, Sequence, Type
 
 from app.utils.dataset import Capabilities, Condition, FieldDef, Op, Page, Query
 
@@ -173,9 +173,26 @@ class ServiceBackend:
         filters = [to_service_filter(c) for c in query.conditions]
         filters.extend(query.params.get('service_filters') or ())
         order_by = [('-' if o.descending else '') + o.field for o in query.order]
+        # подзапросы sql_compute — только для описанных полей (итог, которого нет в наборе,
+        # не утяжеляет запрос таблицы данных)
         items, total = self.service.get_page_filtered(
-            query.offset, query.limit, filters or None, order_by or None, self._relations)
+            query.offset, query.limit, filters or None, order_by or None, self._relations,
+            sql_compute=[name for name in self._sql_compute_names()])
         return Page([self._row(dto) for dto in items], total)
+
+    def _sql_compute_names(self) -> List[str]:
+        """
+        Описанные поля, которые сервис считает подзапросом (``sql_compute`` в настройках).
+
+        Returns:
+            Имена полей.
+
+        Пример:
+            >>> backend._sql_compute_names()
+            []
+        """
+        configs = getattr(self.service, '_field_configs', None) or {}     # настройки полей сервиса
+        return [f.name for f in self._fields if 'sql_compute' in (configs.get(f.name) or {})]
 
     def get(self, key: Hashable) -> Optional[Dict[str, Any]]:
         """

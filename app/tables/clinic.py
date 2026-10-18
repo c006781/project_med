@@ -114,7 +114,9 @@ CLINIC = TableRegistry([
         columns=('mark', 'last_name', 'first_name', 'middle_name', 'birth_date', 'phone', 'visits'),
         form=('last_name', 'first_name', 'middle_name', 'birth_date', 'phone',
               'description_text', 'comment_text'),
-        extras=(mark(), total('visits', 'Приёмов', 'appointments')),
+        # итоги считает БД отдельным запросом (GROUP BY по подчинённой таблице) — не в запросе
+        # таблицы данных; черновики учитываются поправкой (решение владельца 2026-10-18)
+        extras=(mark(), total('visits', 'Приёмов', 'appointments', by='sql')),
     ),
     TableSpec(
         'appointments', 'appointment', 'Приёмы', 'Приём', Appointment, AppointmentDTO,
@@ -125,7 +127,10 @@ CLINIC = TableRegistry([
               'note_text', 'cost_procedure_text'),
         # показ — как у прежнего столбца has_photos (formatter): «N фото» или «❌»; значение —
         # число (сортировка по числу)
-        extras=(mark(), total('photo_count', 'Фото', 'photos', display=photo_count_text)),
+        extras=(mark(), total('photo_count', 'Фото', 'photos', display=photo_count_text, by='sql')),
+        # старый итог has_photos (подзапрос в запросе приёмов) — набору не нужен: его
+        # заменил photo_count (отдельный запрос); старые экраны has_photos показывают по-прежнему
+        skip=('has_photos',),
     ),
     TableSpec(
         'photos', 'photo', 'Фото', 'Фото', Photo, PhotoDTO, PHOTO_CONFIG,

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import contextlib
 import weakref
-from typing import Any, Dict, Hashable, Iterator, List, Mapping, Optional
+from typing import Any, Dict, Hashable, Iterator, List, Mapping, Optional, Tuple
 
 from app.utils.dataset import DataEvent, DataSet, EventKind, Op, Query, State
 from app.utils.drafts import MISSING, DraftEvent, DraftStore
@@ -372,6 +372,51 @@ class DraftsWriter:
         if draft is not None:
             return 'new' if draft.is_new else 'modified'
         return 'child' if self.store.status(self.entity, key) else None
+
+    def pending(self, dataset: DataSet) -> List[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]]:
+        """
+        Не сохранённые изменения этого типа записей — для поправки итогов, которые считает
+        БД (``KeyedTotals(unsaved='delta')``): ``(было, стало)``.
+
+        * новая — ``(None, строка)`` (с полем связи с родителем);
+        * помеченная на удаление существующая — ``(строка с родителем, None)``;
+        * перенесённая к другому родителю — ``(старый родитель, новый)``.
+
+        Правки без смены связи не перечисляются (на число строк не влияют). У удалённой
+        записи значение поля-ссылки (не родителя) известно, только если его меняли в
+        черновике, — итог по ссылке на удаление поправляется не всегда.
+
+        Args:
+            dataset: Набор (не используется — тип записей у моста один).
+
+        Returns:
+            Список пар.
+
+        Пример:
+            >>> writer.pending(photos)
+            [(None, {'id': -1, 'appointment_id': 10})]
+        """
+        fk = self.parent_field
+        result: List[Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]] = []
+        for draft in self.store.drafts(self.entity):
+            if draft.is_new:
+                if draft.deleted:
+                    continue
+                after = dict(draft.data, **{self.key_field: draft.id})
+                if fk and draft.parent_id is not None:
+                    after.setdefault(fk, draft.parent_id)
+                result.append((None, after))
+                continue
+            before = dict(draft.original, **{self.key_field: draft.id})
+            if fk:
+                before.setdefault(fk, draft.parent_id)
+            if draft.deleted:
+                result.append((before, None))
+                continue
+            after = dict(before, **draft.data)
+            if any(before.get(name) != after.get(name) for name in draft.data):
+                result.append((before, after))
+        return result
 
     # ------------------------------------------------------------------ извещения
 

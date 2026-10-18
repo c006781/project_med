@@ -29,6 +29,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
+    from .aggregate import AggregateDef
     from .lookup import LookupDef
 
 # Проверка значения: (значение, вся строка) -> текст ошибки или None
@@ -113,6 +114,8 @@ class FieldDef:
         persistent: Пишется в хранилище (по умолчанию да). ``False`` — значение приходит
             из хранилища (его вычисляет само хранилище: ФИО пациента у приёма, число фото),
             но обратно не пишется и не правится (как ``ProviderFlags`` в FireDAC).
+        aggregate: Итог по подчинённым строкам, который считает программа
+            (``aggregate.AggregateDef``: число фото у приёма, сумма чеков); не пишется.
         local: Своё поле набора (как ``InternalCalc`` в RAD Studio): значение живёт в
             наборе по ключу строки, переживает перечитывание, в хранилище не пишется;
             меняется сразу, без правки строки и проверок (галочка-отметка, своя метка).
@@ -138,6 +141,7 @@ class FieldDef:
     lookup: Optional['LookupDef'] = None
     references: Optional[str] = None
     persistent: bool = True
+    aggregate: Optional['AggregateDef'] = None
     local: bool = False
     validators: Tuple[Validator, ...] = ()
     display: Optional[Callable[[Any], str]] = None
@@ -172,7 +176,7 @@ class FieldDef:
             (True, False)
         """
         return (self.persistent and not self.local and self.calculated is None
-                and self.lookup is None)
+                and self.lookup is None and self.aggregate is None)
 
     @property
     def editable(self) -> bool:
@@ -398,6 +402,19 @@ class Fields:
             'a'
         """
         return [f for f in self._items.values() if f.stored]
+
+    def aggregates(self) -> List[FieldDef]:
+        """
+        Поля-итоги по подчинённым (``aggregate``).
+
+        Returns:
+            Список ``FieldDef``.
+
+        Пример:
+            >>> [f.name for f in fields.aggregates()]
+            ['photo_count']
+        """
+        return [f for f in self._items.values() if f.aggregate is not None]
 
     def local(self) -> List[FieldDef]:
         """

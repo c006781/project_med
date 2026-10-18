@@ -221,6 +221,8 @@ class DataSet:
         self._fetched_keys: Set[Hashable] = set()
         # свои поля набора (local): «ключ строки → {поле: значение}» — переживают перечитывание
         self._local: Dict[Hashable, Dict[str, Any]] = {}
+        # итоги по подчинённым (aggregate): «поле → {ключ строки: итог}»
+        self._agg: Dict[str, Dict[Hashable, Any]] = {}
         self._emitter = Emitter()
         # описание полей — сразу (связи и экран настраиваются до открытия набора)
         self._resolve_fields(())
@@ -640,7 +642,69 @@ class DataSet:
         received = len(rows)
         if isinstance(self.writer, RowOverlay):
             rows = [dict(r) for r in self.writer.overlay(self, rows, query, offset == 0)]
-        return [self._apply_local(r) for r in rows], total, received
+        rows = [self._apply_local(r) for r in rows]
+        self._compute_aggregates([r.get(self.key_field) for r in rows])
+        return rows, total, received
+
+    def _compute_aggregates(self, keys: Sequence[Hashable],
+                            names: Optional[Sequence[str]] = None) -> Dict[str, Dict[Hashable, Any]]:
+        """
+        Считает итоги по подчинённым пачкой для ключей строк и запоминает их.
+
+        Args:
+            keys: Ключи строк.
+            names: Только эти поля-итоги (``None`` — все).
+
+        Returns:
+            «поле → {ключ: итог}» (только посчитанное сейчас).
+
+        Пример:
+            >>> ds._compute_aggregates([10, 11])
+            {'photo_count': {10: 2, 11: 0}}
+        """
+        result: Dict[str, Dict[Hashable, Any]] = {}
+        wanted = [k for k in keys]
+        if not wanted:
+            return result
+        for definition in self._fields.aggregates():
+            if names is not None and definition.name not in names:
+                continue
+            values = definition.aggregate.compute(wanted)
+            self._agg.setdefault(definition.name, {}).update(values)
+            result[definition.name] = values
+        return result
+
+    def recalc(self, keys: Optional[Iterable[Hashable]] = None,
+               names: Optional[Sequence[str]] = None) -> int:
+        """
+        Пересчитывает итоги по подчинённым (изменились подчинённые строки) и сообщает о
+        строках, где итог изменился.
+
+        Args:
+            keys: Ключи строк (``None`` — все загруженные).
+            names: Только эти поля-итоги (``None`` — все).
+
+        Returns:
+            Сколько строк изменилось.
+
+        Пример:
+            >>> ds.recalc([10])
+            1
+        """
+        if not self.active or not self._fields.aggregates():
+            return 0
+        wanted = ([r.get(self.key_field) for r in self._rows] if keys is None else list(keys))
+        before = {n: dict(self._agg.get(n, {})) for n in self._agg}
+        fresh = self._compute_aggregates(wanted, names)
+        changed = 0
+        for i, row in enumerate(self._rows):
+            key = row.get(self.key_field)
+            fields = tuple(n for n, values in fresh.items()
+                           if key in values and before.get(n, {}).get(key, object()) != values[key])
+            if fields:
+                self._emit(EventKind.ROW_CHANGED, index=i, fields=fields)
+                changed += 1
+        return changed
 
     def _apply_local(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -757,6 +821,7 @@ class DataSet:
         self._rows, self._fetched, self._fetched_keys = [], 0, set()
         self._total, self._exhausted = None, True
         self._local = {}                                           # свои поля — до закрытия
+        self._agg = {}
         old_index, old_state = self._index, self._state
         self._index, self._state = -1, State.INACTIVE           # H2: до событий
         self._emit(EventKind.CLOSED)
@@ -952,11 +1017,40 @@ class DataSet:
         row = self._row_at(index)
         definition = self._fields.get(name)
         if definition is not None:
+            if definition.aggregate is not None:
+                return self._aggregate_value(definition, row.get(self.key_field))
             if definition.calculated is not None:
                 return definition.calculated(row)
             if definition.lookup is not None:
                 return definition.lookup.resolve(row.get(definition.lookup.key_field))
         return row.get(name)
+
+    def _aggregate_value(self, definition: FieldDef, key: Hashable) -> Any:
+        """
+        Итог по подчинённым для строки: запомненный; нет — посчитать для этой строки
+        (ошибка подсчёта — в журнал и «нет значения», чтобы не ломать показ таблицы).
+
+        Args:
+            definition: Поле-итог.
+            key: Ключ строки (``None`` — новая строка: итог «нет подчинённых»).
+
+        Returns:
+            Итог.
+
+        Пример:
+            >>> ds._aggregate_value(ds.fields['photo_count'], 10)
+            2
+        """
+        if key is None:
+            return definition.aggregate.empty_value
+        cached = self._agg.get(definition.name, {})
+        if key in cached:
+            return cached[key]
+        try:
+            return self._compute_aggregates([key], [definition.name])[definition.name][key]
+        except Exception:
+            _log.exception("итог %r для строки %r не посчитан", definition.name, key)
+            return None
 
     def text(self, name: str, index: Optional[int] = None) -> str:
         """
@@ -1757,6 +1851,10 @@ class DataSet:
         if not self.active:
             return 0
         wanted = None if keys is None else set(keys)
+        if self._fields.aggregates():
+            # изменения извне (черновики потомков, отмена/повтор) — итоги этих строк заново
+            self._compute_aggregates([r.get(self.key_field) for r in self._rows
+                                      if wanted is None or r.get(self.key_field) in wanted])
         touched = 0
         for i, row in enumerate(self._rows):
             if wanted is None or row.get(self.key_field) in wanted:
@@ -1789,6 +1887,7 @@ class DataSet:
             fresh = overlaid[0] if overlaid else None
         if fresh is not None:
             fresh = self._apply_local(dict(fresh))
+            self._compute_aggregates([fresh.get(self.key_field)])
         if fresh is None:
             del self._rows[i]
             old_index = self._index

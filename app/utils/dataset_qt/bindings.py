@@ -196,8 +196,11 @@ class Binding:
         if isinstance(self.widget, (QLineEdit, QPlainTextEdit, QTextEdit)) and value == '':
             current = ds.value(self.field)
             value = None if current is None else ''        # стёрли пустое — осталось пустым
+        definition = ds.fields.get(self.field)
+        local = definition is not None and definition.local
         try:
-            if not ds.state.editing and not self.source.auto_edit:
+            # своё поле набора (отметка) — без режима правки: auto_edit к нему не относится
+            if not local and not ds.state.editing and not self.source.auto_edit:
                 raise PermissionError("правка с экрана выключена (auto_edit)")
             ds.set_value(self.field, value)
         except Exception as exc:
@@ -260,8 +263,11 @@ class Binding:
         has_row = ds is not None and ds.active and ds.current_index >= 0
         value = ds.value(self.field) if has_row else None
         definition = ds.fields.get(self.field) if ds is not None else None
-        editable = bool(has_row and ds.can_modify and (definition is None or definition.editable)
-                        and (self.source.auto_edit or ds.state.editing))
+        if definition is not None and definition.local:
+            editable = bool(has_row and definition.editable)       # отметка — и в «только чтение»
+        else:
+            editable = bool(has_row and ds.can_modify and (definition is None or definition.editable)
+                            and (self.source.auto_edit or ds.state.editing))
         self._updating = True
         try:
             self._show(value, ds, has_row)

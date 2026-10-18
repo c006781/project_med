@@ -289,8 +289,12 @@ class DataSetTableModel(QAbstractTableModel):
         if ds is None or not index.isValid() or index.row() >= min(self._rows, ds.row_count):
             return None
         row, name = index.row(), self._columns[index.column()]
+        definition = self._field(index.column())
+        is_check = definition is not None and definition.kind is FieldKind.BOOLEAN
+        if role == Qt.CheckStateRole and is_check:
+            return Qt.Checked if ds.value(name, row) else Qt.Unchecked
         if role == Qt.DisplayRole:
-            return ds.text(name, row)
+            return '' if is_check else ds.text(name, row)
         if role == Qt.EditRole:
             return ds.value(name, row)
         if role == Qt.BackgroundRole:
@@ -321,6 +325,13 @@ class DataSetTableModel(QAbstractTableModel):
             >>> model.headerData(0, Qt.Horizontal)
             'Фамилия'
         """
+        if role == Qt.ToolTipRole and orientation == Qt.Horizontal:
+            ds = self.dataset
+            if ds is not None and 0 <= section < len(self._columns):
+                name = self._columns[section]
+                if not ds.sortable(name):
+                    return "Сортировка по этому столбцу — когда загружено всё (его считает программа)"
+            return None
         if role != Qt.DisplayRole:
             return None
         if orientation == Qt.Horizontal:
@@ -348,8 +359,16 @@ class DataSetTableModel(QAbstractTableModel):
             return Qt.NoItemFlags
         base = Qt.ItemIsEnabled | Qt.ItemIsSelectable
         ds, definition = self.dataset, self._field(index.column())
+        if definition is not None and definition.local:
+            # своё поле набора (отметка) — можно и в наборе «только для чтения»: в
+            # хранилище не пишется
+            if definition.kind is FieldKind.BOOLEAN:
+                return base | Qt.ItemIsUserCheckable if definition.editable else base
+            return base | Qt.ItemIsEditable if definition.editable else base
         editable = (ds is not None and ds.can_modify and self.source.auto_edit
                     and (definition is None or definition.editable))
+        if definition is not None and definition.kind is FieldKind.BOOLEAN:
+            return base | Qt.ItemIsUserCheckable if editable else base
         return base | Qt.ItemIsEditable if editable else base
 
     def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
@@ -369,16 +388,55 @@ class DataSetTableModel(QAbstractTableModel):
             True
         """
         ds = self.dataset
-        if role != Qt.EditRole or ds is None or not index.isValid():
+        if role not in (Qt.EditRole, Qt.CheckStateRole) or ds is None or not index.isValid():
             return False
+        name = self._columns[index.column()]
+        definition = self._field(index.column())
+        if role == Qt.CheckStateRole:
+            value = _checked(value)
         try:
+            if definition is not None and definition.local:
+                ds.set_local(name, value, index=index.row())   # отметка — без смены текущей
+                return True
             if ds.current_index != index.row():
                 ds.move_to(index.row())
-            ds.set_value(self._columns[index.column()], value)
+            ds.set_value(name, value)
         except Exception as exc:          # проверка полей, запись, только чтение
             self.error_occurred.emit(str(exc))
             return False
         return True
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:
+        """
+        Сортировка щелчком по заголовку (``QTableView.setSortingEnabled(True)``).
+
+        По столбцу, который считает программа, — только когда загружено всё; иначе
+        отказ с объяснением (``error_occurred``), а не неверный порядок.
+
+        Args:
+            column: Колонка.
+            order: Порядок.
+
+        Returns:
+            None
+
+        Пример:
+            >>> model.sort(0, Qt.DescendingOrder)
+        """
+        ds = self.dataset
+        if ds is None or not 0 <= column < len(self._columns):
+            return
+        name = self._columns[column]
+        if not ds.sortable(name):
+            definition = self._field(column)
+            label = definition.label if definition is not None else name
+            self.error_occurred.emit(f"Сортировка по «{label}» — когда загружено всё "
+                                     "(этот столбец считает программа)")
+            return
+        try:
+            ds.set_order(('-' if order == Qt.DescendingOrder else '') + name)
+        except Exception as exc:
+            self.error_occurred.emit(str(exc))
 
     def canFetchMore(self, parent: QModelIndex = QModelIndex()) -> bool:
         """
@@ -429,6 +487,28 @@ class DataSetTableModel(QAbstractTableModel):
             >>> model.disconnect_source()
         """
         self.source.unsubscribe(self._on_event)
+
+
+def _checked(value: Any) -> bool:
+    """
+    Значение галочки Qt → bool (Qt отдаёт и перечисление, и число).
+
+    Args:
+        value: ``Qt.Checked``/``Qt.Unchecked`` или 0/2.
+
+    Returns:
+        ``True`` — отмечено.
+
+    Пример:
+        >>> _checked(Qt.Checked), _checked(0)
+        (True, False)
+    """
+    if isinstance(value, Qt.CheckState):
+        return value == Qt.Checked
+    try:
+        return int(value) == Qt.Checked.value
+    except (TypeError, ValueError):
+        return bool(value)
 
 
 def bind_table_view(view: QTableView, model: DataSetTableModel) -> None:

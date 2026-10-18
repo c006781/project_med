@@ -153,6 +153,58 @@ def _make_deletion_handler(deletion_type: DeletionType):
     return handler
 
 
+def _unicode_lower(value):
+    """
+    ``lower()`` для SQLite, понимающий все буквы (встроенный — только латиницу).
+
+    Args:
+        value: Значение столбца (не строка — как есть, ``NULL`` — ``NULL``).
+
+    Returns:
+        Строка в нижнем регистре или исходное значение.
+
+    Пример:
+        >>> _unicode_lower('ИВАНОВ')
+        'иванов'
+    """
+    return value.lower() if isinstance(value, str) else value
+
+
+def _unicode_upper(value):
+    """
+    ``upper()`` для SQLite, понимающий все буквы.
+
+    Args:
+        value: Значение столбца.
+
+    Returns:
+        Строка в верхнем регистре или исходное значение.
+
+    Пример:
+        >>> _unicode_upper('иванов')
+        'ИВАНОВ'
+    """
+    return value.upper() if isinstance(value, str) else value
+
+
+def _register_unicode_functions(dbapi_connection, connection_record) -> None:
+    """
+    Подменяет ``lower``/``upper`` соединения SQLite на понимающие Юникод (APP1).
+
+    Args:
+        dbapi_connection: Соединение sqlite3.
+        connection_record: Запись пула (не используется).
+
+    Returns:
+        None
+
+    Пример:
+        >>> event.listen(engine, 'connect', _register_unicode_functions)
+    """
+    dbapi_connection.create_function('lower', 1, _unicode_lower, deterministic=True)
+    dbapi_connection.create_function('upper', 1, _unicode_upper, deterministic=True)
+
+
 class Database:
     """
     Центральный класс для управления подключением к SQLite базе данных.
@@ -241,6 +293,11 @@ class Database:
             future=True,
             connect_args={"check_same_thread": False},
         )
+        # APP1 (2026-10-18): поиск «без учёта регистра» (ilike → lower(...) LIKE lower(...))
+        # по кириллице на деле УЧИТЫВАЛ регистр: встроенный lower() SQLite понимает только
+        # латиницу («иван» не находил «Иванов»). Свой lower — для всех букв (Юникод).
+        if self.engine.url.get_backend_name() == 'sqlite':
+            event.listen(self.engine, 'connect', _register_unicode_functions)
 
         Session = sessionmaker(
             bind=self.engine,

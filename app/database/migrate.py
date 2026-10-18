@@ -511,3 +511,48 @@ def describe_differences(diffs: List) -> List[str]:
             else:
                 result.append(f"{kind} {getattr(item[1], 'name', item[1])}")
     return result
+
+
+def startup_error_text(exc: BaseException) -> Optional[str]:
+    """
+    Понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7, 2026-10-18).
+
+    Раньше отказ миграции или заблокированная база вылетали из ``Database.__init__``
+    необработанным исключением: в exe без консоли программа молча закрывалась. Функция
+    без Qt — её зовёт окно запуска (``interfaces/gui/gui_window/main.py``), её же
+    проверяют тесты.
+
+    Args:
+        exc: Исключение, поднятое при открытии базы (в т. ч. обёрнутое — смотрится
+            цепочка ``__cause__``/``__context__``).
+
+    Returns:
+        Текст для сообщения или ``None`` — ошибка не про базу (пусть идёт дальше как есть).
+
+    Пример:
+        >>> startup_error_text(MigrationError('нет обязательного столбца'))
+        'Базу данных нельзя безопасно обновить: нет обязательного столбца. ...'
+        >>> startup_error_text(ValueError('x')) is None
+        True
+    """
+    from sqlalchemy.exc import DatabaseError
+
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:      # обход цепочки причин
+        seen.add(id(current))
+        if isinstance(current, MigrationError):
+            return (f"Базу данных нельзя безопасно обновить: {current}. "
+                    "База не изменена. Обратитесь к разработчику.")
+        if isinstance(current, DatabaseError):
+            detail = str(getattr(current, 'orig', None) or current).lower()
+            if 'locked' in detail or 'busy' in detail:
+                return ("База данных занята другой копией программы (идёт обновление или запись). "
+                        "Закройте другие копии и запустите программу снова.")
+            if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
+                return ("Нет доступа на запись к файлу базы данных или его папке. "
+                        "Проверьте права и путь к базе в настройках.")
+            return (f"Ошибка базы данных при запуске: {getattr(current, 'orig', None) or current}. "
+                    "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+        current = current.__cause__ or current.__context__
+    return None

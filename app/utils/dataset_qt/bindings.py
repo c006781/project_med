@@ -36,9 +36,9 @@ from PySide6.QtWidgets import (
 )
 
 try:  # пакеты лежат рядом в одном родительском пакете (как в этом проекте)
-    from ..dataset import DataEvent, DataSource, EventKind
+    from ..dataset import DataEvent, DataSet, DataSource, EventKind
 except ImportError:  # pragma: no cover
-    from dataset import DataEvent, DataSource, EventKind
+    from dataset import DataEvent, DataSet, DataSource, EventKind
 
 # После каких событий виджет перечитывает значение
 _REFRESH_EVENTS = frozenset({
@@ -269,7 +269,7 @@ class Binding:
         finally:
             self._updating = False
 
-    def _show(self, value: Any, ds, has_row: bool) -> None:
+    def _show(self, value: Any, ds: Optional[DataSet], has_row: bool) -> None:
         """
         Значение → виджет.
 

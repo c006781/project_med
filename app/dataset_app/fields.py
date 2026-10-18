@@ -51,6 +51,45 @@ _KINDS = {
 }
 
 
+def _date_text(value: Any) -> str:
+    """
+    Дата так, как её показывает программа: ``дд.мм.гггг`` (F3).
+
+    Args:
+        value: Дата (не дата — как есть).
+
+    Returns:
+        Текст.
+
+    Пример:
+        >>> _date_text(datetime.date(1980, 1, 2))
+        '02.01.1980'
+    """
+    return value.strftime('%d.%m.%Y') if isinstance(value, datetime.date) else str(value)
+
+
+def _datetime_text(value: Any) -> str:
+    """
+    Дата и время: ``дд.мм.гггг чч:мм``.
+
+    Args:
+        value: Дата-время.
+
+    Returns:
+        Текст.
+
+    Пример:
+        >>> _datetime_text(datetime.datetime(2026, 10, 18, 9, 5))
+        '18.10.2026 09:05'
+    """
+    return value.strftime('%d.%m.%Y %H:%M') if isinstance(value, datetime.datetime) else str(value)
+
+
+# Показ значений по типу (F3, 2026-10-18: даты были в виде 1980-01-02, а в остальной
+# программе — 02.01.1980)
+_DISPLAY = {FieldKind.DATE: _date_text, FieldKind.DATETIME: _datetime_text}
+
+
 def _unwrap(annotation: Any) -> Any:
     """
     Тип без ``Optional[...]``.
@@ -174,10 +213,12 @@ def fields_from_config(config: Mapping[str, Mapping[str, Any]], dto_class: Optio
         is_note = bool(cfg.get('is_note'))
         computed_by_service = bool(cfg.get('virtual')) and not is_note
         persistent = name != key_field and cfg.get('updatable', True) is not False and not computed_by_service
+        kind = kind_of(annotations.get(name), cfg)
         result.append(FieldDef(
             name=name,
             label=cfg.get('title') or name,
-            kind=kind_of(annotations.get(name), cfg),
+            kind=kind,
+            display=_DISPLAY.get(kind),
             required=bool(cfg.get('required')) and name != key_field,
             read_only=name == key_field or not cfg.get('editable', True) or computed_by_service,
             visible=not cfg.get('hidden', False),

@@ -31,11 +31,12 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtWidgets import QTableView
 
 try:  # пакеты лежат рядом в одном родительском пакете (как в этом проекте)
-    from ..dataset import DataEvent, DataSet, DataSource, EventKind, FieldKind
+    from ..dataset import DataEvent, DataSet, DataSource, EventKind, FieldDef, FieldKind
 except ImportError:  # pragma: no cover — скопированы как отдельные пакеты верхнего уровня
-    from dataset import DataEvent, DataSet, DataSource, EventKind, FieldKind
+    from dataset import DataEvent, DataSet, DataSource, EventKind, FieldDef, FieldKind
 
 # Цвета строк по состоянию (DataSet.row_status); None — без подсветки
 DEFAULT_STATUS_COLORS: Dict[str, str] = {
@@ -250,7 +251,7 @@ class DataSetTableModel(QAbstractTableModel):
         """
         return 0 if parent.isValid() else len(self._columns)
 
-    def _field(self, column: int):
+    def _field(self, column: int) -> Optional[FieldDef]:
         """
         Описание поля колонки (``None`` — поле не описано).
 
@@ -430,7 +431,7 @@ class DataSetTableModel(QAbstractTableModel):
         self.source.unsubscribe(self._on_event)
 
 
-def bind_table_view(view, model: DataSetTableModel) -> None:
+def bind_table_view(view: QTableView, model: DataSetTableModel) -> None:
     """
     Связывает выделение таблицы Qt с текущей строкой набора — в обе стороны.
 
@@ -453,6 +454,18 @@ def bind_table_view(view, model: DataSetTableModel) -> None:
     guard = {'busy': False}
 
     def follow_dataset(row: int) -> None:
+        """
+        Текущая строка набора → выделение таблицы.
+
+        Args:
+            row: Номер строки (-1 — нет строки).
+
+        Returns:
+            None
+
+        Пример:
+            >>> follow_dataset(3)
+        """
         if guard['busy']:
             return
         guard['busy'] = True
@@ -466,6 +479,19 @@ def bind_table_view(view, model: DataSetTableModel) -> None:
             guard['busy'] = False
 
     def follow_view(current: QModelIndex, previous: QModelIndex) -> None:
+        """
+        Выделение таблицы → текущая строка набора (отказ — выделение возвращается).
+
+        Args:
+            current: Новая ячейка.
+            previous: Прежняя ячейка.
+
+        Returns:
+            None
+
+        Пример:
+            >>> follow_view(model.index(2, 0), model.index(1, 0))
+        """
         if guard['busy'] or not current.isValid():
             return
         ds = model.dataset

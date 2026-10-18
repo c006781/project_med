@@ -26,6 +26,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from PySide6.QtCore import QDate, Qt
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QComboBox, QDateEdit, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
@@ -282,7 +283,7 @@ class DataSetPilotPage(BasePage):
         except Exception as exc:
             self.show_error(f"Данные не загружены: {exc}")
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         """
         Экран показан — данные открываются (не при создании окна: старт программы не ждёт БД).
 
@@ -366,6 +367,25 @@ class DataSetPilotPage(BasePage):
             self.show_error(f"Фото не добавлено: {exc}")
             return False
         return True
+
+    def finish_pending_edits(self) -> Optional[str]:
+        """
+        Завершает незавершённые правки всех наборов (F7: перед закрытием окна — иначе
+        правка, ещё не попавшая в черновики/БД, пропала бы молча).
+
+        Returns:
+            ``None`` — всё завершено; иначе — текст ошибки (правка не прошла проверку).
+
+        Пример:
+            >>> page.finish_pending_edits() is None
+            True
+        """
+        try:
+            self.clinic.post_all()
+        except Exception as exc:
+            self.show_error(str(exc))
+            return str(exc)
+        return None
 
     def save(self, current: bool = False) -> bool:
         """

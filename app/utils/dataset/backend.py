@@ -113,6 +113,10 @@ class DataBackend(Protocol):
 
         Returns:
             Последовательность ``FieldDef``.
+
+        Пример:
+            >>> [f.name for f in backend.fields()]
+            ['id', 'name']
         """
 
     def fetch(self, query: Query) -> Page:
@@ -124,6 +128,10 @@ class DataBackend(Protocol):
 
         Returns:
             ``Page``.
+
+        Пример:
+            >>> backend.fetch(Query(limit=10)).total
+            42
         """
 
     def get(self, key: Hashable) -> Optional[Dict[str, Any]]:
@@ -135,6 +143,10 @@ class DataBackend(Protocol):
 
         Returns:
             Строка или ``None`` — нет такой.
+
+        Пример:
+            >>> backend.get(1)
+            {'id': 1, 'name': 'А'}
         """
 
 
@@ -157,6 +169,10 @@ class WritableBackend(DataBackend, Protocol):
 
         Returns:
             Строка, как она легла в хранилище (с ключом и значениями по умолчанию).
+
+        Пример:
+            >>> backend.insert({'name': 'Б'})
+            {'name': 'Б', 'id': 2}
         """
 
     def update(self, key: Hashable, changes: Mapping[str, Any]) -> Dict[str, Any]:
@@ -169,6 +185,10 @@ class WritableBackend(DataBackend, Protocol):
 
         Returns:
             Строка после изменения.
+
+        Пример:
+            >>> backend.update(2, {'name': 'В'})
+            {'name': 'В', 'id': 2}
         """
 
     def delete(self, key: Hashable) -> None:
@@ -177,6 +197,9 @@ class WritableBackend(DataBackend, Protocol):
 
         Args:
             key: Ключ.
+
+        Пример:
+            >>> backend.delete(2)
         """
 
 
@@ -206,6 +229,10 @@ class DataWriter(Protocol):
 
         Returns:
             Строка для показа (обязательно с ключом).
+
+        Пример:
+            >>> writer.insert(ds, {'name': 'А'})
+            {'name': 'А', 'id': -1}
         """
 
     def update(self, dataset: 'DataSet', key: Hashable, changes: Mapping[str, Any],
@@ -222,6 +249,10 @@ class DataWriter(Protocol):
 
         Returns:
             Строка для показа.
+
+        Пример:
+            >>> writer.update(ds, 1, {'name': 'Б'}, {'id': 1, 'name': 'Б'}, {'id': 1, 'name': 'А'})
+            {'id': 1, 'name': 'Б'}
         """
 
     def delete(self, dataset: 'DataSet', key: Hashable, row: Mapping[str, Any]) -> None:
@@ -232,6 +263,9 @@ class DataWriter(Protocol):
             dataset: Набор.
             key: Ключ.
             row: Строка (последнее известное состояние).
+
+        Пример:
+            >>> writer.delete(ds, 1, {'id': 1})
         """
 
 
@@ -263,6 +297,10 @@ class RowOverlay(Protocol):
 
         Returns:
             Строки для показа (можно менять значения, убирать, добавлять).
+
+        Пример:
+            >>> overlay.overlay(ds, [{'id': 1, 'name': 'А'}], Query(), True)
+            [{'id': -1, 'name': 'Новый'}, {'id': 1, 'name': 'Правка'}]
         """
 
     def row_status(self, dataset: 'DataSet', key: Hashable) -> Optional[str]:
@@ -275,6 +313,10 @@ class RowOverlay(Protocol):
 
         Returns:
             Состояние.
+
+        Пример:
+            >>> overlay.row_status(ds, -1)
+            'new'
         """
 
 

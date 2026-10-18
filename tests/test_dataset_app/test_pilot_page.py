@@ -270,3 +270,58 @@ def test_sorting_enabled_keeps_spec_order(qapp, services, providers, filled):
     assert visits.value('date') == datetime.date(2026, 3, 5)       # -date: последний приём первым
     assert page.tables['appointments'].isSortingEnabled()
     assert 'загружено' not in page.status.text()
+
+
+def test_consistency_marks_totals_and_sorting(qapp, services, providers, filled, app_drafts, monkeypatch):
+    """Итоговая проверка новых столбцов: отметки щелчком, сортировка по итогу щелчком, черновики, сохранение."""
+    from PySide6.QtCore import Qt
+    from app.utils.dataset import EventKind
+    from app.utils.dataset_qt import DataSetTableModel
+    unexpected_resets, problems = [], []
+    original_on_event, original_reset = DataSetTableModel._on_event, DataSetTableModel._reset
+
+    def on_event(self, event):
+        self._last_kind = event.kind
+        try:
+            return original_on_event(self, event)
+        finally:
+            self._last_kind = None
+
+    def reset(self):
+        kind = getattr(self, '_last_kind', None)
+        if kind not in (None, EventKind.REFRESHED, EventKind.OPENED, EventKind.CLOSED):
+            unexpected_resets.append((self.dataset.name if self.dataset else None, kind.value))
+        return original_reset(self)
+
+    monkeypatch.setattr(DataSetTableModel, '_on_event', on_event)
+    monkeypatch.setattr(DataSetTableModel, '_reset', reset)
+    page = DataSetPilotPage(drafts=app_drafts, services=providers)
+    page.fetch_mode.setCurrentIndex(1)                                   # всё сразу
+
+    def check(event):
+        ds = event.dataset
+        if ds is None or not ds.active:
+            return
+        if not (-1 <= ds.current_index < ds.row_count or (ds.row_count == 0 and ds.current_index == -1)):
+            problems.append((ds.name, event.kind.value, ds.current_index, ds.row_count))
+        model = page.models[ds.name]
+        if event.kind not in (EventKind.ROWS_INSERTED, EventKind.ROWS_REMOVED) and model.rowCount() != ds.row_count:
+            problems.append((ds.name, event.kind.value, 'таблица', model.rowCount(), ds.row_count))
+
+    for ds in page.clinic.datasets:
+        ds.subscribe(check)
+    page.open_data()
+    c, model = page.clinic, page.models['patients']
+    mark_col, visits_col = model.columns.index('mark'), model.columns.index('visits')
+    assert model.setData(model.index(1, mark_col), Qt.Checked, Qt.CheckStateRole)
+    assert c.patients.current_index == 0 and c.patients.local_keys('mark') == [filled['petrov']]
+    model.sort(visits_col, Qt.DescendingOrder)                           # всё загружено — можно
+    assert [c.patients.value('visits', i) for i in range(c.patients.row_count)] == [2, 1]
+    c.patients.locate(filled['petrov'])
+    c.appointments.append({'date': datetime.date(2026, 10, 18)}); c.appointments.post()
+    c.appointments.append({'date': datetime.date(2026, 10, 19)}); c.appointments.post()
+    assert c.patients.value('visits') == 3                               # черновики — в итоге
+    page.save(current=False)
+    assert c.patients.value('visits') == 3 and c.patients.local_keys('mark') == [filled['petrov']]
+    assert [c.patients.value('visits', i) for i in range(c.patients.row_count)] == [3, 2]   # сортировка — после сохранения
+    assert problems == [] and unexpected_resets == []

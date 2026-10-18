@@ -16,10 +16,12 @@ from .drafts_writer import DraftsWriter
 from .factory import SPECS, ClinicDataSets, create_clinic_datasets, default_services
 from .fields import fields_from_config, kind_of, references_of
 from .service_backend import ServiceBackend, to_service_filter
+from .sql_totals import SqlTotals
 
 __all__ = [
     'DraftsWriter',
     'SPECS', 'ClinicDataSets', 'create_clinic_datasets', 'default_services',
     'fields_from_config', 'kind_of', 'references_of',
     'ServiceBackend', 'to_service_filter',
+    'SqlTotals',
 ]

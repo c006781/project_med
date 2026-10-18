@@ -668,10 +668,20 @@ class DataSet:
         wanted = [k for k in keys]
         if not wanted:
             return result
+        shared: Dict[int, Dict[Hashable, Dict[str, Any]]] = {}
         for definition in self._fields.aggregates():
             if names is not None and definition.name not in names:
                 continue
-            values = definition.aggregate.compute(wanted)
+            aggregate = definition.aggregate
+            source = getattr(aggregate, 'source', None)
+            if source is not None and hasattr(source, 'compute_many'):
+                # столбцы одного объекта-итогов — одним запросом на окно (KeyedTotals)
+                if id(source) not in shared:
+                    shared[id(source)] = source.compute_many(wanted)
+                values = {k: v.get(aggregate.name, aggregate.empty_value)
+                          for k, v in shared[id(source)].items()}
+            else:
+                values = aggregate.compute(wanted)
             self._agg.setdefault(definition.name, {}).update(values)
             result[definition.name] = values
         return result

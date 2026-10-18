@@ -19,7 +19,7 @@
 """
 
 from .actions import Action, ActionSet, builtin_actions
-from .aggregate import AggFunc, AggregateDef
+from .aggregate import AggFunc, AggregateDef, KeyedTotals, PendingChanges, TotalColumn
 from .backend import (
     Capabilities, DataBackend, DataWriter, DirectWriter, Page, ReadOnlyError, RowOverlay,
     WritableBackend,
@@ -35,7 +35,7 @@ from .source import DataSource
 
 __all__ = [
     'Action', 'ActionSet', 'builtin_actions',
-    'AggFunc', 'AggregateDef',
+    'AggFunc', 'AggregateDef', 'KeyedTotals', 'PendingChanges', 'TotalColumn',
     'Capabilities', 'DataBackend', 'DataWriter', 'DirectWriter', 'Page', 'ReadOnlyError',
     'RowOverlay', 'WritableBackend',
     'DataSet', 'DataSetError', 'FetchMode', 'State', 'ValidationError',

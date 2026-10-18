@@ -26,7 +26,7 @@ APP_TABLES = ('patients', 'appointments', 'appointments_notes', 'photos')
 
 def app_metadata() -> MetaData:
     """Схема моделей ПРИЛОЖЕНИЯ (без тестовых моделей других тестов)."""
-    meta = MetaData()
+    meta = MetaData(naming_convention=Base.metadata.naming_convention)
     for name in APP_TABLES:
         Base.metadata.tables[name].to_metadata(meta)
     return meta
@@ -790,3 +790,98 @@ def test_configure_rejects_unknown():
     from app.database.migrate import configure
     with pytest.raises(TypeError):
         configure(auto=True)
+
+
+def _add_fk_column(meta):
+    """Новый необязательный столбец со ссылкой (doctor_id → новая таблица doctors)."""
+    import sqlalchemy as sa
+    sa.Table('doctors', meta, sa.Column('id', sa.Integer, primary_key=True),
+             sa.Column('name', sa.String(100), nullable=False))
+    meta.tables['appointments'].append_column(
+        sa.Column('doctor_id', sa.Integer, sa.ForeignKey('doctors.id'), nullable=True))
+
+
+def test_generate_migration_new_fk_column(tmp_path, with_0002):
+    """A2: новый необязательный столбец со связью — безопасно; миграция применяется, данные целы."""
+    from app.database import migrate
+    with_0002(code=NOOP_0002)
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO appointments (id, patient_id, date) VALUES (1, 1, '2026-10-18')"))
+    models = _models_with(_add_fk_column)
+    assert migrate.generate_migration(models)
+    upgrade_database(engine)
+    assert counts(engine)['appointments'] == 1
+    fks = inspect(engine).get_foreign_keys('appointments')
+    assert any(fk['referred_table'] == 'doctors' for fk in fks)
+    assert migrate.pending_model_changes(models) == []
+
+
+def test_fk_on_existing_column_is_unsafe():
+    """Связь на СУЩЕСТВУЮЩИЙ столбец — небезопасно (старые данные могут её нарушать)."""
+    import sqlalchemy as sa
+    from app.database.migrate import unsafe_changes
+    meta = app_metadata()
+    table = meta.tables['patients']
+    fk = sa.ForeignKeyConstraint(['comment_id'], ['appointments.id'])
+    table.append_constraint(fk)
+    assert unsafe_changes([('add_fk', fk)]) == [('add_fk', fk)]
+
+
+def test_two_heads_clear_error(tmp_path, with_0002, app_models):
+    """A1: две ветки миграций от одной версии — понятный MigrationError и при генерации."""
+    from app.database import migrate
+    target = with_0002(code=NOOP_0002)
+    (target / 'versions' / '0002_other.py').write_text(
+        NOOP_0002.replace("'0002_test_change'", "'0002_other'"), encoding='utf-8')
+    migrate.head_revision.cache_clear()
+    with pytest.raises(migrate.MigrationError, match='голов'):
+        migrate.generate_migration()
+    migrate.configure(autogenerate=True)
+    with pytest.raises(migrate.MigrationError) as info:
+        upgrade_database(create_engine(f"sqlite:///{tmp_path / 'db.db'}"))
+    assert migrate.startup_error_text(info.value)
+
+
+def test_generated_fk_migration_on_legacy_db(tmp_path, with_0002):
+    """Новая связь на СТАРОЙ базе (её ключи — без имён, как у настоящей): пересборка проходит, данные и связи целы."""
+    from app.database import migrate
+    with_0002(code=NOOP_0002)
+    path, engine = legacy_db(tmp_path)
+    before = counts(engine)
+    assert migrate.generate_migration(_models_with(_add_fk_column))
+    upgrade_database(engine)
+    assert counts(engine) == before                        # данные всех таблиц целы
+    referred = sorted(fk['referred_table'] for fk in inspect(engine).get_foreign_keys('appointments'))
+    assert 'doctors' in referred and 'patients' in referred
+
+
+DROP_FK_0002 = """
+from alembic import op
+
+from app.database.database_shema.clinic import NAMING_CONVENTION
+
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+
+
+def upgrade():
+    with op.batch_alter_table('photos', naming_convention=NAMING_CONVENTION) as batch:
+        batch.drop_constraint('fk_photos_appointment_id_appointments', type_='foreignkey')
+
+
+def downgrade():
+    with op.batch_alter_table('photos') as batch:
+        batch.create_foreign_key('fk_photos_appointment_id_appointments', 'appointments',
+                                 ['appointment_id'], ['id'])
+"""
+
+
+def test_drop_unnamed_fk_on_legacy_db_by_convention(tmp_path, with_0002):
+    """Правило §4: связь без имени (старая база) удаляется по имени из NAMING_CONVENTION."""
+    with_0002(code=DROP_FK_0002)
+    path, engine = legacy_db(tmp_path)
+    before = counts(engine)
+    upgrade_database(engine)
+    assert inspect(engine).get_foreign_keys('photos') == []
+    assert counts(engine) == before

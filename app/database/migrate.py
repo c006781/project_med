@@ -945,6 +945,41 @@ def is_safe_addition(item) -> bool:
     return False
 
 
+def unsafe_changes(changes: Sequence) -> list:
+    """
+    Какие изменения из списка нельзя применить автоматически.
+
+    Кроме ``is_safe_addition``: новая СВЯЗЬ (внешний ключ) в существующей таблице безопасна,
+    если все её столбцы добавляются этими же изменениями (A2, 2026-10-18) — в новых
+    столбцах ещё нет данных, нарушить связь нечему. Типичный случай — новый
+    необязательный ``doctor_id`` со ссылкой на врачей. SQLite пересоберёт таблицу
+    (``render_as_batch``), данные сохранятся.
+
+    Args:
+        changes: Плоский список отличий autogenerate.
+
+    Returns:
+        Небезопасные элементы (пусто — всё можно автоматически).
+
+    Пример:
+        >>> unsafe_changes([('add_column', None, 'appointments', doctor_id), ('add_fk', fk)])
+        []
+    """
+    added_columns = {(item[2], item[3].name) for item in changes
+                     if item[0] == 'add_column' and is_safe_addition(item)}
+    result = []
+    for item in changes:
+        if is_safe_addition(item):
+            continue
+        if item[0] == 'add_fk':
+            constraint = item[1]
+            table = constraint.table.name
+            if all((table, column.name) in added_columns for column in constraint.columns):
+                continue
+        result.append(item)
+    return result
+
+
 def pending_model_changes(metadata=None) -> list:
     """
     Чем модели отличаются от схемы последней миграции (то, что попало бы в новую миграцию).
@@ -957,10 +992,14 @@ def pending_model_changes(metadata=None) -> list:
     Returns:
         Плоский список отличий autogenerate (пусто — модели = миграции).
 
+    Raises:
+        MigrationError: У миграций несколько «голов» (A1).
+
     Пример:
         >>> pending_model_changes()
         []
     """
+    head_revision()                 # A1: две «головы» — MigrationError, а не ошибка Alembic
     reference = create_engine('sqlite://')
     try:
         with reference.begin() as conn:
@@ -1012,7 +1051,7 @@ def generate_migration(metadata=None, message: str = 'auto') -> Optional[str]:
     changes = pending_model_changes(metadata)
     if not changes:
         return None
-    unsafe = [item for item in changes if not is_safe_addition(item)]
+    unsafe = unsafe_changes(changes)
     if unsafe:
         raise MigrationError(
             "модели изменены так, что автоматическую миграцию делать нельзя: "

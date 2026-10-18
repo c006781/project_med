@@ -664,3 +664,64 @@ def test_state_consistent_on_every_event():
     patients.delete(); patients.refresh(); patients.set_filter(Condition('id', Op.EQ, 1))
     patients.set_filter(); patients.last(); patients.close()
     assert problems == []
+
+
+# --------------------------------------------------------------------------- свои поля (отметки)
+
+def marked_people(n=4, **kw):
+    backend = MemoryBackend([{'id': i, 'name': f'Имя{i}'} for i in range(1, n + 1)],
+                            fields=[FieldDef('id'), FieldDef('name', required=True),
+                                    FieldDef('mark', 'Отм.', FieldKind.BOOLEAN, local=True, default=False)])
+    return DataSet(backend, **kw)
+
+
+def test_local_field_set_without_edit_and_not_written():
+    ds = marked_people()
+    ds.open()
+    events = recorder(ds)
+    ds.set_local('mark', True, index=2)
+    assert ds.state is State.BROWSE and ds.value('mark', 2) is True and ds.value('mark', 0) is False
+    ds.set_value('mark', True)                                   # и через set_value — сразу
+    assert ds.state is State.BROWSE and ds.local_keys('mark') == [1, 3]
+    assert (EventKind.ROW_CHANGED,) in events
+    ds.set_value('name', 'Новое'); ds.post()
+    assert 'mark' not in ds.backend.get(1)                       # в хранилище не пишется
+
+
+def test_local_field_survives_refresh_portions_and_filter():
+    ds = marked_people(6, fetch_size=2)
+    ds.open()
+    ds.set_local('mark', True, index=1)                          # id 2
+    ds.refresh()
+    assert ds.value('mark', 1) is True
+    ds.set_filter(Condition('id', Op.GE, 4))
+    assert ds.local_keys('mark') == [2]                          # не загружена — но помнится
+    ds.set_filter()
+    assert ds.value('mark', 1) is True
+    ds.clear_local('mark')
+    assert ds.local_keys('mark') == [] and ds.value('mark', 1) is False
+    ds.close(); ds.open()
+    assert ds.local_keys('mark') == []                           # до закрытия набора
+
+
+def test_local_field_on_new_row_and_rekey():
+    ds = marked_people(writer=Deferred())
+    ds.open()
+    ds.append({'name': 'Новый'})
+    assert ds.value('mark') is False
+    ds.set_local('mark', True)
+    ds.post()
+    temp = ds.current_key
+    assert ds.local_keys('mark') == [temp]
+    ds.rekey(temp, 500)
+    ds.rekey(404, 600)                                           # нечего переносить — ничего
+    assert set(ds.local_keys('mark')) == {temp, 500}             # строка ещё с прежним ключом
+
+
+def test_local_errors():
+    ds = marked_people()
+    ds.open()
+    with pytest.raises(DataSetError, match='не своё'):
+        ds.set_local('name', 'x')
+    with pytest.raises(IndexError):
+        ds.set_local('mark', True, index=99)

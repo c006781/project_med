@@ -17,12 +17,14 @@
     >>> layout.addWidget(DataNavigator(source))
 """
 
+from .actions_menu import ActionsMenu, FieldValueDialog, ask_confirm, ask_field_value, widget_value
 from .bindings import Binding, bind
 from .forms import Form, build_form, widget_for, widget_kind
 from .navigator import BUTTONS, DataNavigator
 from .table_model import DEFAULT_STATUS_COLORS, DataSetTableModel, bind_table_view
 
 __all__ = [
+    'ActionsMenu', 'FieldValueDialog', 'ask_confirm', 'ask_field_value', 'widget_value',
     'Binding', 'bind',
     'Form', 'build_form', 'widget_for', 'widget_kind',
     'BUTTONS', 'DataNavigator',

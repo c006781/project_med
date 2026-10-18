@@ -120,19 +120,19 @@ CLINIC = TableRegistry([
         'appointments', 'appointment', 'Приёмы', 'Приём', Appointment, AppointmentDTO,
         APPOINTMENT_CONFIG, service=provider('get_appointment_service'),
         order=('-date', '-id'),
-        columns=('date', 'reason_text', 'date_next', 'photo_count'),
+        columns=('mark', 'date', 'reason_text', 'date_next', 'photo_count'),
         form=('date', 'date_next', 'reason_text', 'procedure_text', 'recommendations_text',
               'note_text', 'cost_procedure_text'),
         # показ — как у прежнего столбца has_photos (formatter): «N фото» или «❌»; значение —
         # число (сортировка по числу)
-        extras=(total('photo_count', 'Фото', 'photos', display=photo_count_text),),
+        extras=(mark(), total('photo_count', 'Фото', 'photos', display=photo_count_text)),
     ),
     TableSpec(
         'photos', 'photo', 'Фото', 'Фото', Photo, PhotoDTO, PHOTO_CONFIG,
         service=provider('get_photo_service'),
         order=('id',),
-        columns=('file_path', 'description'),
+        columns=('mark', 'file_path', 'description'),
         form=('image', 'description'),
-        extras=(calc('image', 'Снимок', photo_image, visible=False, widget='image'),),
+        extras=(mark(), calc('image', 'Снимок', photo_image, visible=False, widget='image')),
     ),
 ])

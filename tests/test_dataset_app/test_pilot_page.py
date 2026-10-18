@@ -80,8 +80,9 @@ def test_page_drafts_mode_save_current(qapp, services, providers, filled, app_dr
     reason.setPlainText('сильная боль')
     assert page.add_photo_file(image)                                             # пост приёма + новое фото
     assert page.clinic.photos.current_key < 0 and page.clinic.photos.value('image') == image
-    assert page.models['appointments'].data(page.models['appointments'].index(
-        page.clinic.appointments.current_index, 0), 0)
+    visits_model = page.models['appointments']
+    assert visits_model.data(visits_model.index(page.clinic.appointments.current_index,
+                                                visits_model.columns.index('date')), 0)
     assert services['appointment'].get_all()[0].reason_text == 'боль'             # в БД — ещё нет
     assert page.save(current=True)
     assert saved == [[('patient', filled['ivanov'])]]
@@ -325,3 +326,31 @@ def test_consistency_marks_totals_and_sorting(qapp, services, providers, filled,
     assert c.patients.value('visits') == 3 and c.patients.local_keys('mark') == [filled['petrov']]
     assert [c.patients.value('visits', i) for i in range(c.patients.row_count)] == [3, 2]   # сортировка — после сохранения
     assert problems == [] and unexpected_resets == []
+
+
+def test_marked_actions_with_drafts(qapp, services, providers, filled, app_drafts):
+    """Массовые действия на экране: удаление отмеченных — один шаг отмены; «сохранить отмеченные» — только их."""
+    saved = []
+
+    def save_handler(targets, scope):
+        saved.append(targets)
+        return app_drafts.save(targets, scope, confirm_deletes=lambda plan: True) is not None
+
+    page = DataSetPilotPage(drafts=app_drafts, save_handler=save_handler, services=providers,
+                            ask_delete=lambda: True)
+    page.open_data()
+    patients, menu = page.clinic.patients, page.action_menus['patients']
+    assert 'save_marked' in page.actions['patients'].names()
+    patients.set_value('phone', '+7 1'); patients.post()                 # Иванов
+    patients.next(); patients.set_value('phone', '+7 2'); patients.post()  # Петров
+    menu.trigger('mark_all')
+    store = app_drafts.store
+    page.action_menus['appointments'].trigger('mark_all')
+    assert page.action_menus['appointments'].trigger('delete_marked') == 1
+    store.undo()                                                          # один шаг — всё удаление
+    assert page.clinic.appointments.row_status() is None
+    patients.set_local('mark', False, index=1)                            # Петрова не сохраняем
+    assert menu.trigger('save_marked') is not None
+    assert saved == [[('patient', filled['ivanov'])]]
+    assert services['patient'].get_by_id(filled['ivanov']).phone == '+7 1'
+    assert services['patient'].get_by_id(filled['petrov']).phone is None and not store.is_empty

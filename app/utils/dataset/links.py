@@ -174,7 +174,14 @@ class MasterDetailLink:
             >>> link._on_master(DataEvent(EventKind.CURRENT_CHANGED, patients))
         """
         if event.kind in _SYNC_EVENTS:
+            before = self._last
             self.sync()
+            # D4 (2026-10-18): главный перечитан, а главная строка та же — связь ничего не
+            # меняла, и подчинённые оставались прежними (пользователь ждёт обновления всего
+            # дерева). Теперь при перечитывании главного перечитывается и подчинённый.
+            if (event.kind is EventKind.REFRESHED and self._last == before and self._last is not None
+                    and self.detail.active and not self.detail.state.editing):
+                self.detail.refresh()
 
     def unlink(self) -> None:
         """

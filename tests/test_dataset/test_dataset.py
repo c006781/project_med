@@ -239,7 +239,7 @@ def test_insert_append_defaults_and_cancel():
     ds.insert({'name': 'В'})                                   # перед текущей
     assert ds.current_index == 1 and ds.state is State.INSERT and ds.row_count == 3
     assert ds.current == {'id': None, 'name': 'В', 'status': 'new'}
-    assert events[:2] == [(EventKind.ROWS_INSERTED, 1, 1), (EventKind.CURRENT_CHANGED, -2, 1)]
+    assert events[:2] == [(EventKind.ROWS_INSERTED, 1, 1), (EventKind.CURRENT_CHANGED, 1, 1)]  # D1: настоящий прежний номер
     ds.cancel()
     assert ds.row_count == 2 and ds.current_key == 2 and ds.state is State.BROWSE
     ds.append({'name': 'Г'}); ds.post()
@@ -495,3 +495,25 @@ def test_link_fields_explicit_ambiguous_and_unlink():
     assert keys(visits) == [10, 20, 21]
     patients.next()
     assert keys(visits) == [10, 20, 21]
+
+
+def test_current_changed_never_reports_internal_index():
+    """D1: «прежний номер» в событии — настоящий номер строки или -1, не служебный -2."""
+    backend = people(4)
+    ds = DataSet(backend, fetch_size=2)
+    olds = []
+    ds.subscribe(lambda e: olds.append(e.old) if e.kind is EventKind.CURRENT_CHANGED else None)
+    ds.open(); ds.next()
+    ds.refresh(); ds.set_filter(); ds.insert({'name': 'x'}); ds.cancel()
+    ds.append({'name': 'y'}); ds.post(); ds.delete()
+    backend.delete(1); ds.first(); ds.next(); ds.reload_row(0)
+    assert olds and all(o >= -1 for o in olds)
+
+
+def test_reload_row_removed_before_current_keeps_record():
+    backend = people(3)
+    ds = DataSet(backend)
+    ds.open(); ds.move_to(2)
+    backend.delete(1)
+    assert not ds.reload_row(0)
+    assert ds.current_key == 3 and ds.current_index == 1

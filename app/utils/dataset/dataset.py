@@ -542,6 +542,29 @@ class DataSet:
             old, self._index = self._index, index
             self._emit(EventKind.CURRENT_CHANGED, old=old, new=index)
 
+    def _force_index(self, index: int, old: Optional[int] = None) -> None:
+        """
+        Делает строку текущей и ВСЕГДА сообщает об этом — даже если номер тот же
+        (под номером теперь другая запись: перечитали, вставили, удалили).
+
+        D1 (2026-10-18): раньше номер сбрасывался в служебный -2, и событие приходило с
+        «прежним номером» -2 — экран, перерисовывающий прежнюю строку, получал
+        несуществующий номер.
+
+        Args:
+            index: Новый номер.
+            old: Прежний номер (по умолчанию — текущий до вызова).
+
+        Returns:
+            None
+
+        Пример:
+            >>> ds._force_index(0)
+        """
+        old = self._index if old is None else old
+        self._index = index
+        self._emit(EventKind.CURRENT_CHANGED, old=old, new=index)
+
     # ------------------------------------------------------------------ чтение
 
     def _require_active(self) -> None:
@@ -737,8 +760,7 @@ class DataSet:
         index = self._find(key) if key is not None else None
         if index is None:
             index = min(old_index, len(self._rows) - 1) if self._rows else -1
-        self._index = -2                       # гарантирует событие о текущей строке
-        self._set_index(index)
+        self._force_index(index, old_index)
 
     def _find(self, key: Hashable) -> Optional[int]:
         """
@@ -1192,8 +1214,7 @@ class DataSet:
             self._emit(EventKind.ERROR, error=exc)
             raise
         self._emit(EventKind.REFRESHED)
-        self._index = -2
-        self._set_index(0 if self._rows else -1)
+        self._force_index(0 if self._rows else -1)
 
     def set_master(self, values: Optional[Mapping[str, Any]]) -> None:
         """
@@ -1340,8 +1361,7 @@ class DataSet:
         self._rows.insert(at, row)
         self._buffer = copy.deepcopy(row)
         self._emit(EventKind.ROWS_INSERTED, index=at, count=1)
-        self._index = -2 if self._index == at else self._index
-        self._set_index(at)
+        self._force_index(at)
         self._set_state(State.INSERT)
 
     def insert(self, values: Optional[Mapping[str, Any]] = None) -> None:
@@ -1487,8 +1507,7 @@ class DataSet:
             del self._rows[at]
             self._set_state(State.BROWSE)
             self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
-            self._index = -2
-            self._set_index(min(at, len(self._rows) - 1) if self._rows else -1)
+            self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
         else:
             self._set_state(State.BROWSE)
             self._emit(EventKind.ROW_CHANGED, index=self._index, fields=tuple(self._rows[self._index]))
@@ -1534,8 +1553,7 @@ class DataSet:
             self._fetched_keys.discard(key)
             self._fetched = max(self._fetched - 1, 0)   # следующая порция — без пропуска
         self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
-        self._index = -2
-        self._set_index(min(at, len(self._rows) - 1) if self._rows else -1)
+        self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
 
     def reload_row(self, index: Optional[int] = None) -> bool:
         """
@@ -1563,9 +1581,10 @@ class DataSet:
         if fresh is None:
             del self._rows[i]
             self._emit(EventKind.ROWS_REMOVED, index=i, count=1)
-            if i <= self._index:
-                self._index = -2
-                self._set_index(min(i, len(self._rows) - 1) if self._rows else -1)
+            if i < self._index:
+                self._force_index(self._index - 1)      # та же запись, номер на 1 меньше
+            elif i == self._index:
+                self._force_index(min(i, len(self._rows) - 1) if self._rows else -1, i)
             return False
         self._rows[i] = dict(fresh)
         self._emit(EventKind.ROW_CHANGED, index=i, fields=tuple(fresh))

@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import functools
 import os
-import shutil
+# import shutil  # до M8 (2026-10-18): копия файла — теперь backup-API SQLite
+import sqlite3
 import time
 from typing import List, Optional, Tuple
 
@@ -206,6 +207,12 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
     """
     Резервная копия файла базы перед миграцией (только SQLite-файл; память — нет).
 
+    Копия — через backup-API SQLite (M8, 2026-10-18), а не копированием файла: в режиме
+    WAL свежие изменения лежат в отдельном файле ``-wal`` и, пока базу держит открытой
+    другая программа, в основной файл не сливаются — копия файла их теряла. Backup-API
+    читает базу как обычный читатель (под нашей блокировкой записи это разрешено) и
+    даёт согласованный снимок в любом режиме журнала.
+
     Args:
         engine: Движок.
         revision: Текущая ревизия (в имя копии).
@@ -225,8 +232,16 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
     while os.path.exists(backup):
         backup = f"{path}.bak-{time.strftime('%Y%m%d_%H%M%S')}-{revision or 'none'}-{n}"
         n += 1
-    engine.dispose()            # закрыть соединения — копируем согласованный файл
-    shutil.copy2(path, backup)
+    engine.dispose()            # закрыть соединения приложения
+    # shutil.copy2(path, backup)
+    # ↑ до M8 (2026-10-18): копия файла теряла изменения из -wal (режим WAL, база открыта другой программой)
+    source = sqlite3.connect(path)
+    target = sqlite3.connect(backup)
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
     return backup
 
 

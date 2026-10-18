@@ -725,3 +725,87 @@ def test_local_errors():
         ds.set_local('name', 'x')
     with pytest.raises(IndexError):
         ds.set_local('mark', True, index=99)
+
+
+# --------------------------------------------------------------------------- итоги по подчинённым
+
+def clinic_with_counts(photo_writer=None):
+    """Приёмы с числом фото и суммой «чеков» (итоги считает программа) + набор фото."""
+    from app.utils.dataset import AggFunc, AggregateDef
+    photo_backend = MemoryBackend(
+        [{'id': 100, 'appointment_id': 10, 'size': 5}, {'id': 101, 'appointment_id': 10, 'size': 7},
+         {'id': 200, 'appointment_id': 20, 'size': None}],
+        fields=[FieldDef('id'), FieldDef('appointment_id', references='appointments'), FieldDef('size')])
+    photos = DataSet(photo_backend, name='photos', writer=photo_writer)
+    visits = DataSet(MemoryBackend([{'id': 10}, {'id': 20}, {'id': 30}]), name='appointments', fields=[
+        FieldDef('id'),
+        FieldDef('photo_count', 'Фото', aggregate=AggregateDef(photos, 'appointment_id')),
+        FieldDef('photo_size', aggregate=AggregateDef(photos, 'appointment_id', AggFunc.SUM, 'size')),
+        FieldDef('big', aggregate=AggregateDef(photo_backend, 'appointment_id',
+                                               where=(Condition('size', Op.GT, 6),))),
+    ])
+    return visits, photos, photo_backend
+
+
+def test_aggregates_computed_in_batch_per_window():
+    visits, photos, backend = clinic_with_counts()
+    visits.open()
+    before = backend.fetch_count
+    assert [visits.value('photo_count', i) for i in range(3)] == [2, 1, 0]
+    assert [visits.value('photo_size', i) for i in range(3)] == [12, None, None]   # None не участвует; нет строк — None
+    assert [visits.value('big', i) for i in range(3)] == [1, 0, 0]
+    assert backend.fetch_count == before                             # показ — из запомненного
+    assert not visits.fields['photo_count'].editable and not visits.fields['photo_count'].stored
+
+
+def test_aggregate_recalculated_through_link():
+    visits, photos, backend = clinic_with_counts()
+    MasterDetailLink(visits, photos)
+    visits.open(); photos.open()
+    photos.append({'size': 1})
+    assert visits.value('photo_count') == 2                          # строка ещё не сохранена
+    photos.post()
+    assert visits.value('photo_count') == 3 and visits.value('photo_size') == 13
+    photos.first(); photos.delete()
+    assert visits.value('photo_count') == 2
+    changed = []
+    visits.subscribe(lambda e: changed.append(e.fields) if e.kind is EventKind.ROW_CHANGED else None)
+    photos.set_value('size', 100)                                    # правка — без пересчёта
+    assert changed == []
+    photos.post()
+    assert visits.value('photo_size') == 101 and changed
+
+
+def test_aggregate_sees_unsaved_rows_of_custom_writer():
+    """Подчинённый — набор с отложенной записью: новые строки считаются, помеченные на удаление — нет."""
+    visits, photos, backend = clinic_with_counts(photo_writer=Deferred())
+    MasterDetailLink(visits, photos)
+    visits.open(); photos.open()
+    photos.append({'size': 3}); photos.post()                         # временный id < 0
+    assert visits.value('photo_count') == 3 and backend.get(-1) is None
+    photos.first(); photos.delete()                                   # пометка, строка видна
+    assert photos.row_status() == 'deleted' and visits.value('photo_count') == 2
+    assert visits.value('big', 0) == 1                                # по источнику — только хранилище
+
+
+def test_aggregate_touch_and_recalc_from_outside():
+    visits, photos, backend = clinic_with_counts()
+    visits.open()
+    backend.insert({'appointment_id': 30, 'size': 2})                 # изменили извне
+    assert visits.value('photo_count', 2) == 0                        # запомненное
+    visits.touch([30])
+    assert visits.value('photo_count', 2) == 1
+    backend.insert({'appointment_id': 20, 'size': 2})
+    assert visits.recalc() == 1 and visits.value('photo_count', 1) == 2
+
+
+def test_aggregate_chunks_and_errors(monkeypatch):
+    from app.utils.dataset import AggFunc, AggregateDef, aggregate as agg_module
+    backend = MemoryBackend([{'id': i, 'parent': i % 7} for i in range(1, 50)])
+    monkeypatch.setattr(agg_module, 'CHUNK', 3)
+    counts = AggregateDef(backend, 'parent').compute(range(7))
+    assert sum(counts.values()) == 49 and counts[0] == 7
+    assert AggregateDef(backend, 'parent', AggFunc.MAX, 'id').compute([1])[1] == 43
+    assert AggregateDef(backend, 'parent', AggFunc.AVG, 'id').compute([None]) == {None: None}
+    with pytest.raises(ValueError, match='укажите поле'):
+        AggregateDef(backend, 'parent', AggFunc.SUM)

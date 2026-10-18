@@ -82,6 +82,7 @@ class MasterDetailLink:
         self.fields: Dict[str, str] = dict(fields) if fields else self._guess_fields()
         self._last: Optional[Dict[str, Any]] = {}      # {} — ещё не сверяли
         self.master.subscribe(self._on_master)
+        detail.subscribe(self._on_detail)
         self.sync()
 
     def __repr__(self) -> str:
@@ -186,6 +187,34 @@ class MasterDetailLink:
                     and self.detail.active and not self.detail.state.editing):
                 self.detail.refresh()
 
+    def _on_detail(self, event: DataEvent) -> None:
+        """
+        Подчинённые строки изменились (сохранили, удалили) — у текущей главной строки
+        пересчитываются итоги, зависящие от подчинённого набора (число фото у приёма).
+
+        Только когда подчинённый не в правке: во время ввода итог не меняется (строка
+        ещё не сохранена), а пересчёт на каждое нажатие клавиши был бы лишним.
+
+        Args:
+            event: Событие подчинённого набора.
+
+        Returns:
+            None
+
+        Пример:
+            >>> link._on_detail(DataEvent(EventKind.ROW_CHANGED, photos, index=0))
+        """
+        if event.kind not in (EventKind.ROW_CHANGED, EventKind.ROWS_REMOVED):
+            return
+        if self.detail.state.editing:
+            return
+        master = self.master.dataset
+        if master is None or not master.active or master.current_index < 0:
+            return
+        names = [f.name for f in master.fields.aggregates() if f.aggregate.depends_on(self.detail)]
+        if names:
+            master.recalc([master.current_key], names)
+
     def unlink(self) -> None:
         """
         Разрывает связь: подписка снимается, условия связи убираются.
@@ -197,5 +226,6 @@ class MasterDetailLink:
             >>> link.unlink()
         """
         self.master.unsubscribe(self._on_master)
+        self.detail.unsubscribe(self._on_detail)
         self._last = {}
         self.detail.set_master({})

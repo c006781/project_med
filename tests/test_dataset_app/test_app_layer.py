@@ -294,3 +294,29 @@ def test_mark_follows_new_record_after_drafts_save(services, providers, filled, 
     real = next(p.id for p in services['patient'].get_all() if p.last_name == 'Отмеченный')
     assert ds.local_keys('mark') == [real]
     assert ds.locate(real) and ds.value('mark') is True
+
+
+def test_program_side_photo_count_with_drafts(services, providers, filled, app_drafts, tmp_path):
+    """Число фото у приёма считает программа: черновик фото виден сразу, отмена/повтор — тоже, после сохранения — верно."""
+    from app.utils.dataset import AggregateDef, DataSet, FieldDef, MasterDetailLink
+    image = tmp_path / 'x.png'
+    image.write_bytes(b'\x89PNG\r\n\x1a\n')
+    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
+    fields = fields_from_config(APPOINTMENT_CONFIG, AppointmentDTO)
+    writer = DraftsWriter(app_drafts.store, 'appointment')
+    visits = writer.attach(DataSet(
+        ServiceBackend(providers['appointment'], AppointmentDTO, fields), writer=writer, name='appointments',
+        fields=fields + [FieldDef('photo_count', 'Фото', aggregate=AggregateDef(clinic.photos, 'appointment_id'))]))
+    MasterDetailLink(visits, clinic.photos)
+    visits.open(); clinic.photos.open()
+    assert [visits.value('photo_count', i) for i in range(visits.row_count)] == [0, 0, 0]
+    clinic.photos.append({'file_path': str(image)}); clinic.photos.post()
+    assert visits.value('photo_count') == 1                            # черновик фото — уже в числе
+    assert services['photo'].get_by_parent(visits.current_key) == []
+    app_drafts.store.undo()
+    assert visits.value('photo_count') == 0
+    app_drafts.store.redo()
+    assert visits.value('photo_count') == 1
+    app_drafts.save()
+    assert len(services['photo'].get_by_parent(visits.current_key)) == 1
+    assert visits.value('photo_count') == 1

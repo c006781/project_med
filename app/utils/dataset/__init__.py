@@ -18,6 +18,7 @@
     1
 """
 
+from .aggregate import AggFunc, AggregateDef
 from .backend import (
     Capabilities, DataBackend, DataWriter, DirectWriter, Page, ReadOnlyError, RowOverlay,
     WritableBackend,
@@ -32,6 +33,7 @@ from .query import Condition, Op, Order, Query, apply_in_memory, sort_rows
 from .source import DataSource
 
 __all__ = [
+    'AggFunc', 'AggregateDef',
     'Capabilities', 'DataBackend', 'DataWriter', 'DirectWriter', 'Page', 'ReadOnlyError',
     'RowOverlay', 'WritableBackend',
     'DataSet', 'DataSetError', 'FetchMode', 'State', 'ValidationError',

@@ -208,6 +208,12 @@ class MasterDetailLink:
             return
         if self.detail.state.editing:
             return
+        if (event.kind is EventKind.ROW_CHANGED and event.fields
+                and all(self.detail.computed_by_program(f) for f in event.fields)):
+            # V5 (2026-10-18): сменилось только посчитанное программой (отметка, итог
+            # подчинённого) — итоги главного считаются по хранимым полям и от этого не
+            # меняются; раньше — лишний запрос к БД на каждый щелчок по галочке
+            return
         master = self.master.dataset
         if master is None or not master.active or master.current_index < 0:
             return

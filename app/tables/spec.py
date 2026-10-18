@@ -38,10 +38,14 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from app.dataset_app.fields import fields_from_config, references_of
 from app.dataset_app.service_backend import ServiceBackend
+if TYPE_CHECKING:
+    from app.draft.integration import ServiceAdapter
+    from app.utils.drafts import TreeSchema
+
 from app.utils.dataset import (
     AggFunc, AggregateDef, Condition, DataSet, DataSource, FetchMode, FieldDef, FieldKind,
     MasterDetailLink,
@@ -509,6 +513,18 @@ class TableRegistry:
         ordered: List[str] = []
 
         def visit(name: str) -> None:
+            """
+            Добавляет таблицу после её родителя (обход вверх по дереву).
+
+            Args:
+                name: Имя таблицы.
+
+            Returns:
+                None
+
+            Пример:
+                >>> visit('photos')       # добавит patients, appointments, photos
+            """
             if name in ordered:
                 return
             parent = self.parent(name)
@@ -592,7 +608,7 @@ class TableRegistry:
 
     # ------------------------------------------------------------------ черновики
 
-    def drafts_schema(self):
+    def drafts_schema(self) -> 'TreeSchema':
         """
         Схема черновиков (дерево типов записей) — из описаний.
 
@@ -615,7 +631,7 @@ class TableRegistry:
         return TreeSchema(types)
 
     def service_adapter(self, transaction_factory: Optional[Callable[[], Any]] = None,
-                        services: Optional[Mapping[str, Callable[[], Any]]] = None):
+                        services: Optional[Mapping[str, Callable[[], Any]]] = None) -> 'ServiceAdapter':
         """
         Запись черновиков через сервисы — из описаний.
 

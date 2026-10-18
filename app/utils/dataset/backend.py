@@ -192,7 +192,7 @@ class DataWriter(Protocol):
     Пример:
         >>> class LogWriter:
         ...     def insert(self, ds, values): print('new', values); return dict(values, id=-1)
-        ...     def update(self, ds, key, changes, row): print('upd', key, changes); return row
+        ...     def update(self, ds, key, changes, row, original): print('upd', key, changes); return row
         ...     def delete(self, ds, key, row): print('del', key)
     """
 
@@ -209,7 +209,7 @@ class DataWriter(Protocol):
         """
 
     def update(self, dataset: 'DataSet', key: Hashable, changes: Mapping[str, Any],
-               row: Mapping[str, Any]) -> Dict[str, Any]:
+               row: Mapping[str, Any], original: Mapping[str, Any]) -> Dict[str, Any]:
         """
         Изменение записи.
 
@@ -218,6 +218,7 @@ class DataWriter(Protocol):
             key: Ключ.
             changes: Изменённые хранимые поля.
             row: Строка целиком после изменения (как её видит набор).
+            original: Строка до правки (отложенная запись по ней узнаёт «вернули как было»).
 
         Returns:
             Строка для показа.
@@ -358,7 +359,7 @@ class DirectWriter:
         return self._require().insert(values)
 
     def update(self, dataset: 'DataSet', key: Hashable, changes: Mapping[str, Any],
-               row: Mapping[str, Any]) -> Dict[str, Any]:
+               row: Mapping[str, Any], original: Mapping[str, Any]) -> Dict[str, Any]:
         """
         Меняет запись в источнике.
 
@@ -367,12 +368,13 @@ class DirectWriter:
             key: Ключ.
             changes: Изменённые поля.
             row: Строка целиком (не используется — источник вернёт свою).
+            original: Строка до правки (не используется).
 
         Returns:
             Строка из источника.
 
         Пример:
-            >>> DirectWriter(backend).update(None, 1, {'name': 'Б'}, {})
+            >>> DirectWriter(backend).update(None, 1, {'name': 'Б'}, {}, {})
             {'id': 1, 'name': 'Б'}
         """
         return self._require().update(key, changes)

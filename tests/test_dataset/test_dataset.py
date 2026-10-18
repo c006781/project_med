@@ -193,7 +193,7 @@ def test_post_without_changes_does_not_write():
 
     class Spy:
         def insert(self, ds, values): calls.append('i'); return dict(values, id=1)
-        def update(self, ds, key, changes, row): calls.append('u'); return dict(row)
+        def update(self, ds, key, changes, row, original): calls.append('u'); return dict(row)
         def delete(self, ds, key, row): calls.append('d')
     ds = DataSet(people(1), writer=Spy())
     ds.open(); ds.edit(); ds.post()
@@ -249,7 +249,7 @@ def test_insert_append_defaults_and_cancel():
 def test_writer_error_keeps_edit_and_reports():
     class Failing:
         def insert(self, ds, values): raise PermissionError('нельзя')
-        def update(self, ds, key, changes, row): raise PermissionError('нельзя')
+        def update(self, ds, key, changes, row, original): raise PermissionError('нельзя')
         def delete(self, ds, key, row): raise PermissionError('нельзя')
     ds = DataSet(people(2), writer=Failing())
     ds.open()
@@ -268,7 +268,7 @@ def test_writer_error_keeps_edit_and_reports():
 def test_writer_must_return_key():
     class NoKey:
         def insert(self, ds, values): return dict(values)
-        def update(self, ds, key, changes, row): return dict(row)
+        def update(self, ds, key, changes, row, original): return dict(row)
         def delete(self, ds, key, row): pass
     ds = DataSet(people(1), writer=NoKey())
     ds.open(); ds.append({'name': 'А'})
@@ -341,7 +341,7 @@ class Deferred:
         self._next -= 1
         return row
 
-    def update(self, ds, key, changes, row):
+    def update(self, ds, key, changes, row, original):
         (self.new if key in self.new else self.changed).setdefault(key, {}).update(changes)
         return dict(row)
 
@@ -545,3 +545,21 @@ def test_row_events_come_first():
     ds.delete(); ds.first(); ds.delete()
     ds.backend.delete(3); ds.reload_row(0)
     assert mirror['bad'] == []
+
+
+def test_writer_gets_original_and_touch():
+    seen = {}
+
+    class Spy:
+        def insert(self, ds, values): return dict(values, id=99)
+        def update(self, ds, key, changes, row, original):
+            seen.update(changes=changes, original=original, row=dict(row)); return dict(row)
+        def delete(self, ds, key, row): pass
+    ds = DataSet(people(2), writer=Spy())
+    ds.open()
+    ds.set_value('name', 'Новое'); ds.post()
+    assert seen['original']['name'] == 'Имя1' and seen['changes'] == {'name': 'Новое'}
+    changed = []
+    ds.subscribe(lambda e: changed.append(e.index) if e.kind is EventKind.ROW_CHANGED else None)
+    assert ds.touch([2]) == 1 and changed == [1]
+    assert ds.touch() == 2

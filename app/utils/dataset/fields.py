@@ -110,6 +110,9 @@ class FieldDef:
             по ключу из поля строки; в хранилище не пишется.
         references: Имя родительской таблицы, на которую ссылается поле (внешний ключ) —
             для связи «главная → подчинённая».
+        persistent: Пишется в хранилище (по умолчанию да). ``False`` — значение приходит
+            из хранилища (его вычисляет само хранилище: ФИО пациента у приёма, число фото),
+            но обратно не пишется и не правится (как ``ProviderFlags`` в FireDAC).
         validators: Свои проверки ``(значение, строка) -> ошибка | None``.
         display: Отображение значения текстом (по умолчанию ``str``, ``None`` → '').
         extra: Свободные данные для своих виджетов и адаптеров (ширина колонки и т. п.).
@@ -131,6 +134,7 @@ class FieldDef:
     calculated: Optional[Callable[[Mapping[str, Any]], Any]] = None
     lookup: Optional['LookupDef'] = None
     references: Optional[str] = None
+    persistent: bool = True
     validators: Tuple[Validator, ...] = ()
     display: Optional[Callable[[Any], str]] = None
     extra: Mapping[str, Any] = field(default_factory=dict)
@@ -154,16 +158,16 @@ class FieldDef:
     @property
     def stored(self) -> bool:
         """
-        Хранится ли поле в источнике (не вычисляемое и не подстановка).
+        Пишется ли поле в хранилище: не вычисляемое, не подстановка, ``persistent``.
 
         Returns:
-            ``True`` — пишется при сохранении.
+            ``True`` — пишется при сохранении (и проверяется).
 
         Пример:
-            >>> FieldDef('name').stored
-            True
+            >>> FieldDef('name').stored, FieldDef('full_name', persistent=False).stored
+            (True, False)
         """
-        return self.calculated is None and self.lookup is None
+        return self.persistent and self.calculated is None and self.lookup is None
 
     @property
     def editable(self) -> bool:

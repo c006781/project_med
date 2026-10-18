@@ -178,3 +178,19 @@ def test_lookup_backend_function_and_cache():
     by_field.invalidate(1)
     assert by_field.resolve(1) == 'Сидоров'
     assert by_field.resolve(404) is None
+
+
+def test_not_persistent_field_read_but_never_written():
+    """Значение вычисляет хранилище (ФИО пациента у приёма): читается, не правится, не пишется."""
+    from app.utils.dataset import DataSet, DataSetError
+    backend = MemoryBackend([{'id': 1, 'qty': 2, 'patient_name': 'Петров И.'}],
+                            fields=[FieldDef('id'), FieldDef('qty'),
+                                    FieldDef('patient_name', persistent=False)])
+    ds = DataSet(backend)
+    ds.open()
+    assert ds.value('patient_name') == 'Петров И.'
+    with pytest.raises(DataSetError, match='только для чтения'):
+        ds.set_value('patient_name', 'x')
+    ds.append({'qty': 5, 'patient_name': 'не писать'})
+    ds.post()
+    assert 'patient_name' not in backend.get(ds.current_key)

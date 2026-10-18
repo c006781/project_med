@@ -44,6 +44,7 @@ DEFAULT_STATUS_COLORS: Dict[str, str] = {
     'new': '#dff5df',
     'modified': '#fff4c2',
     'deleted': '#f7d9d9',
+    'child': '#e6efff',          # изменены потомки строки (подчинённые записи)
 }
 
 _NUMERIC = (FieldKind.INTEGER, FieldKind.FLOAT)

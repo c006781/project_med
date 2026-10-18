@@ -1477,7 +1477,8 @@ class DataSet:
                 changes = {k: v for k, v in self._stored_values(buffer).items()
                            if original.get(k, object()) != v or k not in original}
                 key = original.get(self.key_field)
-                saved = self.writer.update(self, key, changes, buffer) if changes else buffer
+                saved = (self.writer.update(self, key, changes, buffer, copy.deepcopy(original))
+                         if changes else buffer)
         except Exception as exc:
             self._emit(EventKind.ERROR, error=exc)
             raise
@@ -1557,6 +1558,31 @@ class DataSet:
             self._fetched = max(self._fetched - 1, 0)   # следующая порция — без пропуска
         self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
         self._force_index(min(at, len(self._rows) - 1) if self._rows else -1, at)
+
+    def touch(self, keys: Optional[Iterable[Hashable]] = None) -> int:
+        """
+        Сообщает, что строки нужно перерисовать: данные те же, но их состояние сменилось
+        извне (например, у отложенной записи изменились потомки строки).
+
+        Args:
+            keys: Ключи строк (``None`` — все загруженные).
+
+        Returns:
+            Сколько строк затронуто.
+
+        Пример:
+            >>> ds.touch([1, 2])
+            2
+        """
+        if not self.active:
+            return 0
+        wanted = None if keys is None else set(keys)
+        touched = 0
+        for i, row in enumerate(self._rows):
+            if wanted is None or row.get(self.key_field) in wanted:
+                self._emit(EventKind.ROW_CHANGED, index=i, fields=())
+                touched += 1
+        return touched
 
     def reload_row(self, index: Optional[int] = None) -> bool:
         """

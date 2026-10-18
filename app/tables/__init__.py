@@ -13,9 +13,9 @@
 """
 
 from .clinic import CLINIC, photo_image, provider
-from .spec import BuiltTables, Extra, SpecError, TableRegistry, TableSpec, calc, mark, total
+from .spec import BuiltTables, Extra, Link, SpecError, TableRegistry, TableSpec, calc, mark, ref, total
 
 __all__ = [
     'CLINIC', 'photo_image', 'provider',
-    'BuiltTables', 'Extra', 'SpecError', 'TableRegistry', 'TableSpec', 'calc', 'mark', 'total',
+    'BuiltTables', 'Extra', 'Link', 'SpecError', 'TableRegistry', 'TableSpec', 'calc', 'mark', 'ref', 'total',
 ]

@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import (
-    TYPE_CHECKING, Any, Callable, ContextManager, Dict, Hashable, Iterable, Mapping, Optional,
+    TYPE_CHECKING, Any, Callable, ContextManager, Dict, Hashable, Iterable, List, Mapping, Optional,
     Tuple, Type,
 )
 
@@ -226,13 +226,15 @@ class ServiceAdapter:
         dto = current.model_copy(update={k: v for k, v in changes.items() if k != 'id'})
         service.update(dto, session=tx)
 
-    def read(self, entity: str, entity_id: Hashable) -> Optional[Dict[str, Any]]:
+    def read(self, entity: str, entity_id: Hashable, tx: Any = None) -> Optional[Dict[str, Any]]:
         """
-        Текущая запись из БД (для ``find_conflicts``).
+        Текущая запись из БД (для ``find_conflicts``; для правил удаления ссылок — внутри
+        транзакции сохранения).
 
         Args:
             entity: Тип.
             entity_id: Id.
+            tx: Сессия транзакции (``None`` — своя).
 
         Returns:
             Поля записи или ``None``, если записи нет.
@@ -245,12 +247,41 @@ class ServiceAdapter:
             400
         """
         try:
-            dto = self.service(entity).get_by_id(entity_id)
+            # dto = self.service(entity).get_by_id(entity_id)
+            # ↑ до 2026-10-18: только своей сессией; правила удаления ссылок читают внутри
+            #   транзакции сохранения (видны уже записанные правки)
+            dto = (self.service(entity).get_by_id(entity_id) if tx is None
+                   else self.service(entity).get_by_id(entity_id, session=tx))
         except Exception as e:
             if 'NotFound' in type(e).__name__:
                 return None
             raise
         return None if dto is None else dto.model_dump()
+
+    def referrers(self, entity: str, field: str, ids: Iterable[Hashable], tx: Any) -> List[Hashable]:
+        """
+        Кто из записей типа ``entity`` ссылается полем ``field`` на записи ``ids``
+        (правила удаления ссылок черновиков; внутри транзакции сохранения).
+
+        Args:
+            entity: Тип ссылающихся записей.
+            field: Поле ссылки.
+            ids: Id целей.
+            tx: Сессия транзакции.
+
+        Returns:
+            Id ссылающихся записей.
+
+        Пример:
+            >>> adapter.referrers('appointment', 'doctor_id', [5], session)
+            [12, 14]
+        """
+        wanted = list(ids)
+        if not wanted:
+            return []
+        items, _ = self.service(entity).get_page_filtered(
+            0, None, [{'column': field, 'operator': 'in', 'value': wanted}], session=tx)
+        return [item.id for item in items]
 
     def delete(self, entity: str, entity_id: Hashable, tx: Any) -> None:
         """

@@ -107,6 +107,103 @@ class SavePlan:
                          for d in group)
 
 
+def _dependencies(store: 'DraftStore', node: NodeKey) -> List[NodeKey]:
+    """
+    От каких записей зависит запись при создании: родитель и цели ссылок (по итоговым
+    значениям черновика).
+
+    Args:
+        store: Хранилище.
+        node: Узел.
+
+    Returns:
+        Узлы (могут быть и сохранённые в БД — их отберёт вызывающий).
+
+    Пример:
+        >>> _dependencies(store, ('appointment', -2))
+        [('patient', -1), ('doctor', -3)]
+    """
+    result: List[NodeKey] = []
+    parent = store.parent_of(*node)
+    if parent is not None:
+        result.append(parent)
+    draft = store.get(*node)
+    data = draft.data if draft is not None else {}
+    for ref in store.schema.references(node[0]):
+        value = data.get(ref.field)
+        if value is not None:
+            result.append((ref.entity, value))
+    return result
+
+
+def _required_new(store: 'DraftStore', writable: Set[NodeKey]) -> List[NodeKey]:
+    """
+    Новые записи вне объёма, без которых сохраняемые записать нельзя: новые предки и
+    новые цели ссылок — рекурсивно (у новой цели свои новые предки и ссылки).
+
+    Args:
+        store: Хранилище.
+        writable: Сохраняемые узлы.
+
+    Returns:
+        Узлы по порядку появления.
+
+    Пример:
+        >>> _required_new(store, {('appointment', -2)})
+        [('doctor', -3)]
+    """
+    missing: List[NodeKey] = []
+    queue = sorted(writable, key=lambda n: store.get(*n).order)
+    while queue:
+        node = queue.pop(0)
+        candidates = list(store.ancestors(node)) + [d for d in _dependencies(store, node)
+                                                    if d not in store.ancestors(node)]
+        for dep in candidates:
+            draft = store.get(*dep)
+            if draft is None or not draft.is_new or dep in writable or dep in missing:
+                continue
+            missing.append(dep)
+            queue.append(dep)
+    return missing
+
+
+def _ordered_creates(store: 'DraftStore', creates: List[Draft], depth) -> List[Draft]:
+    """
+    Порядок создания: запись — после всех новых записей, от которых она зависит (родитель,
+    цели ссылок); среди готовых — по глубине дерева и порядку появления.
+
+    Args:
+        store: Хранилище.
+        creates: Новые записи плана.
+        depth: Функция глубины узла.
+
+    Returns:
+        Упорядоченный список.
+
+    Raises:
+        PlanError: Новые записи ссылаются друг на друга по кругу.
+
+    Пример:
+        >>> [d.key for d in _ordered_creates(store, creates, depth)]
+        [('doctor', -3), ('patient', -1), ('appointment', -2)]
+    """
+    pending = {d.key: d for d in creates}
+    done: List[Draft] = []
+    placed: Set[NodeKey] = set()
+    while pending:
+        ready = [d for d in pending.values()
+                 if all(dep in placed or dep not in pending for dep in _dependencies(store, d.key))]
+        if not ready:
+            raise PlanError("новые записи ссылаются друг на друга по кругу: "
+                            + ", ".join(f"{t}:{i}" for t, i in sorted(pending, key=str)))
+        ready.sort(key=lambda d: (depth(d.key), d.order))
+        first = ready[0]
+        done.append(first)
+        placed.add(first.key)
+        del pending[first.key]
+    return done
+
+
 def build_plan(
     store: 'DraftStore',
     targets: Optional[Iterable[NodeKey]] = None,
@@ -175,13 +272,16 @@ def build_plan(
     writable.difference_update(extra_blocked)
     blocked = tuple(resolution.blocked) + tuple(n for n in extra_blocked if n not in resolution.blocked)
 
-    missing: List[NodeKey] = []
-    for node in sorted(writable, key=lambda n: store.get(*n).order):
-        for ancestor in store.ancestors(node):
-            draft = store.get(*ancestor)
-            if draft is None or not draft.is_new or ancestor in writable or ancestor in missing:
-                continue
-            missing.append(ancestor)
+    # missing: List[NodeKey] = []
+    # for node in sorted(writable, key=lambda n: store.get(*n).order):
+    #     for ancestor in store.ancestors(node):
+    #         draft = store.get(*ancestor)
+    #         if draft is None or not draft.is_new or ancestor in writable or ancestor in missing:
+    #             continue
+    #         missing.append(ancestor)
+    # ↑ до 2026-10-18: нужными считались только новые ПРЕДКИ. Теперь ещё и новые записи, на
+    #   которые ссылаются (ссылки, не владение: приём → новый врач) — и их предки, рекурсивно.
+    missing = _required_new(store, writable)
     if include_new_ancestors:
         writable.update(missing)
         missing = []
@@ -203,8 +303,11 @@ def build_plan(
         return store.schema.depth(node[0])
 
     drafts = {node: store.get(*node) for node in writable | by_delete}
-    creates = sorted((drafts[n] for n in writable if drafts[n].is_new),
-                     key=lambda d: (depth(d.key), d.order))
+    # creates = sorted((drafts[n] for n in writable if drafts[n].is_new),
+    #                  key=lambda d: (depth(d.key), d.order))
+    # ↑ до 2026-10-18: порядок по глубине дерева; теперь ещё и запись, на которую
+    #   ссылаются, — раньше ссылающейся (её настоящий id нужен в ссылке)
+    creates = _ordered_creates(store, [drafts[n] for n in writable if drafts[n].is_new], depth)
     updates = sorted((drafts[n] for n in writable if not drafts[n].is_new),
                      key=lambda d: (depth(d.key), d.order))
     deletes = sorted((drafts[n] for n in resolution.deletes),

@@ -421,3 +421,35 @@ def test_startup_error_text_wrapped_and_unrelated():
     except RuntimeError as outer:
         assert startup_error_text(outer).startswith('Базу данных нельзя')
     assert startup_error_text(ValueError('не про базу')) is None
+
+
+# ---------------------------------------------------------------------------
+# Проверочный проход 4: резервная копия базы в режиме WAL (M8)
+# ---------------------------------------------------------------------------
+
+def test_backup_includes_wal_changes(tmp_path):
+    """
+    База в режиме WAL, другая программа держит её открытой — свежие строки лежат в
+    файле -wal. Копия файла (shutil.copy2) их теряла; копия через backup-API SQLite — нет.
+    """
+    import sqlite3
+    path, engine = legacy_db(tmp_path)                      # старая база без индекса — будет копия
+    engine.dispose()
+    writer = sqlite3.connect(str(path))
+    writer.execute('PRAGMA journal_mode=WAL')
+    reader = sqlite3.connect(str(path))                     # держит базу: WAL не сливается в файл
+    reader.execute('SELECT count(*) FROM patients').fetchone()
+    with writer:
+        writer.execute("INSERT INTO patients (id, first_name, last_name) VALUES (777, 'Свежий', 'В WAL')")
+    try:
+        upgrade_database(create_engine(f"sqlite:///{path}"))
+        copies = backups(tmp_path)
+        assert len(copies) == 1
+        copy = sqlite3.connect(str(tmp_path / copies[0]))
+        try:
+            assert copy.execute('SELECT first_name FROM patients WHERE id = 777').fetchone() == ('Свежий',)
+        finally:
+            copy.close()
+    finally:
+        reader.close()
+        writer.close()

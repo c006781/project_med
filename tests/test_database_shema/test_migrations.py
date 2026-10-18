@@ -721,6 +721,7 @@ def test_generate_migration_safe_changes(tmp_path, with_0002):
     assert name.startswith('0003_auto_') and name.endswith('.py')
     body = open(path, encoding='utf-8').read()
     assert 'создана автоматически' in body and 'add_table prescriptions_auto' in body
+    assert 'Автомиграция: add_table prescriptions_auto' in body      # заголовок файла
     assert migrate.head_revision() == name[:-3]
     engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
     upgrade_database(engine)

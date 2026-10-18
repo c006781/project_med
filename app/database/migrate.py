@@ -1049,13 +1049,14 @@ def _next_revision_id() -> str:
     return f"{n:04d}_auto_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 
-def generate_migration(metadata=None, message: str = 'auto') -> Optional[str]:
+def generate_migration(metadata=None, message: Optional[str] = None) -> Optional[str]:
     """
     Создаёт файл миграции по изменившимся моделям — только если все изменения безопасны.
 
     Args:
         metadata: Модели; по умолчанию ``Base.metadata`` приложения.
-        message: Короткое описание (в заголовок файла; имя файла — номер ревизии).
+        message: Заголовок файла (имя файла — номер ревизии). По умолчанию —
+            «Автомиграция: <что меняет>».
 
     Returns:
         Путь созданного файла или ``None`` (модели = миграции, создавать нечего).
@@ -1081,6 +1082,9 @@ def generate_migration(metadata=None, message: str = 'auto') -> Optional[str]:
             "(app/database/IMPLEMENTATION.md §4)"
         )
     rev_id = _next_revision_id()
+    if message is None:
+        summary = ', '.join(describe_differences(changes))
+        message = 'Автомиграция: ' + (summary if len(summary) <= 120 else summary[:117] + '...')
     reference = create_engine('sqlite://')
     try:
         with reference.begin() as conn:

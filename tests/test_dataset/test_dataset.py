@@ -7,7 +7,7 @@ import pytest
 from app.utils.dataset import (
     Capabilities, Condition, DataSet, DataSetError, DataSource, EventKind, FetchMode,
     FieldDef, FieldKind, LinkError, LookupDef, MasterDetailLink, MemoryBackend, Op, Page,
-    Query, ReadOnlyError, State, ValidationError,
+    ReadOnlyError, State, ValidationError,
 )
 
 

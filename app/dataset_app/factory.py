@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 import os
 
@@ -75,6 +75,19 @@ def photo_image_field(photo_service: Callable[[], Any]) -> FieldDef:
         'C:/data/photos/app_1/a.png'
     """
     def resolve(row: Mapping[str, Any]) -> Optional[str]:
+        """
+        Полный путь снимка строки фото.
+
+        Args:
+            row: Строка фото.
+
+        Returns:
+            Путь или ``None`` (пути нет).
+
+        Пример:
+            >>> resolve({'file_path': 'app_1/a.png'})
+            'C:/data/photos/app_1/a.png'
+        """
         path = row.get('file_path')
         if not path:
             return None
@@ -87,7 +100,7 @@ def photo_image_field(photo_service: Callable[[], Any]) -> FieldDef:
     return FieldDef('image', 'Снимок', calculated=resolve, visible=False)
 
 
-def _table_parts(entity: str):
+def _table_parts(entity: str) -> Tuple[Type[Any], Mapping[str, Any], Any]:
     """
     DTO, настройки полей и модель типа записи.
 
@@ -195,7 +208,7 @@ class ClinicDataSets:
             if dataset.active:
                 dataset.post()
 
-    def save(self, *args: Any, **kwargs: Any):
+    def save(self, *args: Any, **kwargs: Any) -> Any:
         """
         Сохраняет черновики (см. ``AppDrafts.save``); перед этим — ``post_all``.
 

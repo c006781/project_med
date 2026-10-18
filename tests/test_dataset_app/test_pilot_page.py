@@ -117,3 +117,23 @@ def test_page_undo_redo_buttons(qapp, services, providers, filled, app_drafts):
     assert page.clinic.patients.value('phone') is None and phone.text() == ''
     nav.button('redo').click()
     assert phone.text() == '+7 444'
+
+
+def test_finish_pending_edits_before_close(qapp, services, providers, filled, app_drafts):
+    """F7: незавершённая правка перед закрытием окна попадает в черновики (иначе пропала бы)."""
+    page = DataSetPilotPage(drafts=app_drafts, services=providers)
+    page.open_data()
+    widget_for(page, 'patients', 'phone').textEdited.emit('+7 555')
+    assert app_drafts.store.is_empty                         # правка ещё не завершена
+    assert page.finish_pending_edits() is None
+    assert not app_drafts.store.is_empty                     # теперь окно её увидит и спросит
+    page.clinic.patients.set_value('last_name', '')
+    assert 'обязательно' in page.finish_pending_edits()      # не прошла — окно не закроется
+
+
+def test_dates_shown_like_rest_of_program(qapp, services, providers, filled):
+    """F3: даты в таблицах — дд.мм.гггг."""
+    page = DataSetPilotPage(services=providers)
+    page.open_data()
+    model = page.models['patients']
+    assert model.data(model.index(0, model.columns.index('birth_date'))) == '01.01.1980'

@@ -22,15 +22,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QMessageBox, QToolButton, QWidget
 
 try:  # пакеты лежат рядом в одном родительском пакете (как в этом проекте)
-    from ..dataset import DataEvent, DataSource, State
+    from ..dataset import DataEvent, DataSet, DataSource, State
 except ImportError:  # pragma: no cover
-    from dataset import DataEvent, DataSource, State
+    from dataset import DataEvent, DataSet, DataSource, State
 
 _log = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class DataNavigator(QWidget):
         self._buttons[name] = button
         return button
 
-    def buttons(self):
+    def buttons(self) -> List[str]:
         """
         Имена кнопок по порядку.
 
@@ -199,7 +199,7 @@ class DataNavigator(QWidget):
                 QMessageBox.warning(self, 'Ошибка', str(exc))
         self.update_buttons()
 
-    def _ds(self):
+    def _ds(self) -> DataSet:
         """
         Набор источника (нет — ошибка для пользователя).
 
@@ -219,45 +219,125 @@ class DataNavigator(QWidget):
         return ds
 
     def _do_first(self) -> None:
-        """Первая запись."""
+        """
+        Первая запись.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('first').click()
+        """
         self._ds().first()
 
     def _do_prior(self) -> None:
-        """Предыдущая запись."""
+        """
+        Предыдущая запись.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('prior').click()
+        """
         self._ds().prior()
 
     def _do_next(self) -> None:
-        """Следующая запись."""
+        """
+        Следующая запись (на последней загруженной — догрузка).
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('next').click()
+        """
         self._ds().next()
 
     def _do_last(self) -> None:
-        """Последняя запись (порциями — догружает всё)."""
+        """
+        Последняя запись (порциями — догружает всё).
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('last').click()
+        """
         self._ds().last()
 
     def _do_insert(self) -> None:
-        """Новая запись в конце загруженных."""
+        """
+        Новая запись в конце загруженных.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('insert').click()
+        """
         self._ds().append()
 
     def _do_delete(self) -> None:
-        """Удаление текущей записи (с вопросом)."""
+        """
+        Удаление текущей записи (с вопросом; новая, ещё не сохранённая — без вопроса).
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('delete').click()
+        """
         ds = self._ds()
         if ds.state is State.INSERT or self._confirm_delete():
             ds.delete()
 
     def _do_edit(self) -> None:
-        """Начать правку."""
+        """
+        Начать правку текущей записи.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('edit').click()
+        """
         self._ds().edit()
 
     def _do_post(self) -> None:
-        """Сохранить правку."""
+        """
+        Сохранить правку.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('post').click()
+        """
         self._ds().post()
 
     def _do_cancel(self) -> None:
-        """Отменить правку."""
+        """
+        Отменить правку.
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('cancel').click()
+        """
         self._ds().cancel()
 
     def _do_refresh(self) -> None:
-        """Перечитать набор."""
+        """
+        Перечитать набор (подчинённые — тоже, D4).
+
+        Returns:
+            None
+
+        Пример:
+            >>> nav.button('refresh').click()
+        """
         self._ds().refresh()
 
     def _ask_delete(self) -> bool:

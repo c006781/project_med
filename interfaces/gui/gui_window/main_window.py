@@ -1629,6 +1629,17 @@ class MainWindow(
             >>> window.close()      # с изменениями — диалог
         """
         from interfaces.gui.gui_window.drafts_qt import ask_on_close
+        # F7 (2026-10-18): незавершённая правка на экране наборов данных — ещё не в черновиках
+        # (и не в БД); без этого вопрос «сохранить?» её не видел, и она пропадала молча
+        pilot = getattr(self, 'dataset_pilot_page', None)
+        if pilot is not None:
+            problem = pilot.finish_pending_edits()
+            if problem:
+                QMessageBox.warning(self, "Незавершённая правка",
+                                    "На экране «Наборы данных» правка не прошла проверку:\n"
+                                    f"{problem}\n\nИсправьте или отмените её.")
+                event.ignore()
+                return
         drafts = getattr(self, 'drafts', None)
         if drafts is not None and not drafts.store.is_empty:
             choice = ask_on_close(self)

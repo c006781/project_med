@@ -8,7 +8,6 @@
 небезопасном, резервные копии, «модели = миграции», откат, ``Database``/``init_db``.
 """
 
-import datetime
 import os
 
 import pytest
@@ -711,7 +710,6 @@ def test_pending_changes_empty_for_app_models():
 
 def test_generate_migration_safe_changes(tmp_path, with_0002):
     """Новая таблица + новый необязательный столбец → файл миграции; он применяется, модели = миграции."""
-    import glob
     from app.database import migrate
     target = with_0002(code=NOOP_0002)
     models = _models_with(lambda m: (_add_table(m), _add_nullable_column(m)))

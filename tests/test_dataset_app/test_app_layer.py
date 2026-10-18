@@ -13,7 +13,7 @@ import pytest
 from app.dataset_app import (
     DraftsWriter, ServiceBackend, create_clinic_datasets, fields_from_config, to_service_filter,
 )
-from app.dto.dto_all import AppointmentDTO, PatientDTO
+from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO
 from app.dto.field_configs import APPOINTMENT_CONFIG, PATIENT_CONFIG
 from app.utils.dataset import (
     Condition, FetchMode, FieldKind, Op, Order, Query, State, ValidationError,
@@ -259,23 +259,41 @@ def test_drafts_undelete(services, providers, filled, app_drafts):
     clinic.close()
 
 
-def test_save_reads_each_dataset_few_times(services, providers, filled, app_drafts, monkeypatch):
-    """G2: сохранение 15 записей — не по нескольку чтений БД на каждую (было 181)."""
-    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
-    clinic.open()
-    for i in range(5):
-        clinic.patients.append({'last_name': f'Ф{i}', 'first_name': 'И', 'birth_date': datetime.date(2000, 1, 1)})
-        clinic.patients.post()
-        for j in range(2):
-            clinic.appointments.append({'date': datetime.date(2026, 1, j + 1)})
-            clinic.appointments.post()
-    calls = []
-    original = ServiceBackend.fetch
-    monkeypatch.setattr(ServiceBackend, 'fetch', lambda self, q: (calls.append(1), original(self, q))[1])
-    clinic.save()
-    assert len(calls) <= 6, len(calls)                       # по 1–2 на набор
-    assert all(k > 0 for k in keys(clinic.patients))
-    clinic.close()
+def test_save_reads_each_dataset_few_times(services, providers, filled, monkeypatch):
+    """
+    G2: число чтений БД при сохранении черновиков не растёт с числом сохраняемых записей
+    (было — по нескольку чтений на каждую: 181 на 15 записей). Наборы и итоги
+    (число приёмов, число фото) читаются по разу.
+    """
+    def reads_for(patients):
+        from app.draft.integration import AppDrafts, ServiceAdapter, build_app_schema, make_parent_resolver
+        from app.utils.drafts import DraftStore
+        adapter = ServiceAdapter({'patient': (providers['patient'], PatientDTO),
+                                  'appointment': (providers['appointment'], AppointmentDTO),
+                                  'photo': (providers['photo'], PhotoDTO)},
+                                 transaction_factory=lambda: services['db'].session_scope())
+        schema = build_app_schema()
+        drafts = AppDrafts(schema, adapter, DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter)))
+        clinic = create_clinic_datasets(services=providers, drafts=drafts)
+        clinic.open()
+        for i in range(patients):
+            clinic.patients.append({'last_name': f'Ф{patients}_{i}', 'first_name': 'И',
+                                    'birth_date': datetime.date(2000, 1, 1)})
+            clinic.patients.post()
+            for j in range(2):
+                clinic.appointments.append({'date': datetime.date(2026, 1, j + 1)})
+                clinic.appointments.post()
+        calls = []
+        original = ServiceBackend.fetch
+        monkeypatch.setattr(ServiceBackend, 'fetch', lambda self, q: (calls.append(1), original(self, q))[1])
+        clinic.save()
+        monkeypatch.setattr(ServiceBackend, 'fetch', original)
+        assert all(k > 0 for k in keys(clinic.patients))
+        clinic.close()
+        return len(calls)
+
+    one, five = reads_for(1), reads_for(5)
+    assert one == five and five <= 8, (one, five)
 
 
 def test_mark_follows_new_record_after_drafts_save(services, providers, filled, app_drafts):

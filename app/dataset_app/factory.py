@@ -27,8 +27,9 @@ import os
 
 from app.utils.dataset import DataSet, DataSource, FetchMode, FieldDef, MasterDetailLink
 
-from .fields import fields_from_config
-from .service_backend import ServiceBackend
+# from .fields import fields_from_config
+# from .service_backend import ServiceBackend
+# ↑ до 2026-10-18: нужны были сборке наборов здесь — теперь её делает app.tables
 
 # Набор: (имя набора = таблица, тип записи черновиков, сортировка по умолчанию)
 SPECS: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
@@ -127,6 +128,9 @@ def _table_parts(entity: str) -> Tuple[Type[Any], Mapping[str, Any], Any]:
 @dataclass
 class ClinicDataSets:
     """
+    (не используется с 2026-10-18: наборы собирает ``app.tables`` — ``BuiltTables``;
+    оставлен как было, по правилу проекта)
+
     Наборы клиники и всё, что их связывает.
 
     Attributes:
@@ -238,9 +242,9 @@ def create_clinic_datasets(
     fetch_mode: FetchMode = FetchMode.ON_DEMAND,
     fetch_size: int = 50,
     sizes: Optional[Mapping[str, int]] = None,
-) -> ClinicDataSets:
+) -> Any:
     """
-    Собирает наборы клиники со связями.
+    Собирает наборы клиники со связями — по описаниям таблиц (``app.tables.CLINIC``).
 
     Args:
         drafts: Черновики (``AppDrafts``); ``None`` — запись сразу в БД.
@@ -250,34 +254,41 @@ def create_clinic_datasets(
         sizes: Свой размер порции для отдельных наборов («имя → размер»).
 
     Returns:
-        ``ClinicDataSets`` (наборы ещё закрыты — ``open()``).
+        ``BuiltTables`` (наборы ещё закрыты — ``open()``): ``clinic.patients``,
+        ``clinic['appointments']``, ``clinic.sources``, ``clinic.writers``…
 
     Пример:
         >>> clinic = create_clinic_datasets(fetch_mode=FetchMode.ALL)
     """
-    providers = dict(services or default_services())
-    built: Dict[str, DataSet] = {}
-    writers: Dict[str, Any] = {}
-    for name, entity, order in SPECS:
-        dto_class, config, model = _table_parts(entity)
-        fields = fields_from_config(config, dto_class, model)
-        if entity == 'photo':
-            fields.append(photo_image_field(providers['photo']))
-        backend = ServiceBackend(providers[entity], dto_class, fields)
-        writer = None
-        if drafts is not None:
-            from .drafts_writer import DraftsWriter
-            writer = DraftsWriter(drafts.store, entity)
-            writers[name] = writer
-        dataset = DataSet(backend, name=name, writer=writer, order=order,
-                          fetch_mode=fetch_mode, fetch_size=(sizes or {}).get(name, fetch_size))
-        if writer is not None:
-            writer.attach(dataset)
-        built[name] = dataset
-    sources = {name: DataSource(ds) for name, ds in built.items()}
-    links = [
-        MasterDetailLink(sources['patients'], built['appointments']),
-        MasterDetailLink(sources['appointments'], built['photos']),
-    ]
-    return ClinicDataSets(built['patients'], built['appointments'], built['photos'],
-                          sources, links, drafts, writers)
+    # providers = dict(services or default_services())
+    # built: Dict[str, DataSet] = {}
+    # writers: Dict[str, Any] = {}
+    # for name, entity, order in SPECS:
+    #     dto_class, config, model = _table_parts(entity)
+    #     fields = fields_from_config(config, dto_class, model)
+    #     if entity == 'photo':
+    #         fields.append(photo_image_field(providers['photo']))
+    #     backend = ServiceBackend(providers[entity], dto_class, fields)
+    #     writer = None
+    #     if drafts is not None:
+    #         from .drafts_writer import DraftsWriter
+    #         writer = DraftsWriter(drafts.store, entity)
+    #         writers[name] = writer
+    #     dataset = DataSet(backend, name=name, writer=writer, order=order,
+    #                       fetch_mode=fetch_mode, fetch_size=(sizes or {}).get(name, fetch_size))
+    #     if writer is not None:
+    #         writer.attach(dataset)
+    #     built[name] = dataset
+    # sources = {name: DataSource(ds) for name, ds in built.items()}
+    # links = [
+    #     MasterDetailLink(sources['patients'], built['appointments']),
+    #     MasterDetailLink(sources['appointments'], built['photos']),
+    # ]
+    # return ClinicDataSets(built['patients'], built['appointments'], built['photos'],
+    #                       sources, links, drafts, writers)
+    # ↑ до 2026-10-18: таблицы, поля, связи перечислялись здесь вручную (три таблицы клиники) —
+    #   новая таблица требовала правки этого файла. Теперь всё — из описаний таблиц
+    #   (app/tables: одно описание на таблицу; свои столбцы — отметки, итоги по подчинённым).
+    from app.tables import CLINIC         # здесь, а не наверху: app.tables импортирует этот пакет
+    return CLINIC.build(drafts=drafts, services=services, fetch_mode=fetch_mode,
+                        fetch_size=fetch_size, sizes=sizes)

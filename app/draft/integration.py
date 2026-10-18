@@ -59,11 +59,16 @@ def build_app_schema() -> TreeSchema:
         >>> build_app_schema().depth('photo')
         2
     """
-    return TreeSchema([
-        EntityType('patient', label='Пациент'),
-        EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём'),
-        EntityType('photo', parent='appointment', parent_field='appointment_id', label='Фото'),
-    ])
+    # return TreeSchema([
+    #     EntityType('patient', label='Пациент'),
+    #     EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём'),
+    #     EntityType('photo', parent='appointment', parent_field='appointment_id', label='Фото'),
+    # ])
+    # ↑ до 2026-10-18: дерево перечислялось вручную — новая таблица требовала правки здесь.
+    #   Теперь — из описаний таблиц (app/tables, одно описание на таблицу; родитель — из
+    #   внешнего ключа модели). Схема совпадает с прежней (тест).
+    from app.tables import CLINIC         # здесь, а не наверху: app.tables импортирует этот модуль
+    return CLINIC.drafts_schema()
 
 
 class ServiceAdapter:
@@ -392,18 +397,22 @@ def create_app_drafts() -> AppDrafts:
         >>> drafts.store.is_empty
         True
     """
-    from app.dependencies import (  # здесь, а не наверху: циклы импортов сервисов
-        get_appointment_service, get_patient_service, get_photo_service,
-    )
-    from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO
+    # from app.dependencies import (  # здесь, а не наверху: циклы импортов сервисов
+    #     get_appointment_service, get_patient_service, get_photo_service,
+    # )
+    # from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO
+    # ↑ до 2026-10-18: нужны были для ручного перечня сервисов (ниже) — теперь описания таблиц
     from app.utils.drafts import DraftStore
 
     schema = build_app_schema()
     from app.dependencies import get_db
-    adapter = ServiceAdapter({
-        'patient': (get_patient_service, PatientDTO),
-        'appointment': (get_appointment_service, AppointmentDTO),
-        'photo': (get_photo_service, PhotoDTO),
-    }, transaction_factory=lambda: get_db().session_scope())
+    # adapter = ServiceAdapter({
+    #     'patient': (get_patient_service, PatientDTO),
+    #     'appointment': (get_appointment_service, AppointmentDTO),
+    #     'photo': (get_photo_service, PhotoDTO),
+    # }, transaction_factory=lambda: get_db().session_scope())
+    # ↑ до 2026-10-18: сервисы перечислялись вручную; теперь — из описаний таблиц
+    from app.tables import CLINIC
+    adapter = CLINIC.service_adapter(transaction_factory=lambda: get_db().session_scope())
     store = DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter))
     return AppDrafts(schema=schema, adapter=adapter, store=store)

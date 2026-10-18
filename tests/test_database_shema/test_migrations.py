@@ -885,3 +885,68 @@ def test_drop_unnamed_fk_on_legacy_db_by_convention(tmp_path, with_0002):
     upgrade_database(engine)
     assert inspect(engine).get_foreign_keys('photos') == []
     assert counts(engine) == before
+
+
+UNIQUE_0002 = """
+from alembic import op
+
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+
+
+def upgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.create_index('ux_patient_phone', ['phone'], unique=True)
+
+
+def downgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.drop_index('ux_patient_phone')
+"""
+
+
+def test_drift_item_that_fails_is_skipped(tmp_path, with_0002):
+    """A5: уникальный индекс нельзя дописать (повторы) — пропуск с предупреждением; остальное дописано; запуск не падает."""
+    with_0002(code=UNIQUE_0002)
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('DROP INDEX ux_patient_phone'))
+        conn.execute(text('DROP TABLE photos'))
+        conn.execute(text("UPDATE patients SET phone = '111'"))
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name, phone) VALUES (2, 'А', 'Б', '111')"))
+    upgrade_database(engine)                                     # не падает
+    assert 'photos' in inspect(engine).get_table_names()
+    assert 'ux_patient_phone' not in {i['name'] for i in inspect(engine).get_indexes('patients')}
+    assert counts(engine)['patients'] == 2
+
+
+def _add_unique_index_existing(meta):
+    import sqlalchemy as sa
+    sa.Index('ux_patient_phone', meta.tables['patients'].c.phone, unique=True)
+
+
+def _add_table_with_unique(meta):
+    import sqlalchemy as sa
+    table = sa.Table('codes', meta, sa.Column('id', sa.Integer, primary_key=True),
+                     sa.Column('code', sa.String(20)))
+    sa.Index('ux_codes_code', table.c.code, unique=True)
+
+
+def test_unique_index_on_existing_table_is_unsafe(with_0002):
+    """A4: уникальный индекс на существующей таблице — вручную; на новой — можно."""
+    from app.database import migrate
+    with_0002(code=NOOP_0002)
+    with pytest.raises(migrate.MigrationError, match='ux_patient_phone'):
+        migrate.generate_migration(_models_with(_add_unique_index_existing))
+    assert migrate.generate_migration(_models_with(_add_table_with_unique))
+
+
+def test_build_check_output_survives_narrow_encoding(tmp_path):
+    """A3: вывод проверки сборки в канал cp1252 — без падения на кириллице."""
+    import subprocess
+    import sys
+    env = dict(os.environ, PYTHONIOENCODING='cp1252', PROJECT_MED_ENV_DIR=str(tmp_path))
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    result = subprocess.run([sys.executable, '-m', 'app.database.migrate', 'check'],
+                            cwd=root, env=env, capture_output=True)
+    assert result.returncode == 0, result.stdout[-500:] + result.stderr[-500:]

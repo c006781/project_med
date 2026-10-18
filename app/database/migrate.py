@@ -56,6 +56,7 @@ import functools
 import os
 # import shutil  # до M8 (2026-10-18): копия файла — теперь backup-API SQLite
 import sqlite3
+import sys
 import time
 from typing import List, Optional, Sequence, Tuple
 
@@ -782,8 +783,21 @@ def _repair_drift(engine: Engine, conn, head: str, may_backup: bool) -> List[str
         path = _backup(engine, f"{head}-repair")
         if path:
             _log.info(f"Резервная копия базы перед автодостройкой: {path}")
-    _apply_legacy_repair(conn, added, where='Автодостройка')
-    return describe_differences(added)
+    done = []
+    for item in sorted(added, key=lambda i: _ADDABLE.index(i[0])):
+        # A5 (2026-10-18): каждый пункт — в своей точке отката. Пункт, который нельзя
+        # дописать (уникальный индекс при повторах в данных…), пропускается с
+        # предупреждением — иначе программа не запускалась бы НИ РАЗУ на этой базе.
+        savepoint = conn.begin_nested()
+        try:
+            _apply_legacy_repair(conn, [item], where='Автодостройка')
+            savepoint.commit()
+            done.append(item)
+        except Exception as exc:
+            savepoint.rollback()
+            _log.warning(f"Автодостройка: не удалось дописать {describe_differences([item])[0]} — "
+                         f"пропущено ({exc}); база работает без этого")
+    return describe_differences(done)
 
 
 def _apply_legacy_repair(connection, added, where: str = 'Старая база') -> None:
@@ -949,6 +963,7 @@ def unsafe_changes(changes: Sequence) -> list:
     """
     Какие изменения из списка нельзя применить автоматически.
 
+    Уникальный индекс на существующей таблице — небезопасен (A4): повторы в данных.
     Кроме ``is_safe_addition``: новая СВЯЗЬ (внешний ключ) в существующей таблице безопасна,
     если все её столбцы добавляются этими же изменениями (A2, 2026-10-18) — в новых
     столбцах ещё нет данных, нарушить связь нечему. Типичный случай — новый
@@ -967,8 +982,15 @@ def unsafe_changes(changes: Sequence) -> list:
     """
     added_columns = {(item[2], item[3].name) for item in changes
                      if item[0] == 'add_column' and is_safe_addition(item)}
+    added_tables = {item[1].name for item in changes if item[0] == 'add_table'}
     result = []
     for item in changes:
+        if item[0] == 'add_index' and item[1].unique and item[1].table.name not in added_tables:
+            # A4: уникальный индекс на СУЩЕСТВУЮЩЕЙ таблице — при повторах в данных клиники
+            # миграция упадёт, и программа перестанет запускаться на этой базе. Что делать
+            # с повторами, решает человек (миграция вручную).
+            result.append(item)
+            continue
         if is_safe_addition(item):
             continue
         if item[0] == 'add_fk':
@@ -1114,6 +1136,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return 2 if exc.code else 0
+    try:   # A3: вывод в файл/канал с однобайтовой кодировкой — не падать на кириллице
+        sys.stdout.reconfigure(errors='replace')
+    except (AttributeError, ValueError):
+        pass
     try:
         head = head_revision()
         changes = pending_model_changes()
@@ -1139,5 +1165,4 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == '__main__':
-    import sys
     sys.exit(main())

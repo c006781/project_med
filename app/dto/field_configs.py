@@ -217,7 +217,10 @@ APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = {
         'virtual'       : True,         # Виртуальное.
         'source_attr'   : 'patient',    # Атрибут ORM, содержащий объект пациента.
         'compute'       : {             # Вычисление: формирует строку "Фамилия Имя".
-            'func'  : lambda patient: " ".join([patient.last_name, patient.first_name, patient.middle_name]).strip(),
+            # 'func'  : lambda patient: " ".join([patient.last_name, patient.first_name, patient.middle_name]).strip(),
+            # ↑ до APP3 (2026-10-18): без отчества (None) join падал, ошибка проглатывалась —
+            #   у приёмов пациентов без отчества ФИО было пустым.
+            'func'  : lambda patient: " ".join(part for part in (patient.last_name, patient.first_name, patient.middle_name) if part),
             'args'  : ['patient'],
         },
     },

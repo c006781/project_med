@@ -22,7 +22,7 @@ from typing import Any, Dict, Hashable, Iterable, List, Mapping, Optional, Seque
 
 from .backend import Capabilities, Page
 from .fields import FieldDef
-from .query import Order, Query, apply_in_memory  # noqa: F401  (Order — для примеров)
+from .query import Query, apply_in_memory
 
 
 class MemoryBackend:

@@ -31,7 +31,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Hashable, Iterable, List, Mapping, Optional, Sequence, Type
+from typing import Any, Callable, Dict, Hashable, Mapping, Optional, Sequence, Type
 
 from app.utils.dataset import Capabilities, Condition, FieldDef, Op, Page, Query
 

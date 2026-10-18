@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Dict, Optional, Sequence
 
 from PySide6.QtCore import Signal
@@ -30,6 +31,8 @@ try:  # пакеты лежат рядом в одном родительско�
     from ..dataset import DataEvent, DataSource, State
 except ImportError:  # pragma: no cover
     from dataset import DataEvent, DataSource, State
+
+_log = logging.getLogger(__name__)
 
 # Кнопка: (имя, значок, подсказка)
 BUTTONS = (
@@ -158,7 +161,8 @@ class DataNavigator(QWidget):
             icon: Значок.
             tip: Подсказка.
             handler: Действие (после него набор не перечитывается — это дело действия).
-            enabled: Когда кнопка доступна (зовётся при каждом событии набора).
+            enabled: Функция «доступна ли кнопка» (зовётся при каждом событии набора;
+                именно функция — не готовое значение свойства).
 
         Returns:
             Кнопка.
@@ -321,6 +325,9 @@ class DataNavigator(QWidget):
                 try:
                     button.setEnabled(bool(self._extra[name]()))
                 except Exception:
+                    # ошибка в условии — кнопка выключена, причина — в журнал (иначе такую
+                    # ошибку, например свойство вместо функции, не найти)
+                    _log.exception("условие доступности кнопки %r упало", name)
                     button.setEnabled(False)
 
     def disconnect_source(self) -> None:

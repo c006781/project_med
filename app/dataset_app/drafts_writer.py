@@ -247,6 +247,31 @@ class DraftsWriter:
         with self._mine():
             self.store.delete(self.entity, key, parent_id=self._parent(row))
 
+    def undelete(self, dataset: DataSet, key: Optional[Hashable] = None) -> bool:
+        """
+        Возвращает строку, помеченную на удаление (D5): пометка снимается, строка снова
+        обычная (правки, сделанные до удаления, сохраняются).
+
+        Args:
+            dataset: Набор.
+            key: Ключ (``None`` — текущая строка).
+
+        Returns:
+            ``True`` — пометка снята; ``False`` — строка не была помечена.
+
+        Пример:
+            >>> writer.undelete(ds)
+            True
+        """
+        key = dataset.current_key if key is None else key
+        draft = self.store.get(self.entity, key)
+        if draft is None or not draft.deleted:
+            return False
+        with self._mine():
+            self.store.undelete(self.entity, key)
+        dataset.touch([key])
+        return True
+
     # ------------------------------------------------------------------ RowOverlay
 
     def _parent_condition(self, query: Query) -> Any:

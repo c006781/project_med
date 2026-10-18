@@ -1289,6 +1289,10 @@ class DataSet:
         self._require_modifiable()
         if self._current_row() is None:
             raise DataSetError("нет текущей строки")
+        if self.row_status() == 'deleted':
+            # D5 (2026-10-18): строка помечена на удаление (отложенная запись) — правка её
+            # смысла не имеет; сначала вернуть (способ записи знает как)
+            raise DataSetError("строка помечена на удаление — сначала верните её")
         self._buffer = copy.deepcopy(self._rows[self._index])
         self._set_state(State.EDIT)
 
@@ -1544,6 +1548,8 @@ class DataSet:
         if row is None:
             raise DataSetError("нет текущей строки")
         key, at = row.get(self.key_field), self._index
+        if self.row_status() == 'deleted':
+            return                               # D5: уже помечена — повторно не удаляем
         try:
             self.writer.delete(self, key, copy.deepcopy(row))
         except Exception as exc:

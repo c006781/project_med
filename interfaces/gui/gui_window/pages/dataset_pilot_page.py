@@ -228,6 +228,12 @@ class DataSetPilotPage(BasePage):
                                  store.undo, enabled=lambda: store.can_undo)
             navigator.add_action('redo', '↷', 'Повторить изменение черновиков',
                                  store.redo, enabled=lambda: store.can_redo)
+            writer = self.clinic.writers[name]
+            dataset_of = self.clinic.sources[name]
+            navigator.add_action(
+                'undelete', '⎌', 'Вернуть строку, помеченную на удаление',
+                lambda w=writer, s=dataset_of: w.undelete(s.dataset),
+                enabled=lambda s=dataset_of: s.dataset.active and s.dataset.row_status() == 'deleted')
         if name == 'photos':
             navigator.add_action('add_file', '🖼', 'Добавить фото из файла…', self.add_photo_file,
                                  enabled=lambda: self.clinic.photos.can_modify)

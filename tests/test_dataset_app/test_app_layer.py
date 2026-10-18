@@ -293,3 +293,15 @@ def test_service_backend_get_missing_with_entity_specific_error(services, filled
     fields = fields_from_config(APPOINTMENT_CONFIG, AppointmentDTO)
     backend = ServiceBackend(lambda: services['appointment'], AppointmentDTO, fields)
     assert backend.get(99999) is None
+
+
+def test_drafts_undelete(services, providers, filled, app_drafts):
+    """D5: вернуть строку, помеченную на удаление."""
+    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
+    clinic.open()
+    clinic.appointments.delete()
+    writer = clinic.writers['appointments']
+    assert writer.undelete(clinic.appointments)
+    assert clinic.appointments.row_status() is None and app_drafts.store.is_empty
+    assert not writer.undelete(clinic.appointments)
+    clinic.close()

@@ -563,3 +563,27 @@ def test_writer_gets_original_and_touch():
     ds.subscribe(lambda e: changed.append(e.index) if e.kind is EventKind.ROW_CHANGED else None)
     assert ds.touch([2]) == 1 and changed == [1]
     assert ds.touch() == 2
+
+
+def test_master_refresh_refreshes_detail():
+    """D4: «обновить» главный — подчинённый тоже перечитывается (главная строка та же)."""
+    patients, visits, _ = tree()
+    MasterDetailLink(patients, visits)
+    patients.open(); visits.open()
+    visits.backend.insert({'id': 11, 'patient_id': 1})            # появилось в хранилище
+    patients.refresh()
+    assert keys(visits) == [10, 11]
+
+
+def test_deleted_row_not_editable_nor_deleted_twice():
+    """D5: строка с пометкой удаления — не правится; повторное удаление — ничего."""
+    writer = Deferred()
+    ds = DataSet(people(2), writer=writer)
+    ds.open(); ds.delete()
+    assert ds.row_status() == 'deleted'
+    with pytest.raises(DataSetError, match='помечена на удаление'):
+        ds.edit()
+    with pytest.raises(DataSetError):
+        ds.set_value('name', 'x')
+    ds.delete()
+    assert writer.deleted == {1}

@@ -28,13 +28,14 @@ from typing import Any, Callable, Dict, Mapping, Optional
 from PySide6.QtCore import QDate, Qt
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
-    QComboBox, QDateEdit, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView, QVBoxLayout, QWidget,
+    QComboBox, QDateEdit, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPlainTextEdit, QPushButton, QSpinBox, QSplitter, QTableView, QToolButton, QVBoxLayout, QWidget,
 )
 
 from app.dataset_app import create_clinic_datasets
 from app.utils.dataset import Condition, DataSource, FetchMode, Op
-from app.utils.dataset_qt import DataNavigator, DataSetTableModel, bind_table_view, build_form
+from app.utils.dataset import Action, ActionSet
+from app.utils.dataset_qt import ActionsMenu, DataNavigator, DataSetTableModel, bind_table_view, build_form
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
 # # Колонки таблиц и поля форм: (поле, виджет)
@@ -137,6 +138,8 @@ class DataSetPilotPage(BasePage):
         self.navigators: Dict[str, DataNavigator] = {}
         self.tables: Dict[str, QTableView] = {}
         self.forms: Dict[str, Any] = {}
+        self.actions: Dict[str, ActionSet] = {}
+        self.action_menus: Dict[str, ActionsMenu] = {}
         self.bindings = []
         self._opened = False
         self._ask_delete = ask_delete
@@ -249,7 +252,25 @@ class DataSetPilotPage(BasePage):
         if name == 'photos':
             navigator.add_action('add_file', '🖼', 'Добавить фото из файла…', self.add_photo_file,
                                  enabled=lambda: self.clinic.photos.can_modify)
-        column.addWidget(navigator)
+        # массовые действия над отмеченными («чеки»): меню «Отмеченные ▾» по набору действий
+        actions = ActionSet(batch=self.drafts.store.batch if self.drafts is not None else None)
+        if self.drafts is not None:
+            actions.add(Action('save_marked', 'Сохранить отмеченные',
+                               lambda ds, keys, params, e=spec.entity: self._save_targets(
+                                   [(e, k) for k in keys]),
+                               group='save'))
+        menu = ActionsMenu(source, actions, self, confirm=self._ask_confirm)
+        menu.error_occurred.connect(self.show_error)
+        marked_button = QToolButton()
+        marked_button.setText('Отмеченные')
+        marked_button.setMenu(menu)
+        marked_button.setPopupMode(QToolButton.InstantPopup)
+        marked_button.setVisible('mark' in source.dataset.fields)
+        top = QHBoxLayout()
+        top.addWidget(navigator, 1)
+        top.addWidget(marked_button)
+        column.addLayout(top)
+        self.actions[name], self.action_menus[name] = actions, menu
         self.navigators[name] = navigator
         model = DataSetTableModel(source, columns=list(spec.columns) or None, parent=self)
         model.error_occurred.connect(self.show_error)
@@ -407,6 +428,48 @@ class DataSetPilotPage(BasePage):
             self.show_error(str(exc))
             return str(exc)
         return None
+
+    def _ask_confirm(self, parent: Optional[QWidget], text: str) -> bool:
+        """
+        Вопрос «да/нет» для массовых действий (удаление отмеченных — тем же вопросом, что
+        у навигатора).
+
+        Args:
+            parent: Родитель.
+            text: Вопрос.
+
+        Returns:
+            ``True`` — да.
+
+        Пример:
+            >>> page._ask_confirm(page, 'Удалить 3?')
+            True
+        """
+        if self._ask_delete is not None:
+            return bool(self._ask_delete())
+        return QMessageBox.question(parent or self, 'Отмеченные', text) == QMessageBox.Yes
+
+    def _save_targets(self, targets) -> bool:
+        """
+        Сохраняет черновики заданных записей (отмеченных) — с вопросами окна.
+
+        Args:
+            targets: Узлы ``(тип, id)``.
+
+        Returns:
+            ``True`` — сохранено.
+
+        Пример:
+            >>> page._save_targets([('patient', 3)])
+            True
+        """
+        self.clinic.post_all()
+        if self._save_handler is not None:
+            ok = bool(self._save_handler(list(targets), None))
+        else:
+            ok = self.clinic.drafts.save(list(targets)) is not None
+        self.show_status('Сохранено' if ok else 'Сохранение отменено')
+        return ok
 
     def save(self, current: bool = False) -> bool:
         """

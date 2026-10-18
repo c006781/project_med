@@ -98,12 +98,16 @@ def widget_for(definition: FieldDef, parent: Optional[QWidget] = None) -> QWidge
         widget.setCalendarPopup(True)
         widget.setMinimumDate(NULL_DATE)
         widget.setDisplayFormat('dd.MM.yyyy')
+        widget.setSpecialValueText('—')
+        widget.setDate(NULL_DATE)            # начальное — «пусто», а не 01.01.2000 по умолчанию Qt
         return widget
     if kind == 'datetime':
         widget = QDateTimeEdit(parent)
         widget.setCalendarPopup(True)
         widget.setMinimumDateTime(QDateTime(NULL_DATE, QTime(0, 0)))
         widget.setDisplayFormat('dd.MM.yyyy HH:mm')
+        widget.setSpecialValueText('—')
+        widget.setDateTime(QDateTime(NULL_DATE, QTime(0, 0)))
         return widget
     if kind == 'int':
         widget = QSpinBox(parent)

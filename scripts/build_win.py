@@ -27,6 +27,17 @@ def main():
         sys.exit(1)
     print(f"Entry script: {entry_point}")
 
+    # 2.1. Миграции БД (2026-10-18): модели = миграции, одна «голова». Безопасные изменения
+    #      моделей сразу оформляются файлом миграции — сборка останавливается, чтобы его
+    #      просмотреть и добавить в git; небезопасные — написать миграцию вручную.
+    #      Настоящая база не открывается (сравнение во временной базе в памяти).
+    #      См. app/database/IMPLEMENTATION.md §8.
+    check = subprocess.run([sys.executable, '-m', 'app.database.migrate', 'check', '--generate'],
+                           cwd=root_dir)
+    if check.returncode != 0:
+        print("Error: migrations check failed — see above. Build stopped.")
+        sys.exit(1)
+
     # 3. Формируем команду PyInstaller
     #    Важно: все опции должны идти ДО указания scriptname
     separator = ';' if sys.platform == 'win32' else ':'

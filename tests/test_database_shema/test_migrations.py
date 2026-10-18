@@ -184,7 +184,7 @@ def test_failed_migration_rolls_back(tmp_path, monkeypatch):
     import app.database.migrate as migrate_module
     path, engine = legacy_db(tmp_path)
 
-    def boom(connection, added):
+    def boom(connection, added, where=None):
         connection.execute(text("CREATE TABLE half_done (id INTEGER)"))
         raise RuntimeError('сбой')
 
@@ -539,3 +539,254 @@ def test_old_broken_links_do_not_block_migration(tmp_path, with_0002):
     with_0002()
     assert upgrade_database(engine) == '0002_test_change'
     assert counts(engine)['appointments'] == 1
+
+
+
+# ---------------------------------------------------------------------------
+# Автомиграции: автодостройка, генерация миграции, проверка для сборки
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _restore_migration_settings():
+    """Настройки автоматики — общие на процесс: каждый тест начинает с умолчаний."""
+    import dataclasses
+    from app.database import migrate
+    saved = dataclasses.asdict(migrate._settings)
+    yield
+    migrate.configure(**saved)
+
+
+@pytest.fixture
+def app_models(monkeypatch):
+    """Модели по умолчанию — только таблицы приложения (не модели других тестов)."""
+    from app.database import migrate
+    meta = app_metadata()
+    monkeypatch.setattr(migrate, '_default_metadata', lambda: meta)
+    return meta
+
+
+def head_db(tmp_path, name='db.db'):
+    """База на последней версии с одним пациентом."""
+    engine = create_engine(f"sqlite:///{tmp_path / name}")
+    upgrade_database(engine)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
+    return tmp_path / name, engine
+
+
+def test_drift_missing_index_and_table_repaired(tmp_path):
+    """База на последней версии, но индекс и таблицу удалили вручную — дописываются сами."""
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('DROP INDEX ix_appointment_note_text'))
+        conn.execute(text('DROP TABLE photos'))
+    assert upgrade_database(engine) == BASELINE
+    assert 'photos' in inspect(engine).get_table_names()
+    assert 'ix_appointment_note_text' in {i['name'] for i in inspect(engine).get_indexes('appointments_notes')}
+    assert counts(engine)['patients'] == 1
+    copies = backups(tmp_path)
+    assert len(copies) == 1 and copies[0].endswith('-repair')
+    upgrade_database(engine)                                  # второй запуск — ничего
+    assert len(backups(tmp_path)) == 1
+
+
+def test_drift_extras_kept_and_no_backup(tmp_path):
+    """Лишнее (свой столбец, своя таблица) не трогается; менять нечего — файл не трогается."""
+    import hashlib
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('ALTER TABLE patients ADD COLUMN email VARCHAR(100)'))
+        conn.execute(text('CREATE TABLE my_stuff (id INTEGER PRIMARY KEY)'))
+    engine.dispose()
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    upgrade_database(engine)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert backups(tmp_path) == []
+
+
+def test_drift_missing_required_column_refused(tmp_path):
+    import hashlib
+    from app.database.migrate import MigrationError
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('DROP INDEX ix_patient_last_name'))
+        conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+    engine.dispose()
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+    with pytest.raises(MigrationError, match='обязательного столбца patients.last_name'):
+        upgrade_database(engine)
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+
+
+def test_drift_repair_can_be_disabled(tmp_path):
+    from app.database.migrate import configure
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('DROP TABLE photos'))
+    configure(repair_drift=False)
+    upgrade_database(engine)
+    assert 'photos' not in inspect(engine).get_table_names()
+
+
+INDEXED_COLUMN_0002 = """
+from alembic import op
+import sqlalchemy as sa
+
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+
+
+def upgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.add_column(sa.Column('email', sa.String(100), nullable=True))
+        batch.create_index('ix_patient_email', ['email'])
+
+
+def downgrade():
+    with op.batch_alter_table('patients') as batch:
+        batch.drop_index('ix_patient_email')
+        batch.drop_column('email')
+"""
+
+
+def test_drift_adds_column_before_its_index(tmp_path, with_0002):
+    """M12: недостающий столбец С ИНДЕКСОМ — сначала столбец, потом индекс (раньше — наоборот, сбой)."""
+    with_0002(code=INDEXED_COLUMN_0002)
+    path, engine = head_db(tmp_path)
+    with engine.begin() as conn:
+        conn.execute(text('DROP INDEX ix_patient_email'))
+        conn.execute(text('ALTER TABLE patients DROP COLUMN email'))
+    upgrade_database(engine)
+    assert 'email' in {c['name'] for c in inspect(engine).get_columns('patients')}
+    assert 'ix_patient_email' in {i['name'] for i in inspect(engine).get_indexes('patients')}
+
+
+NOOP_0002 = """
+revision = '0002_test_change'
+down_revision = '0001_baseline'
+
+
+def upgrade():
+    pass
+
+
+def downgrade():
+    pass
+"""
+
+
+def _models_with(extra):
+    """Модели приложения + изменение ``extra(meta)``."""
+    meta = app_metadata()
+    extra(meta)
+    return meta
+
+
+def _add_table(meta):
+    import sqlalchemy as sa
+    sa.Table('prescriptions_auto', meta,
+             sa.Column('id', sa.Integer, primary_key=True),
+             sa.Column('appointment_id', sa.Integer, sa.ForeignKey('appointments.id'), nullable=False),
+             sa.Column('drug', sa.String(100), nullable=False))
+
+
+def _add_nullable_column(meta):
+    import sqlalchemy as sa
+    meta.tables['patients'].append_column(sa.Column('email', sa.String(100), nullable=True))
+
+
+def _rename_column(meta):
+    """Переименование phone → mobile: автоматика видит «удалить phone + добавить mobile»."""
+    import sqlalchemy as sa
+    table = meta.tables['patients']
+    phone = table.c.phone
+    table._columns.remove(phone)
+    table.append_column(sa.Column('mobile', sa.String(20), nullable=True))
+
+
+def test_pending_changes_empty_for_app_models():
+    from app.database.migrate import pending_model_changes
+    assert pending_model_changes(app_metadata()) == []
+
+
+def test_generate_migration_safe_changes(tmp_path, with_0002):
+    """Новая таблица + новый необязательный столбец → файл миграции; он применяется, модели = миграции."""
+    import glob
+    from app.database import migrate
+    target = with_0002(code=NOOP_0002)
+    models = _models_with(lambda m: (_add_table(m), _add_nullable_column(m)))
+    path = migrate.generate_migration(models)
+    assert path and os.path.dirname(path) == str(target / 'versions')
+    name = os.path.basename(path)
+    assert name.startswith('0003_auto_') and name.endswith('.py')
+    body = open(path, encoding='utf-8').read()
+    assert 'создана автоматически' in body and 'add_table prescriptions_auto' in body
+    assert migrate.head_revision() == name[:-3]
+    engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
+    upgrade_database(engine)
+    assert 'prescriptions_auto' in inspect(engine).get_table_names()
+    assert migrate.pending_model_changes(models) == []        # модели = миграции
+    assert migrate.generate_migration(models) is None          # повторно — нечего
+
+
+def test_generate_migration_refuses_unsafe(tmp_path, with_0002):
+    """Переименование столбца — отказ, файл не создаётся (автоматика потеряла бы данные)."""
+    import glob
+    from app.database import migrate
+    target = with_0002()
+    before = sorted(glob.glob(str(target / 'versions' / '*.py')))
+    with pytest.raises(migrate.MigrationError, match='вручную'):
+        migrate.generate_migration(_models_with(_rename_column))
+    assert sorted(glob.glob(str(target / 'versions' / '*.py'))) == before
+
+
+def test_autogenerate_on_startup(tmp_path, with_0002, app_models, monkeypatch):
+    """configure(autogenerate=True): модели опередили миграции — при открытии базы миграция создаётся и применяется."""
+    from app.database import migrate
+    with_0002(code=NOOP_0002)
+    path, engine = head_db(tmp_path)
+    _add_table(app_models)
+    migrate.configure(autogenerate=True)
+    head = upgrade_database(engine)
+    assert head.startswith('0003_auto_')
+    assert 'prescriptions_auto' in inspect(engine).get_table_names()
+    assert counts(engine)['patients'] == 1
+    assert len(backups(tmp_path)) == 1
+
+
+def test_autogenerate_off_by_default(tmp_path, with_0002, app_models):
+    import glob
+    target = with_0002(code=NOOP_0002)
+    _add_table(app_models)
+    before = sorted(glob.glob(str(target / 'versions' / '*.py')))
+    upgrade_database(create_engine(f"sqlite:///{tmp_path / 'db.db'}"))
+    assert sorted(glob.glob(str(target / 'versions' / '*.py'))) == before
+
+
+def test_build_check_cli(tmp_path, with_0002, app_models, capsys):
+    """python -m app.database.migrate check: 0 — совпадает; 1 — отличается; --generate — файл и 1."""
+    import glob
+    from app.database import migrate
+    target = with_0002(code=NOOP_0002)
+    assert migrate.main(['check']) == 0
+    _add_table(app_models)
+    assert migrate.main(['check']) == 1
+    assert 'add_table prescriptions_auto' in capsys.readouterr().out
+    assert migrate.main(['check', '--generate']) == 1
+    assert len(glob.glob(str(target / 'versions' / '*_auto_*.py'))) == 1
+    assert migrate.main(['check']) == 0                        # после генерации — совпадает
+    assert migrate.main(['bogus']) == 2
+
+
+def test_build_check_cli_unsafe(with_0002, app_models, capsys):
+    from app.database import migrate
+    with_0002(code=NOOP_0002)
+    _rename_column(app_models)
+    assert migrate.main(['check', '--generate']) == 1
+    assert 'вручную' in capsys.readouterr().out
+
+
+def test_configure_rejects_unknown():
+    from app.database.migrate import configure
+    with pytest.raises(TypeError):
+        configure(auto=True)

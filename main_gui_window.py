@@ -74,5 +74,14 @@ if __name__ == '__main__':
     # См. app/utils/logger/IMPLEMENTATION.md §7.1.
     setup_logging()
 
+    # Автомиграции (2026-10-18): при запуске из исходников модели, опередившие миграции,
+    # сами оформляются миграцией (только безопасные добавления) и применяются при
+    # открытии базы. В exe — нет: там модели = миграции гарантирует проверка при сборке
+    # (scripts/build_win.py), а файлы миграций лежат во временной папке.
+    # См. app/database/IMPLEMENTATION.md §8.
+    if not getattr(sys, 'frozen', False):
+        from app.database.migrate import configure as configure_migrations
+        configure_migrations(autogenerate=True)
+
     main_gui_window.main()
 

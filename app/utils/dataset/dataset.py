@@ -756,11 +756,15 @@ class DataSet:
         except Exception as exc:
             self._emit(EventKind.ERROR, error=exc)
             raise
-        self._emit(EventKind.REFRESHED)
         index = self._find(key) if key is not None else None
         if index is None:
             index = min(old_index, len(self._rows) - 1) if self._rows else -1
-        self._force_index(index, old_index)
+        # G1 (2026-10-18): номер текущей строки — ДО события «перечитано»: подписчики
+        # (связь «главная → подчинённая») читают текущую строку уже в нём; раньше номер
+        # был старым, и при уменьшении числа строк указывал за конец (IndexError у связи)
+        self._index = index
+        self._emit(EventKind.REFRESHED)
+        self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=index)
 
     def _find(self, key: Hashable) -> Optional[int]:
         """
@@ -1208,13 +1212,15 @@ class DataSet:
         if keep_position:
             self.refresh()
             return
+        old_index = self._index
         try:
             self._load_first()
         except Exception as exc:
             self._emit(EventKind.ERROR, error=exc)
             raise
+        self._index = 0 if self._rows else -1          # G1: до события «перечитано»
         self._emit(EventKind.REFRESHED)
-        self._force_index(0 if self._rows else -1)
+        self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=self._index)
 
     def set_master(self, values: Optional[Mapping[str, Any]]) -> None:
         """

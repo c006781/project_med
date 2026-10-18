@@ -305,3 +305,22 @@ def test_drafts_undelete(services, providers, filled, app_drafts):
     assert clinic.appointments.row_status() is None and app_drafts.store.is_empty
     assert not writer.undelete(clinic.appointments)
     clinic.close()
+
+
+def test_save_reads_each_dataset_few_times(services, providers, filled, app_drafts, monkeypatch):
+    """G2: сохранение 15 записей — не по нескольку чтений БД на каждую (было 181)."""
+    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
+    clinic.open()
+    for i in range(5):
+        clinic.patients.append({'last_name': f'Ф{i}', 'first_name': 'И', 'birth_date': datetime.date(2000, 1, 1)})
+        clinic.patients.post()
+        for j in range(2):
+            clinic.appointments.append({'date': datetime.date(2026, 1, j + 1)})
+            clinic.appointments.post()
+    calls = []
+    original = ServiceBackend.fetch
+    monkeypatch.setattr(ServiceBackend, 'fetch', lambda self, q: (calls.append(1), original(self, q))[1])
+    clinic.save()
+    assert len(calls) <= 6, len(calls)                       # по 1–2 на набор
+    assert all(k > 0 for k in keys(clinic.patients))
+    clinic.close()

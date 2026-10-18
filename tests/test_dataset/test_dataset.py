@@ -131,13 +131,15 @@ def test_open_events_order():
     ds = DataSet(people(2))
     events = recorder(ds)
     ds.open()
-    assert events == [(EventKind.STATE_CHANGED, State.INACTIVE, State.BROWSE), (EventKind.OPENED,),
-                      (EventKind.REFRESHED,), (EventKind.CURRENT_CHANGED, -1, 0)]
+    assert events == [(EventKind.OPENED,), (EventKind.REFRESHED,),           # H2: «открыт» — первым
+                      (EventKind.STATE_CHANGED, State.INACTIVE, State.BROWSE),
+                      (EventKind.CURRENT_CHANGED, -1, 0)]
     events.clear()
     ds.fetch_more()
     assert events == []                                          # всё загружено — нечего
     ds.close()
-    assert events[-1] == (EventKind.CLOSED,) and ds.row_count == 0
+    assert events[-3:] == [(EventKind.CLOSED,), (EventKind.STATE_CHANGED, State.BROWSE, State.INACTIVE),
+                           (EventKind.CURRENT_CHANGED, 0, -1)] and ds.row_count == 0
 
 
 def test_source_error_reported_and_dataset_stays_closed():

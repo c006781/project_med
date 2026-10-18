@@ -137,3 +137,73 @@ def test_dates_shown_like_rest_of_program(qapp, services, providers, filled):
     page.open_data()
     model = page.models['patients']
     assert model.data(model.index(0, model.columns.index('birth_date'))) == '01.01.1980'
+
+
+def test_consistency_through_full_drafts_scenario(qapp, services, providers, filled, app_drafts, image, monkeypatch):
+    """
+    Итоговая проверка: на КАЖДОМ событии всех трёх наборов (черновики, настоящие сервисы)
+    состояние согласовано, и таблицы Qt не перестраиваются целиком там, где хватает
+    точного изменения (перестройка — только на «перечитано»).
+    """
+    from app.utils.dataset import EventKind
+    from app.utils.dataset_qt import DataSetTableModel
+    unexpected_resets = []
+    # перестройка таблицы — каким событием вызвана (обёртка ДО создания экрана: модель
+    # подписывает на источник именно эту функцию)
+    original_on_event, original_reset = DataSetTableModel._on_event, DataSetTableModel._reset
+
+    def on_event(self, event):
+        self._last_kind = event.kind
+        try:
+            return original_on_event(self, event)
+        finally:
+            self._last_kind = None
+
+    def reset(self):
+        kind = getattr(self, '_last_kind', None)
+        if kind not in (None, EventKind.REFRESHED, EventKind.OPENED, EventKind.CLOSED):
+            unexpected_resets.append((self.dataset.name if self.dataset else None, kind.value))
+        return original_reset(self)
+
+    monkeypatch.setattr(DataSetTableModel, '_on_event', on_event)
+    monkeypatch.setattr(DataSetTableModel, '_reset', reset)
+    page = DataSetPilotPage(drafts=app_drafts, services=providers, ask_delete=lambda: True)
+    problems = []
+
+    def check(event):
+        ds = event.dataset
+        if ds is None or not ds.active:
+            return
+        if not (-1 <= ds.current_index < ds.row_count or (ds.row_count == 0 and ds.current_index == -1)):
+            problems.append((ds.name, event.kind.value, ds.current_index, ds.row_count))
+        if ds.current_index >= 0:
+            try:
+                ds.current, ds.row_status()
+            except Exception as exc:
+                problems.append((ds.name, event.kind.value, repr(exc)))
+        model = page.models[ds.name]
+        if event.kind not in (EventKind.ROWS_INSERTED, EventKind.ROWS_REMOVED) and model.rowCount() != ds.row_count:
+            problems.append((ds.name, event.kind.value, 'таблица', model.rowCount(), ds.row_count))
+
+    for ds in page.clinic.datasets:
+        ds.subscribe(check)
+    page.open_data()
+    c = page.clinic
+    c.patients.append({'last_name': 'Новый', 'first_name': 'Н', 'birth_date': datetime.date(2001, 1, 1)})
+    c.patients.post()
+    c.appointments.append({'date': datetime.date(2026, 10, 18), 'reason_text': 'первичный'})
+    c.appointments.post()
+    assert page.add_photo_file(image)
+    c.photos.set_value('description', 'снимок'); c.photos.post()
+    c.patients.first(); c.appointments.last(); c.appointments.delete()
+    page.clinic.writers['appointments'].undelete(c.appointments)
+    c.appointments.delete()
+    app_drafts.store.undo(); app_drafts.store.redo()
+    c.patients.last()
+    assert page.save(current=False)
+    c.patients.refresh(); c.patients.first(); c.patients.last()
+    assert problems == []
+    assert unexpected_resets == []
+    new = next(p for p in services['patient'].get_all() if p.last_name == 'Новый')
+    appointment = next(a for a in services['appointment'].get_all() if a.patient_id == new.id)
+    assert [p.description for p in services['photo'].get_by_parent(appointment.id)] == ['снимок']

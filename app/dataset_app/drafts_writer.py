@@ -75,6 +75,8 @@ class DraftsWriter:
         store.schema.get(entity)                       # тип должен быть в схеме
         self._datasets: 'weakref.WeakSet[DataSet]' = weakref.WeakSet()
         self._stale: 'weakref.WeakSet[DataSet]' = weakref.WeakSet()
+        # G2: версия черновиков, при которой набор перечитан в последний раз
+        self._seen: 'weakref.WeakKeyDictionary[DataSet, int]' = weakref.WeakKeyDictionary()
         self._own = 0
         store.subscribe(self._on_store)
 
@@ -380,6 +382,13 @@ class DraftsWriter:
             self._stale.add(dataset)
             return
         self._stale.discard(dataset)
+        # G2 (2026-10-18): сохранение рассылает событие на КАЖДЫЙ узел («сохранено»,
+        # «временный id → настоящий») — по 2–3 перечитывания наборов на событие (181
+        # чтение БД на 15 записей). Пачка событий рассылается, когда изменения уже
+        # внесены, — версия черновиков одна: набор, уже перечитанный при этой версии (в
+        # том числе связью «главная → подчинённая»), повторно не читается.
+        if self._seen.get(dataset) == self.store.version:
+            return
         dataset.refresh()
 
     def _on_store(self, event: DraftEvent) -> None:
@@ -418,6 +427,8 @@ class DraftsWriter:
         Пример:
             >>> writer._on_dataset(DataEvent(EventKind.STATE_CHANGED, ds, new=State.BROWSE))
         """
+        if event.kind is EventKind.REFRESHED and event.dataset is not None:
+            self._seen[event.dataset] = self.store.version     # G2: перечитан — при этой версии
         if (event.kind is EventKind.STATE_CHANGED and event.new is State.BROWSE
                 and event.dataset in self._stale):
             self._refresh(event.dataset)

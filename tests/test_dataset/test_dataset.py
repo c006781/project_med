@@ -587,3 +587,39 @@ def test_deleted_row_not_editable_nor_deleted_twice():
         ds.set_value('name', 'x')
     ds.delete()
     assert writer.deleted == {1}
+
+
+def test_refreshed_event_sees_consistent_current_row():
+    """G1: в событии «перечитано» текущая строка уже верная (было: старый номер за концом)."""
+    backend = people(4)
+    ds = DataSet(backend)
+    ds.open(); ds.last()
+    seen = []
+    ds.subscribe(lambda e: seen.append((ds.current_index, ds.row_count))
+                 if e.kind is EventKind.REFRESHED else None)
+    for key in (2, 3, 4):
+        backend.delete(key)
+    ds.refresh()
+    ds.set_filter(Condition('id', Op.EQ, 99))
+    assert all(index < rows for index, rows in seen) and seen[-1] == (-1, 0)
+
+
+def test_link_survives_detail_shrinking_on_refresh():
+    """G1: подчинённый — сам главный для следующего уровня; его строк стало меньше — связь не падает."""
+    patients, visits, photos = tree()
+    MasterDetailLink(patients, visits)
+    MasterDetailLink(visits, photos)
+    for ds in (patients, visits, photos):
+        ds.open()
+    patients.next(); visits.last()                               # приём 21
+    errors = []
+    import logging
+    handler = logging.Handler()
+    handler.emit = lambda record: errors.append(record)
+    logging.getLogger('app.utils.dataset.events').addHandler(handler)
+    try:
+        visits.backend.delete(21); visits.backend.delete(20)
+        patients.refresh()
+    finally:
+        logging.getLogger('app.utils.dataset.events').removeHandler(handler)
+    assert errors == [] and visits.row_count == 0 and photos.row_count == 0

@@ -377,3 +377,47 @@ def test_next_migration_downgrade(tmp_path, with_0002):
         command.downgrade(alembic_config(conn), BASELINE)
     assert current_revision(engine) == BASELINE
     assert 'email' not in {c['name'] for c in inspect(engine).get_columns('patients')}
+
+
+# ---------------------------------------------------------------------------
+# Проверочный проход 3: понятные сообщения об ошибках при запуске (M7)
+# ---------------------------------------------------------------------------
+
+def test_startup_error_text_for_refused_migration(tmp_path):
+    from app.database.migrate import MigrationError, startup_error_text
+    path, engine = legacy_db(tmp_path, extra_sql=())
+    with engine.begin() as conn:                      # обязательный столбец исчез — отказ
+        conn.execute(text('DROP INDEX ix_patient_last_name'))
+        conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+    with pytest.raises(MigrationError) as info:
+        upgrade_database(engine)
+    assert startup_error_text(info.value).startswith('Базу данных нельзя безопасно обновить')
+
+
+def test_startup_error_text_for_locked_db(tmp_path):
+    """Другая копия держит блокировку записи — понятное «база занята», а не трассировка."""
+    import sqlite3
+    from app.database.migrate import startup_error_text
+    path, engine = legacy_db(tmp_path)
+    holder = sqlite3.connect(str(path), isolation_level=None)
+    holder.execute('BEGIN IMMEDIATE')
+    try:
+        slow = create_engine(f"sqlite:///{path}", connect_args={'timeout': 0.2})
+        with pytest.raises(Exception) as info:
+            upgrade_database(slow)
+        assert 'занята другой копией' in startup_error_text(info.value)
+    finally:
+        holder.rollback()
+        holder.close()
+
+
+def test_startup_error_text_wrapped_and_unrelated():
+    from app.database.migrate import MigrationError, startup_error_text
+    try:
+        try:
+            raise MigrationError('x')
+        except MigrationError as inner:
+            raise RuntimeError('обёртка') from inner
+    except RuntimeError as outer:
+        assert startup_error_text(outer).startswith('Базу данных нельзя')
+    assert startup_error_text(ValueError('не про базу')) is None

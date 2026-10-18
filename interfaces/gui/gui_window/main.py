@@ -144,7 +144,20 @@ def main():
     )
     
     from interfaces.gui.gui_window.main_window import MainWindow # тут, так как должно быть после создания QApplication
-    window = MainWindow()
+    # window = MainWindow()
+    # ↑ до 2026-10-18 (M7): ошибка открытия базы (отказ миграции, база занята, нет прав)
+    #   вылетала необработанной — exe без консоли молча закрывался.
+    try:
+        window = MainWindow()
+    except Exception as exc:
+        from app.database.migrate import startup_error_text
+        text = startup_error_text(exc)
+        if text is None:
+            raise                                   # не про базу — как раньше
+        logger.exception(f"Не удалось открыть базу данных: {exc}")
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "Запуск программы", text)
+        sys.exit(1)
     window.show()
 
     logger.info("GUI приложение запущено")

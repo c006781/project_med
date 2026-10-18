@@ -317,14 +317,19 @@ class DraftsWriter:
         result = []
         for row in rows:
             key = row.get(self.key_field)
-            parent = self._parent(row)
+            has_draft = key is not None and self.store.has_draft(self.entity, key)
+            # родитель — из ИТОГОВОЙ строки (БД + черновик): у записи, перенесённой к другому
+            # родителю в черновике, в БД ещё старый. Раньше родитель брался из строки БД и
+            # «сведения о дереве» затирали перенос — при удалении старого родителя
+            # перенесённая запись удалялась вместе с ним (2026-10-18)
+            effective = self.store.effective(self.entity, key, row) if has_draft else row
+            parent = self._parent(effective)
             if parent is not MISSING and key is not None:
                 # для значков предков; «своё» — событие 'linked' не должно перечитывать
                 # набор, который сейчас как раз читается (повторный вход в чтение)
                 with self._mine():
                     self.store.remember_parent(self.entity, key, parent)
-            result.append(self.store.effective(self.entity, key, row)
-                          if self.store.has_draft(self.entity, key) else row)
+            result.append(effective)
         if first:
             new_rows = []
             for draft in self.store.drafts(self.entity, parent_id=self._parent_condition(query),
@@ -341,7 +346,8 @@ class DraftsWriter:
 
     def row_status(self, dataset: DataSet, key: Hashable) -> Optional[str]:
         """
-        Состояние строки: ``new`` / ``modified`` / ``deleted`` / ``child`` / ``None``.
+        Состояние строки: ``new`` / ``modified`` / ``deleted`` / ``parent_deleted``
+        (удаляется вместе с родителем) / ``child`` / ``None``.
 
         Args:
             dataset: Набор.
@@ -355,9 +361,15 @@ class DraftsWriter:
             'new'
         """
         draft = self.store.get(self.entity, key)
+        if draft is not None and draft.deleted:
+            return 'deleted'
+        # удаляется вместе с родителем (предок помечен на удаление): показывается как
+        # удаляемая, но править можно — метку родителя могут снять (решение 2026-10-18)
+        for ancestor in self.store.ancestors((self.entity, key)):
+            parent_draft = self.store.get(*ancestor)
+            if parent_draft is not None and parent_draft.deleted:
+                return 'parent_deleted'
         if draft is not None:
-            if draft.deleted:
-                return 'deleted'
             return 'new' if draft.is_new else 'modified'
         return 'child' if self.store.status(self.entity, key) else None
 

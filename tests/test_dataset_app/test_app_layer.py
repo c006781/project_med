@@ -338,3 +338,36 @@ def test_program_side_photo_count_with_drafts(services, providers, filled, app_d
     app_drafts.save()
     assert len(services['photo'].get_by_parent(visits.current_key)) == 1
     assert visits.value('photo_count') == 1
+
+
+def test_children_of_deleted_parent_shown_but_editable(services, providers, filled, app_drafts, tmp_path):
+    """Дети записи, помеченной на удаление: показываются как удаляемые, но правка разрешена (метку могут снять)."""
+    image = tmp_path / 'a.png'; image.write_bytes(b'x')
+    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
+    clinic.open()
+    clinic.photos.append({'file_path': str(image)}); clinic.photos.post()
+    clinic.appointments.delete()
+    assert clinic.photos.row_status(0) == 'parent_deleted'
+    clinic.photos.set_value('description', 'правка разрешена'); clinic.photos.post()
+    clinic.photos.append({'file_path': str(image)}); clinic.photos.post()
+    clinic.writers['appointments'].undelete(clinic.appointments)
+    assert {clinic.photos.row_status(i) for i in range(clinic.photos.row_count)} == {'new'}
+    clinic.close()
+
+
+def test_moved_child_survives_deleting_old_parent(services, providers, filled, app_drafts):
+    """Приём перенесли к другому пациенту, старого пациента удалили — приём уцелел (перенос пишется раньше удаления)."""
+    clinic = create_clinic_datasets(services=providers, drafts=app_drafts)
+    clinic.open()
+    moved = clinic.appointments.current_key                       # приём Иванова
+    other = keys(clinic.appointments)[1]
+    writer = clinic.writers['appointments']
+    row = clinic.appointments.row()
+    writer.update(clinic.appointments, moved, {'patient_id': filled['petrov']},
+                  dict(row, patient_id=filled['petrov']), row)
+    clinic.patients.delete()                                      # Иванов — на удаление
+    clinic.save(confirm_deletes=lambda plan: True)
+    assert services['appointment'].get_by_id(moved).patient_id == filled['petrov']
+    with pytest.raises(Exception, match='не найден'):
+        services['appointment'].get_by_id(other)                 # оставшийся — удалён с пациентом
+    clinic.close()

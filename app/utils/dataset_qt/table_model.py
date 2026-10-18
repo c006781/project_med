@@ -45,6 +45,7 @@ DEFAULT_STATUS_COLORS: Dict[str, str] = {
     'new': '#dff5df',
     'modified': '#fff4c2',
     'deleted': '#f7d9d9',
+    'parent_deleted': '#fbecec',  # удаляется вместе с родителем (правка разрешена)
     'child': '#e6efff',          # изменены потомки строки (подчинённые записи)
 }
 
@@ -299,7 +300,7 @@ class DataSetTableModel(QAbstractTableModel):
             return ds.value(name, row)
         if role == Qt.BackgroundRole:
             return self._brushes.get(ds.row_status(row) or '')
-        if role == Qt.FontRole and ds.row_status(row) == 'deleted':
+        if role == Qt.FontRole and ds.row_status(row) in ('deleted', 'parent_deleted'):
             font = QFont()
             font.setStrikeOut(True)
             return font

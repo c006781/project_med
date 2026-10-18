@@ -380,3 +380,17 @@ def test_q3_linking_does_not_create_undo_step(store):
     assert len(store._undo) == steps                     # а шага отмены нет
     store.modify('photo', 8, {}, parent_id=13)
     assert len(store._undo) == steps
+
+
+def test_remember_parent_does_not_undo_reparent_by_draft(schema):
+    """L1: запись перенесена черновиком — «сведения о родителе» из старой строки БД её не возвращают."""
+    store = DraftStore(schema)
+    store.remember_parent('appointment', 12, 1)
+    store.modify('appointment', 12, {'patient_id': 2}, original={'patient_id': 1}, parent_id=1)
+    assert store.parent_of('appointment', 12) == ('patient', 2)
+    store.remember_parent('appointment', 12, 1)                 # строка из БД — старый родитель
+    assert store.parent_of('appointment', 12) == ('patient', 2)
+    assert ('appointment', 12) not in store.descendants(('patient', 1))
+    store.modify('appointment', 12, {'patient_id': 1})          # вернули — черновика нет
+    store.remember_parent('appointment', 12, 1)
+    assert store.parent_of('appointment', 12) == ('patient', 1)

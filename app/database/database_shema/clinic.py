@@ -128,7 +128,24 @@ from sqlalchemy.orm import (
     # sessionmaker
 )
 
-Base = declarative_base()
+# Base = declarative_base()
+# ↑ до 2026-10-18 (A2): внешние ключи без имён. SQLite меняет связи только пересборкой
+#   таблицы, и Alembic для неё требует имя ключа («Constraint must have a name») — любая
+#   миграция с новой связью в существующей таблице падала. Правило именования даёт имена
+#   НОВЫМ ключам; существующие базы (ключи без имён) от моделей не отличаются — проверено:
+#   autogenerate сравнивает ключи по столбцам, а не по имени.
+
+from sqlalchemy import MetaData
+
+# Имена ограничений по правилу (рекомендация Alembic для SQLite). Не менять: по этим
+# именам миграции находят ограничения. Индексы в моделях названы явно — правило не нужно.
+NAMING_CONVENTION = {
+    'fk': 'fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s',
+    'uq': 'uq_%(table_name)s_%(column_0_name)s',
+    'ck': 'ck_%(table_name)s_%(constraint_name)s',
+}
+
+Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
 class Patient(Base):
     """

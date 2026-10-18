@@ -24,7 +24,10 @@ from sqlalchemy import engine_from_config, pool
 from app.database.database_shema.clinic import Base
 
 config = context.config
-target_metadata = Base.metadata
+# target_metadata = Base.metadata
+# ↑ до 2026-10-18: всегда модели приложения. Теперь их можно передать (generate_migration,
+#   тесты) через config.attributes['target_metadata']; по умолчанию — как раньше.
+target_metadata = config.attributes.get('target_metadata', Base.metadata)
 
 
 def _configure(connection) -> None:

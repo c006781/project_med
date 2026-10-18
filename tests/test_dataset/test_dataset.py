@@ -1,0 +1,497 @@
+# tests/test_dataset/test_dataset.py
+
+"""Набор данных: чтение порциями, навигация, правка, события, способы записи, связи."""
+
+import pytest
+
+from app.utils.dataset import (
+    Capabilities, Condition, DataSet, DataSetError, DataSource, EventKind, FetchMode,
+    FieldDef, FieldKind, LinkError, LookupDef, MasterDetailLink, MemoryBackend, Op, Page,
+    Query, ReadOnlyError, State, ValidationError,
+)
+
+
+def people(n=5):
+    return MemoryBackend([{'id': i, 'name': f'Имя{i}', 'age': 20 + i} for i in range(1, n + 1)],
+                         fields=[FieldDef('id', read_only=True), FieldDef('name', 'Имя', FieldKind.STRING, required=True),
+                                 FieldDef('age', kind=FieldKind.INTEGER)])
+
+
+def recorder(ds):
+    events = []
+    ds.subscribe(lambda e: events.append((e.kind, e.index, e.count) if e.kind in (
+        EventKind.ROWS_INSERTED, EventKind.ROWS_REMOVED) else (e.kind, e.old, e.new) if e.kind in (
+        EventKind.CURRENT_CHANGED, EventKind.STATE_CHANGED) else (e.kind,)))
+    return events
+
+
+# --------------------------------------------------------------------------- чтение
+
+def test_on_demand_loads_in_portions():
+    backend = people(5)
+    ds = DataSet(backend, fetch_size=2)
+    ds.open()
+    assert (ds.row_count, ds.total, ds.has_more, ds.current_index) == (2, 5, True, 0)
+    assert ds.next() and ds.current_index == 1
+    assert ds.next() and ds.row_count == 4                    # догрузка на краю
+    assert ds.fetch_all() == 1 and not ds.has_more and ds.row_count == 5
+    assert backend.fetch_count == 3
+
+
+def test_fetch_all_mode_and_size_validation():
+    ds = DataSet(people(5), fetch_mode=FetchMode.ALL, fetch_size=1)
+    ds.open()
+    assert ds.row_count == 5 and not ds.has_more
+    with pytest.raises(ValueError):
+        DataSet(people(), fetch_size=0)
+
+
+def test_last_and_locate_load_on_demand():
+    ds = DataSet(people(7), fetch_size=2)
+    ds.open()
+    assert ds.locate(5) and ds.current_key == 5 and ds.row_count == 6
+    assert not ds.locate(99)
+    assert ds.last() and ds.current_key == 7 and ds.eof
+    assert ds.first() and ds.bof and not ds.prior()
+
+
+def test_move_to_beyond_loaded_and_errors():
+    ds = DataSet(people(4), fetch_size=1)
+    with pytest.raises(DataSetError, match='не открыт'):
+        ds.next()
+    ds.open()
+    ds.move_to(3)
+    assert ds.current_key == 4
+    with pytest.raises(IndexError):
+        ds.move_to(10)
+
+
+def test_empty_dataset():
+    ds = DataSet(MemoryBackend([]))
+    ds.open()
+    assert ds.current_index == -1 and ds.current is None and ds.bof and ds.eof
+    assert not ds.first() and not ds.next() and not ds.last()
+    with pytest.raises(DataSetError, match='нет текущей'):
+        ds.edit()
+
+
+def test_fields_from_rows_when_backend_silent():
+    ds = DataSet(MemoryBackend([{'id': 1, 'x': 2}]))
+    ds.open()
+    assert ds.fields.names() == ['id', 'x']
+
+
+def test_filter_order_params_and_refresh_keeps_record():
+    ds = DataSet(people(6), fetch_size=2, order=['-age'])
+    ds.open()
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [6, 5]
+    ds.next(); ds.next()                                       # загружено 4, текущая — id 4
+    assert ds.current_key == 4
+    ds.set_order('age')
+    assert ds.current_key == 4 and ds.row_count >= 4           # та же запись после пересортировки
+    ds.set_filter(Condition('age', Op.GE, 24))
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [4, 5] and ds.current_index == 0
+    ds.refresh()
+    assert ds.current_key == 4
+    ds.set_filter()
+    assert ds.total == 6
+
+
+class Dumb:
+    """Источник, который умеет только отдать всё (ни фильтра, ни сортировки, ни окна, ни подсчёта)."""
+
+    key_field = 'id'
+    capabilities = Capabilities(filter=False, sort=False, window=False, count=False)
+
+    def __init__(self, rows):
+        self.rows = rows
+
+    def fields(self):
+        return []
+
+    def fetch(self, query):
+        return Page([dict(r) for r in self.rows])
+
+    def get(self, key):
+        return next((dict(r) for r in self.rows if r['id'] == key), None)
+
+
+def test_backend_without_capabilities_handled_in_memory():
+    ds = DataSet(Dumb([{'id': i, 'v': i % 3} for i in range(1, 8)]), fetch_size=2, order=['-id'],
+                 conditions=[Condition('v', Op.NE, 0)])
+    ds.open()
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [7, 5]
+    ds.fetch_all()
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [7, 5, 4, 2, 1]
+    with pytest.raises(DataSetError, match='только для чтения'):
+        ds.edit()
+
+
+def test_open_events_order():
+    ds = DataSet(people(2))
+    events = recorder(ds)
+    ds.open()
+    assert events == [(EventKind.STATE_CHANGED, State.INACTIVE, State.BROWSE), (EventKind.OPENED,),
+                      (EventKind.REFRESHED,), (EventKind.CURRENT_CHANGED, -1, 0)]
+    events.clear()
+    ds.fetch_more()
+    assert events == []                                          # всё загружено — нечего
+    ds.close()
+    assert events[-1] == (EventKind.CLOSED,) and ds.row_count == 0
+
+
+def test_source_error_reported_and_dataset_stays_closed():
+    class Broken(Dumb):
+        def fetch(self, query):
+            raise ConnectionError('нет связи')
+    ds = DataSet(Broken([]))
+    errors = []
+    ds.subscribe(lambda e: errors.append(e.error) if e.kind is EventKind.ERROR else None)
+    with pytest.raises(ConnectionError):
+        ds.open()
+    assert not ds.active and isinstance(errors[0], ConnectionError)
+
+
+# --------------------------------------------------------------------------- значения
+
+def test_calculated_and_lookup_values():
+    patients = MemoryBackend([{'id': 1, 'last': 'Петров'}])
+    ds = DataSet(MemoryBackend([{'id': 10, 'patient_id': 1, 'price': 100, 'qty': 3}]), fields=[
+        FieldDef('id'), FieldDef('patient_id'), FieldDef('price'), FieldDef('qty'),
+        FieldDef('sum', calculated=lambda r: r['price'] * r['qty'], display=lambda v: f'{v} ₽'),
+        FieldDef('patient', lookup=LookupDef('patient_id', patients, 'last')),
+    ])
+    ds.open()
+    assert ds.value('sum') == 300 and ds.text('sum') == '300 ₽' and ds.value('patient') == 'Петров'
+    ds.set_value('qty', 4)                                     # во время правки — с правкой
+    assert ds.value('sum') == 400
+    with pytest.raises(DataSetError, match='только для чтения'):
+        ds.set_value('sum', 1)
+    ds.post()
+    assert ds.backend.get(10) == {'id': 10, 'patient_id': 1, 'price': 100, 'qty': 4}  # вычисляемые не пишутся
+
+
+# --------------------------------------------------------------------------- правка
+
+def test_edit_post_cancel():
+    ds = DataSet(people(3))
+    ds.open()
+    events = recorder(ds)
+    ds.set_value('name', 'Новое')                              # AutoEdit
+    assert ds.state is State.EDIT and ds.modified and ds.backend.get(1)['name'] == 'Имя1'
+    ds.post()
+    assert ds.state is State.BROWSE and ds.backend.get(1)['name'] == 'Новое'
+    ds.edit(); ds.set_value('name', 'X'); ds.cancel()
+    assert ds.value('name') == 'Новое' and ds.backend.get(1)['name'] == 'Новое'
+    assert (EventKind.STATE_CHANGED, State.BROWSE, State.EDIT) in events
+    with pytest.raises(DataSetError, match='только для чтения'):
+        ds.set_value('id', 5)
+
+
+def test_post_without_changes_does_not_write():
+    calls = []
+
+    class Spy:
+        def insert(self, ds, values): calls.append('i'); return dict(values, id=1)
+        def update(self, ds, key, changes, row): calls.append('u'); return dict(row)
+        def delete(self, ds, key, row): calls.append('d')
+    ds = DataSet(people(1), writer=Spy())
+    ds.open(); ds.edit(); ds.post()
+    assert calls == []
+
+
+def test_validation_keeps_editing():
+    ds = DataSet(people(2))
+    ds.open()
+    ds.set_value('name', '')
+    with pytest.raises(ValidationError) as info:
+        ds.post()
+    assert 'name' in info.value.errors and ds.state is State.EDIT
+    with pytest.raises(ValidationError):
+        ds.next()                                              # auto_post тоже проверяет
+    assert ds.current_index == 0
+    ds.cancel()
+    assert ds.next()
+
+
+def test_auto_post_on_navigation_and_disabled():
+    ds = DataSet(people(3))
+    ds.open()
+    ds.set_value('name', 'А')
+    ds.next()
+    assert ds.backend.get(1)['name'] == 'А' and ds.state is State.BROWSE
+    strict = DataSet(people(3), auto_post=False)
+    strict.open()
+    strict.set_value('name', 'Б')
+    with pytest.raises(DataSetError, match='сохраните или отмените'):
+        strict.next()
+    with pytest.raises(DataSetError):
+        strict.refresh()
+
+
+def test_insert_append_defaults_and_cancel():
+    backend = MemoryBackend([{'id': 1, 'name': 'А'}, {'id': 2, 'name': 'Б'}],
+                            fields=[FieldDef('id'), FieldDef('name', required=True),
+                                    FieldDef('status', default='new')])
+    ds = DataSet(backend)
+    ds.open(); ds.next()
+    events = recorder(ds)
+    ds.insert({'name': 'В'})                                   # перед текущей
+    assert ds.current_index == 1 and ds.state is State.INSERT and ds.row_count == 3
+    assert ds.current == {'id': None, 'name': 'В', 'status': 'new'}
+    assert events[:2] == [(EventKind.ROWS_INSERTED, 1, 1), (EventKind.CURRENT_CHANGED, -2, 1)]
+    ds.cancel()
+    assert ds.row_count == 2 and ds.current_key == 2 and ds.state is State.BROWSE
+    ds.append({'name': 'Г'}); ds.post()
+    assert ds.current_index == 2 and ds.current_key == 3 and backend.get(3)['status'] == 'new'
+
+
+def test_writer_error_keeps_edit_and_reports():
+    class Failing:
+        def insert(self, ds, values): raise PermissionError('нельзя')
+        def update(self, ds, key, changes, row): raise PermissionError('нельзя')
+        def delete(self, ds, key, row): raise PermissionError('нельзя')
+    ds = DataSet(people(2), writer=Failing())
+    ds.open()
+    errors = []
+    ds.subscribe(lambda e: errors.append(e.error) if e.kind is EventKind.ERROR else None)
+    ds.set_value('name', 'X')
+    with pytest.raises(PermissionError):
+        ds.post()
+    assert ds.state is State.EDIT and ds.value('name') == 'X' and len(errors) == 1
+    ds.cancel()
+    with pytest.raises(PermissionError):
+        ds.delete()
+    assert ds.row_count == 2
+
+
+def test_writer_must_return_key():
+    class NoKey:
+        def insert(self, ds, values): return dict(values)
+        def update(self, ds, key, changes, row): return dict(row)
+        def delete(self, ds, key, row): pass
+    ds = DataSet(people(1), writer=NoKey())
+    ds.open(); ds.append({'name': 'А'})
+    with pytest.raises(DataSetError, match='ключ'):
+        ds.post()
+
+
+def test_read_only_and_readonly_backend():
+    ds = DataSet(people(1), read_only=True)
+    ds.open()
+    assert not ds.can_modify
+    with pytest.raises(DataSetError, match='только для чтения'):
+        ds.append()
+
+    class ReadOnly(Dumb):
+        capabilities = Capabilities()
+
+        def fetch(self, query):
+            return Page([dict(r) for r in self.rows], total=len(self.rows))
+    ds2 = DataSet(ReadOnly([{'id': 1}]))
+    ds2.open()
+    with pytest.raises(DataSetError):
+        ds2.edit()
+    from app.utils.dataset import DirectWriter
+    with pytest.raises(ReadOnlyError):
+        DirectWriter(ReadOnly([])).delete(None, 1, {})
+
+
+def test_delete_and_no_skip_on_next_portion():
+    backend = people(6)
+    ds = DataSet(backend, fetch_size=2)
+    ds.open()
+    ds.delete()                                                # id 1
+    assert ds.current_key == 2 and backend.get(1) is None
+    ds.fetch_more()                                            # смещение учло удаление
+    assert [ds.key_at(i) for i in range(ds.row_count)] == [2, 3, 4]
+
+
+def test_no_duplicates_after_insert_shifts_window():
+    backend = people(4)
+    ds = DataSet(backend, fetch_size=2, order=['id'])
+    ds.open()
+    backend.insert({'id': 0, 'name': 'Первый'})               # кто-то добавил строку в начало
+    ds.fetch_all()
+    keys = [ds.key_at(i) for i in range(ds.row_count)]
+    assert len(keys) == len(set(keys)) and set(keys) == {1, 2, 3, 4}
+
+
+def test_reload_row():
+    backend = people(2)
+    ds = DataSet(backend)
+    ds.open()
+    backend.update(1, {'name': 'Извне'})
+    assert ds.reload_row() and ds.value('name') == 'Извне'
+    backend.delete(1)
+    assert not ds.reload_row() and ds.row_count == 1 and ds.current_key == 2
+
+
+# --------------------------------------------------------------------------- свой способ записи
+
+class Deferred:
+    """Отложенная запись: копит изменения, временные ключи < 0, удалённое видно с пометкой."""
+
+    def __init__(self):
+        self.new, self.changed, self.deleted, self._next = {}, {}, set(), -1
+
+    def insert(self, ds, values):
+        row = dict(values, id=self._next)
+        self.new[self._next] = row
+        self._next -= 1
+        return row
+
+    def update(self, ds, key, changes, row):
+        (self.new if key in self.new else self.changed).setdefault(key, {}).update(changes)
+        return dict(row)
+
+    def delete(self, ds, key, row):
+        if key in self.new:
+            del self.new[key]
+        else:
+            self.deleted.add(key)
+
+    def overlay(self, ds, rows, query, first):
+        rows = [dict(r, **self.changed.get(r['id'], {})) for r in rows]
+        if first:
+            rows = list(self.new.values()) + rows
+        return rows
+
+    def row_status(self, ds, key):
+        if key in self.deleted:
+            return 'deleted'
+        return 'new' if key in self.new else 'modified' if key in self.changed else None
+
+
+def test_custom_writer_with_overlay_survives_refresh():
+    backend = people(3)
+    writer = Deferred()
+    ds = DataSet(backend, writer=writer)
+    ds.open()
+    ds.set_value('name', 'Правка'); ds.post()
+    ds.append({'name': 'Новый'}); ds.post()
+    assert ds.current_key == -1 and backend.get(1)['name'] == 'Имя1'   # в хранилище — ничего
+    ds.first(); ds.delete()                                    # пометка, строка остаётся видна
+    ds.refresh()
+    assert ds.row_count == 4 and ds.locate(-1)
+    assert ds.row_status(ds.current_index) == 'new'
+    ds.locate(1)
+    assert ds.value('name') == 'Правка' and ds.row_status() == 'deleted'
+
+
+# --------------------------------------------------------------------------- источник событий
+
+def test_datasource_pause_switch_and_errors():
+    ds1, ds2 = DataSet(people(2)), DataSet(people(3))
+    source = DataSource(ds1)
+    seen = []
+    source.subscribe(lambda e: seen.append((e.kind, e.dataset)))
+    ds1.open()
+    assert (EventKind.OPENED, ds1) in seen
+    seen.clear()
+    with source.paused():
+        ds1.next(); ds1.set_value('name', 'x'); ds1.post()
+        ds1._emit(EventKind.ERROR, error=RuntimeError('сбой'))
+    assert [k for k, _ in seen] == [EventKind.ERROR, EventKind.REFRESHED]  # ошибка — сразу, остальное — одним
+    seen.clear()
+    source.dataset = ds2
+    assert seen == [(EventKind.REFRESHED, ds2)]
+    ds1.prior()
+    assert len(seen) == 1                                       # старый набор больше не слышно
+    source.dataset = None
+    assert seen[-1] == (EventKind.CLOSED, None)
+
+
+def test_nested_pause():
+    ds = DataSet(people(2))
+    source = DataSource(ds)
+    seen = []
+    source.subscribe(lambda e: seen.append(e.kind))
+    ds.open(); seen.clear()
+    with source.paused():
+        with source.paused():
+            ds.next()
+        assert seen == []
+    assert seen == [EventKind.REFRESHED]
+
+
+# --------------------------------------------------------------------------- связи
+
+def tree():
+    patients = DataSet(MemoryBackend([{'id': 1, 'name': 'П1'}, {'id': 2, 'name': 'П2'}],
+                                     fields=[FieldDef('id'), FieldDef('name')]), name='patients')
+    visits = DataSet(MemoryBackend(
+        [{'id': 10, 'patient_id': 1}, {'id': 20, 'patient_id': 2}, {'id': 21, 'patient_id': 2}],
+        fields=[FieldDef('id'), FieldDef('patient_id', references='patients')]), name='appointments')
+    photos = DataSet(MemoryBackend(
+        [{'id': 100, 'appointment_id': 10}, {'id': 200, 'appointment_id': 20}],
+        fields=[FieldDef('id'), FieldDef('appointment_id', references='appointments')]), name='photos')
+    return patients, visits, photos
+
+
+def keys(ds):
+    return [ds.key_at(i) for i in range(ds.row_count)]
+
+
+def test_three_level_chain():
+    patients, visits, photos = tree()
+    MasterDetailLink(DataSource(patients), visits)
+    MasterDetailLink(DataSource(visits), photos)
+    for ds in (patients, visits, photos):
+        ds.open()
+    assert keys(visits) == [10] and keys(photos) == [100]
+    patients.next()
+    assert keys(visits) == [20, 21] and keys(photos) == [200]
+    visits.next()
+    assert keys(photos) == []
+    photos.append(); photos.post()
+    assert photos.backend.get(photos.current_key)['appointment_id'] == 21   # связь проставлена сама
+
+
+def test_new_master_blocks_detail_until_saved():
+    patients, visits, photos = tree()
+    MasterDetailLink(patients, visits)
+    patients.open(); visits.open()
+    patients.append({'name': 'Новый'})
+    assert visits.row_count == 0 and not visits.can_modify
+    with pytest.raises(DataSetError, match='нет главной записи'):
+        visits.append()
+    patients.post()
+    assert visits.can_modify and visits.row_count == 0
+    visits.append(); visits.post()
+    assert visits.backend.get(visits.current_key)['patient_id'] == patients.current_key
+
+
+def test_detail_edit_saved_when_master_moves():
+    patients, visits, _ = tree()
+    MasterDetailLink(patients, visits)
+    patients.open(); visits.open()
+    visits.edit(); visits.set_value('patient_id', 1)
+    visits.backend.update(10, {'note': 'x'})
+    patients.next()                                             # правка приёма сохранена до смены
+    assert visits.state is State.BROWSE and keys(visits) == [20, 21]
+
+
+def test_detail_opened_later_uses_master():
+    patients, visits, _ = tree()
+    MasterDetailLink(patients, visits)
+    patients.open(); patients.next()
+    visits.open()
+    assert keys(visits) == [20, 21]
+
+
+def test_link_fields_explicit_ambiguous_and_unlink():
+    patients, visits, _ = tree()
+    with pytest.raises(LinkError, match='имени'):
+        MasterDetailLink(DataSet(MemoryBackend([])), visits)
+    twice = DataSet(MemoryBackend([], fields=[FieldDef('id'), FieldDef('a', references='patients'),
+                                              FieldDef('b', references='patients')]))
+    with pytest.raises(LinkError, match='однозначно'):
+        MasterDetailLink(patients, twice)
+    link = MasterDetailLink(patients, visits, {'patient_id': 'id'})
+    patients.open(); visits.open()
+    assert keys(visits) == [10]
+    link.unlink()
+    assert keys(visits) == [10, 20, 21]
+    patients.next()
+    assert keys(visits) == [10, 20, 21]

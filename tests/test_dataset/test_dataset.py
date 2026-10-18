@@ -239,7 +239,7 @@ def test_insert_append_defaults_and_cancel():
     ds.insert({'name': 'В'})                                   # перед текущей
     assert ds.current_index == 1 and ds.state is State.INSERT and ds.row_count == 3
     assert ds.current == {'id': None, 'name': 'В', 'status': 'new'}
-    assert events[:2] == [(EventKind.ROWS_INSERTED, 1, 1), (EventKind.CURRENT_CHANGED, 1, 1)]  # D1: настоящий прежний номер
+    assert events[:2] == [(EventKind.ROWS_INSERTED, 1, 1), (EventKind.CURRENT_CHANGED, 2, 1)]  # D1/H1: прежняя запись сдвинулась на 2
     ds.cancel()
     assert ds.row_count == 2 and ds.current_key == 2 and ds.state is State.BROWSE
     ds.append({'name': 'Г'}); ds.post()
@@ -623,3 +623,42 @@ def test_link_survives_detail_shrinking_on_refresh():
     finally:
         logging.getLogger('app.utils.dataset.events').removeHandler(handler)
     assert errors == [] and visits.row_count == 0 and photos.row_count == 0
+
+
+def test_state_consistent_on_every_event():
+    """
+    H1: на КАЖДОМ событии состояние согласовано — номер текущей строки в пределах строк,
+    текущую строку можно прочитать, при вставке/правке есть строка. Цепочка из трёх
+    связанных наборов, все операции.
+    """
+    patients, visits, photos = tree()
+    MasterDetailLink(patients, visits)
+    MasterDetailLink(visits, photos)
+    problems = []
+
+    def check(event):
+        ds = event.dataset
+        if ds is None or not ds.active:
+            return
+        if not (-1 <= ds.current_index < ds.row_count or (ds.row_count == 0 and ds.current_index == -1)):
+            problems.append((ds.name, event.kind.value, ds.current_index, ds.row_count))
+        if ds.current_index >= 0:
+            try:
+                ds.current, ds.value(ds.key_field)
+            except Exception as exc:
+                problems.append((ds.name, event.kind.value, repr(exc)))
+        if ds.state.editing and ds.current is None:
+            problems.append((ds.name, event.kind.value, 'правка без строки'))
+
+    for ds in (patients, visits, photos):
+        ds.subscribe(check)
+        ds.open()
+    patients.append({'name': 'Новый'}); patients.cancel()         # отмена последней строки главного
+    patients.insert({'name': 'Перед'}); patients.cancel()
+    patients.next(); visits.append(); visits.cancel()
+    visits.last(); photos.append(); photos.post(); photos.delete()
+    visits.backend.delete(21); visits.reload_row(visits.current_index)
+    patients.first(); patients.append({'name': 'Ещё'}); patients.post()
+    patients.delete(); patients.refresh(); patients.set_filter(Condition('id', Op.EQ, 1))
+    patients.set_filter(); patients.last(); patients.close()
+    assert problems == []

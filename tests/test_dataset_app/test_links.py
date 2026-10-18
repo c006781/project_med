@@ -213,3 +213,57 @@ def test_link_text_and_choices_do_not_query_per_row(services, providers, filled,
     doctor_queries = [s for s in statements if 'test_doctors' in s]
     assert len(doctor_queries) <= 2, doctor_queries              # было: на каждую ячейку и строку
     assert form.widgets['doctor_id'].currentText() == 'Иванова'
+
+
+def test_everything_together_consistent(services, providers, filled, link_services):
+    """Итоговая проверка связей: ссылки + итоги БД с поправкой + массовые действия + черновики; согласованность на каждом событии."""
+    from app.tables import mark, total
+    from app.utils.dataset import ActionSet
+    base = [CLINIC.get(n) for n in CLINIC.names()]
+    appointments = TableSpec(**{**base[1].__dict__, 'extras': base[1].extras + (
+        total('orders', 'Назначений', 'test_orders', by='sql'),)})
+    reg = TableRegistry([base[0], appointments, base[2],
+                         TableSpec('test_doctors', 'doctor', 'Врачи', 'Врач', LinkDoctor, DoctorDTO, DOCTOR_CONFIG,
+                                   service=lambda: link_services['doctor'], order=('name',)),
+                         TableSpec('test_orders', 'order', 'Назначения', 'Назначение', LinkOrder, OrderDTO,
+                                   ORDER_CONFIG, service=lambda: link_services['order'], order=('id',),
+                                   parent='appointments', extras=(mark(),))])
+    drafts = drafts_for(reg, services, providers, link_services)
+    built = build(reg, providers, link_services, drafts)
+    problems = []
+
+    def check(event):
+        ds = event.dataset
+        if ds is None or not ds.active:
+            return
+        if not (-1 <= ds.current_index < ds.row_count or (ds.row_count == 0 and ds.current_index == -1)):
+            problems.append((ds.name, event.kind.value, ds.current_index, ds.row_count))
+        if ds.current_index >= 0:
+            try:
+                ds.current, ds.row_status()
+            except Exception as exc:
+                problems.append((ds.name, event.kind.value, repr(exc)))
+
+    for ds in built.datasets:
+        ds.subscribe(check)
+    doctors, orders, visits = built['test_doctors'], built['test_orders'], built.appointments
+    doctors.append({'name': 'Иванова'}); doctors.post()
+    first_doctor = doctors.current_key
+    doctors.append({'name': 'Петрова'}); doctors.post()
+    for title in ('А', 'Б', 'В'):
+        orders.append({'title': title, 'doctor_id': first_doctor}); orders.post()
+    assert visits.value('orders') == 3                                  # БД (0) + 3 черновика
+    actions = ActionSet(batch=drafts.store.batch)
+    orders.set_local('mark', True, index=0); orders.set_local('mark', True, index=2)
+    assert actions.run('set_field', orders, field='doctor_id', value=doctors.current_key) == 2
+    assert [orders.text('doctor_id', i) for i in range(3)] == ['Петрова', 'Иванова', 'Петрова']
+    drafts.store.undo()                                                 # массовая правка — одной отменой
+    assert [orders.text('doctor_id', i) for i in range(3)] == ['Иванова'] * 3
+    built.save()
+    assert link_services['order'].get_page(0, 10)[1] == 3 and visits.value('orders') == 3
+    doctors.locate(next(d.id for d in link_services['doctor'].get_page(0, 10)[0] if d.name == 'Иванова'))
+    doctors.delete()
+    with pytest.raises(DeleteBlocked, match='Назначение'):
+        built.save()                                                    # на врача ссылаются — отказ
+    drafts.store.undo()
+    assert drafts.store.is_empty and problems == []

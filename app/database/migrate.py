@@ -19,12 +19,20 @@ create_all умеет только СОЗДАТЬ недостающие таб�
     * **база с отметкой** — применяются недостающие миграции.
 
 Перед применением миграций к существующей базе-файлу делается резервная копия
-(``<файл>.bak-<ГГГГММДД_ЧЧММСС>-<версия>``): данные клиники дороже.
+(``<файл>.bak-<ГГГГММДД_ЧЧММСС>-<версия>``, backup-API SQLite — M8): данные клиники дороже.
+
+Защиты (подробно — ``IMPLEMENTATION.md`` рядом):
+    * всё — одна транзакция, откатывается и изменение схемы (M1);
+    * блокировка записи сразу и решение под ней — две копии программы не мешают (M3);
+    * база новее программы — отказ до любых изменений (M9);
+    * внешние ключи на время миграции выключены, после — проверка новых «висячих»
+      ссылок (M10);
+    * понятный текст ошибки для окна запуска — ``startup_error_text`` (M7).
 
 Пример:
     >>> from app.database.migrate import upgrade_database
     >>> upgrade_database(engine)          # при старте — Database делает это сам
-    'a1b2c3d4'
+    '0001_baseline'
 """
 
 from __future__ import annotations
@@ -39,7 +47,7 @@ from typing import List, Optional, Tuple
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
-from alembic.migration import MigrationContext
+from alembic.runtime.migration import MigrationContext   # alembic.migration — лишь совместимый псевдоним
 from alembic.script import ScriptDirectory
 import sqlalchemy as sa
 from sqlalchemy import create_engine, event, inspect
@@ -511,12 +519,13 @@ def _baseline_metadata():
 _ADDABLE = ('add_table', 'add_index', 'add_column')
 
 
-def _plan_legacy_repair(engine: Engine):
+def _plan_legacy_repair(engine) -> Tuple[list, List[str]]:
     """
     Что дописать в старую базу до исходной схемы и что оставить как есть.
 
     Args:
-        engine: Движок старой базы.
+        engine: Соединение движка миграций (внутри транзакции с блокировкой) или движок
+            старой базы — ``schema_differences`` принимает оба.
 
     Returns:
         ``(добавить, оставить)``: элементы autogenerate для дописывания и строки-описания

@@ -22,8 +22,10 @@
 from __future__ import annotations
 
 import importlib
-import os
-from typing import Any, Callable, Mapping, Optional
+# import os
+from typing import Any, Callable
+# from typing import Any, Callable, Mapping, Optional
+# ↑ до 2026-10-19: os, Mapping, Optional нужны были photo_image (перенесена в app/schema/clinic.py)
 
 from app.database.database_shema import clinic as models
 from app.dto import dto_all, field_configs

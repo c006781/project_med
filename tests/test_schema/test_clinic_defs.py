@@ -129,3 +129,21 @@ def test_definition_errors():
     with pytest.raises(ValueError, match='неизвестные'):
         TableDef('t', 'T', 'TDTO', (key(),), config_order=('nope',)).build_config()
     assert PATIENTS.service == 'get_patient_service' and APPOINTMENTS.entity == 'appointment'
+
+
+def test_app_uses_generated_classes():
+    """Модели, DTO и настройки приложения — из описаний и совпадают с прежними (снимок)."""
+    from app.database.database_shema import clinic as models
+    from app.dto import dto_all, field_configs
+    from app.tables.clinic import CLINIC
+    for d in CLINIC_DEFS:
+        model = getattr(models, d.model_name)
+        assert model.__module__ == models.__name__
+        assert model_snapshot(model) == SNAPSHOT['models'][d.model_name]
+        name = f'{d.entity.upper()}_CONFIG'
+        assert config_snapshot(getattr(field_configs, name)) == SNAPSHOT['configs'][name]
+        assert [n for n, *_ in dto_snapshot(getattr(dto_all, d.dto_name))] == \
+            [n for n, *_ in SNAPSHOT['dtos'][d.dto_name]]
+        spec = CLINIC.get(d.name)
+        assert spec.model is model and spec.dto is getattr(dto_all, d.dto_name)
+    assert repr(models.Patient(first_name='Иван', last_name='Петров')) == '<Patient(id=None, name=Петров Иван)>'

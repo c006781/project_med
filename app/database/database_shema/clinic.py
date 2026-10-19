@@ -147,478 +147,544 @@ NAMING_CONVENTION = {
 
 Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 
-class Patient(Base):
+# ↓ до 2026-10-19: модели Patient, Appointment, Photo были написаны здесь вручную; теперь
+#   они строятся из описаний таблиц app/schema/clinic.py (одно описание → модель, DTO,
+#   field_configs, наборы данных экрана). Сгенерированное совпадает с прежним один в один —
+#   проверка tests/test_schema/test_clinic_defs.py (снимок прежних классов).
+# class Patient(Base):
+#     """
+#     Таблица пациентов.
+#
+#     Хранит персональные данные пациента: имя, фамилию, дату рождения,
+#     контактную информацию. Связана с приёмами (Appointment) отношением one-to-many.
+#
+#     Атрибуты:
+#         id (int): Первичный ключ, автоинкремент.
+#         first_name (str): Имя пациента (обязательное).
+#         last_name (str): Фамилия пациента (обязательное).
+#         birth_date (date, optional): Дата рождения.
+#         phone (str, optional): Номер телефона.
+#         email (str, optional): Адрес электронной почты.
+#         created_at (datetime): Дата и время создания записи (автоматически).
+#         appointments (list[Appointment]): Список связанных приёмов (каскадное удаление).
+#
+#     Индексы:
+#         ix_patient_last_name (last_name) – для ускорения поиска по фамилии.
+#
+#     Пример:
+#         >>> patient = Patient(first_name="Иван", last_name="Петров")
+#         >>> session.add(patient)
+#         >>> session.commit()
+#     """
+#
+#     __tablename__ = 'patients'
+#
+#     id = Column(
+#         Integer, 
+#         primary_key=True , 
+#         autoincrement=True, 
+#         comment='Уникальный идентификатор пациента',
+#     )
+#     first_name = Column(
+#         String(50), 
+#         nullable=False,
+#         comment='Имя пациента',
+#     )
+#     middle_name = Column(
+#         String(50), 
+#         nullable=True, 
+#         comment='Отчество пациента'
+#     )
+#     last_name = Column(
+#         String(50), 
+#         nullable=False,
+#         comment='Фамилия пациента',
+#     )
+#     birth_date = Column(
+#         Date, 
+#         nullable=True,
+#         comment='Дата рождения',
+#     )
+#     phone = Column(
+#         String(20), 
+#         nullable=True,
+#         comment='Номер телефона',
+#     )
+#     # email = Column(
+#     #     String(100), 
+#     #     nullable=True,
+#     #     comment='Электронная почта',
+#     # )
+#     description_id = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с описанием пациента'
+#     )
+#     comment_id = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с комментарием к пациенту'
+#     )
+#     # address = Column(String(200), nullable=True)
+#     created_at = Column(
+#         DateTime, 
+#         default=datetime.now,
+#         comment='Дата создания',
+#     )
+#
+#     # Отношения к заметкам
+#     description_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[description_id],
+#         # back_populates="appointments"
+#     )
+#     comment_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[comment_id],
+#         # back_populates="appointments"
+#     )
+#
+#     # Отношение к приёмам
+#     appointments = relationship(
+#         "Appointment", 
+#         back_populates="patient", 
+#         cascade="all, delete-orphan"
+#     )
+#
+#     __table_args__ = (
+#         Index('ix_patient_last_name', 'last_name'),
+#         {
+#             'comment': 'Таблица пациентов', 
+#             'sqlite_autoincrement': True,
+#         }
+#     )
+#
+#     # @AppLogger.get_instance(
+#     #     name = 'Patient', 
+#     #     # share_file_with = 'system',
+#     #     enable_file_logging = 'system',
+#     #     use_name_in_filename = False, # 'system',
+#     # ).log_execution_time(
+#     #     level=AppLogger._parse_log_level('DEBUG')
+#     # )
+#     def __repr__(self):
+#         """
+#         Возвращает строковое представление объекта Patient.
+#
+#         Формат: <Patient(id=1, name=Петров Иван)>
+#
+#         Возвращает:
+#             str: Представление пациента.
+#         """
+#
+#         try:
+#             # temp = ' '.join([
+#             #     self.last_name,
+#             #     self.first_name,
+#             #     self.middle_name
+#             # ]).strip()
+#             # ↑ до B1 (2026-10-15): без отчества (None) join падал TypeError — а repr
+#             #   вызывается логом репозитория при КАЖДОМ add: создание пациента без
+#             #   отчества падало целиком.
+#             temp = ' '.join(
+#                 part for part in (self.last_name, self.first_name, self.middle_name) if part
+#             ).strip()
+#
+#             id_val = getattr(self, 'id', None)
+#
+#             # rezult = f"<Patient(id={id_val}, "
+#             # f"name={temp})>"
+#             # ↑ до B1: вторая f-строка была отдельной инструкцией (не продолжением) —
+#             #   repr возвращал обрубок "<Patient(id=1, ".
+#             rezult = (f"<Patient(id={id_val}, "
+#                       f"name={temp})>")
+#
+#             return rezult
+#
+#         except Exception as e:
+#             # tt = str(e)
+#             AppLogger.get_instance(
+#                 name='api.Patient',
+#                 enable_file_logging = 'user',
+#                 use_name_in_filename = False, # 'system',
+#             ).exception(f'Err: {str(e)}')
+#             raise e
+#
+#         # return result
+#
+# class Appointment(Base):
+#     """
+#     Таблица приёмов.
+#
+#     Связывает пациента с датой, временем и опциональной заметкой.
+#     Может содержать несколько фотографий (Photo).
+#
+#     Атрибуты:
+#         id (int): Первичный ключ.
+#         patient_id (int): Внешний ключ на Patient.id.
+#         date (date): Дата приёма (обязательное).
+#         time (time, optional): Время приёма.
+#         note_id (int, optional): Внешний ключ на AppointmentNote.id.
+#         created_at (datetime): Дата создания записи.
+#         patient (Patient): ORM-связь с пациентом.
+#         note (AppointmentNote): ORM-связь с заметкой.
+#         photos (list[Photo]): Список фотографий (каскадное удаление).
+#
+#     Индексы:
+#         ix_appointment_date (date) – для ускорения фильтрации по дате.
+#
+#     Пример:
+#         >>> app = Appointment(patient_id=1, date=date(2025,3,10), time=time(10,30))
+#         >>> session.add(app)
+#     """
+#
+#     __tablename__ = 'appointments'
+#
+#     id = Column(
+#         Integer, 
+#         primary_key=True , 
+#         autoincrement=True,
+#         comment='Уникальный идентификатор приёма',
+#     )
+#
+#     patient_id = Column(
+#         Integer, 
+#         ForeignKey('patients.id'), 
+#         nullable=False,
+#         comment='ID пациента (внешний ключ)',
+#     )
+#
+#     date = Column(
+#         Date, 
+#         nullable=False,
+#         comment='Дата приёма',
+#     )
+#
+#     # time = Column(Time, nullable=True, default=time.now)  
+#     # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
+#     # time = Column(
+#     #     Time, 
+#     #     nullable=True, 
+#     #     default=func.current_time(),
+#     #     comment='Время приёма',
+#     # )
+#     # time = Column(Time, nullable=True, server_default=func.current_time())
+#
+#     # notes = Column(Text, nullable=True)      # заметки / рекомендации
+#     # note_id = Column(
+#     #     Integer, 
+#     #     ForeignKey('appointments_notes.id'), 
+#     #     nullable=True,
+#     #     comment='ID заметки (внешний ключ)',
+#     # )   # внешний ключ на заметку
+#
+#     reason_id           = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с причиной обращения'
+#     )
+#     procedure_id        = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с выполненной процедурой'
+#     )
+#     recommendations_id  = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с рекомендациями'
+#     )
+#     date_next           = Column(
+#         Date, 
+#         nullable=True, 
+#         comment='Дата следующего приёма'
+#     )
+#     note_id             = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки с примечанием'
+#     )
+#     cost_procedure_id   = Column(
+#         Integer, 
+#         ForeignKey('appointments_notes.id'), 
+#         nullable=True, 
+#         comment='ID заметки со стоимостью процедуры'
+#     )
+#
+#     created_at = Column(
+#         DateTime, 
+#         default=datetime.now,
+#         comment='Дата и время создания записи',
+#     )
+#
+#
+#     # Отношение к пациенту
+#     patient = relationship(
+#         "Patient", 
+#         back_populates="appointments",
+#     )
+#
+#     # Отношения к заметкам
+#     reason_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[reason_id]
+#     )
+#     procedure_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[procedure_id]
+#     )
+#     recommendations_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[recommendations_id]
+#     )
+#     note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[note_id]
+#     )
+#     cost_procedure_note = relationship(
+#         "AppointmentNote", 
+#         foreign_keys=[cost_procedure_id]
+#     )
+#
+#     # Отношение к фотографиям
+#     photos = relationship(
+#         "Photo", 
+#         back_populates="appointment", 
+#         cascade="all, delete-orphan",
+#     )
+#
+#     __table_args__ = (
+#         Index('ix_appointment_date', 'date'),
+#         Index('ix_patient_id', 'patient_id'),   # уже есть
+#         {
+#             'comment': 'Таблица приёмов', 
+#             'sqlite_autoincrement': True,
+#         }
+#     )
+#
+#     # @AppLogger.get_instance(
+#     #     name = 'Appointment',
+#     #     # share_file_with = 'system',
+#     #     enable_file_logging = 'system',
+#     #     use_name_in_filename = False, # 'system',
+#     # ).log_execution_time(
+#     #     level=AppLogger._parse_log_level('DEBUG')
+#     # )
+#     def __repr__(self):
+#         """
+#         Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
+#         """
+#         # return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
+#
+#         try:
+#             id_val = getattr(self, 'id', None)
+#             patient_id_val = getattr(self, 'patient_id', None)
+#             date_val = getattr(self, 'date', None)
+#
+#             # rezult = f"<Appointment(id={id_val}, "
+#             # f"patient_id={patient_id_val}, "
+#             # f"date={date_val})>"
+#             # ↑ до DB1 (2026-10-16): вторая и третья f-строки — отдельные инструкции, repr
+#             #   был обрезан: "<Appointment(id=1, "
+#             rezult = (f"<Appointment(id={id_val}, "
+#                       f"patient_id={patient_id_val}, "
+#                       f"date={date_val})>")
+#
+#             return rezult
+#
+#         except Exception as e:
+#             # tt = str(e)
+#             AppLogger.get_instance(
+#                 name='api.Appointment',
+#                 enable_file_logging = 'user',
+#                 use_name_in_filename = False, # 'system',
+#             ).exception(f'Err: {str(e)}')
+#             raise e
+#
+#
+#
+# class Photo(Base):
+#     """
+#     Таблица фотографий, прикреплённых к приёмам.
+#
+#     Файлы изображений хранятся в файловой системе, в таблице сохраняется
+#     относительный путь (относительно `PHOTOS_STORAGE_PATH`).
+#
+#     Атрибуты:
+#         id (int): Первичный ключ.
+#         appointment_id (int): Внешний ключ на Appointment.id (обязательное).
+#         file_path (str): Относительный путь к файлу.
+#         description (str, optional): Описание фотографии.
+#         uploaded_at (datetime): Дата и время загрузки.
+#         appointment (Appointment): ORM-связь с приёмом.
+#
+#     Индексы:
+#         ix_photo_appointment (appointment_id) – для быстрого получения фото по приёму.
+#
+#     Пример:
+#         >>> photo = Photo(appointment_id=1, file_path="app_1/1_face.jpg", description="Лицо")
+#         >>> session.add(photo)
+#     """
+#
+#     __tablename__ = 'photos'
+#
+#     id = Column(
+#         Integer, 
+#         primary_key=True , 
+#         autoincrement=True,
+#         comment='Уникальный идентификатор фотографии',
+#     )
+#
+#     appointment_id = Column(
+#         Integer, 
+#         ForeignKey('appointments.id'), nullable=False,
+#         comment='ID приёма, к которому относится фото',
+#     )
+#
+#     file_path = Column( # путь к файлу на диске
+#         String(500), 
+#         nullable=False,
+#         comment='Относительный путь к файлу на диске',
+#     )  
+#
+#     description = Column(
+#         String(200), 
+#         nullable=True,
+#         comment='Описание фотографии',
+#     )
+#
+#     uploaded_at = Column(
+#         DateTime, 
+#         default=datetime.now,
+#         comment='Дата и время загрузки',
+#     )
+#
+#
+#     # Отношение к приёму
+#     appointment = relationship(
+#         "Appointment", 
+#         back_populates="photos"
+#     )
+#
+#     __table_args__ = (
+#         Index('ix_photo_appointment', 'appointment_id'),
+#         {
+#             'comment': 'Таблица фотографий приёмов', 
+#             'sqlite_autoincrement': True,
+#         }
+#     )
+#
+#     # @AppLogger.get_instance(
+#     #     name = 'AppoinPhototment',
+#     #     # share_file_with = 'system',
+#     #     enable_file_logging = 'system',
+#     #     use_name_in_filename = False, # 'system',
+#     # ).log_execution_time(
+#     #     level=AppLogger._parse_log_level('DEBUG')
+#     # )
+#     def __repr__(self):
+#         """
+#         Возвращает строку-representation объекта Photo в виде "<Photo(id=1, appointment_id=1, file=photo.jpg)>"
+#         """
+#         # return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
+#
+#
+#         try:
+#             id_val = getattr(self, 'id', None)
+#             appointment_id_val = getattr(self, 'appointment_id', None)
+#             file_path_val = getattr(self, 'file_path', None)
+#
+#             # rezult = f"<Photo(id={id_val}, "
+#             # f"appointment_id={appointment_id_val}, "
+#             # f"file={file_path_val})>"
+#             # ↑ до DB1 (2026-10-16): repr был обрезан (отдельные инструкции)
+#             rezult = (f"<Photo(id={id_val}, "
+#                       f"appointment_id={appointment_id_val}, "
+#                       f"file={file_path_val})>")
+#
+#             return rezult
+#
+#         except Exception as e:
+#             # tt = str(e)
+#             AppLogger.get_instance(
+#                 name='api.Photo',
+#                 enable_file_logging = 'user',
+#                 use_name_in_filename = False, # 'system',
+#             ).exception(f'Err: {str(e)}')
+#             raise e     
+#
+#             rezult = f"<Note(id={id_val}, "
+#             f"text_preview={text_val[:30]}...)>"
+#             return text_val
+
+
+def _patient_repr(self) -> str:
     """
-    Таблица пациентов.
+    Строка пациента (как у прежнего класса): ``<Patient(id=1, name=Петров Иван)>``.
 
-    Хранит персональные данные пациента: имя, фамилию, дату рождения,
-    контактную информацию. Связана с приёмами (Appointment) отношением one-to-many.
+    Args:
+        self: Объект пациента.
 
-    Атрибуты:
-        id (int): Первичный ключ, автоинкремент.
-        first_name (str): Имя пациента (обязательное).
-        last_name (str): Фамилия пациента (обязательное).
-        birth_date (date, optional): Дата рождения.
-        phone (str, optional): Номер телефона.
-        email (str, optional): Адрес электронной почты.
-        created_at (datetime): Дата и время создания записи (автоматически).
-        appointments (list[Appointment]): Список связанных приёмов (каскадное удаление).
-
-    Индексы:
-        ix_patient_last_name (last_name) – для ускорения поиска по фамилии.
+    Returns:
+        Строка; части ФИО без пустых.
 
     Пример:
-        >>> patient = Patient(first_name="Иван", last_name="Петров")
-        >>> session.add(patient)
-        >>> session.commit()
+        >>> repr(Patient(first_name='Иван', last_name='Петров'))
+        '<Patient(id=None, name=Петров Иван)>'
     """
+    name = ' '.join(part for part in (self.last_name, self.first_name, self.middle_name) if part).strip()
+    return f"<Patient(id={getattr(self, 'id', None)}, name={name})>"
 
-    __tablename__ = 'patients'
 
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True, 
-        comment='Уникальный идентификатор пациента',
-    )
-    first_name = Column(
-        String(50), 
-        nullable=False,
-        comment='Имя пациента',
-    )
-    middle_name = Column(
-        String(50), 
-        nullable=True, 
-        comment='Отчество пациента'
-    )
-    last_name = Column(
-        String(50), 
-        nullable=False,
-        comment='Фамилия пациента',
-    )
-    birth_date = Column(
-        Date, 
-        nullable=True,
-        comment='Дата рождения',
-    )
-    phone = Column(
-        String(20), 
-        nullable=True,
-        comment='Номер телефона',
-    )
-    # email = Column(
-    #     String(100), 
-    #     nullable=True,
-    #     comment='Электронная почта',
-    # )
-    description_id = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с описанием пациента'
-    )
-    comment_id = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с комментарием к пациенту'
-    )
-    # address = Column(String(200), nullable=True)
-    created_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата создания',
-    )
-
-    # Отношения к заметкам
-    description_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[description_id],
-        # back_populates="appointments"
-    )
-    comment_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[comment_id],
-        # back_populates="appointments"
-    )
-
-    # Отношение к приёмам
-    appointments = relationship(
-        "Appointment", 
-        back_populates="patient", 
-        cascade="all, delete-orphan"
-    )
-    
-    __table_args__ = (
-        Index('ix_patient_last_name', 'last_name'),
-        {
-            'comment': 'Таблица пациентов', 
-            'sqlite_autoincrement': True,
-        }
-    )
-    
-    # @AppLogger.get_instance(
-    #     name = 'Patient', 
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level=AppLogger._parse_log_level('DEBUG')
-    # )
-    def __repr__(self):
-        """
-        Возвращает строковое представление объекта Patient.
-
-        Формат: <Patient(id=1, name=Петров Иван)>
-
-        Возвращает:
-            str: Представление пациента.
-        """
-
-        try:
-            # temp = ' '.join([
-            #     self.last_name,
-            #     self.first_name,
-            #     self.middle_name
-            # ]).strip()
-            # ↑ до B1 (2026-10-15): без отчества (None) join падал TypeError — а repr
-            #   вызывается логом репозитория при КАЖДОМ add: создание пациента без
-            #   отчества падало целиком.
-            temp = ' '.join(
-                part for part in (self.last_name, self.first_name, self.middle_name) if part
-            ).strip()
-
-            id_val = getattr(self, 'id', None)
-
-            # rezult = f"<Patient(id={id_val}, "
-            # f"name={temp})>"
-            # ↑ до B1: вторая f-строка была отдельной инструкцией (не продолжением) —
-            #   repr возвращал обрубок "<Patient(id=1, ".
-            rezult = (f"<Patient(id={id_val}, "
-                      f"name={temp})>")
-
-            return rezult
-        
-        except Exception as e:
-            # tt = str(e)
-            AppLogger.get_instance(
-                name='api.Patient',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
-            ).exception(f'Err: {str(e)}')
-            raise e
-
-        # return result
-    
-class Appointment(Base):
+def _appointment_repr(self) -> str:
     """
-    Таблица приёмов.
+    Строка приёма (как у прежнего класса).
 
-    Связывает пациента с датой, временем и опциональной заметкой.
-    Может содержать несколько фотографий (Photo).
+    Args:
+        self: Объект приёма.
 
-    Атрибуты:
-        id (int): Первичный ключ.
-        patient_id (int): Внешний ключ на Patient.id.
-        date (date): Дата приёма (обязательное).
-        time (time, optional): Время приёма.
-        note_id (int, optional): Внешний ключ на AppointmentNote.id.
-        created_at (datetime): Дата создания записи.
-        patient (Patient): ORM-связь с пациентом.
-        note (AppointmentNote): ORM-связь с заметкой.
-        photos (list[Photo]): Список фотографий (каскадное удаление).
-
-    Индексы:
-        ix_appointment_date (date) – для ускорения фильтрации по дате.
+    Returns:
+        ``<Appointment(id=…, patient_id=…, date=…)>``.
 
     Пример:
-        >>> app = Appointment(patient_id=1, date=date(2025,3,10), time=time(10,30))
-        >>> session.add(app)
+        >>> repr(Appointment(id=1, patient_id=2))
+        '<Appointment(id=1, patient_id=2, date=None)>'
     """
-
-    __tablename__ = 'appointments'
-
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True,
-        comment='Уникальный идентификатор приёма',
-    )
-
-    patient_id = Column(
-        Integer, 
-        ForeignKey('patients.id'), 
-        nullable=False,
-        comment='ID пациента (внешний ключ)',
-    )
-
-    date = Column(
-        Date, 
-        nullable=False,
-        comment='Дата приёма',
-    )
-
-    # time = Column(Time, nullable=True, default=time.now)  
-    # time = Column(Time, nullable=True, default=lambda: datetime.now().time())
-    # time = Column(
-    #     Time, 
-    #     nullable=True, 
-    #     default=func.current_time(),
-    #     comment='Время приёма',
-    # )
-    # time = Column(Time, nullable=True, server_default=func.current_time())
-
-    # notes = Column(Text, nullable=True)      # заметки / рекомендации
-    # note_id = Column(
-    #     Integer, 
-    #     ForeignKey('appointments_notes.id'), 
-    #     nullable=True,
-    #     comment='ID заметки (внешний ключ)',
-    # )   # внешний ключ на заметку
-
-    reason_id           = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с причиной обращения'
-    )
-    procedure_id        = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с выполненной процедурой'
-    )
-    recommendations_id  = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с рекомендациями'
-    )
-    date_next           = Column(
-        Date, 
-        nullable=True, 
-        comment='Дата следующего приёма'
-    )
-    note_id             = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки с примечанием'
-    )
-    cost_procedure_id   = Column(
-        Integer, 
-        ForeignKey('appointments_notes.id'), 
-        nullable=True, 
-        comment='ID заметки со стоимостью процедуры'
-    )
-
-    created_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата и время создания записи',
-    )
+    return (f"<Appointment(id={getattr(self, 'id', None)}, "
+            f"patient_id={getattr(self, 'patient_id', None)}, "
+            f"date={getattr(self, 'date', None)})>")
 
 
-    # Отношение к пациенту
-    patient = relationship(
-        "Patient", 
-        back_populates="appointments",
-    )
-
-    # Отношения к заметкам
-    reason_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[reason_id]
-    )
-    procedure_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[procedure_id]
-    )
-    recommendations_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[recommendations_id]
-    )
-    note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[note_id]
-    )
-    cost_procedure_note = relationship(
-        "AppointmentNote", 
-        foreign_keys=[cost_procedure_id]
-    )
-   
-    # Отношение к фотографиям
-    photos = relationship(
-        "Photo", 
-        back_populates="appointment", 
-        cascade="all, delete-orphan",
-    )
-
-    __table_args__ = (
-        Index('ix_appointment_date', 'date'),
-        Index('ix_patient_id', 'patient_id'),   # уже есть
-        {
-            'comment': 'Таблица приёмов', 
-            'sqlite_autoincrement': True,
-        }
-    )
-
-    # @AppLogger.get_instance(
-    #     name = 'Appointment',
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level=AppLogger._parse_log_level('DEBUG')
-    # )
-    def __repr__(self):
-        """
-        Возвращает строку-representation объекта Appointment в виде "<Appointment(id=1, patient_id=1, date=2025-01-01)>"
-        """
-        # return f"<Appointment(id={self.id}, patient_id={self.patient_id}, date={self.date})>"
-    
-        try:
-            id_val = getattr(self, 'id', None)
-            patient_id_val = getattr(self, 'patient_id', None)
-            date_val = getattr(self, 'date', None)
-
-            # rezult = f"<Appointment(id={id_val}, "
-            # f"patient_id={patient_id_val}, "
-            # f"date={date_val})>"
-            # ↑ до DB1 (2026-10-16): вторая и третья f-строки — отдельные инструкции, repr
-            #   был обрезан: "<Appointment(id=1, "
-            rezult = (f"<Appointment(id={id_val}, "
-                      f"patient_id={patient_id_val}, "
-                      f"date={date_val})>")
-
-            return rezult
-        
-        except Exception as e:
-            # tt = str(e)
-            AppLogger.get_instance(
-                name='api.Appointment',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
-            ).exception(f'Err: {str(e)}')
-            raise e
-
-
-
-class Photo(Base):
+def _photo_repr(self) -> str:
     """
-    Таблица фотографий, прикреплённых к приёмам.
+    Строка фото (как у прежнего класса).
 
-    Файлы изображений хранятся в файловой системе, в таблице сохраняется
-    относительный путь (относительно `PHOTOS_STORAGE_PATH`).
+    Args:
+        self: Объект фото.
 
-    Атрибуты:
-        id (int): Первичный ключ.
-        appointment_id (int): Внешний ключ на Appointment.id (обязательное).
-        file_path (str): Относительный путь к файлу.
-        description (str, optional): Описание фотографии.
-        uploaded_at (datetime): Дата и время загрузки.
-        appointment (Appointment): ORM-связь с приёмом.
-
-    Индексы:
-        ix_photo_appointment (appointment_id) – для быстрого получения фото по приёму.
+    Returns:
+        ``<Photo(id=…, appointment_id=…, file=…)>``.
 
     Пример:
-        >>> photo = Photo(appointment_id=1, file_path="app_1/1_face.jpg", description="Лицо")
-        >>> session.add(photo)
+        >>> repr(Photo(id=1, appointment_id=2, file_path='a.png'))
+        '<Photo(id=1, appointment_id=2, file=a.png)>'
     """
-
-    __tablename__ = 'photos'
-
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True,
-        comment='Уникальный идентификатор фотографии',
-    )
-
-    appointment_id = Column(
-        Integer, 
-        ForeignKey('appointments.id'), nullable=False,
-        comment='ID приёма, к которому относится фото',
-    )
-
-    file_path = Column( # путь к файлу на диске
-        String(500), 
-        nullable=False,
-        comment='Относительный путь к файлу на диске',
-    )  
-
-    description = Column(
-        String(200), 
-        nullable=True,
-        comment='Описание фотографии',
-    )
-
-    uploaded_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата и время загрузки',
-    )
+    return (f"<Photo(id={getattr(self, 'id', None)}, "
+            f"appointment_id={getattr(self, 'appointment_id', None)}, "
+            f"file={getattr(self, 'file_path', None)})>")
 
 
-    # Отношение к приёму
-    appointment = relationship(
-        "Appointment", 
-        back_populates="photos"
-    )
+from app.schema.clinic import APPOINTMENTS, PATIENTS, PHOTOS  # noqa: E402
 
-    __table_args__ = (
-        Index('ix_photo_appointment', 'appointment_id'),
-        {
-            'comment': 'Таблица фотографий приёмов', 
-            'sqlite_autoincrement': True,
-        }
-    )
+Patient = PATIENTS.build_model(Base, {'__repr__': _patient_repr}, module=__name__)
+Appointment = APPOINTMENTS.build_model(Base, {'__repr__': _appointment_repr}, module=__name__)
+Photo = PHOTOS.build_model(Base, {'__repr__': _photo_repr}, module=__name__)
 
-    # @AppLogger.get_instance(
-    #     name = 'AppoinPhototment',
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level=AppLogger._parse_log_level('DEBUG')
-    # )
-    def __repr__(self):
-        """
-        Возвращает строку-representation объекта Photo в виде "<Photo(id=1, appointment_id=1, file=photo.jpg)>"
-        """
-        # return f"<Photo(id={self.id}, appointment_id={self.appointment_id}, file={self.file_path})>"
-    
-
-        try:
-            id_val = getattr(self, 'id', None)
-            appointment_id_val = getattr(self, 'appointment_id', None)
-            file_path_val = getattr(self, 'file_path', None)
-
-            # rezult = f"<Photo(id={id_val}, "
-            # f"appointment_id={appointment_id_val}, "
-            # f"file={file_path_val})>"
-            # ↑ до DB1 (2026-10-16): repr был обрезан (отдельные инструкции)
-            rezult = (f"<Photo(id={id_val}, "
-                      f"appointment_id={appointment_id_val}, "
-                      f"file={file_path_val})>")
-
-            return rezult
-        
-        except Exception as e:
-            # tt = str(e)
-            AppLogger.get_instance(
-                name='api.Photo',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
-            ).exception(f'Err: {str(e)}')
-            raise e     
-
-            rezult = f"<Note(id={id_val}, "
-            f"text_preview={text_val[:30]}...)>"
-            return text_val
-    
-     
 
 class AppointmentNote(Base):
     """

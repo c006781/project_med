@@ -623,7 +623,7 @@ Base = declarative_base(metadata=MetaData(naming_convention=NAMING_CONVENTION))
 #             return text_val
 
 
-def _patient_repr(self) -> str:
+def _patient_repr(self: object) -> str:
     """
     Строка пациента (как у прежнего класса): ``<Patient(id=1, name=Петров Иван)>``.
 
@@ -641,7 +641,7 @@ def _patient_repr(self) -> str:
     return f"<Patient(id={getattr(self, 'id', None)}, name={name})>"
 
 
-def _appointment_repr(self) -> str:
+def _appointment_repr(self: object) -> str:
     """
     Строка приёма (как у прежнего класса).
 
@@ -660,7 +660,7 @@ def _appointment_repr(self) -> str:
             f"date={getattr(self, 'date', None)})>")
 
 
-def _photo_repr(self) -> str:
+def _photo_repr(self: object) -> str:
     """
     Строка фото (как у прежнего класса).
 

@@ -88,7 +88,7 @@ def photo_image(row: Mapping[str, Any], service: Any) -> Optional[str]:
 
 PATIENTS = TableDef(
     'patients', 'Patient', 'PatientDTO',
-    doc='Пациент клиники.',
+    doc='Пациент клиники.', comment='Таблица пациентов',
     entity='patient', title='Пациенты', label='Пациент',
     fields=(
         key('Уникальный идентификатор пациента', dto_desc='ID пациента (None для нового)', order=0),
@@ -127,7 +127,7 @@ PATIENTS = TableDef(
 
 APPOINTMENTS = TableDef(
     'appointments', 'Appointment', 'AppointmentDTO',
-    doc='Приём пациента.',
+    doc='Приём пациента.', comment='Таблица приёмов',
     entity='appointment', title='Приёмы', label='Приём',
     fields=(
         key('Уникальный идентификатор приёма', dto_desc='ID приёма (None для нового)'),
@@ -185,7 +185,7 @@ APPOINTMENTS = TableDef(
 
 PHOTOS = TableDef(
     'photos', 'Photo', 'PhotoDTO',
-    doc='Фотография к приёму.',
+    doc='Фотография к приёму.', comment='Таблица фотографий приёмов',
     entity='photo', title='Фото', label='Фото',
     fields=(
         key('Уникальный идентификатор фотографии', dto_desc='ID фотографии'),

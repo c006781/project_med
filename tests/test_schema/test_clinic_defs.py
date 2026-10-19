@@ -40,6 +40,8 @@ def model_snapshot(model):
     table = model.__table__
     return {
         'table': table.name,
+        'comment': table.comment,
+        'dialect': dict(table.dialect_kwargs),
         'columns': [(c.name, repr(c.type), c.nullable, c.primary_key, sorted(fk.target_fullname for fk in c.foreign_keys),
                      c.comment, c.default is not None) for c in table.columns],
         'indexes': sorted((i.name, tuple(c.name for c in i.columns), i.unique) for i in table.indexes),

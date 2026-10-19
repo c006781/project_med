@@ -388,6 +388,8 @@ class TableDef:
         parent: Родительская таблица (если внешних ключей на таблицы реестра несколько).
         parent_field: Поле связи с родителем (вместе с ``parent``).
         fetch_size: Свой размер порции загрузки.
+        comment: Комментарий таблицы в БД.
+        sqlite_autoincrement: ``AUTOINCREMENT`` у ключа в SQLite (id не переиспользуются).
 
     Пример:
         >>> PATIENTS.build_config()['last_name']['title']
@@ -415,6 +417,8 @@ class TableDef:
     parent: Optional[str] = None
     parent_field: Optional[str] = None
     fetch_size: Optional[int] = None
+    comment: Optional[str] = None
+    sqlite_autoincrement: bool = True
 
     def __post_init__(self) -> None:
         """
@@ -514,13 +518,15 @@ class TableDef:
                                                  nullable=True, comment=spec.comment)
         return self._ordered(result, self.column_order)
 
-    def build_model(self, base: Any, namespace: Optional[Mapping[str, Any]] = None) -> type:
+    def build_model(self, base: Any, namespace: Optional[Mapping[str, Any]] = None,
+                    module: Optional[str] = None) -> type:
         """
         Класс модели SQLAlchemy на базовом классе ``base``.
 
         Args:
             base: Декларативная база (``Base`` приложения или своя — для проверок).
             namespace: Свои атрибуты класса (методы).
+            module: Модуль класса (``__module__``; по умолчанию — этот).
 
         Returns:
             Класс модели.
@@ -531,7 +537,7 @@ class TableDef:
             'patients'
         """
         attrs: Dict[str, Any] = {'__tablename__': self.name, '__doc__': self.doc or self.model_name,
-                                 '__repr__': _model_repr}
+                                 '__repr__': _model_repr, '__module__': module or __name__}
         columns = self._columns()
         attrs.update(columns)
         indexes = []
@@ -546,8 +552,10 @@ class TableDef:
             elif spec.kind == 'children':
                 attrs[spec.relation] = relationship(spec.target_model, back_populates=spec.back,
                                                     cascade=spec.cascade)
-        if indexes:
-            attrs['__table_args__'] = tuple(indexes)
+        options: Dict[str, Any] = {'sqlite_autoincrement': self.sqlite_autoincrement}
+        if self.comment:
+            options['comment'] = self.comment
+        attrs['__table_args__'] = (*indexes, options)
         attrs.update(dict(namespace or {}))
         return type(self.model_name, (base,), attrs)
 
@@ -578,13 +586,15 @@ class TableDef:
             result[spec.name] = (annotation, Field(default, description=spec.dto_desc))
         return self._ordered(result, self.dto_order)
 
-    def build_dto(self, namespace: Optional[Mapping[str, Any]] = None) -> Type[BaseModel]:
+    def build_dto(self, namespace: Optional[Mapping[str, Any]] = None,
+                  module: Optional[str] = None) -> Type[BaseModel]:
         """
         Класс DTO (``from_attributes``). Ссылки на другие DTO по имени (``List['PhotoDTO']``)
         разрешаются ``rebuild_dtos`` после создания всех.
 
         Args:
             namespace: Не используется (зарезервировано для своих методов DTO).
+            module: Модуль класса (``__module__``; по умолчанию — этот).
 
         Returns:
             Класс DTO.
@@ -594,7 +604,8 @@ class TableDef:
             True
         """
         dto = create_model(self.dto_name, __config__=ConfigDict(from_attributes=True),
-                           __doc__=self.doc or self.dto_name, **self.dto_fields())
+                           __doc__=self.doc or self.dto_name, __module__=module or __name__,
+                           **self.dto_fields())
         return dto
 
     # ------------------------------------------------------------------ настройки полей

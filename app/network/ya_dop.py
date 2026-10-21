@@ -128,7 +128,12 @@ def yadisk_download_file(
         return -2
 
     try:
-        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+        local_dir = os.path.dirname(local_file_path)
+        if local_dir:
+            os.makedirs(local_dir, exist_ok=True)
+        # os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+        # ↑ до rework-yadisk (2026-10-21): путь без папки ('clinic.db') давал makedirs('')
+        #   → FileNotFoundError, скачивание падало.
         y.download(ya_file_path, local_file_path, progress_callback=progress_callback)
         return 0
     except Exception as e:
@@ -171,7 +176,10 @@ def yadisk_upload_file(
     try:
         parent_dir = os.path.dirname(ya_file_path)
         if parent_dir and not y.exists(parent_dir):
-            y.mkdir(parent_dir)
+            y.makedirs(parent_dir)
+            # y.mkdir(parent_dir)
+            # ↑ до rework-yadisk (2026-10-21): mkdir создаёт только последнюю папку —
+            #   при отсутствии родительской Диск отвечал ParentNotFoundError.
 
         y.upload(
             local_file_path, 
@@ -224,7 +232,10 @@ def check_and_create_path(
         if y.exists(ya_path):
             return True, "Путь существует"
         elif create_if_missing:
-            y.mkdir(ya_path, parents=True)
+            y.makedirs(ya_path)
+            # y.mkdir(ya_path, parents=True)
+            # ↑ до rework-yadisk (2026-10-21): у yadisk 3.x mkdir нет parents — аргумент
+            #   молча отбрасывался, создавалась только последняя папка (ParentNotFoundError).
             return True, f"Путь успешно создан: {ya_path}"
         else:
             return False, f"Путь не существует: {ya_path}"

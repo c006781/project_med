@@ -4,20 +4,17 @@ from unittest.mock import MagicMock, patch
 from PySide6.QtCore import QThread
 from app.network.thread_network import DownloadThread, UploadThread
 
-@patch('app.network.thread_network.check_remote_file_exists')
 @patch('app.network.thread_network.yadisk_download_file')
-def test_download_thread_run(mock_download, mock_exists):
+def test_download_thread_run(mock_download):
     """
     Тестирование функции run класса DownloadThread.
-    Проверяет, что функция run сначала проверяет файл на Диске
-    (check_remote_file_exists), затем вызывает функцию yadisk_download_file
-    с корректными параметрами и колбэком _progress_callback.
+    Проверяет, что функция run вызывает функцию yadisk_download_file
+    с корректными параметрами и колбэком _progress_callback (проверку токена,
+    наличия и типа файла делает сама yadisk_download_file).
     """
     thread = DownloadThread("token", "/remote", "/local")
-    mock_exists.return_value = (True, "Файл существует")
     mock_download.return_value = 0
     thread.run()
-    mock_exists.assert_called_once_with("token", "/remote")
     mock_download.assert_called_once_with(
         ya_token="token",
         ya_file_path="/remote",
@@ -49,20 +46,20 @@ def test_upload_thread_run(mock_upload):
         progress_callback=thread._progress_callback
     )
 
-@patch('app.network.thread_network.check_remote_file_exists')
 @patch('app.network.thread_network.yadisk_download_file')
-def test_download_thread_run_remote_missing(mock_download, mock_exists):
+def test_download_thread_run_remote_missing(mock_download):
     """
-    Файла на Диске нет: run отдаёт сообщение проверки в сигнал error
-    и не вызывает yadisk_download_file.
+    Файла на Диске нет (yadisk_download_file с if_err=True бросает FileNotFoundError):
+    run отдаёт текст в сигнал error, finished не испускается.
     """
     thread = DownloadThread("token", "/remote", "/local")
-    mock_exists.return_value = (False, "Файл /remote не найден на Яндекс.Диске")
-    errors = []
+    mock_download.side_effect = FileNotFoundError("Файл /remote не найден на Яндекс.Диске")
+    errors, finished = [], []
     thread.error.connect(errors.append)
+    thread.finished.connect(finished.append)
     thread.run()
     assert errors == ["Файл /remote не найден на Яндекс.Диске"]
-    mock_download.assert_not_called()
+    assert finished == []
 
 def test_download_thread_signals():
     """

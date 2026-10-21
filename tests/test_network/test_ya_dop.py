@@ -27,6 +27,7 @@ def test_yadisk_download_file_token_error(mock_yadisk):
 def test_yadisk_download_file_not_exists(mock_yadisk):
     mock_y = MagicMock()
     mock_y.check_token.return_value = True
+    mock_y.is_file.return_value = False
     mock_y.exists.return_value = False
     mock_yadisk.return_value = mock_y
     result = yadisk_download_file("token", "/nonexistent", "local.db", if_err=False)

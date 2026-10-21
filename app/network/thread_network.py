@@ -3,7 +3,14 @@
 # import os
 from PySide6.QtCore import QThread, Signal # pip install PySide6
 
-from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
+from app.network.ya_dop import (
+    check_remote_file_exists, # проверка файла на Диске перед скачиванием (DownloadThread.run)
+    yadisk_download_file,
+    yadisk_upload_file,
+)
+# from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
+# ↑ до rework-yadisk (2026-10-21): check_remote_file_exists не импортировалась — DownloadThread.run
+#   сразу падал с «name 'check_remote_file_exists' is not defined», скачивание БД не работало.
 
 class DownloadThread(QThread):
     """

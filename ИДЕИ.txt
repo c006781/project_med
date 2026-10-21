@@ -20,3 +20,9 @@
        режим «тихой» проверки, в котором ошибки и «обновлений нет» не показываются.
   И-8. Канал обновлений (стабильные / предварительные релизы) — настройка.
 
+
+Исключения (app/exceptions)
+  И-9. SyncError/DownloadError/UploadError/TokenError, DatabaseError/IntegrityError/
+       DatabaseConnectionError нигде не бросаются — либо использовать (например, база
+       занята → DatabaseConnectionError в app/database), либо удалить.
+

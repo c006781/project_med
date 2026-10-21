@@ -359,5 +359,7 @@ def test_sync_service_upload_with_progress(sync_service):
             sync_service.local_path = tmp.name
             result = sync_service.upload_sync(progress_callback=progress_cb)
         assert result == 0
-        mock_y.mkdir.assert_called_once()
+        mock_y.makedirs.assert_called_once()
+        # mock_y.mkdir.assert_called_once()
+        # ↑ до rework-yadisk (2026-10-21): папка на Диске теперь создаётся makedirs (с родителями)
         mock_y.upload.assert_called_once()

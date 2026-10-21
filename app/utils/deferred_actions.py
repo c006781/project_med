@@ -24,6 +24,7 @@ import weakref
 from app.utils.logger.logger import AppLogger
 
 from PySide6.QtCore import QMetaObject, QTimer, Qt, Q_ARG
+from PySide6.QtCore import QCoreApplication # есть ли цикл событий (DA3)
 from sqlalchemy.orm import Session
 
 
@@ -159,6 +160,28 @@ def clear_actions_by_type(session: Session, atype: ActionType) -> None:
         session._actions[atype].clear()
 
 
+def action_name(
+    func: Callable, # действие (функция, метод, partial, объект с __call__)
+) -> str:
+    """
+    Имя действия для журнала (у partial и объектов нет ``__name__``).
+
+    Args:
+        func: Действие.
+
+    Returns:
+        str: ``__qualname__``, ``__name__`` или ``repr``.
+
+    Example:
+        >>> import functools
+        >>> action_name(functools.partial(print, 1)).startswith('functools.partial')
+        True
+        >>> action_name(len)
+        'len'
+    """
+    return getattr(func, '__qualname__', None) or getattr(func, '__name__', None) or repr(func)
+
+
 @AppLogger.get_instance(
     name='deferred_actions.py',
     enable_file_logging='system',
@@ -187,25 +210,53 @@ def execute_actions(
     if not actions:
         return
 
+    if logger is None:
+        logger = AppLogger.get_instance(
+            name='deferred_actions.py', # журнал модуля
+            enable_file_logging='user', # файл пользователя
+            use_name_in_filename=False, # имя не в имени файла
+        )
+    # Без приложения Qt (командная строка, тесты) цикла событий нет — QTimer не сработает
+    run_now = QCoreApplication.instance() is None
+
     for func, args, kwargs in actions:
-        logg=logger or print
-        # Обёртка для вызова в главном потоке
-        # Создаём частичную функцию с фиксированными аргументами
-        def wrapper(f=func, a=args, k=kwargs, logg=logg):
+        def wrapper(f=func, a=args, k=kwargs, logg=logger):
             try:
                 f(*a, **k)
-
-                logg.debug(
-                    f"отложенного действия выполнено: {f.__name__} " 
-                )
-                # 0==0
             except Exception as e:
-                if logg:
-                    logg.exception(f"Ошибка при выполнении отложенного действия: {e}")
+                logg.exception(f"Ошибка при выполнении отложенного действия {action_name(f)}: {e}")
+                return
+            logg.debug(f"отложенное действие выполнено: {action_name(f)}")
 
-        # QMetaObject.invokeMethod(
-        #     wrapper,
-        #     Qt.QueuedConnection,
-        #     Q_ARG(object, None)  # заглушка – метод invokeMethod требует хотя бы один аргумент
-        # )
-        QTimer.singleShot(0, wrapper)
+        if run_now:
+            wrapper()
+        else:
+            QTimer.singleShot(0, wrapper)
+    # ↓ до rework-file-deletions (2026-10-21): logger=None → print.debug/print.exception
+    #   (AttributeError в таймере Qt) (DA1); f.__name__ у partial/объекта — успешное действие
+    #   записывалось как ошибка (DA2); без приложения Qt действия не выполнялись (DA3)
+    # if not actions:
+    #     return
+    #
+    # for func, args, kwargs in actions:
+    #     logg=logger or print
+    #     # Обёртка для вызова в главном потоке
+    #     # Создаём частичную функцию с фиксированными аргументами
+    #     def wrapper(f=func, a=args, k=kwargs, logg=logg):
+    #         try:
+    #             f(*a, **k)
+    #
+    #             logg.debug(
+    #                 f"отложенного действия выполнено: {f.__name__} " 
+    #             )
+    #             # 0==0
+    #         except Exception as e:
+    #             if logg:
+    #                 logg.exception(f"Ошибка при выполнении отложенного действия: {e}")
+    #
+    #     # QMetaObject.invokeMethod(
+    #     #     wrapper,
+    #     #     Qt.QueuedConnection,
+    #     #     Q_ARG(object, None)  # заглушка – метод invokeMethod требует хотя бы один аргумент
+    #     # )
+    #     QTimer.singleShot(0, wrapper)

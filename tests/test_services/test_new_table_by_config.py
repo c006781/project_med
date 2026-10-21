@@ -149,3 +149,30 @@ def test_plain_base_service_without_subclass(env):
     rx.delete(created.id)
     with pytest.raises(EntityNotFoundError):
         rx.get_by_id(created.id)
+
+
+# --- 2026-10-21, ветка rework-services-errors (app/services/IMPLEMENTATION.md §3.3, SE1):
+#     таблица без своего класса исключения — EntityValidationError (поле, причина, таблица)
+from app.exceptions import EntityValidationError  # noqa: E402
+
+
+def test_se1_required_field_entity_validation_error(env):
+    """Пустое обязательное поле — EntityValidationError с полем и таблицей."""
+    with pytest.raises(EntityValidationError) as info:
+        env['rx'].create(PrescriptionDTO(appointment_id=env['a1'].id, dosage=''))
+    assert info.value.entity == 'Prescription'
+    assert info.value.field
+    assert 'обязатель' in info.value.reason
+
+
+def test_se1_missing_parent_entity_validation_error(env):
+    """Нет родительской записи — EntityValidationError, причина с таблицей родителя."""
+    with pytest.raises(EntityValidationError, match='appointments') as info:
+        env['rx'].create(PrescriptionDTO(appointment_id=999, dosage='1'))
+    assert 'appointments' in info.value.reason
+
+
+def test_se1_still_value_error(env):
+    """Интерфейс, ловящий ValueError, по-прежнему ловит."""
+    with pytest.raises(ValueError):
+        env['rx'].create(PrescriptionDTO(appointment_id=env['a1'].id, dosage=''))

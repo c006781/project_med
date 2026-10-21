@@ -51,22 +51,49 @@ class DeletionContext:
     # Ленивая инициализация атрибутов (без __init__)
     # ------------------------------------------------------------------
 
-    @property
-    def logger(cls) -> AppLogger:
-        try:
-            return cls._logger
-        except AttributeError as e:
-            cls._logger = AppLogger.get_instance(
-                name='api.DeletionContext',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system'
+    # Журнал класса (один на все контексты; в __slots__ экземпляра его нет)
+    _class_logger: Optional[AppLogger] = None
+
+    @classmethod
+    def _get_logger(cls) -> AppLogger:
+        """
+        Журнал контекстов удаления (создаётся при первом обращении).
+
+        Returns:
+            AppLogger: Журнал ``api.DeletionContext``.
+        """
+        if cls._class_logger is None:
+            cls._class_logger = AppLogger.get_instance(
+                name='api.DeletionContext', # имя журнала
+                enable_file_logging = 'user', # файл пользователя
+                use_name_in_filename = False, # имя не в имени файла
             )
+        return cls._class_logger
 
-        return cls._logger
+    @property
+    def logger(self) -> AppLogger:
+        """Журнал (общий для класса)."""
+        return type(self)._get_logger()
 
-    @logger.setter
-    def logger(cls, value):
-        cls._logger = value
+    # @property
+    # def logger(cls) -> AppLogger:
+    #     try:
+    #         return cls._logger
+    #     except AttributeError as e:
+    #         cls._logger = AppLogger.get_instance(
+    #             name='api.DeletionContext',
+    #             enable_file_logging = 'user',
+    #             use_name_in_filename = False, # 'system'
+    #         )
+    #
+    #     return cls._logger
+    #
+    # @logger.setter
+    # def logger(cls, value):
+    #     cls._logger = value
+    # ↑ до rework-file-deletions (2026-10-21): свойство экземпляра вызывалось из метода
+    #   класса (cls.logger → объект property: create(None, …) падал AttributeError вместо
+    #   «удалить сразу»); у экземпляра _logger не записывался (__slots__) (FD1)
 
     @classmethod
     def create(cls, session, deletion_type):
@@ -94,7 +121,7 @@ class DeletionContext:
         """
 
         if session is None:
-            cls.logger.warning(
+            cls._get_logger().warning(
                 "DeletionContext.create вызван без сессии – удаление файлов будет немедленным, "
                 "атомарность не гарантирована"
             )
@@ -206,7 +233,7 @@ def delete_file_safely(
     Returns:
         Tuple[bool, Optional[str]]: (успех, ошибка)
             - `(True, None)` – файл успешно удалён или не существовал.
-            - `(False, Exception)` – ошибка при удалении (файл заблокирован, нет прав).
+            - `(False, str)` – ошибка при удалении (файл заблокирован, нет прав): текст ошибки.
     """
 
     if logger is None:
@@ -256,8 +283,9 @@ def delete_empty_directory(
     Returns:
         Tuple[bool, Optional[str]]: (успех, ошибка)
             - `(True, None)` – директория успешно удалена.
-            - `(False, Exception)` – директория не существует, не пуста (при force=False),
-              или произошла ошибка доступа/удаления.
+            - `(True, None)` – директории нет (удалять нечего).
+            - `(False, None)` – директория не пуста (при force=False).
+            - `(False, str)` – ошибка доступа/удаления: текст ошибки.
     """
 
     if logger is None:
@@ -583,6 +611,9 @@ def copy_file_to_temp_dir(
         raise RuntimeError(
             "Для копирования файла необходима папка (target_dir). "
         )
+
+    # Папка создаётся, если её нет (как обещает описание; раньше — FileNotFoundError, FD6)
+    os.makedirs(target_dir, exist_ok=True)
 
     if unique_name is None:
         ext = os.path.splitext(source_path)[1]

@@ -87,6 +87,7 @@ from app.network.thread_network import DownloadThread, UploadThread
 
 # try:
 from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
+import os # remote_db_file_path: имя файла из локального пути
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -111,6 +112,40 @@ from app.config.config_manager.manager import AppConfigManager, get_config_env
 
 
 
+
+
+# Расширения файла БД: путь на Диске без них считается папкой
+DB_EXTENSIONS = ('.db', '.sqlite', '.sqlite3')
+
+
+def remote_db_file_path(
+    remote_path: str, # путь на Диске из настроек: файл БД или папка
+    local_path: str, # локальный путь к БД — из него берётся имя файла
+) -> str:
+    """
+    Путь к файлу БД на Яндекс.Диске.
+
+    Если в настройках указана папка (путь не кончается на .db/.sqlite/.sqlite3),
+    дописывается имя локального файла — как MainWindow._correct_remote_path у окна.
+
+    Args:
+        remote_path (str): Путь на Диске из настроек (None/'' — корень Диска).
+        local_path (str): Локальный путь к файлу БД.
+
+    Returns:
+        str: Путь к файлу БД на Диске.
+
+    Example:
+        >>> remote_db_file_path('Папка/база', './clinic.db')
+        'Папка/база/clinic.db'
+        >>> remote_db_file_path('/Папка/clinic.db', './other.db')
+        '/Папка/clinic.db'
+    """
+    remote_path = remote_path or ''
+    if remote_path.lower().endswith(DB_EXTENSIONS):
+        return remote_path
+    remote_dir = remote_path.rstrip('/\\')
+    return f"{remote_dir}/{os.path.basename(local_path)}"
 
 
 class SyncService:
@@ -180,7 +215,9 @@ class SyncService:
         # передается в колбэк error.
         return yadisk_download_file(
             ya_token=self.token,
-            ya_file_path=self.remote_path,
+            ya_file_path=remote_db_file_path(self.remote_path, self.local_path),
+            # ya_file_path=self.remote_path,
+            # ↑ до rework-sync-service (2026-10-21): папка из настроек шла как путь к файлу
             local_file_path=self.local_path,
             if_err=True,
             progress_callback=progress_callback
@@ -218,9 +255,14 @@ class SyncService:
         return yadisk_upload_file(
             ya_token=self.token,
             local_file_path=self.local_path,
-            ya_file_path=self.remote_path,
+            ya_file_path=remote_db_file_path(self.remote_path, self.local_path),
+            # ya_file_path=self.remote_path,
+            # ↑ до rework-sync-service (2026-10-21): папка из настроек шла как путь к файлу
             if_err=True,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            # Файл БД на Диске заменяется (как у окна); без этого повторная выгрузка
+            # падала — файл уже есть
+            overwrite=True,
         )
     
     @AppLogger.get_instance(
@@ -239,7 +281,9 @@ class SyncService:
         # Создаем настроенный, но не запущенный поток DownloadThread
         thread = DownloadThread(
             token=self.token, 
-            remote_path=self.remote_path, 
+            remote_path=remote_db_file_path(self.remote_path, self.local_path),
+            # remote_path=self.remote_path,
+            # ↑ до rework-sync-service (2026-10-21): папка из настроек шла как путь к файлу
             local_path=self.local_path
         )
 
@@ -264,7 +308,11 @@ class SyncService:
         thread = UploadThread(
             token=self.token, 
             local_path=self.local_path, 
-            remote_path=self.remote_path
+            remote_path=remote_db_file_path(self.remote_path, self.local_path),
+            # remote_path=self.remote_path
+            # ↑ до rework-sync-service (2026-10-21): папка из настроек шла как путь к файлу
+            # Файл БД на Диске заменяется (как у окна)
+            overwrite=True,
         )
 
         return thread

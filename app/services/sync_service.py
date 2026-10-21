@@ -86,8 +86,15 @@ from app.network.thread_network import DownloadThread, UploadThread
 
 
 # try:
-from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
-import os # remote_db_file_path: имя файла из локального пути
+from app.network.ya_dop import (
+    DB_EXTENSIONS, # расширения файла БД (реэкспорт — прежний адрес app.services.sync_service)
+    remote_db_file_path, # путь к файлу БД на Диске по настройкам
+    yadisk_download_file,
+    yadisk_upload_file,
+)
+# from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
+# import os # remote_db_file_path: имя файла из локального пути
+# ↑ до rework-yadisk, проход 1 (2026-10-21): remote_db_file_path перенесена в app.network (P1)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -114,38 +121,40 @@ from app.config.config_manager.manager import AppConfigManager, get_config_env
 
 
 
-# Расширения файла БД: путь на Диске без них считается папкой
-DB_EXTENSIONS = ('.db', '.sqlite', '.sqlite3')
-
-
-def remote_db_file_path(
-    remote_path: str, # путь на Диске из настроек: файл БД или папка
-    local_path: str, # локальный путь к БД — из него берётся имя файла
-) -> str:
-    """
-    Путь к файлу БД на Яндекс.Диске.
-
-    Если в настройках указана папка (путь не кончается на .db/.sqlite/.sqlite3),
-    дописывается имя локального файла — как MainWindow._correct_remote_path у окна.
-
-    Args:
-        remote_path (str): Путь на Диске из настроек (None/'' — корень Диска).
-        local_path (str): Локальный путь к файлу БД.
-
-    Returns:
-        str: Путь к файлу БД на Диске.
-
-    Example:
-        >>> remote_db_file_path('Папка/база', './clinic.db')
-        'Папка/база/clinic.db'
-        >>> remote_db_file_path('/Папка/clinic.db', './other.db')
-        '/Папка/clinic.db'
-    """
-    remote_path = remote_path or ''
-    if remote_path.lower().endswith(DB_EXTENSIONS):
-        return remote_path
-    remote_dir = remote_path.rstrip('/\\')
-    return f"{remote_dir}/{os.path.basename(local_path)}"
+# # Расширения файла БД: путь на Диске без них считается папкой
+# DB_EXTENSIONS = ('.db', '.sqlite', '.sqlite3')
+#
+#
+# def remote_db_file_path(
+#     remote_path: str, # путь на Диске из настроек: файл БД или папка
+#     local_path: str, # локальный путь к БД — из него берётся имя файла
+# ) -> str:
+#     """
+#     Путь к файлу БД на Яндекс.Диске.
+#
+#     Если в настройках указана папка (путь не кончается на .db/.sqlite/.sqlite3),
+#     дописывается имя локального файла — как MainWindow._correct_remote_path у окна.
+#
+#     Args:
+#         remote_path (str): Путь на Диске из настроек (None/'' — корень Диска).
+#         local_path (str): Локальный путь к файлу БД.
+#
+#     Returns:
+#         str: Путь к файлу БД на Диске.
+#
+#     Example:
+#         >>> remote_db_file_path('Папка/база', './clinic.db')
+#         'Папка/база/clinic.db'
+#         >>> remote_db_file_path('/Папка/clinic.db', './other.db')
+#         '/Папка/clinic.db'
+#     """
+#     remote_path = remote_path or ''
+#     if remote_path.lower().endswith(DB_EXTENSIONS):
+#         return remote_path
+#     remote_dir = remote_path.rstrip('/\\')
+#     return f"{remote_dir}/{os.path.basename(local_path)}"
+# ↑ до rework-yadisk, проход 1 (2026-10-21): путь к файлу БД — основа сетевого модуля (P1),
+#   перенесён в app.network.ya_dop.remote_db_file_path (там же '\\' → '/').
 
 
 class SyncService:

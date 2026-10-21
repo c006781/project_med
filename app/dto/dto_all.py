@@ -14,11 +14,17 @@ DTO (Data Transfer Objects) на базе Pydantic.
 Для каждого DTO установлена конфигурация `from_attributes = True`, что позволяет
 создавать DTO из ORM-объектов SQLAlchemy через `model_validate(obj)`.
 
+PatientDTO, AppointmentDTO, PhotoDTO строятся из описаний таблиц (``app/schema/clinic.py``,
+``TableDef.build_dto``): новое поле — в описании таблицы, не здесь. AppointmentNoteDTO пока
+написан вручную (ОСТАЛОСЬ.txt п. 4.4).
+
 Пример:
     >>> dto = PatientDTO(first_name="Иван", last_name="Петров")
-    >>> print(dto.model_dump())
+    >>> dto.model_dump(exclude_none=True)
     {'first_name': 'Иван', 'last_name': 'Петров'}
 """
+# ↑ до rework-dto (2026-10-21): пример печатал model_dump() без exclude_none — выводил
+#   два поля, а их десять (doctest падал).
 
 import datetime
 
@@ -322,9 +328,12 @@ class AppointmentNoteDTO(BaseModel):
 
     Пример:
         >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
-        >>> print(note_dto.text)
+        >>> note_dto.text
         'Первичный осмотр. Жалобы на головную боль.'
+        >>> note_dto.id is None
+        True
     """
+    # ↑ до rework-dto (2026-10-21): print(...) выводит текст без кавычек — doctest падал
 
     model_config = ConfigDict(from_attributes=True)
 

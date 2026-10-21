@@ -26,11 +26,14 @@
               exclude (DT6, правится в app/schema). → app/dto/IMPLEMENTATION.md
   2026-10-21  app/schema, ветка rework-schema: id заметок в DTO снова не выгружаются в
               model_dump() (регрессия генерации DTO 2026-10-19). → app/schema/IMPLEMENTATION.md
+  2026-10-21  app/utils/filtering, ветка rework-filtering, проход 1: поиск «содержит» по
+              числовому столбцу и с пустым значением падал, время «9:30», between с value2,
+              устаревшие пустые and_/or_. Проход 2 не выполнен. → app/utils/filtering/IMPLEMENTATION.md
 
 ПЛАН ПРОДОЛЖЕНИЯ (остановлено 2026-10-21; порядок — от основы к окну)
   Основа — ещё не проходились по новым правилам (докстринги/типы/тесты/журнал):
-    1. app/repositories       — журнала своего нет (частично: app/services §3.2).
-    2. app/utils/filtering    — журнала нет.
+    1. app/utils/filtering    — проход 2 (проход 1 сделан 2026-10-21).
+    2. (app/repositories — уже проверен 2026-10-16, журнал в app/services/IMPLEMENTATION.md §3.2)
     3. app/utils/*.py         — deferred_actions, virtual_fields, file_deletions, colors,
                                 qt_meta — журнала нет.
     4. app/dependencies.py    — убрать мёртвую регистрацию _NOTE_USAGE_MODELS/MODEL_CONFIG_MAP

@@ -34,11 +34,13 @@
               проход 1: «удалить без сессии» падал AttributeError, временная папка не
               создавалась при копировании; отложенные действия: журнал без логгера,
               partial, выполнение без приложения Qt. → app/utils/IMPLEMENTATION.md
+  2026-10-21  app/utils/virtual_fields.py, ветка rework-virtual-fields: вычисление без
+              extra_data падало TypeError. → app/utils/IMPLEMENTATION.md
 
 ПЛАН ПРОДОЛЖЕНИЯ (остановлено 2026-10-21; порядок — от основы к окну)
   Основа — ещё не проходились по новым правилам (докстринги/типы/тесты/журнал):
     2. (app/repositories — уже проверен 2026-10-16, журнал в app/services/IMPLEMENTATION.md §3.2)
-    3. app/utils/*.py         — проход 2 по file_deletions/deferred_actions; virtual_fields,
+    3. app/utils/*.py         — проход 2 по file_deletions/deferred_actions/virtual_fields;
                                 colors, qt_meta — не проверены.
     4. app/dependencies.py    — убрать мёртвую регистрацию _NOTE_USAGE_MODELS/MODEL_CONFIG_MAP
                                 (DT5); журнала нет.

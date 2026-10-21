@@ -48,7 +48,15 @@
     2. (app/repositories — уже проверен 2026-10-16, журнал в app/services/IMPLEMENTATION.md §3.2)
     3. app/utils/*.py         — проход 2 по file_deletions/deferred_actions/virtual_fields;
                                 colors, qt_meta — не проверены.
-    6. parsers/word_importer.py — журнала нет.
+    6. parsers/word_importer.py — журнала нет. Найдено 2026-10-21, НЕ исправлено:
+       W1 normalize_text обещает убирать лишние пробелы, но нет: «  Иван  » попадает в ФИО
+          с пробелами (strip/схлопывание пробелов не делается);
+       W2 normalize_phone: нераспознанный номер → None — исходный телефон молча теряется
+          ('12-34-56', '+7 999 123 45 67 доб. 12', '+375…');
+       W3 номер с 4-значным кодом города '8 (3842) 12-34-56' форматируется как
+          '+7 (384) 212-34-56' (цифры верны, вид неверный);
+       W4 python-docx нет в requirements.txt (в venv стоит): на чистой установке импорт
+          из Word не работает (окно импортирует парсер лениво — программа запускается).
     Уже с журналами проверок (повторно — по необходимости): config, database, dataset_app,
     draft, schema, tables, utils/dataset, utils/drafts, utils/drafts_qt, utils/logger,
     network, updater, exceptions, dto.

@@ -44,7 +44,7 @@ def test_yadisk_upload_file_success(mock_yadisk, tmp_path):
     result = yadisk_upload_file("token", str(local_file), "/remote/upload.db", if_err=False)
     assert result == 0
     mock_y.mkdir.assert_called_once()
-    mock_y.upload.assert_called_once_with(str(local_file), "/remote/upload.db", progress_callback=None)
+    mock_y.upload.assert_called_once_with(str(local_file), "/remote/upload.db", progress_callback=None, overwrite=False)
 
 @patch('app.network.ya_dop.yadisk.YaDisk')
 def test_yadisk_upload_file_local_not_found(mock_yadisk):

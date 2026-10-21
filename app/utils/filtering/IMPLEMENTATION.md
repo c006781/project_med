@@ -2,11 +2,11 @@
 
 > Файл для разработчиков: что делает модуль, как устроен, почему так и журнал проверок.
 > Обновляется вместе с кодом.
-> Последнее обновление: 2026-10-21, проход 1 (ветка `rework-filtering`).
+> Последнее обновление: 2026-10-21, проходы 1–3 (ветка `rework-filtering`).
 
 | Файл | Назначение |
 |---|---|
-| [filtering.py](filtering.py) | `apply_filters` (узлы фильтра → условие SQLAlchemy + пост-фильтры `fuzzy`), `apply_post_filters`, `like_condition`, `escape_like`, `_convert_value`, `FilterOperator` |
+| [filtering.py](filtering.py) | `apply_filters` (узлы фильтра → условие SQLAlchemy + пост-фильтры `fuzzy`), `column_condition` (лист: столбец + оператор), `note_condition` (лист по тексту поля-заметки), `apply_post_filters`, `like_condition`, `escape_like`, `_convert_value`, `FilterOperator` |
 | Пользователи | `app/services/services_all.py` (`BaseService`), `app/repositories/repositories_all.py` |
 | Тесты | `tests/test_filtering.py`, `tests/test_filtering_review_pass1.py` (SQLite в памяти) |
 
@@ -40,4 +40,17 @@
 Тесты: `test_filtering_review_pass1.py` (33; на старом коде 15 падают, 18 проходят —
 поведение, которое не менялось). Полный набор — без новых падений.
 
-Проход 2 — не выполнялся (остановлено по времени, ОСТАЛОСЬ.txt «План продолжения»).
+### Проход 2 (2026-10-21)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| FL6 | Поле-заметка: только `ilike`/`like`/`eq` | Диалог фильтра столбца предлагает все 12 операторов для любого столбца, набор данных шлёт «пусто/не пусто» для любого поля — на «Описание», «Причина обращения» … выбор «не равно», «в списке», «между», «пусто» давал `ValueError` | Условия листа — `column_condition` (перенесено без изменений); `note_condition`: `EXISTS` с тем же условием по тексту; «пусто» — нет заметки или пустой текст, «не пусто» — непустой текст |
+
+Тесты: `test_filtering_review_pass2.py` (18; на коде прохода 1 падают 14, проходят 4 —
+`eq`/`like`/`ilike` работали и раньше, `None` исправлен в проходе 1). Полный набор: 1713
+прошли, 10 известных падений.
+
+### Проход 3 (2026-10-21) — замечаний нет
+
+Перечитан модуль после переноса (`_build_filter_condition`, `apply_filters`,
+`_collect_post_filters`, `apply_post_filters`).

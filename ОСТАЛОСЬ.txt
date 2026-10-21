@@ -1,6 +1,6 @@
 ЧТО ОСТАЛОСЬ: НЕПРАВИЛЬНО, НЕ ИСПРАВЛЕНО, НЕ ПЕРЕРАБОТАНО
 Состояние на 2026-10-21, ветка rework.
-Тесты: 1757 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
+Тесты: 1760 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
 Подробности по модулям — в IMPLEMENTATION.md рядом с кодом.
 Техдолг (что не решено и ждёт решения) — ТЕХДОЛГ.txt; идеи улучшений — ИДЕИ.txt.
 
@@ -39,15 +39,15 @@
   2026-10-21  app/dependencies.py, ветка rework-dependencies: сброс кэша всех
               зарегистрированных сервисов (был список вручную), мёртвый реестр заметок
               убран. → app/DEPENDENCIES.md
+  2026-10-21  app/services, ветка rework-services-errors: ошибка проверки поля у таблицы
+              без своего класса — EntityValidationError (поле, причина); устаревшие
+              инструкции в описаниях. → app/services/IMPLEMENTATION.md §3.3
 
 ПЛАН ПРОДОЛЖЕНИЯ (остановлено 2026-10-21; порядок — от основы к окну)
   Основа — ещё не проходились по новым правилам (докстринги/типы/тесты/журнал):
     2. (app/repositories — уже проверен 2026-10-16, журнал в app/services/IMPLEMENTATION.md §3.2)
     3. app/utils/*.py         — проход 2 по file_deletions/deferred_actions/virtual_fields;
                                 colors, qt_meta — не проверены.
-    5. app/services           — _validation_error для таблицы без класса → EntityValidationError
-                                (app/exceptions §4); убрать из описания BaseService
-                                инструкцию про MODEL_CONFIG_MAP (DT5).
     6. parsers/word_importer.py — журнала нет.
     Уже с журналами проверок (повторно — по необходимости): config, database, dataset_app,
     draft, schema, tables, utils/dataset, utils/drafts, utils/drafts_qt, utils/logger,

@@ -157,7 +157,7 @@ note_service=…)` без подкласса и без своего репози
 | SE1 | `BaseService._validation_error` | Таблица без своего `_validation_exception` — `ValueError(f"{reason}: {field}")` | Ни поля, ни таблицы — окно не может подсветить поле; новая таблица хуже старых | `EntityValidationError(field, reason, entity=<модель>)` (тоже `ValueError`) |
 | SE2 | Описание модуля и `BaseService` (инструкция «новая сущность»), `NoteService` | «Добавьте модель в `MODEL_CONFIG_MAP`», «через `_NOTE_USAGE_MODELS`» | Устарело с DYN2 (реестр убран — app/DEPENDENCIES.md DP3) | Описания исправлены |
 
-Тесты: `tests/test_services/test_services_errors_review_pass1.py` (3; на старом коде 2
+Тесты: 3 теста `test_se1_*` в `tests/test_services/test_new_table_by_config.py` (на старом коде 2
 падают). Полный набор — без новых падений.
 
 ## 4. Дальше

@@ -150,6 +150,16 @@ note_service=…)` без подкласса и без своего репози
 `get_unique_values`). Покрытие репозиториев 86% → 95% (не покрыты абстрактное свойство и
 ветки перехвата исключений). Цикл завершён.
 
+## 3.3 Ошибки проверки полей (2026-10-21, ветка `rework-services-errors`)
+
+| # | Где | Что было | Чем плохо | Исправление |
+|---|---|---|---|---|
+| SE1 | `BaseService._validation_error` | Таблица без своего `_validation_exception` — `ValueError(f"{reason}: {field}")` | Ни поля, ни таблицы — окно не может подсветить поле; новая таблица хуже старых | `EntityValidationError(field, reason, entity=<модель>)` (тоже `ValueError`) |
+| SE2 | Описание модуля и `BaseService` (инструкция «новая сущность»), `NoteService` | «Добавьте модель в `MODEL_CONFIG_MAP`», «через `_NOTE_USAGE_MODELS`» | Устарело с DYN2 (реестр убран — app/DEPENDENCIES.md DP3) | Описания исправлены |
+
+Тесты: `tests/test_services/test_services_errors_review_pass1.py` (3; на старом коде 2
+падают). Полный набор — без новых падений.
+
 ## 4. Дальше
 
 * ✅ Карта ключей `field_configs` (2026-10-16): все ключи используются, кроме

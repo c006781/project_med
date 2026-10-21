@@ -1,6 +1,6 @@
 ЧТО ОСТАЛОСЬ: НЕПРАВИЛЬНО, НЕ ИСПРАВЛЕНО, НЕ ПЕРЕРАБОТАНО
 Состояние на 2026-10-21, ветка rework.
-Тесты: 1633 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
+Тесты: 1662 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
 Подробности по модулям — в IMPLEMENTATION.md рядом с кодом.
 Техдолг (что не решено и ждёт решения) — ТЕХДОЛГ.txt; идеи улучшений — ИДЕИ.txt.
 
@@ -26,6 +26,29 @@
               exclude (DT6, правится в app/schema). → app/dto/IMPLEMENTATION.md
   2026-10-21  app/schema, ветка rework-schema: id заметок в DTO снова не выгружаются в
               model_dump() (регрессия генерации DTO 2026-10-19). → app/schema/IMPLEMENTATION.md
+
+ПЛАН ПРОДОЛЖЕНИЯ (остановлено 2026-10-21; порядок — от основы к окну)
+  Основа — ещё не проходились по новым правилам (докстринги/типы/тесты/журнал):
+    1. app/repositories       — журнала своего нет (частично: app/services §3.2).
+    2. app/utils/filtering    — журнала нет.
+    3. app/utils/*.py         — deferred_actions, virtual_fields, file_deletions, colors,
+                                qt_meta — журнала нет.
+    4. app/dependencies.py    — убрать мёртвую регистрацию _NOTE_USAGE_MODELS/MODEL_CONFIG_MAP
+                                (DT5); журнала нет.
+    5. app/services           — _validation_error для таблицы без класса → EntityValidationError
+                                (app/exceptions §4); убрать из описания BaseService
+                                инструкцию про MODEL_CONFIG_MAP (DT5).
+    6. parsers/word_importer.py — журнала нет.
+    Уже с журналами проверок (повторно — по необходимости): config, database, dataset_app,
+    draft, schema, tables, utils/dataset, utils/drafts, utils/drafts_qt, utils/logger,
+    network, updater, exceptions, dto.
+  Окно (после основы):
+    7. main_window.py — п. 1.4: конфликт обработчиков SyncMixin/UpdateMixin,
+       _correct_remote_path → remote_db_file_path, коды Диска → YaDiskResult.describe,
+       pending_release_data вместо hasattr, is_github_reachable при старте (блокирует окно).
+    8. settings_page.py — потоки проверки токена/папки (сейчас не падают — app/network N1).
+    9. utils/dataset_qt, экраны — ОСТАЛОСЬ п. 4–5.
+  Техдолг — ТЕХДОЛГ.txt (ТД-1…ТД-5), идеи — ИДЕИ.txt (И-1…И-9).
 
 
 =====================================================================

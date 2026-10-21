@@ -9,7 +9,7 @@
 |---|---|---|
 | [file_deletions.py](file_deletions.py) | Удаление файлов/папок сразу или после COMMIT/ROLLBACK сессии (`DeletionContext`, `schedule_deletion`), копирование во временную папку, поиск файла фото | 2026-10-21, проход 1 |
 | [deferred_actions.py](deferred_actions.py) | Действия после COMMIT/ROLLBACK сессии (`ActionContext`, `add_deferred_action`, `execute_actions` — в цикле событий Qt) | 2026-10-21, проход 1 |
-| [virtual_fields.py](virtual_fields.py) | Виртуальные поля DTO | нет |
+| [virtual_fields.py](virtual_fields.py) | Виртуальные поля DTO: `compute_virtual_fields` (по `compute` в конфигурации), `enrich_dto_with_computed_fields` | 2026-10-21, проход 1 |
 | [colors.py](colors.py), [qt_meta.py](qt_meta.py) | Цвета интерфейса; метакласс Qt + ABC | нет |
 
 Обработчики `after_commit`/`after_rollback`, которые выполняют накопленные удаления и
@@ -37,4 +37,14 @@
 `tests/test_deferred_actions_review_pass1.py` (12, с настоящим циклом событий Qt; на
 старом коде DA-тесты падают). Полный набор: 1745 прошли, 10 известных падений.
 
-### Проход 2 — не выполнялся (virtual_fields, colors, qt_meta — тоже)
+### virtual_fields.py, проход 1 (2026-10-21, ветка `rework-virtual-fields`)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| VF1 | Журнал в цикле проверял `arg_name in extra_data` до проверки на `None` | `compute_virtual_fields(data, configs)` без `extra_data` (по умолчанию) — `TypeError` на первом поле с аргументами | `extra_data = extra_data or {}` |
+
+Проверено: аргументы вычислений клиники — связи (`description_note`, `patient` …), а не id
+заметок — исключение id из `model_dump` (app/schema SC1) их не задевает.
+Тесты: `tests/test_virtual_fields_review_pass1.py` (8; на старом коде 4 падают).
+
+### Проход 2 — не выполнялся (colors, qt_meta — не проверены)

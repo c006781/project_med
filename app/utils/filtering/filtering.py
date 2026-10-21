@@ -145,21 +145,32 @@ def _build_filter_condition(
         fk_column = getattr(model, note_info['foreign_key'])
         text_column = getattr(note_model, note_info['text_column'])
         
-        if op == 'ilike':
-            # subq = select(text_column).where(text_column.ilike(f"%{value}%")).where(note_model.id == fk_column)
-            # ↑ до DYN6 (2026-10-16): % и _ из поиска работали как шаблоны (у обычных полей — экранируются)
-            subq = select(text_column).where(text_column.ilike(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
-            return exists(subq)
-        elif op == 'like':
-            # subq = select(text_column).where(text_column.like(f"%{value}%")).where(note_model.id == fk_column)
-            # ↑ до DYN6: без экранирования
-            subq = select(text_column).where(text_column.like(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
-            return exists(subq)
-        elif op == 'eq':
-            subq = select(text_column).where(text_column == value).where(note_model.id == fk_column)
-            return exists(subq)
-        else:
-            raise ValueError(f"Оператор {op} не поддерживается для поля-заметки {column_name}")
+        return note_condition(
+            fk_column, # ссылка записи на заметку
+            note_model, # модель заметок
+            text_column, # текст заметки
+            op, # оператор
+            value, # значение
+            value2, # вторая граница (between)
+        )
+        # ↓ до rework-filtering, проход 2 (2026-10-21): только ilike/like/eq — остальные
+        #   операторы диалога фильтра и набора данных (ne, in, between, is_null …) на поле-
+        #   заметке давали ValueError (FL6)
+#         if op == 'ilike':
+#             # subq = select(text_column).where(text_column.ilike(f"%{value}%")).where(note_model.id == fk_column)
+#             # ↑ до DYN6 (2026-10-16): % и _ из поиска работали как шаблоны (у обычных полей — экранируются)
+#             subq = select(text_column).where(text_column.ilike(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
+#             return exists(subq)
+#         elif op == 'like':
+#             # subq = select(text_column).where(text_column.like(f"%{value}%")).where(note_model.id == fk_column)
+#             # ↑ до DYN6: без экранирования
+#             subq = select(text_column).where(text_column.like(f"%{escape_like(value)}%", escape="\\")).where(note_model.id == fk_column)
+#             return exists(subq)
+#         elif op == 'eq':
+#             subq = select(text_column).where(text_column == value).where(note_model.id == fk_column)
+#             return exists(subq)
+#         else:
+#             raise ValueError(f"Оператор {op} не поддерживается для поля-заметки {column_name}")
     # else:
     #     raise ValueError(f"Столбец {column_name} не найден в модели {model.__name__}")
 
@@ -168,63 +179,9 @@ def _build_filter_condition(
         raise ValueError(f"Столбец {column_name} не найден в модели {model.__name__}")
 
     column = getattr(model, column_name)
-
-    # «Содержит» — по тексту столбца, без приведения значения к типу столбца (FL1):
-    # раньше '1' для числового id приводилось к int → escape_like(int) падал AttributeError
-    if op in ('like', 'ilike'):
-        return like_condition(column, value, case_insensitive=(op == 'ilike'))
-
-    value = _convert_value(column, value) if value is not None else None
-
-    if op == 'eq':
-        return column == value
-    elif op == 'ne':
-        return column != value
-    elif op == 'gt':
-        return column > value
-    elif op == 'ge':
-        return column >= value
-    elif op == 'lt':
-        return column < value
-    elif op == 'le':
-        return column <= value
-    # elif op == 'like':
-    #     safe = escape_like(value)
-    #     return column.like(f"%{safe}%", escape='\\')
-    # elif op == 'ilike':
-    #     safe = escape_like(value)
-    #     return column.ilike(f"%{safe}%", escape='\\')
-    # ↑ до rework-filtering (2026-10-21): like/ilike — выше, через like_condition (FL1, FL2)
-    elif op == 'in':
-        if not isinstance(value, (list, tuple)):
-            raise ValueError("Для IN значение должно быть списком")
-        
-        return column.in_(value)
-    
-    elif op == 'not_in':
-        if not isinstance(value, (list, tuple)):
-            raise ValueError("Для NOT_IN значение должно быть списком")
-        
-        return ~column.in_(value)
-    
-    elif op == 'between':
-        # Границы — списком в 'value' или парой 'value' + 'value2' (как в описании узла, FL5)
-        if not isinstance(value, (list, tuple)) and value2 is not None:
-            value = [value, value2]
-        if not isinstance(value, (list, tuple)) or len(value) != 2:
-            raise ValueError("Для BETWEEN значение должно быть списком из двух элементов")
-        
-        v1 = _convert_value(column, value[0])
-        v2 = _convert_value(column, value[1])
-
-        return column.between(v1, v2)
-    
-    elif op == 'is_null':
-        return column.is_(None)
-    elif op == 'is_not_null':
-        return column.isnot(None)
-    else:
-        raise ValueError(f"Неизвестный оператор: {op}")
+    # Условия по оператору — column_condition (перенесено без изменений, FL6: то же для
+    # текста поля-заметки)
+    return column_condition(column, op, value, value2)
 
 @AppLogger.get_instance(
     name = 'filtering.py',
@@ -597,6 +554,129 @@ def escape_like(
 
 #     # Возвращаем запрос и список пост-фильтров
 #     return query, post_filters
+
+def column_condition(
+    column: Any, # столбец модели (или текст заметки)
+    op: str, # оператор (FilterOperator)
+    value: Any, # значение
+    value2: Any = None, # вторая граница для between
+) -> Any:
+    """
+    Условие SQLAlchemy «столбец <оператор> значение» для листа фильтра.
+
+    Операторы: ``eq, ne, gt, ge, lt, le, like, ilike, in, not_in, between, is_null,
+    is_not_null``. Значение приводится к типу столбца (``_convert_value``), кроме
+    ``like``/``ilike`` (по тексту — ``like_condition``).
+
+    Args:
+        column: Столбец.
+        op: Оператор.
+        value: Значение (для ``in``/``not_in``/``between`` — список).
+        value2: Вторая граница ``between`` (если ``value`` — не список).
+
+    Returns:
+        Условие SQLAlchemy.
+
+    Raises:
+        ValueError: Неизвестный оператор или неверное значение.
+
+    Example:
+        >>> import sqlalchemy as sa
+        >>> str(column_condition(sa.column('n', sa.Integer()), 'gt', '5'))
+        'n > :n_1'
+    """
+    # «Содержит» — по тексту столбца, без приведения значения к типу столбца (FL1):
+    # раньше '1' для числового id приводилось к int → escape_like(int) падал AttributeError
+    if op in ('like', 'ilike'):
+        return like_condition(column, value, case_insensitive=(op == 'ilike'))
+
+    value = _convert_value(column, value) if value is not None else None
+
+    if op == 'eq':
+        return column == value
+    elif op == 'ne':
+        return column != value
+    elif op == 'gt':
+        return column > value
+    elif op == 'ge':
+        return column >= value
+    elif op == 'lt':
+        return column < value
+    elif op == 'le':
+        return column <= value
+    # elif op == 'like':
+    #     safe = escape_like(value)
+    #     return column.like(f"%{safe}%", escape='\\')
+    # elif op == 'ilike':
+    #     safe = escape_like(value)
+    #     return column.ilike(f"%{safe}%", escape='\\')
+    # ↑ до rework-filtering (2026-10-21): like/ilike — выше, через like_condition (FL1, FL2)
+    elif op == 'in':
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("Для IN значение должно быть списком")
+        
+        return column.in_(value)
+    
+    elif op == 'not_in':
+        if not isinstance(value, (list, tuple)):
+            raise ValueError("Для NOT_IN значение должно быть списком")
+        
+        return ~column.in_(value)
+    
+    elif op == 'between':
+        # Границы — списком в 'value' или парой 'value' + 'value2' (как в описании узла, FL5)
+        if not isinstance(value, (list, tuple)) and value2 is not None:
+            value = [value, value2]
+        if not isinstance(value, (list, tuple)) or len(value) != 2:
+            raise ValueError("Для BETWEEN значение должно быть списком из двух элементов")
+        
+        v1 = _convert_value(column, value[0])
+        v2 = _convert_value(column, value[1])
+
+        return column.between(v1, v2)
+    
+    elif op == 'is_null':
+        return column.is_(None)
+    elif op == 'is_not_null':
+        return column.isnot(None)
+    else:
+        raise ValueError(f"Неизвестный оператор: {op}")
+
+
+def note_condition(
+    fk_column: Any, # столбец записи со ссылкой на заметку (например, Patient.description_id)
+    note_model: Any, # модель заметок
+    text_column: Any, # столбец текста заметки
+    op: str, # оператор
+    value: Any, # значение
+    value2: Any = None, # вторая граница для between
+) -> Any:
+    """
+    Условие по тексту поля-заметки (подзапрос ``EXISTS`` к таблице заметок).
+
+    * ``is_null`` — заметки нет или её текст пустой;
+    * ``is_not_null`` — есть заметка с непустым текстом;
+    * остальные — есть заметка, текст которой удовлетворяет ``column_condition``.
+
+    Args:
+        fk_column: Ссылка записи на заметку.
+        note_model: Модель заметок.
+        text_column: Текст заметки.
+        op: Оператор.
+        value: Значение.
+        value2: Вторая граница ``between``.
+
+    Returns:
+        Условие SQLAlchemy.
+    """
+    has_text = and_(text_column.isnot(None), text_column != '')
+    if op == 'is_null':
+        return or_(fk_column.is_(None), ~exists(select(note_model.id).where(note_model.id == fk_column, has_text)))
+    if op == 'is_not_null':
+        return exists(select(note_model.id).where(note_model.id == fk_column, has_text))
+    condition = column_condition(text_column, op, value, value2)
+    return exists(select(note_model.id).where(note_model.id == fk_column, condition))
+
 
 def like_condition(
     column: Any, # столбец модели (любого типа)

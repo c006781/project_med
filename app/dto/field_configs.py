@@ -422,17 +422,32 @@ PHOTO_CONFIG: Dict[str, Dict[str, Any]] = PHOTOS.build_config()
 from app.database.database_shema.clinic import Patient, Appointment
 
 # Словарь соответствия модель -> конфигурация полей
+# Устарело (DYN2, 2026-10-16): кто ссылается на заметки, сервис заметок узнаёт из схемы БД
+# (внешние ключи), а не отсюда; карту читает только регистрация в app.dependencies,
+# результат которой никто не использует. Новую таблицу сюда добавлять НЕ нужно.
 MODEL_CONFIG_MAP: Dict = {
     Patient: PATIENT_CONFIG,
     Appointment: APPOINTMENT_CONFIG,
 }
 
-def get_note_fields(field_configs: Dict[str, Dict[str, Any]]) -> List[str]:
+def get_note_fields(
+    field_configs: Dict[str, Dict[str, Any]], # конфигурация полей (например, PATIENT_CONFIG)
+) -> List[str]:
     """
-    Возвращает список имён полей, помеченных как is_note, из переданной конфигурации.
+    Имена полей-ссылок на заметки (значения ключа ``is_note``) из конфигурации.
 
-    :param field_configs: Словарь конфигурации полей (например, PATIENT_CONFIG)
-    :return: Список строк – имена полей, у которых установлен ключ 'is_note' (независимо от значения, но обычно строка)
+    У виртуального поля текста заметки (``description_text``) ``is_note`` — имя поля с id
+    заметки (``description_id``); возвращаются именно они.
+
+    Args:
+        field_configs (Dict[str, Dict[str, Any]]): Конфигурация полей.
+
+    Returns:
+        List[str]: Имена полей с id заметок, в порядке конфигурации.
+
+    Example:
+        >>> get_note_fields({'description_text': {'is_note': 'description_id'}, 'phone': {}})
+        ['description_id']
     """
     note_fields = []
     for name, cfg in field_configs.items():

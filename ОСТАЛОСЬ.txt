@@ -21,6 +21,9 @@
               EntityNotFoundError/EntityValidationError (поле и причина), ConnectionError
               больше не перекрывает встроенный при import *, pickle исключений, экспорт.
               → app/exceptions/IMPLEMENTATION.md
+  2026-10-21  app/dto, ветка rework-dto: ФИО без отчества («Ошибка загрузки»), «не найден»,
+              примеры в докстрингах; найдена регрессия DTO из app/schema — id заметок без
+              exclude (DT6, правится в app/schema). → app/dto/IMPLEMENTATION.md
 
 
 =====================================================================

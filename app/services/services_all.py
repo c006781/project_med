@@ -35,7 +35,7 @@
            return super()._get_child_service(relation_name)
 
 5. Зарегистрируйте сервис в `app/dependencies.py` с декораторами `@register_service_provider` и `@lru_cache`.
-6. Если модель имеет поля `is_note`, добавьте её в `MODEL_CONFIG_MAP` в `field_configs.py`.
+6. (Устарело с DYN2: `MODEL_CONFIG_MAP` не нужен — ссылки на заметки берутся из схемы БД.)
 
 Пример для сервиса без заметок и без дочерних:
     class InventoryService(BaseService[Inventory, InventoryDTO, InventoryRepository]):
@@ -208,6 +208,7 @@ from app.exceptions import (
     # DATA9 (2026-10-16): исключения валидации сущностей
     AppointmentValidationError, AppointmentNoteValidationError, PhotoValidationError,
     EntityNotFoundError,  # DYN9: общее «не найдено»
+    EntityValidationError, # общая ошибка проверки поля (таблица без своего класса)
 )
 # except ImportError as e:
 #     try:
@@ -351,7 +352,7 @@ class BaseService(
             return super()._get_child_service(relation_name)
 
     6. Зарегистрируйте сервис в `app/dependencies.py` с декораторами `@register_service_provider` и `@lru_cache`.
-    7. Если модель имеет поля `is_note`, добавьте её в `MODEL_CONFIG_MAP` в `field_configs.py`.
+    7. (Устарело с DYN2: `MODEL_CONFIG_MAP` не нужен — ссылки на заметки берутся из схемы БД.)
 
     Пример для сущности без заметок и дочерних связей:
         class InventoryService(BaseService[Inventory, InventoryDTO, InventoryRepository]):
@@ -2222,7 +2223,8 @@ class BaseService(
     def _validation_error(self, field: str, reason: str) -> Exception:
         """
         Исключение валидации для этой сущности: ``_validation_exception(field, reason)``
-        (``PatientValidationError`` и т. п. — они же ``ValueError``), иначе ``ValueError``.
+        (``PatientValidationError`` и т. п. — они же ``ValueError``), иначе
+        ``EntityValidationError(field, reason, entity=<модель>)`` (тоже ``ValueError``).
 
         Args:
             field: Поле (или перечень названий полей).
@@ -2236,7 +2238,11 @@ class BaseService(
         """
         if self._validation_exception is not None:
             return self._validation_exception(field, reason)
-        return ValueError(f"{reason}: {field}")
+        # return ValueError(f"{reason}: {field}")
+        # ↑ до rework-services-errors (2026-10-21): у таблицы без своего класса — голый
+        #   ValueError без поля и причины. EntityValidationError — тоже ValueError (интерфейс
+        #   ловит по-прежнему), но с exc.field / exc.reason / exc.entity (app/exceptions).
+        return EntityValidationError(field, reason, entity=self._model_class.__name__)
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -4302,7 +4308,7 @@ class NoteService(
     Особенности:
         - Используется всеми сервисами через `_apply_note_updates`.
         - Реализует метод `cleanup_unused_note`, который удаляет заметку, если она больше не используется
-          ни в одной из зарегистрированных моделей (через `_NOTE_USAGE_MODELS`).
+          ни в одной таблице (ссылки — внешние ключи на таблицу заметок из схемы БД, DYN2).
         - Переопределяет `_get_note_service`, возвращая None (у заметок нет своих заметок).
 
     Примечание:

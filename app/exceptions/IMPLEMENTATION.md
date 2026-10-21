@@ -28,7 +28,7 @@ AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle
   текст (`super().__init__(..., code=, message=)`).
 * Сервисы выбирают исключение так: «не найдено» — `BaseService._not_found_exception`
   (по умолчанию `EntityNotFoundError`), проверка — `_validation_exception` у сервиса
-  (у таблиц без класса пока `ValueError` — см. §4).
+  (у таблицы без своего класса — `EntityValidationError`).
 * Тексты и коды исключений конкретных таблиц не менялись (на них опираются тесты и
   командная строка).
 
@@ -75,6 +75,5 @@ AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle
 
 ## 4. Дальше
 
-* Сервисы: `BaseService._validation_error` для таблицы без своего класса — бросать
-  `EntityValidationError(field, reason, entity=<модель>)` вместо `ValueError` (шаг
-  «сервисы»).
+* ~~Сервисы: `BaseService._validation_error` для таблицы без своего класса —
+  `EntityValidationError`~~ — сделано 2026-10-21 (app/services/IMPLEMENTATION.md §3.3, SE1).

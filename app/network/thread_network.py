@@ -9,7 +9,7 @@ from app.network.ya_dop import (
     yadisk_upload_file,
 )
 # from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
-# ↑ до fix/yadisk (2026-10-21): check_remote_file_exists не импортировалась — DownloadThread.run
+# ↑ до rework-yadisk (2026-10-21): check_remote_file_exists не импортировалась — DownloadThread.run
 #   сразу падал с «name 'check_remote_file_exists' is not defined», скачивание БД не работало.
 
 class DownloadThread(QThread):

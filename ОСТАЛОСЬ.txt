@@ -24,6 +24,8 @@
   2026-10-21  app/dto, ветка rework-dto: ФИО без отчества («Ошибка загрузки»), «не найден»,
               примеры в докстрингах; найдена регрессия DTO из app/schema — id заметок без
               exclude (DT6, правится в app/schema). → app/dto/IMPLEMENTATION.md
+  2026-10-21  app/schema, ветка rework-schema: id заметок в DTO снова не выгружаются в
+              model_dump() (регрессия генерации DTO 2026-10-19). → app/schema/IMPLEMENTATION.md
 
 
 =====================================================================

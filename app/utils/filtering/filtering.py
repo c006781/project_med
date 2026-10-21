@@ -33,6 +33,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Query
 from sqlalchemy import or_, and_, true  # true — «истина» для узла fuzzy (DATA4)
+from sqlalchemy import String, cast # like/ilike по нестроковому столбцу (FL1)
 
 
 @AppLogger.get_instance(
@@ -108,11 +109,16 @@ def _build_filter_condition(
 
     if 'and' in filter_node:
         subconds = [_build_filter_condition(sub, model, note_mappings, _inside_or) for sub in filter_node['and']]
-        return and_(*subconds)
+        # Пустой 'and' — без отбора (как было); and_() без аргументов устарел в SQLAlchemy 2.x (FL3)
+        return and_(*subconds) if subconds else true()
+        # return and_(*subconds)
 
     if 'or' in filter_node:
         subconds = [_build_filter_condition(sub, model, note_mappings, True) for sub in filter_node['or']]
-        return or_(*subconds)
+        # Пустой 'or' — без отбора (как было: or_() без аргументов ничего не добавлял в запрос);
+        # or_() без аргументов устарел в SQLAlchemy 2.x (FL3)
+        return or_(*subconds) if subconds else true()
+        # return or_(*subconds)
 
     # Узел-лист
     column_name = filter_node['column']
@@ -162,6 +168,12 @@ def _build_filter_condition(
         raise ValueError(f"Столбец {column_name} не найден в модели {model.__name__}")
 
     column = getattr(model, column_name)
+
+    # «Содержит» — по тексту столбца, без приведения значения к типу столбца (FL1):
+    # раньше '1' для числового id приводилось к int → escape_like(int) падал AttributeError
+    if op in ('like', 'ilike'):
+        return like_condition(column, value, case_insensitive=(op == 'ilike'))
+
     value = _convert_value(column, value) if value is not None else None
 
     if op == 'eq':
@@ -176,12 +188,13 @@ def _build_filter_condition(
         return column < value
     elif op == 'le':
         return column <= value
-    elif op == 'like':
-        safe = escape_like(value)
-        return column.like(f"%{safe}%", escape='\\')
-    elif op == 'ilike':
-        safe = escape_like(value)
-        return column.ilike(f"%{safe}%", escape='\\')
+    # elif op == 'like':
+    #     safe = escape_like(value)
+    #     return column.like(f"%{safe}%", escape='\\')
+    # elif op == 'ilike':
+    #     safe = escape_like(value)
+    #     return column.ilike(f"%{safe}%", escape='\\')
+    # ↑ до rework-filtering (2026-10-21): like/ilike — выше, через like_condition (FL1, FL2)
     elif op == 'in':
         if not isinstance(value, (list, tuple)):
             raise ValueError("Для IN значение должно быть списком")
@@ -195,6 +208,9 @@ def _build_filter_condition(
         return ~column.in_(value)
     
     elif op == 'between':
+        # Границы — списком в 'value' или парой 'value' + 'value2' (как в описании узла, FL5)
+        if not isinstance(value, (list, tuple)) and value2 is not None:
+            value = [value, value2]
         if not isinstance(value, (list, tuple)) or len(value) != 2:
             raise ValueError("Для BETWEEN значение должно быть списком из двух элементов")
         
@@ -409,16 +425,23 @@ def _convert_value(column, value: Any) -> Any:
         try:
             return datetime.time.fromisoformat(value)
         
-        except AttributeError as e:            
+        # except AttributeError as e:
+        # ↑ до rework-filtering (2026-10-21): fromisoformat('9:30') бросает ValueError, а не
+        #   AttributeError — запасной разбор «Ч:ММ» не срабатывал (FL4)
+        except (AttributeError, ValueError) as e:
             AppLogger.get_instance( 
                 name = '_convert_value',
                 enable_file_logging = 'user',
                 use_name_in_filename = False, 
             ).error(f"Ошибка преобразования времени {e}")
 
-            h, m = map(int, value.split(':'))
-
-            return datetime.time(h, m)
+            # h, m = map(int, value.split(':'))
+            # return datetime.time(h, m)
+            # ↑ до rework-filtering (2026-10-21): только «Ч:ММ»; теперь и «Ч:ММ:СС»
+            parts = [int(part) for part in str(value).strip().split(':')]
+            if not 2 <= len(parts) <= 3:
+                raise ValueError(f"Неверный формат времени: {value!r} (нужно Ч:ММ или Ч:ММ:СС)")
+            return datetime.time(*parts)
         
     return value
 
@@ -429,17 +452,30 @@ def _convert_value(column, value: Any) -> Any:
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
-def escape_like(value: str, escape_char: str = '\\') -> str:
+def escape_like(
+    value: Any, # что искать (None — пустая строка, не строка — str(value))
+    escape_char: str = '\\', # символ экранирования
+) -> str:
     """
     Экранирует спецсимволы % и _ в строке для LIKE.
 
     Args:
-        value: Строка, которую нужно экранировать.
+        value: Строка, которую нужно экранировать (``None`` → ``''``, число → ``str``).
         escape_char: Символ экранирования (по умолчанию '\\').
 
     Returns:
         Строка, в которой символы '%', '_' и сам escape_char экранированы.
+
+    Example:
+        >>> escape_like('50%_')
+        '50\\\\%\\\\_'
+        >>> escape_like(None)
+        ''
+        >>> escape_like(15)
+        '15'
     """
+    # До rework-filtering (2026-10-21): None или число → AttributeError (FL2)
+    value = '' if value is None else str(value)
 
     return value.replace(
         escape_char, escape_char * 2
@@ -561,6 +597,37 @@ def escape_like(value: str, escape_char: str = '\\') -> str:
 
 #     # Возвращаем запрос и список пост-фильтров
 #     return query, post_filters
+
+def like_condition(
+    column: Any, # столбец модели (любого типа)
+    value: Any, # что искать (None — пусто: подходит любое непустое значение)
+    case_insensitive: bool = True, # ilike (True) или like (False)
+) -> Any:
+    """
+    Условие «столбец содержит value» (LIKE %value%), спецсимволы экранируются.
+
+    Нестроковый столбец (число, дата) сравнивается по тексту: ``CAST(столбец AS VARCHAR)``.
+
+    Args:
+        column: Столбец модели.
+        value: Что искать.
+        case_insensitive: Без учёта регистра.
+
+    Returns:
+        Условие SQLAlchemy.
+
+    Example:
+        >>> import sqlalchemy as sa
+        >>> str(like_condition(sa.column('id', sa.Integer()), 5, case_insensitive=False)).startswith(
+        ...     'CAST(id AS VARCHAR) LIKE')
+        True
+    """
+    target = column if isinstance(getattr(column, 'type', None), String) else cast(column, String)
+    pattern = f"%{escape_like(value)}%"
+    if case_insensitive:
+        return target.ilike(pattern, escape='\\')
+    return target.like(pattern, escape='\\')
+
 
 @AppLogger.get_instance(
     name = 'filtering.py',

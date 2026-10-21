@@ -578,7 +578,12 @@ class TableDef:
                 continue
             if spec.kind == 'note':
                 result[spec.text_name] = (Optional[str], Field(None, description=spec.dto_desc))
-                result[spec.id_name] = (Optional[int], Field(None, description=spec.id_dto_desc))
+                # id заметки — служебное поле: в model_dump() не выгружается (как в DTO,
+                # написанных вручную до 2026-10-19)
+                result[spec.id_name] = (Optional[int], Field(None, description=spec.id_dto_desc, exclude=True))
+                # result[spec.id_name] = (Optional[int], Field(None, description=spec.id_dto_desc))
+                # ↑ до rework-schema (2026-10-21): без exclude=True — id заметок попадали в
+                #   model_dump() (регрессия генерации DTO 2026-10-19, DT6 в app/dto/IMPLEMENTATION.md)
                 continue
             annotation = spec.dto_type
             required = spec.kind in ('column', 'fk') and not spec.nullable

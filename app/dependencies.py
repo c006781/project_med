@@ -13,6 +13,7 @@ from typing import (
     get_args,
     Union
 )
+from typing import Any, Callable, List # реестр поставщиков сервисов
 import datetime
 # import inspect
 
@@ -46,25 +47,54 @@ from pydantic import BaseModel
 # ------------------------------------------------------------
 # Глобальный реестр для заметок
 # ------------------------------------------------------------
-_NOTE_USAGE_MODELS = []   # список кортежей (model_class, [поля_заметок])
-
-from app.dto.field_configs import get_note_fields
-def register_note_model(model_class, field_configs):
-    fields = get_note_fields(field_configs)
-    if fields:
-        _NOTE_USAGE_MODELS.append((model_class, fields))
-
-# Автоматическая регистрация всех моделей из MODEL_CONFIG_MAP
-from app.dto.field_configs import MODEL_CONFIG_MAP
-
-for model_class, field_configs in MODEL_CONFIG_MAP.items():
-    register_note_model(model_class, field_configs)
+# _NOTE_USAGE_MODELS = []   # список кортежей (model_class, [поля_заметок])
+#
+# from app.dto.field_configs import get_note_fields
+# def register_note_model(model_class, field_configs):
+#     fields = get_note_fields(field_configs)
+#     if fields:
+#         _NOTE_USAGE_MODELS.append((model_class, fields))
+#
+# # Автоматическая регистрация всех моделей из MODEL_CONFIG_MAP
+# from app.dto.field_configs import MODEL_CONFIG_MAP
+#
+# for model_class, field_configs in MODEL_CONFIG_MAP.items():
+#     register_note_model(model_class, field_configs)
+# ↑ до rework-dependencies (2026-10-21): реестр моделей с заметками не читается с DYN2
+#   (2026-10-16) — сервис заметок узнаёт ссылки из схемы БД (внешние ключи). Регистрация
+#   при импорте была мёртвым кодом (DP3; app/dto/IMPLEMENTATION.md DT5).
 
 #############################
 
-_SERVICE_PROVIDERS = []
+# Поставщики сервисов (get_*_service): перезагрузка настроек (ConfigApplier) и сброс кэша
+# (clear_services_cache) идут по этому списку — новый сервис достаточно пометить декоратором
+_SERVICE_PROVIDERS: List[Callable[[], Any]] = []
 
-def register_service_provider(func):
+
+def register_service_provider(
+    func: Callable[[], Any], # поставщик сервиса (обычно обёрнут lru_cache)
+) -> Callable[[], Any]:
+    """
+    Регистрирует поставщика сервиса.
+
+    Порядок декораторов: ``@register_service_provider`` снаружи, ``@lru_cache`` под ним —
+    тогда зарегистрирован кэширующий поставщик (у него есть ``cache_clear``).
+
+    Args:
+        func: Поставщик сервиса.
+
+    Returns:
+        Тот же поставщик.
+
+    Example:
+        >>> @register_service_provider
+        ... @lru_cache(maxsize=1)
+        ... def get_my_service():
+        ...     return object()
+        >>> get_my_service in _SERVICE_PROVIDERS
+        True
+        >>> _SERVICE_PROVIDERS.remove(get_my_service)   # убрать пример из реестра
+    """
     _SERVICE_PROVIDERS.append(func)
     return func
 
@@ -162,11 +192,17 @@ def clear_services_cache() -> None:
     Вызывается в reload_config сервисов, чтобы гарантировать получение
     новых экземпляров с обновлёнными настройками.
     """
-    get_patient_service.cache_clear()
-    get_appointment_service.cache_clear()
-    get_note_service.cache_clear()
-    get_photo_service.cache_clear()
-    # Если в будущем появятся другие закэшированные сервисы, добавить их сюда
+    # get_patient_service.cache_clear()
+    # get_appointment_service.cache_clear()
+    # get_note_service.cache_clear()
+    # get_photo_service.cache_clear()
+    # # Если в будущем появятся другие закэшированные сервисы, добавить их сюда
+    # ↑ до rework-dependencies (2026-10-21): список вручную — новый сервис легко забыть (DP2).
+    #   Теперь — все зарегистрированные поставщики с кэшем.
+    for provider in _SERVICE_PROVIDERS:
+        cache_clear = getattr(provider, 'cache_clear', None)
+        if callable(cache_clear):
+            cache_clear()
 
 @register_service_provider
 @lru_cache(maxsize=1)

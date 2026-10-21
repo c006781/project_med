@@ -1,6 +1,6 @@
 ЧТО ОСТАЛОСЬ: НЕПРАВИЛЬНО, НЕ ИСПРАВЛЕНО, НЕ ПЕРЕРАБОТАНО
 Состояние на 2026-10-21, ветка rework.
-Тесты: 1745 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
+Тесты: 1757 прошли, 10 падают (п. 2.1, 2.3), 2 пропущены, 5 ожидаемо падают (xfail).
 Подробности по модулям — в IMPLEMENTATION.md рядом с кодом.
 Техдолг (что не решено и ждёт решения) — ТЕХДОЛГ.txt; идеи улучшений — ИДЕИ.txt.
 
@@ -36,14 +36,15 @@
               partial, выполнение без приложения Qt. → app/utils/IMPLEMENTATION.md
   2026-10-21  app/utils/virtual_fields.py, ветка rework-virtual-fields: вычисление без
               extra_data падало TypeError. → app/utils/IMPLEMENTATION.md
+  2026-10-21  app/dependencies.py, ветка rework-dependencies: сброс кэша всех
+              зарегистрированных сервисов (был список вручную), мёртвый реестр заметок
+              убран. → app/DEPENDENCIES.md
 
 ПЛАН ПРОДОЛЖЕНИЯ (остановлено 2026-10-21; порядок — от основы к окну)
   Основа — ещё не проходились по новым правилам (докстринги/типы/тесты/журнал):
     2. (app/repositories — уже проверен 2026-10-16, журнал в app/services/IMPLEMENTATION.md §3.2)
     3. app/utils/*.py         — проход 2 по file_deletions/deferred_actions/virtual_fields;
                                 colors, qt_meta — не проверены.
-    4. app/dependencies.py    — убрать мёртвую регистрацию _NOTE_USAGE_MODELS/MODEL_CONFIG_MAP
-                                (DT5); журнала нет.
     5. app/services           — _validation_error для таблицы без класса → EntityValidationError
                                 (app/exceptions §4); убрать из описания BaseService
                                 инструкцию про MODEL_CONFIG_MAP (DT5).
@@ -57,7 +58,7 @@
        pending_release_data вместо hasattr, is_github_reachable при старте (блокирует окно).
     8. settings_page.py — потоки проверки токена/папки (сейчас не падают — app/network N1).
     9. utils/dataset_qt, экраны — ОСТАЛОСЬ п. 4–5.
-  Техдолг — ТЕХДОЛГ.txt (ТД-1…ТД-5), идеи — ИДЕИ.txt (И-1…И-9).
+  Техдолг — ТЕХДОЛГ.txt (ТД-1…ТД-6), идеи — ИДЕИ.txt (И-1…И-10).
 
 
 =====================================================================

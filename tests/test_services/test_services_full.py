@@ -274,17 +274,24 @@ def test_photo_service_delete_photo(photo_service, sample_photo, tmp_path, db_se
     #   tests/test_services/test_data_layer_review.py::test_photo_file_removed_after_delete
 
 # ---------- SyncService (без Qt) ----------
+from app.services.sync_service import remote_db_file_path
+
 def test_sync_service_prepare_download(sync_service):
     thread = sync_service.prepare_download()
     assert thread.token == sync_service.token
-    assert thread.remote_path == sync_service.remote_path
+    assert thread.remote_path == remote_db_file_path(sync_service.remote_path, sync_service.local_path)
+    # assert thread.remote_path == sync_service.remote_path
+    # ↑ до rework-sync-service (2026-10-21): папка из настроек дополняется именем файла БД
     assert thread.local_path == sync_service.local_path
 
 def test_sync_service_prepare_upload(sync_service):
     thread = sync_service.prepare_upload()
     assert thread.token == sync_service.token
     assert thread.local_path == sync_service.local_path
-    assert thread.remote_path == sync_service.remote_path
+    assert thread.remote_path == remote_db_file_path(sync_service.remote_path, sync_service.local_path)
+    # assert thread.remote_path == sync_service.remote_path
+    # ↑ до rework-sync-service (2026-10-21): папка из настроек дополняется именем файла БД
+    assert thread.overwrite is True
 
 
 from unittest.mock import patch, MagicMock
@@ -363,3 +370,39 @@ def test_sync_service_upload_with_progress(sync_service):
         # mock_y.mkdir.assert_called_once()
         # ↑ до rework-yadisk (2026-10-21): папка на Диске теперь создаётся makedirs (с родителями)
         mock_y.upload.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "remote, expected",
+    [
+        ("Папка/база", "Папка/база/clinic.db"),          # папка — дописывается имя файла
+        ("Папка/база/", "Папка/база/clinic.db"),         # завершающий слэш не удваивается
+        ("/Папка/main.sqlite", "/Папка/main.sqlite"),    # уже файл БД — без изменений
+        ("/Папка/main.DB", "/Папка/main.DB"),            # расширение без учёта регистра
+        ("", "/clinic.db"),                              # пусто — корень Диска
+        (None, "/clinic.db"),                            # не задано — корень Диска
+    ],
+)
+def test_remote_db_file_path(remote, expected):
+    """Путь к файлу БД на Диске — как MainWindow._correct_remote_path."""
+    assert remote_db_file_path(remote, "./data/clinic.db") == expected
+
+
+def test_sync_service_sync_uses_file_path_and_overwrite(sync_service, tmp_path):
+    """
+    download_sync/upload_sync: папка из настроек дополняется именем файла БД,
+    выгрузка заменяет файл на Диске (overwrite=True).
+    """
+    local = tmp_path / "clinic.db"
+    local.write_bytes(b"data")
+    sync_service.local_path = str(local)
+    sync_service.remote_path = "Папка/база"
+    with patch('app.services.sync_service.yadisk_download_file') as mock_download, \
+         patch('app.services.sync_service.yadisk_upload_file') as mock_upload:
+        mock_download.return_value = 0
+        mock_upload.return_value = 0
+        assert sync_service.download_sync() == 0
+        assert sync_service.upload_sync() == 0
+    assert mock_download.call_args.kwargs["ya_file_path"] == "Папка/база/clinic.db"
+    assert mock_upload.call_args.kwargs["ya_file_path"] == "Папка/база/clinic.db"
+    assert mock_upload.call_args.kwargs["overwrite"] is True

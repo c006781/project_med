@@ -37,6 +37,9 @@ def compute_virtual_fields(
     :return: словарь с вычисленными значениями (может содержать и исходные поля)
     """
     result = data.copy() # копируем исходный словарь
+    # extra_data=None (значение по умолчанию) — пустой словарь: журнал ниже проверяет
+    # `arg_name in extra_data` (раньше TypeError на первом же поле с аргументами, VF1)
+    extra_data = extra_data or {}
     logger =  AppLogger.get_instance(
         name='api.virtual_fields.py',
         enable_file_logging = 'user',

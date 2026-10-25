@@ -32,8 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Hashable, Iterable, List, Optional, Protocol, Sequence, Tuple,
-    Union, runtime_checkable,
+    TYPE_CHECKING, Any, Callable, Dict, Hashable, Iterable, List, Optional, Protocol, Sequence, Set,
+    Tuple, Union, runtime_checkable,
 )
 
 from .backend import DataBackend, RowOverlay
@@ -161,6 +161,7 @@ class AggregateDef:
         backend = dataset.backend if dataset is not None else self.child
         writer = dataset.writer if dataset is not None else None
         result: List[Dict[str, Any]] = []
+        seen: Set[Hashable] = set()          # DS5: ключи подчинённых строк, уже взятых в итог
         for start in range(0, len(keys), CHUNK):
             part = list(keys[start:start + CHUNK])
             query = Query(conditions=(Condition(self.link_field, Op.IN, part),) + self.where)
@@ -173,6 +174,21 @@ class AggregateDef:
                 rows = [dict(r) for r in writer.overlay(dataset, rows, query, True)]
                 key_field = backend.key_field
                 rows = [r for r in rows if writer.row_status(dataset, r.get(key_field)) != 'deleted']
+                # DS5 (2026-10-25): поверх хранилища — несохранённые значения, поэтому
+                # условия итога (where) — заново: строка, переставшая им отвечать в
+                # отложенной записи, раньше всё равно считалась. Новые строки способа
+                # записи, не проверяющего условий запроса, приходят в каждом куске
+                # ключей — берутся один раз (раньше — по разу на кусок). Условие связи
+                # (IN ключей куска) заново не проверяется: строку, перенесённую к другой
+                # главной, итог видит у новой (её отбирает compute)
+                rows = [r for r in rows if all(c.matches(r) for c in self.where)]
+                unique = []
+                for row in rows:
+                    key = row.get(key_field)
+                    if key is None or key not in seen:
+                        seen.add(key)
+                        unique.append(row)
+                rows = unique
             result.extend(rows)
         return result
 

@@ -152,8 +152,14 @@ class MasterDetailLink:
         """
         Сверяет подчинённый набор с текущей главной строкой (изменилось — перечитывает).
 
+        Ошибка чтения подчинённого — дальше (из подписчика — в журнал); связь остаётся
+        несверенной и пробует снова на следующем событии главного.
+
         Returns:
             None
+
+        Raises:
+            Exception: Ошибка источника подчинённого (его условия — прежние, DS6).
 
         Пример:
             >>> link.sync()
@@ -161,8 +167,12 @@ class MasterDetailLink:
         values = self._master_values()
         if values == self._last:
             return
-        self._last = values
+        # self._last = values
+        # self.detail.set_master(values)
+        # ↑ до 2026-10-25 (DS6): «сверено» запоминалось ДО перечитывания подчинённого —
+        # после ошибки чтения связь считала его сверенным и больше не пробовала
         self.detail.set_master(values)
+        self._last = values
 
     def _on_master(self, event: DataEvent) -> None:
         """

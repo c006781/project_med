@@ -55,4 +55,6 @@ _dev/hashes.checked
 # хеши — у каждой машины свои (Windows: рабочая копия с CRLF), 2026-10-25
 _dev/hashes.sha256
 
+# параллельные агенты — координация вне git (skill dev-rules п. 10), 2026-10-26
 _dev/agents/
+_dev/ПАРАЛЛЕЛЬНАЯ_РАБОТА.md

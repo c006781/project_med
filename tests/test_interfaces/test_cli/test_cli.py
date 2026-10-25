@@ -106,10 +106,17 @@ def runner():
     """
     return CliRunner()
 
+# ТД-3 (2026-10-25): тесты ждут полей, которых нет в модели (email у пациента, время
+# приёма --time). Решение владельца 25.10: поля, возможно, вернутся — тесты отключить, а
+# нужность полей обсудить позже (_dev/ТЕХДОЛГ.md ТД-3). Проверки в тестах не менялись.
+SKIP_TD3 = pytest.mark.skip(reason='ТД-3: нет полей email / --time — решение о полях отложено владельцем (2026-10-25)')
+
+
 # ----------------------------------------------------------------------
 # Тесты команд для пациентов
 # ----------------------------------------------------------------------
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_patient_list_no_filter(runner, mock_patient_service):
     """
     Тест на вывод списка пациентов без фильтрации.
@@ -300,6 +307,7 @@ def test_patient_list_invalid_filter(runner):
     assert result.exit_code != 0
     assert "Неверный формат фильтра" in result.output
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_patient_get_success(runner, mock_patient_service):
     """
     Тест на вывод информации о пациенте.
@@ -579,6 +587,7 @@ def test_patient_delete_not_found(runner, mock_patient_service):
 # Тесты команд для приёмов
 # ----------------------------------------------------------------------
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_appointment_list_all(runner, mock_appointment_service):
     """
     Тест на получение списка всех приёмов.
@@ -720,6 +729,7 @@ def test_appointment_list_with_filter(runner, mock_appointment_service):
         ], 60
     )
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_appointment_get_success(runner, mock_appointment_service):
     """
     Тест на получение информации о приёме.
@@ -784,6 +794,7 @@ def test_appointment_get_not_found(runner, mock_appointment_service):
     assert result.exit_code == 0
     assert "Приём с идентификатором 1 не найден." in result.output
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_appointment_create_success(runner, mock_appointment_service):
     """
     Тест на создание приёма.
@@ -859,6 +870,7 @@ def test_appointment_create_patient_not_found(runner, mock_appointment_service):
     assert result.exit_code == 0
     assert "Пациент с идентификатором 1 не найден." in result.output
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_appointment_update_success(runner, mock_appointment_service):
     """
     Тест на обновление существующего приёма.
@@ -1745,6 +1757,7 @@ def test_appointment_create_invalid_date(runner):
     assert result.exit_code == 0  # click обрабатывает ошибку внутри команды
     assert "Неверный формат даты" in result.output
 
+@SKIP_TD3  # ТД-3, см. выше
 def test_appointment_create_invalid_time(runner):
     """
     Тест на создание приёма с неправильным временем.

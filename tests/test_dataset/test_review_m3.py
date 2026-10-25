@@ -91,7 +91,8 @@ def test_ds1_in_never_matches_empty_value_like_sql():
 # --------------------------------------------------------------------------- DS2
 
 def test_ds2_next_and_move_to_skip_empty_portion():
-    """DS2: порция, из которой не добавилось строк (способ записи их спрятал), не конец набора."""
+    """DS2: порция, из которой не добавилось строк (способ записи их спрятал), не конец набора
+    (``next``, ``move_to``, ``first`` при пустом первом окне)."""
     ds = DataSet(numbered(5), writer=Hiding({3, 4}), fetch_size=2)
     ds.open()
     assert [ds.key_at(i) for i in range(ds.row_count)] == [1, 2]
@@ -103,6 +104,10 @@ def test_ds2_next_and_move_to_skip_empty_portion():
     assert other.current_key == 5
     with pytest.raises(IndexError):
         other.move_to(3)
+    empty_first = DataSet(numbered(3), writer=Hiding({1, 2}), fetch_size=2)
+    empty_first.open()
+    assert empty_first.row_count == 0 and empty_first.has_more
+    assert empty_first.first() and empty_first.current_key == 3      # первое окно пусто
 
 
 # --------------------------------------------------------------------------- DS3

@@ -64,7 +64,10 @@ class Condition:
     op: Op = Op.EQ
     value: Any = None
 
-    def matches(self, row: Mapping[str, Any]) -> bool:
+    def matches(
+        self,
+        row : Mapping[str, Any],  # проверяемая строка
+    ) -> bool:
         """
         Подходит ли строка под условие (для источников без своей фильтрации).
 

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import QTableView
 
@@ -69,8 +69,13 @@ class DataSetTableModel(QAbstractTableModel):
     error_occurred = Signal(str)
     current_row_changed = Signal(int)
 
-    def __init__(self, source: DataSource, columns: Optional[Sequence[str]] = None,
-                 parent=None, status_colors: Optional[Mapping[str, Optional[str]]] = None) -> None:
+    def __init__(
+        self,
+        source        : DataSource,                                # источник набора
+        columns       : Optional[Sequence[str]] = None,            # поля-колонки
+        parent        : Optional[QObject] = None,                  # родитель Qt
+        status_colors : Optional[Mapping[str, Optional[str]]] = None,  # цвета по состоянию строки
+    ) -> None:
         """
         Args:
             source: Источник набора.

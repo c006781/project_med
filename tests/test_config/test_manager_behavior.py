@@ -47,7 +47,9 @@ def test_defaults_without_file(cfg_path):
     m = AppConfigManager.get_instance(config_path=cfg_path)
     assert m.config_exists is False
     assert m.get('LOG_LEVEL') == 'INFO'
-    assert m.get('system_enabled') == 'False'           # умолчания — строки (M6)
+    # assert m.get('system_enabled') == 'False'           # умолчания — строки (M6)
+    # ↑ до 2026-10-25 (M6): умолчания были строками; теперь — bool / int
+    assert m.get('system_enabled') is False
     assert not os.path.exists(cfg_path)                 # файл не создаётся до save()
 
 

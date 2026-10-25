@@ -247,3 +247,155 @@ def test_e5_unreadable_env_does_not_crash(env_file, monkeypatch, capsys):
     monkeypatch.setattr(getenv_module, 'dotenv_values', boom)
     assert get_getenv('APP_CONFIG_PATH', start_value='config.msgpack') == 'config.msgpack'
     assert 'не удалось прочитать' in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# M6: умолчания правильных типов; старые строковые значения читаются без потерь
+# ---------------------------------------------------------------------------
+
+# Ключи с типами (bool / int) и их строковые значения из старых config.msgpack
+OLD_STRING_VALUES = {
+    'LOG_MAX_BYTES'          : ('10485760', 10485760),
+    'LOG_BACKUP_COUNT'       : ('5', 5),
+    'LOG_ARGS'               : ('False', False),
+    'system_enabled'         : ('True', True),
+    'system_console_enabled' : ('False', False),
+    'system_file_enabled'    : ('true', True),
+    'user_enabled'           : ('False', False),
+    'user_console_enabled'   : ('1', True),
+    'user_file_enabled'      : ('no', False),
+    'enabled'                : ('True', True),
+    'console_enabled'        : ('False', False),
+    'file_enabled'           : ('True', True),
+    'use_timestamp'          : ('False', False),
+    'show_call_depth'        : ('True', True),
+}
+
+
+def _write_msgpack(
+    path : str,              # путь к файлу
+    data : dict,             # содержимое
+) -> None:
+    """
+    Пишет словарь в файл MessagePack (как старый ``config.msgpack``).
+
+    Args:
+        path: Путь к файлу.
+        data: Содержимое.
+
+    Returns:
+        None
+
+    Пример:
+        >>> _write_msgpack('config.msgpack', {'LOG_ARGS': 'False'})
+    """
+    import msgpack
+    with open(path, 'wb') as f:
+        msgpack.pack(data, f)
+
+
+def test_m6_defaults_have_proper_types(config_sandbox):
+    """M6: умолчания флагов — bool, чисел — int (до 2026-10-25 — строки 'False', '10485760')."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    m = AppConfigManager.get_instance(config_path=str(config_sandbox / 'config.msgpack'))
+    for key, (_, typed) in OLD_STRING_VALUES.items():
+        assert type(m.get(key)) is type(typed), key
+    assert m.get('LOG_MAX_BYTES') == 10 * 1024 * 1024
+    assert m.get('LOG_BACKUP_COUNT') == 5
+    assert m.get('enabled') is True and m.get('system_enabled') is False
+
+
+def test_m6_old_string_values_read_without_loss(config_sandbox):
+    """M6: старый ``config.msgpack`` со строковыми значениями читается: строки → bool / int."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    path = str(config_sandbox / 'config.msgpack')
+    old = {key: text for key, (text, _) in OLD_STRING_VALUES.items()}
+    old.update({'LOG_LEVEL': 'DEBUG', 'YANDEX_TOKEN': 'tok', 'CUSTOM': 'False'})
+    _write_msgpack(path, old)
+
+    m = AppConfigManager.get_instance(config_path=path)
+    for key, (_, typed) in OLD_STRING_VALUES.items():
+        assert m.get(key) == typed and type(m.get(key)) is type(typed), key
+    assert m.get('LOG_LEVEL') == 'DEBUG'          # строковые настройки — как есть
+    assert m.get('YANDEX_TOKEN') == 'tok'
+    assert m.get('CUSTOM') == 'False'             # неизвестный ключ не трогается
+    assert m.broken_config_message is None
+
+
+def test_m6_unparseable_string_kept_as_is(config_sandbox):
+    """M6: строка, которую не перевести в тип умолчания, остаётся как есть (без потерь)."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    path = str(config_sandbox / 'config.msgpack')
+    _write_msgpack(path, {'LOG_MAX_BYTES': '10 МБ', 'use_timestamp': 'on'})
+
+    m = AppConfigManager.get_instance(config_path=path)
+    assert m.get('LOG_MAX_BYTES') == '10 МБ'
+    assert m.get('use_timestamp') == 'on'
+
+
+def test_m6_old_file_not_rewritten_on_read(config_sandbox):
+    """M6: чтение старого файла его не переписывает (типы — в памяти; в файл — при save())."""
+    import msgpack
+    from app.config.config_manager.manager import AppConfigManager
+
+    path = str(config_sandbox / 'config.msgpack')
+    _write_msgpack(path, {'LOG_ARGS': 'False'})
+    AppConfigManager.get_instance(config_path=path)
+    with open(path, 'rb') as f:
+        assert msgpack.unpack(f) == {'LOG_ARGS': 'False'}
+
+
+def test_m6_typed_values_after_save_reload(config_sandbox):
+    """M6: после save() и повторного чтения значения — тех же типов."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    path = str(config_sandbox / 'config.msgpack')
+    _write_msgpack(path, {'LOG_BACKUP_COUNT': '7', 'LOG_ARGS': 'True'})
+    AppConfigManager.get_instance(config_path=path).save()
+    again = AppConfigManager.get_instance(
+        config_path = path,     # тот же файл
+        force_new   = True,     # перечитать
+    )
+    assert again.get('LOG_BACKUP_COUNT') == 7
+    assert again.get('LOG_ARGS') is True
+
+
+def test_m6_settings_snapshot_no_false_logging_change(config_sandbox):
+    """M6: старый файл со строками + экран сохраняет те же значения bool/int — блоки не «меняются».
+
+    До 2026-10-25 'False' (файл) и False (экран) считались разными — логирование
+    перенастраивалось при каждом первом сохранении настроек.
+    """
+    from app.config.config_applier import ConfigApplier
+    from app.config.config_manager.manager import AppConfigManager
+
+    path = str(config_sandbox / 'config.msgpack')
+    _write_msgpack(path, {'system_enabled': 'False', 'LOG_MAX_BYTES': '10485760'})
+    m = AppConfigManager.get_instance(config_path=path)
+    old = m.get_all()
+    m.set('system_enabled', False)                # как экран настроек: bool
+    m.set('LOG_MAX_BYTES', 10485760)              # как экран настроек: int
+    assert ConfigApplier.get_changed_blocks(old, m.get_all()) == set()
+
+
+def test_m6_logger_config_same_for_strings_and_types():
+    """M6: логгер понимает и строки, и типы — настройки логгера одинаковые."""
+    from app.utils.logger.logger import AppLogger
+
+    strings = {key: text for key, (text, _) in OLD_STRING_VALUES.items()}
+    typed = {key: value for key, (_, value) in OLD_STRING_VALUES.items()}
+    log = AppLogger.get_instance('test.m6.types')
+    from_strings = log._get_config_with_inheritance(
+        AppLogger.build_logger_config(strings),   # старый файл
+        None,
+        None,
+    )
+    from_typed = log._get_config_with_inheritance(
+        AppLogger.build_logger_config(typed),     # новые типы
+        None,
+        None,
+    )
+    assert from_strings == from_typed

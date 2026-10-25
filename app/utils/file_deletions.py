@@ -420,35 +420,57 @@ def schedule_deletion(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def del_file_and_parent_dir(
+#     file_path: str,
+#     remove_parent_if_empty: bool = False,
+#     force: bool = False,
+#     logger: Optional[AppLogger] = None,
+# ) -> Tuple[bool, Optional[str]]:
+# ↑ до 2026-10-25 (FD7): сигнатура без комментариев к параметрам (формат skill п. 7 —
+#   правимая функция приводится к нему).
 def del_file_and_parent_dir(
-    file_path: str,
-    remove_parent_if_empty: bool = False,
-    force: bool = False,    
-    logger: Optional[AppLogger] = None, 
-) -> Tuple[bool, Optional[str]]:    
+    file_path              : str,                        # путь к файлу или папке
+    remove_parent_if_empty : bool = False,               # затем удалить родителя, если он пуст
+    force                  : bool = False,               # папку — рекурсивно (только сам объект)
+    logger                 : Optional[AppLogger] = None, # журнал (None — журнал модуля)
+) -> Tuple[bool, Optional[str]]:
     """
-    Немедленно удаляет файл , при необходимости, родительскую папку. Или просто указанную папку
+    Немедленно удаляет файл или папку и, при необходимости, ставшую пустой родительскую папку.
 
     Алгоритм:
-        1. Удаляет файл через `delete_file_safely`. или папку через 
-        2. Если удаление файла прошло успешно и `remove_parent_if_empty == True`,
-           пытается удалить родительскую папку через `delete_empty_directory(force=False)`.
-        3. Если удаление файла завершилось ошибкой, родительская папка НЕ удаляется,
-           и функция возвращает результат удаления файла.
+        1. Пустой путь или объекта нет — ``(False, None)`` с предупреждением (вызывающие
+           опираются на это: «удалять было нечего»).
+        2. Файл удаляется через `delete_file_safely`, папка — через `delete_empty_directory`
+           (``force=True`` — со всем содержимым, иначе только пустая).
+        3. Если удаление прошло без ошибки и `remove_parent_if_empty == True`,
+           пытается удалить родительскую папку через `delete_empty_directory(force=False)` —
+           **всегда только пустую**, независимо от `force` (FD7).
+        4. Если удаление объекта завершилось ошибкой, родительская папка НЕ удаляется,
+           и функция возвращает результат удаления объекта.
 
     Args:
-        file_path: Путь к файлу (не папке).
-        remove_parent_if_empty: Если True, после успешного удаления файла
+        file_path: Путь к файлу или папке.
+        remove_parent_if_empty: Если True, после успешного удаления
             попытаться удалить родительскую папку (только если она пуста).
-        force: Параметр `force` передаётся в `delete_empty_directory`.
+        force: Для папки — удалить рекурсивно (со всем содержимым). На родительскую
+            папку не действует.
         logger: Опциональный логгер.
 
     Returns:
         Tuple[bool, Optional[str]]: (успех, ошибка) для последней выполненной операции.
-            - Если `remove_parent_if_empty=False` – возвращает результат удаления файла.
-            - Если `remove_parent_if_empty=True` и файл удалён успешно – возвращает
-              результат удаления родительской папки.
-            - Если при удалении файла произошла ошибка – возвращает ошибку файла.
+            - Если `remove_parent_if_empty=False` – возвращает результат удаления объекта.
+            - Если `remove_parent_if_empty=True` и объект удалён успешно – возвращает
+              результат удаления родительской папки (``(False, None)`` — родитель не пуст
+              и оставлен).
+            - Если при удалении объекта произошла ошибка – возвращает эту ошибку.
+
+    Пример:
+        >>> del_file_and_parent_dir('temp/draft_1/a.png', remove_parent_if_empty=True)
+        (True, None)
+        >>> del_file_and_parent_dir('temp/draft_2', force=True)  # папка со всем содержимым
+        (True, None)
+        >>> del_file_and_parent_dir('нет.png')  # объекта нет
+        (False, None)
     """
 
     if logger is None:
@@ -505,12 +527,21 @@ def del_file_and_parent_dir(
     if not parent_dir:
         # Файл находится в корневой директории (без родителя)
         logger.debug("Файл в корне, родительская папка не удаляется")
-        return True, None 
-     
+        return True, None
+
+    # return delete_empty_directory(
+    #     parent_dir,
+    #     force = force,
+    #     logger=logger
+    # )
+    # ↑ до 2026-10-25 (FD7): родитель удалялся с force=force — при force=True (папка
+    #   черновика «со всем содержимым») рекурсивно, вместе с соседними файлами и папками,
+    #   хотя remove_parent_if_empty обещает «только если стала пустой». force относится
+    #   только к самому удаляемому объекту.
     return delete_empty_directory(
-        parent_dir,
-        force = force,    
-        logger=logger
+        parent_dir,       # родительская папка
+        force  = False,   # только пустую (force — для самого объекта, не для родителя)
+        logger = logger,  # журнал вызывающего
     )
     
 
@@ -599,31 +630,57 @@ def resolve_photo_path(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def copy_file_to_temp_dir(
+#     source_path: str,
+#     target_dir: str,
+#     remove_parent_if_empty: bool = False,
+#     unique_name: Optional[str] = None,
+#     logger: Optional[AppLogger] = None,
+#     delete_on_error: bool = True,
+#     ctx: Optional[DeletionContext] = None
+# ) -> str:
+# ↑ до 2026-10-25 (FD8): сигнатура без комментариев к параметрам (формат skill п. 7 —
+#   правимая функция приводится к нему).
 def copy_file_to_temp_dir(
-    source_path: str,
-    target_dir: str,
-    remove_parent_if_empty: bool = False,
-    unique_name: Optional[str] = None,
-    logger: Optional[AppLogger] = None,
-    delete_on_error: bool = True,
-    ctx: Optional[DeletionContext] = None
+    source_path            : str,                             # исходный файл
+    target_dir             : str,                             # целевая папка (создаётся, если нет)
+    remove_parent_if_empty : bool = False,                    # при ошибке удалить папку, если пуста
+    unique_name            : Optional[str] = None,            # имя копии (None — UUID + расширение)
+    logger                 : Optional[AppLogger] = None,      # журнал (None — журнал модуля)
+    delete_on_error        : bool = True,                     # при ошибке убрать недокопированное
+    ctx                    : Optional[DeletionContext] = None, # когда убирать (None — сразу)
 ) -> str:
     """
     Копирует файл в указанную папку (обычно временную) с возможностью генерации уникального имени.
-    При ошибке копирования удаляет созданные файлы и папку, если она стала пустой.
+
+    При ошибке копирования (``delete_on_error=True``) удаляет недокопированный файл, а при
+    ``remove_parent_if_empty=True`` — и целевую папку, если она пуста (в том числе только что
+    созданную этой функцией, FD8). Удаление — через `schedule_deletion`: с `ctx` —
+    отложенное до COMMIT/ROLLBACK сессии, без него — сразу.
 
     Args:
         source_path: Абсолютный путь к исходному файлу.
         target_dir: Целевая папка (должна существовать или будет создана).
+        remove_parent_if_empty: При ошибке копирования удалить целевую папку, если она пуста.
         unique_name: Желаемое имя файла в целевой папке. Если None, генерируется UUID + расширение.
         logger: Опциональный логгер для записи ошибок.
-        delete_on_error: Если True, при ошибке копирования удаляет целевой файл и, если папка стала пустой, саму папку.
+        delete_on_error: Если True, при ошибке копирования удаляет целевой файл (и папку —
+            см. `remove_parent_if_empty`).
+        ctx: Контекст отложенного удаления для уборки при ошибке (None — немедленно).
 
     Returns:
-        Относительный путь к скопированному файлу (только имя, если target_dir — временная папка, или полный путь по желанию).
+        str: Имя скопированного файла в `target_dir` (без папки).
 
     Raises:
-        OSError, IOError: если копирование не удалось.
+        RuntimeError: Не задана `target_dir`.
+        OSError: Копирование не удалось (исключение пробрасывается после уборки).
+
+    Пример:
+        >>> name = copy_file_to_temp_dir('C:/in/фото.jpg', 'C:/temp/draft_1')
+        >>> name  # UUID + расширение
+        '3f2b9c0e8a7d4e1f9b6c5a4d3e2f1a0b.jpg'
+        >>> copy_file_to_temp_dir('C:/in/фото.jpg', 'C:/temp/draft_1', unique_name='a.jpg')
+        'a.jpg'
     """
     if logger is None:
         logger = AppLogger.get_instance(
@@ -653,13 +710,34 @@ def copy_file_to_temp_dir(
     
     except Exception as e:
         if delete_on_error:
-            schedule_deletion(
-                path=dest_path or target_dir,
-                ctx=ctx,
-                remove_parent_if_empty=(dest_path is not None) and remove_parent_if_empty ,
-                force=False,
-                logger=logger
-            )
+            # if delete_on_error:
+            #     schedule_deletion(
+            #         path=dest_path or target_dir,
+            #         ctx=ctx,
+            #         remove_parent_if_empty=(dest_path is not None) and remove_parent_if_empty ,
+            #         force=False,
+            #         logger=logger
+            #     )
+            # ↑ до 2026-10-25 (FD8): если копия не успела появиться (нет исходного файла,
+            #   нет прав), del_file_and_parent_dir выходил на «объекта нет» и до родителя не
+            #   доходил — созданная выше пустая папка оставалась, хотя remove_parent_if_empty
+            #   обещает её убрать. Теперь: копия есть — удалить её (с родителем, если пуст);
+            #   копии нет — удалить саму папку, если она пуста.
+            if os.path.exists(dest_path):
+                schedule_deletion(
+                    path                   = dest_path,              # недокопированный файл
+                    remove_parent_if_empty = remove_parent_if_empty, # и папку, если пуста
+                    force                  = False,                  # файл — не рекурсивно
+                    ctx                    = ctx,                    # когда удалять
+                    logger                 = logger,                 # журнал
+                )
+            elif remove_parent_if_empty:
+                schedule_deletion(
+                    path   = target_dir,  # папка, в которую копировали
+                    force  = False,       # только пустую
+                    ctx    = ctx,         # когда удалять
+                    logger = logger,      # журнал
+                )
 
         logger.exception(f"Ошибка копирования файла {source_path} в {dest_path}: {e}")
         raise

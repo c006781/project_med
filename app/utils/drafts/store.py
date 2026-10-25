@@ -663,7 +663,12 @@ class DraftStore:
 
     def _apply_parent(self, record: _Record, parent_id: Any) -> Optional[NodeKey]:
         """
-        Устанавливает родителя записи и синхронизирует поле внешнего ключа.
+        Запоминает родителя записи по сведениям вызывающего (``parent_id`` в ``modify`` /
+        ``delete`` — не изменение, а «что известно о дереве»).
+
+        Если черновик сам задаёт родителя (поле внешнего ключа есть в ``data``: перенос
+        существующей записи или новая запись), сведения не применяются — родителя решает
+        черновик (как ``remember_parent``, L1; DR2).
 
         Args:
             record: Запись.
@@ -676,6 +681,12 @@ class DraftStore:
             >>> store._apply_parent(record, 12)
         """
         if parent_id is MISSING:
+            return None
+        # DR2 (2026-10-25): таблица старого родителя передаёт родителя из строки БД при
+        # правке другого поля перенесённой записи — раньше это возвращало связь к старому
+        # родителю (значки не у того приёма; удаление старого уносило перенесённую запись).
+        fk = self.schema.parent_field(record.entity)
+        if fk and fk in record.data:
             return None
         return self._set_link((record.entity, record.id), parent_id)
 
@@ -1556,9 +1567,23 @@ class DraftStore:
             >>> store._apply_saved({('photo', -1)}, {('photo', -1): 77}, ())
         """
         with self.batch():
+            # for node in consumed:
+            #     self._records.pop(node, None)
+            #     self._emit('saved', node)
+            # ↑ до 2026-10-25 (DR3): поглощённая НОВАЯ запись (удалённая до сохранения —
+            #   в БД так и не появилась) оставляла связь в индексе: родитель «помнил»
+            #   несуществующего ребёнка (children/descendants), к нему же оставались
+            #   привязаны записи, перенесённые в неё.
+            ghosts: Set[NodeKey] = set()
             for node in consumed:
-                self._records.pop(node, None)
-                self._emit('saved', node)
+                record = self._records.pop(node, None)
+                if record is not None and record.is_new and node not in id_map:
+                    ghosts.add(node)
+                self._emit('saved', node)       # предки — по связям ДО забывания
+            stale = [n for n, p in self._parents.items()
+                     if n in ghosts or self._parent_node(n, p) in ghosts]
+            for node in stale:
+                self._forget(node)
             for (entity, old_id), new_id in id_map.items():
                 self._remap(entity, old_id, new_id)
             for node in removed:

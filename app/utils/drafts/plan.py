@@ -202,6 +202,52 @@ def _required_new(store: 'DraftStore', writable: Set[NodeKey]) -> List[NodeKey]:
     return missing
 
 
+def _check_required_new(
+    store    : 'DraftStore',     # хранилище черновиков
+    writable : Set[NodeKey],     # сохраняемые узлы
+    missing  : List[NodeKey],    # нужные им новые записи вне объёма (_required_new)
+) -> None:
+    """
+    Нужные новые записи можно создать: ни сохраняемые записи, ни нужные им новые записи
+    вне объёма не ссылаются на удалённую новую запись, и ни одна нужная новая запись не
+    помечена на удаление и не лежит под помеченным на удаление предком (DR1, 2026-10-25).
+
+    Иначе ``include_new_ancestors`` добавил бы в «создать» запись, помеченную на удаление
+    (нарушение гарантии F1), или создал бы запись под родителем, который сейчас удаляется.
+
+    Args:
+        store: Хранилище.
+        writable: Сохраняемые узлы.
+        missing: Нужные им новые записи вне объёма.
+
+    Returns:
+        None
+
+    Raises:
+        DeleteBlocked: Запись ссылается на удалённую новую запись (подкласс ``PlanError``).
+        PlanError: Нужная новая запись сама помечена на удаление или под удаляемым предком.
+
+    Пример:
+        >>> _check_required_new(store, {('appointment', 12)}, [('doctor', -2), ('clinic', -1)])
+        Traceback (most recent call last):
+        PlanError: Сохранить нельзя: нужна новая запись «Врач #-2», а «Клиника #-1» помечена на удаление
+    """
+    from .executor import _human                     # здесь: executor импортирует этот модуль
+    # ссылки на удалённые новые записи — у сохраняемых и у нужных им новых записей
+    _check_deleted_new_targets(
+        store,
+        writable | set(missing),
+    )
+    for node in missing:
+        gone = [x for x in (node, *store.ancestors(node))
+                if (draft := store.get(*x)) is not None and draft.deleted]
+        if gone:
+            raise PlanError(
+                f"Сохранить нельзя: нужна новая запись {_human(store, node)}, "
+                f"а {_human(store, gone[0])} помечена на удаление"
+            )
+
+
 def _ordered_creates(store: 'DraftStore', creates: List[Draft], depth: Callable[[NodeKey], int]) -> List[Draft]:
     """
     Порядок создания: запись — после всех новых записей, от которых она зависит (родитель,
@@ -269,7 +315,10 @@ def build_plan(
         План.
 
     Raises:
-        PlanError: Политика удаления запретила сохранение.
+        PlanError: Политика удаления запретила сохранение; нужная новая запись помечена
+            на удаление или лежит под удаляемым предком (DR1).
+        DeleteBlocked: Сохраняемая (или нужная ей новая) запись ссылается на удалённую
+            новую запись.
 
     Пример:
         >>> build_plan(store, None).is_empty          # сохранить всё
@@ -316,8 +365,18 @@ def build_plan(
     #         missing.append(ancestor)
     # ↑ до 2026-10-18: нужными считались только новые ПРЕДКИ. Теперь ещё и новые записи, на
     #   которые ссылаются (ссылки, не владение: приём → новый врач) — и их предки, рекурсивно.
-    _check_deleted_new_targets(store, writable)
+    # _check_deleted_new_targets(store, writable)
+    # missing = _required_new(store, writable)
+    # ↑ до 2026-10-25 (DR1): удалённые новые цели проверялись только у сохраняемых записей.
+    #   Нужная им новая запись вне объёма (врач) могла сама ссылаться на удалённую новую
+    #   (шаблон) или лежать под удалённым новым родителем (клиника) — с
+    #   include_new_ancestors удалённая запись попадала в «создать» (нарушение F1).
     missing = _required_new(store, writable)
+    _check_required_new(
+        store,     # хранилище
+        writable,  # сохраняемые узлы
+        missing,   # нужные им новые записи вне объёма
+    )
     if include_new_ancestors:
         writable.update(missing)
         missing = []

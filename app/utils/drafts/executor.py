@@ -289,7 +289,8 @@ def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: 
 
     Raises:
         DeleteBlocked: Удаление запрещено правилом ``restrict``.
-        PlanError: Адаптер не умеет искать ссылки, а они описаны.
+        PlanError: Адаптер не умеет искать ссылки, а они описаны; описаны переиспользуемые
+            данные (``collect``), а адаптер не умеет читать запись (нет ``read``, DR7).
 
     Пример:
         >>> _delete_with_references(store, [('doctor', 5)], adapter, tx)
@@ -343,7 +344,16 @@ def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: 
             return
         visiting.add(node)
         collected = [ref for ref in schema.references(node[0]) if ref.collect]
-        values = adapter.read(node[0], node[1], tx) if collected and hasattr(adapter, 'read') else None
+        # values = adapter.read(node[0], node[1], tx) if collected and hasattr(adapter, 'read') else None
+        # ↑ до 2026-10-25 (DR7): без read у адаптера «переиспользуемые данные» молча не
+        #   удалялись (оставались никому не нужными) — теперь отказ, как и без referrers;
+        #   проверка здесь, а не до транзакции, — так она видит и записи, удаляемые каскадом.
+        if collected and not hasattr(adapter, 'read'):
+            raise PlanError(
+                f"у типа {node[0]} описаны переиспользуемые данные (collect), а адаптер не "
+                "умеет читать запись (нет read) — что удалять следом, узнать нельзя"
+            )
+        values = adapter.read(node[0], node[1], tx) if collected else None
         if hasattr(adapter, 'referrers'):
             for referrer_type, ref, ids in users_of(node):
                 if ref.on_delete == 'restrict':

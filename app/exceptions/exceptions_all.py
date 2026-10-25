@@ -125,16 +125,29 @@ class AppException(Exception):
         """
         Текст исключения: ``[код] сообщение`` или только сообщение.
 
+        Код ``0`` — тоже код (без кода — только ``None``, как в ``__init__``). Текст не
+        строкой (``AppException(OSError(...))``) приводится к строке: ``__str__`` не должен
+        падать — его зовут журналы и окна ошибок.
+
         Returns:
             str: Текст.
 
         Пример:
             >>> str(AppException('сбой', code=7))
             '[7] сбой'
+            >>> str(AppException('сбой', code=0))
+            '[0] сбой'
+            >>> str(AppException(OSError('нет файла')))
+            'нет файла'
         """
-        if self.code:
+        # if self.code:
+        #     return f"[{self.code}] {self.message}"
+        # return self.message
+        # ↑ до 2026-10-25 (E9, E10): код 0 считался «без кода» (вопреки «None — без кода»);
+        #   текст не строкой давал TypeError «__str__ returned non-string».
+        if self.code is not None:
             return f"[{self.code}] {self.message}"
-        return self.message
+        return str(self.message)
 
     def __reduce__(self) -> Tuple[
         Callable[..., 'AppException'],

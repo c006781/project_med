@@ -1,5 +1,6 @@
 # tests/test_exceptions.py
-import pytest
+# import pytest
+# ↑ до 2026-10-25 (E12): pyflakes — «imported but unused» (pytest в этих тестах не нужен).
 from app.exceptions import (
     PatientNotFoundError, 
     PatientValidationError,

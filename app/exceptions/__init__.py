@@ -46,8 +46,13 @@ from app.exceptions.exceptions_all import (
 
     # База данных
     DatabaseError, IntegrityError, DatabaseConnectionError,
-    ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
+    # ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
+    # ↑ до 2026-10-25 (E11): pyflakes — «imported but unused» (имени нет в __all__).
 )
+
+# Прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет — import * не
+# перекрывает встроенный ConnectionError). Присваивание, а не импорт: pyflakes без замечаний.
+ConnectionError = DatabaseConnectionError
 
 # Что экспортируется при импорте * (без ConnectionError — не перекрывать встроенный)
 __all__ = [

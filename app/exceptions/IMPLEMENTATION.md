@@ -7,15 +7,15 @@
 | Файл | Назначение |
 |---|---|
 | [exceptions_all.py](exceptions_all.py) | Все исключения приложения (иерархия — в описании модуля) |
-| [\_\_init\_\_.py](__init__.py) | Экспорт; `__all__` без `ConnectionError` |
-| [tests/test_exceptions.py](../../tests/test_exceptions.py), [tests/test_exceptions_review_pass1.py](../../tests/test_exceptions_review_pass1.py) | Тесты |
+| [\_\_init\_\_.py](__init__.py) | Экспорт; `__all__` без `ConnectionError` (прежнее имя — присваиванием) |
+| [tests/test_exceptions.py](../../tests/test_exceptions.py), [tests/test_exceptions_review_pass1.py](../../tests/test_exceptions_review_pass1.py), [tests/test_exceptions_review_pass3.py](../../tests/test_exceptions_review_pass3.py) | Тесты |
 
 ---
 
 ## 1. Как устроено
 
 ```
-AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle/copy)
+AppException (message, code; __str__ → "[code] message" / message при code=None; __reduce__ → pickle/copy)
 ├── EntityNotFoundError (+LookupError): entity, entity_id      9001 / по таблицам 1001…4001
 ├── EntityValidationError (+ValueError): entity, field, reason 9002 / по таблицам 1002…4002
 ├── PhotoFileError: path, operation, reason, errno             4003 (+ Permission/NoSpace)
@@ -50,6 +50,13 @@ AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle
 каждого класса, примеры из докстрингов. На старом модуле: 44 падают, 32 проходят (тесты
 неизменных текстов/кодов и `copy`, который работал и раньше).
 
+`tests/test_exceptions_review_pass3.py` (25, проход 3, 2026-10-25): E9–E11 (до исправления
+падали `test_e9_zero_code_is_shown`, `test_e10_non_string_message_without_code`,
+`test_e11_pyflakes_clean`) и непокрытое: свой код/текст `EntityValidationError`, пустая
+таблица, коды по умолчанию `SyncError`/`DatabaseError`, ловля по базовым классам групп,
+`reason` скачивания/загрузки, `TokenError`, `args`, `errno=0`, лишние атрибуты при
+`pickle`, примеры описания пакета. Всего по модулю — 108.
+
 ---
 
 ## 3. Журнал проверок
@@ -76,6 +83,23 @@ AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle
 | # | Что было | Почему плохо | Исправление |
 |---|---|---|---|
 | D2 | 18 `__init__` без докстринга; у классов и `__init__` нет примеров; нет `-> None`; параметры и вызовы — не по формату skill п. 7; описание пакета (`__init__.py`) устарело | Правило проекта: докстринг с примером и полная типизация у всего | Весь модуль переформатирован (параметр на строку с комментарием, выравнивание) и задокументирован: докстринги с «Пример:» (все проверяются `doctest`, тест E7), `-> None`, точный тип `__reduce__`; в описании модуля и заголовках разделов — что не используется (И-9). Поведение не менялось |
+| E9 | `AppException.__str__`: `if self.code:` — код `0` считался «без кода» | Расходилось с описанием «`None` — без кода»; код 0 терялся в тексте | `if self.code is not None` (старый код — комментарием) |
+| E10 | `__str__` без кода возвращал `self.message` как есть | Текст не строкой (`AppException(OSError(...))`) — `TypeError: __str__ returned non-string`: падал бы журнал / окно ошибки | `str(self.message)`; атрибут `message` — как передан |
+| E11 | `__init__.py`: прежнее имя `ConnectionError` импортировалось, но не входило в `__all__` | `pyflakes`: «imported but unused» — шум в проверке модуля | Присваивание `ConnectionError = DatabaseConnectionError` после импорта (тот же объект; импорт по имени работает; тест `pyflakes` по пакету) |
+| E12 | `tests/test_exceptions.py`: неиспользуемый `import pytest` | `pyflakes` | Импорт закомментирован с пометкой |
+
+Не исправлялось (вне модуля или нужен ответ владельца — `_dev/agents/M9.md`):
+
+* **N1.** Вызывающие передают `operation` не в родительном падеже: `app/services/services_all.py`
+  (`add_photo_to_appointment`) — `PhotoFileError(path, "проверка", "файл не существует")` →
+  «Ошибка проверка файла …» (и в `tests/test_exceptions.py` — «копирование»). Править
+  вызов (`"проверки"`) — вне территории М9 (М11); текст модуля не трогали.
+* **N2.** `entity` у заметки разный: «не найдено» — `'Заметка приёма'`, проверка —
+  `'Заметка'`; у общих исключений из сервисов `entity` — имя модели (`'Prescription'`), у
+  таблиц со своим классом — по-русски. Сейчас `entity` никто не читает; менять — по решению
+  владельца (атрибут — публичный, тесты прохода 1 его проверяют).
+* **N3.** `errno=0` в `PhotoFileError` в текст не попадает (`if errno:`) — оставлено: 0 не
+  код ошибки ОС; закреплено тестом.
 
 ---
 

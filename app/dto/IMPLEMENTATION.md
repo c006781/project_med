@@ -17,7 +17,7 @@
 
 * Новое поле или таблица — в описании `app/schema/clinic.py`; DTO и конфигурация полей
   строятся из него. Вручную остались заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) —
-  ОСТАЛОСЬ.txt п. 4.4.
+  _dev/ОСТАЛОСЬ.md п. 4.4.
 * `MODEL_CONFIG_MAP` и `get_note_fields` нужны только регистрации `_NOTE_USAGE_MODELS` в
   `app/dependencies.py`, которую никто не читает с DYN2 (сервис заметок узнаёт ссылки из
   схемы БД). Новую таблицу туда добавлять не нужно; удаление — шаг `dependencies`.

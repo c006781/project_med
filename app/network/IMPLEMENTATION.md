@@ -132,6 +132,6 @@ YaDiskThread.run ──► ya_dop: yadisk_download_file / yadisk_upload_file / c
 
 ## 4. Техдолг и дальше
 
-* Скачивание пишет прямо в рабочий файл БД — см. `ТЕХДОЛГ.txt` (ТД-1).
+* Скачивание пишет прямо в рабочий файл БД — см. `_dev/ТЕХДОЛГ.md` (ТД-1).
 * Окно: `MainWindow._correct_remote_path` → `remote_db_file_path`; текст кода в
   `_on_download_finished`/`_on_upload_finished` → `YaDiskResult.describe` (шаг «окно»).

@@ -107,6 +107,6 @@ AppUpdater.check_for_updates()
 ## 4. Дальше
 
 * Окно (`UpdateMixin`): обработчики `_on_download_finished`/`_on_download_error`
-  перекрыты одноимёнными `SyncMixin` (ОСТАЛОСЬ.txt п. 1.4); `pending_release_data` вместо
+  перекрыты одноимёнными `SyncMixin` (_dev/ОСТАЛОСЬ.md п. 1.4); `pending_release_data` вместо
   `hasattr`; `is_github_reachable()` при старте блокирует окно до 3 с.
 * ТЕХДОЛГ: ТД-4 (`verify=False`), ТД-5 (автообновление на Linux).

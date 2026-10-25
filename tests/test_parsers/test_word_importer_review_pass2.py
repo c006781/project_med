@@ -8,13 +8,10 @@
 Документы — синтетические (``test_word_importer_docx.make_docx``), БД — в памяти.
 """
 
-import pytest
-
 from parsers.word_importer import batch_parse
-from tests.test_parsers.test_word_importer_docx import (  # noqa: F401 (services — фикстура)
+from tests.test_parsers.test_word_importer_docx import (
     ROWS,
     make_docx,
-    services,
 )
 
 
@@ -74,12 +71,12 @@ def test_w13_specific_files_extension_case(tmp_path, services):
     assert (results['total'], results['success']) == (1, 1)
 
 
-@pytest.mark.xfail(
-    strict = True,     # исправят ТД-8 — тест начнёт проходить, пометку снять
-    reason = 'ТД-8: find_matching_patient читает Patient.description_text — у ORM его нет',
-)
-def test_td8_update_existing_patient_with_description(tmp_path, services):
-    """ТД-8: повторный импорт с обновлением пациента и описанием в шапке — без падения и дублей."""
+def test_td8_find_existing_with_description(tmp_path, services):
+    """
+    ТД-8: повторный импорт с поиском пациента и описанием в шапке — без падения и дублей
+    (раньше — xfail: AttributeError на Patient.description_text; решено 2026-10-25,
+    подробно — test_word_importer_find_existing.py).
+    """
     make_docx(
         str(tmp_path / 'а.docx'),
         'Иванов Иван Иванович 1990 89991234567 тётя Анна',
@@ -93,8 +90,8 @@ def test_td8_update_existing_patient_with_description(tmp_path, services):
 
     results, _ = batch_parse(
         str(tmp_path),
-        specific_files          = ['а.docx'],
-        update_existing_patient = True,
+        specific_files        = ['а.docx'],
+        find_existing_patient = True,
         **services,
     )
 

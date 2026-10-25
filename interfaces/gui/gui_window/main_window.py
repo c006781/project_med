@@ -13,7 +13,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-from typing import List
+from typing import List, Optional
 # import sys
 
 from app.config import (
@@ -70,7 +70,8 @@ from PySide6.QtWidgets import (
     QApplication, QDialog, QFileDialog, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressDialog,
     QWidget, QVBoxLayout,
     QPushButton, QLabel, QProgressBar, QComboBox,
-    QStackedWidget, QFrame, QHBoxLayout, QTextEdit
+    QStackedWidget, QFrame, QHBoxLayout, QTextEdit,
+    QCheckBox,    # флажок в вопросе перед импортом из Word (ТД-8, 2026-10-25)
 )
 from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QDesktopServices
@@ -1519,10 +1520,32 @@ class ParsingThread(QThread):
     file_list_ready = Signal(list)        # список имён файлов
     status_update = Signal(str, str, str)  # file_name, status, error_msg
 
-    def __init__(self, folder_path, update_existing=False):
+    def __init__(
+        self,
+        folder_path   : str,            # папка с .docx
+        find_existing : bool = False,   # искать пациента по ФИО + году (ТД-8, выбор пользователя)
+    ) -> None:
+        """
+        Поток импорта из Word.
+
+        Args:
+            folder_path (str): Папка с документами.
+            find_existing (bool): Искать существующего пациента по ФИО + году рождения
+                (``parsers.word_importer.parse_one_file``, ТД-8).
+
+        Returns:
+            None
+
+        Пример:
+            >>> ParsingThread('C:/Документы', find_existing=True).start()
+        """
         super().__init__()
         self.folder_path = folder_path
-        self.update_existing = update_existing
+        self.find_existing = find_existing
+        # def __init__(self, folder_path, update_existing=False):
+        #     ...
+        #     self.update_existing = update_existing
+        # ↑ до 2026-10-25 (ТД-8, parsers): флаг «обновлять пациента» не работал и не задавался
 
     def run(self):
         try:
@@ -1541,7 +1564,9 @@ class ParsingThread(QThread):
             results, log_dir = batch_parse(
                 folder_path=self.folder_path,
                 specific_files=None,
-                update_existing_patient=self.update_existing,
+                find_existing_patient=self.find_existing,     # ТД-8: выбор пользователя
+                # update_existing_patient=self.update_existing,
+                # ↑ до 2026-10-25 (ТД-8, parsers): параметр заменён find_existing_patient
                 progress_callback_start=on_start,
                 progress_callback_update=on_update,
             )
@@ -1864,18 +1889,67 @@ class MainWindow(
         if not folder:
             return
 
+        # ТД-8: пользователь сам решает, искать ли существующих пациентов (ФИО + год)
+        find_existing = self._ask_find_existing(folder)
+        if find_existing is None:
+            return
+
         # Создаём и показываем диалог прогресса
         self.progress_dialog = ParsingProgressDialog(self)
         self.progress_dialog.show()
 
         # Создаём и запускаем поток
-        self.parsing_thread = ParsingThread(folder, update_existing=False)
+        self.parsing_thread = ParsingThread(
+            folder,
+            find_existing = find_existing,  # выбор пользователя (ТД-8)
+        )
+        # self.parsing_thread = ParsingThread(folder, update_existing=False)
+        # ↑ до 2026-10-25 (ТД-8, parsers): поиск пациента не предлагался
         self.parsing_thread.file_list_ready.connect(self.progress_dialog.set_file_list)
         self.parsing_thread.status_update.connect(self.progress_dialog.update_file_status)
         self.parsing_thread.finished.connect(self._on_parsing_finished)
         self.parsing_thread.error.connect(self._on_parsing_error)
 
         self.parsing_thread.start()
+
+    def _ask_find_existing(
+        self,
+        folder : str,   # выбранная папка (показывается в вопросе)
+    ) -> Optional[bool]:
+        """
+        Перед импортом из Word: подтверждение и флажок «искать существующих пациентов»
+        (ТД-8, решение владельца 2026-10-25 — выбор пользователя, по умолчанию выключен).
+
+        Args:
+            folder (str): Папка с документами.
+
+        Returns:
+            Optional[bool]: None — пользователь отменил импорт; True / False — флажок.
+
+        Пример:
+            >>> window._ask_find_existing('C:/Документы')     # «Импорт», флажок снят
+            False
+        """
+        box = QMessageBox(self)
+        box.setWindowTitle("Импорт из Word")
+        box.setIcon(QMessageBox.Question)
+        box.setText(f"Импортировать документы из папки:\n{folder}")
+        box.setInformativeText(
+            "Без флажка каждый документ — новый пациент.\n"
+            "С флажком пациент ищется по ФИО и году рождения: приёмы добавятся к найденному, "
+            "повторные приёмы пропускаются. Дубли можно объединить в программе."
+        )
+        # ссылка на флажок — своя: box.checkBox() в PySide6 может вернуть голый QObject
+        find_box = QCheckBox("Искать существующих пациентов (ФИО + год рождения)")
+        box.setCheckBox(find_box)
+        box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        box.button(QMessageBox.Ok).setText("Импорт")
+        box.button(QMessageBox.Cancel).setText("Отмена")
+        box.setDefaultButton(QMessageBox.Ok)
+
+        if box.exec() != QMessageBox.Ok:
+            return None
+        return find_box.isChecked()
 
     @AppLogger.get_instance(
         name='MainWindow',

@@ -319,6 +319,7 @@ AP3a, AP7, CLI1, M12a, AP2a) и 6 расхождений в описаниях (
 | # | Файл | Что было | Почему плохо | Исправление |
 |---|---|---|---|---|
 | К6 | `config_applier.py`, `app/dependencies.py`, `SettingsPage`, `cli apply_settings` | `config_applier` импортировал `app.dependencies` (`_SERVICE_PROVIDERS`, `get_photo_service`, `get_sync_service` и 3 неиспользуемых — замечания pyflakes) | Связь «снизу вверх»: настройки тянули сборку приложения → сервисы → базу; риск циклов импорта при перестановке; импорт `app.config` поднимал всё приложение | Сервисы приходят снаружи: `ServiceHooks` (поставщики сервисов, сервис фото, сервис синхронизации) в `ConfigApplier(services=…)`; создаёт `app.dependencies.create_config_applier()`; экран настроек и CLI вызывают её. Без обработчиков блоки `database`/`photos`/`sync` — в `errors` («обработчики сервисов не переданы»), а не молча |
+| M16 (часть M6, Ф1.4.2) | `manager.py` | Ключ реестра `AppConfigManager._instances` — путь как передан | `config.msgpack`, `./config.msgpack`, абсолютный путь, другой регистр (Windows) — разные менеджеры одного файла: правки одного не видны другому, сохранение одного затирает другой | Ключ — `_instance_key()`: `os.path.normcase(os.path.abspath(путь))`; менеджер хранит путь как передан (относительный — от текущей папки, как раньше) |
 
 Замечено вне модуля (К6): `get_sync_service()` не кэшируется — каждый вызов создаёт новый
 `SyncService`, поэтому `apply_sync` меняет поля временного объекта (новые экземпляры и так

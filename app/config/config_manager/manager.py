@@ -707,6 +707,30 @@ class AppConfigManager(BaseConfigManager):
         """
         cls._resolved_default_path = None
 
+    @staticmethod
+    def _instance_key(
+        config_path : str,   # путь к файлу конфигурации (как передан)
+    ) -> str:
+        """
+        Ключ реестра экземпляров: один файл — один ключ, как бы ни был записан путь (M16).
+
+        Абсолютный путь (относительный — от текущей папки), без ``.``/``..``; на Windows —
+        без учёта регистра и с ``\\`` (``os.path.normcase``).
+
+        Args:
+            config_path: Путь к файлу конфигурации.
+
+        Returns:
+            Нормализованный абсолютный путь.
+
+        Пример:
+            >>> AppConfigManager._instance_key('./config.msgpack')   # Windows, папка C:\\app
+            'c:\\app\\config.msgpack'
+        """
+        return os.path.normcase(
+            os.path.abspath(config_path),
+        )
+
     def __init__(self, config_path: Optional[str] = None) -> None:
         """
         Менеджер с умолчаниями приложения (``_defaults``).
@@ -757,13 +781,26 @@ class AppConfigManager(BaseConfigManager):
                 #   GUI). Путь к конфигу за время работы не меняется — читаем один раз.
                 config_path = cls._default_config_path()
 
+            # # Если не требуем новый экземпляр и такой уже есть – возвращаем его
+            # if not force_new and config_path in cls._instances:
+            #     return cls._instances[config_path]
+            #
+            # # Создаём новый экземпляр
+            # instance = cls(config_path)
+            # cls._instances[config_path] = instance
+            # ↑ до 2026-10-25 (M16): ключ реестра — путь как передан: 'config.msgpack' и
+            #   './config.msgpack' (или другой регистр на Windows) давали два менеджера
+            #   одного файла — правки одного не видны другому. Теперь ключ — нормализованный
+            #   абсолютный путь; сам менеджер хранит путь как передан (как раньше).
+            key = cls._instance_key(config_path)
+
             # Если не требуем новый экземпляр и такой уже есть – возвращаем его
-            if not force_new and config_path in cls._instances:
-                return cls._instances[config_path]
+            if not force_new and key in cls._instances:
+                return cls._instances[key]
 
             # Создаём новый экземпляр
             instance = cls(config_path)
-            cls._instances[config_path] = instance
+            cls._instances[key] = instance
 
             if create_if_missing and not instance.config_exists:  # config_exists добавим позже
                 instance.save()  # сохраняем умолчания

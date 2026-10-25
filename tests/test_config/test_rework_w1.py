@@ -142,3 +142,44 @@ def test_k6_callers_use_dependencies_factory(rel):
     code = '\n'.join(line for line in text.splitlines() if not line.strip().startswith('#'))
     assert 'create_config_applier()' in code
     assert 'ConfigApplier()' not in code
+
+
+# ---------------------------------------------------------------------------
+# M16: один экземпляр менеджера на файл, как бы ни был записан путь
+# ---------------------------------------------------------------------------
+
+def test_m16_same_file_different_spelling_one_instance(config_sandbox):
+    """M16: ``config.msgpack``, ``./config.msgpack`` и абсолютный путь — один экземпляр.
+
+    До 2026-10-25 ключ реестра — путь как передан: разные написания одного файла давали
+    разные менеджеры, правки одного не видны другому.
+    """
+    from app.config.config_manager.manager import AppConfigManager
+
+    a = AppConfigManager.get_instance(config_path='config.msgpack')
+    assert AppConfigManager.get_instance(config_path=os.path.join('.', 'config.msgpack')) is a
+    assert AppConfigManager.get_instance(config_path=str(config_sandbox / 'config.msgpack')) is a
+    assert AppConfigManager.get_instance(config_path=os.path.join('sub', '..', 'config.msgpack')) is a
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='регистр имён не важен только на Windows')
+def test_m16_case_insensitive_on_windows(config_sandbox):
+    """M16: на Windows ``CONFIG.msgpack`` — тот же файл, что ``config.msgpack``."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    a = AppConfigManager.get_instance(config_path='config.msgpack')
+    assert AppConfigManager.get_instance(config_path='CONFIG.MSGPACK') is a
+
+
+def test_m16_force_new_replaces_registered_instance(config_sandbox):
+    """M16: ``force_new`` с другим написанием пути заменяет тот же экземпляр в реестре."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    a = AppConfigManager.get_instance(config_path='config.msgpack')
+    b = AppConfigManager.get_instance(
+        config_path = os.path.join('.', 'config.msgpack'),   # другое написание
+        force_new   = True,                                  # новый экземпляр
+    )
+    assert b is not a
+    assert AppConfigManager.get_instance(config_path='config.msgpack') is b
+    assert len(AppConfigManager._instances) == 1

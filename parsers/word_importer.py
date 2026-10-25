@@ -11,10 +11,13 @@
     - Подробное логирование: файлы успехов и ошибок.
 """
 
+import argparse
 import os
 import re
 import shutil
-import sys
+# import sys
+# ↑ до 2026-10-25 (Ф1.1.7): нужен был ручному разбору sys.argv — теперь argparse
+import tempfile
 import uuid
 from datetime import date, datetime
 from typing import (
@@ -27,6 +30,7 @@ from docx import Document # pip install python-docx
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 from docx.oxml.ns import qn
+from sqlalchemy.orm import Session
 
 from app.database.database import Database
 from app.database.database_shema.clinic import Patient
@@ -906,11 +910,18 @@ class WordFileParser:
         """
 
         images = []
-        self.temp_dir = os.path.join(
-            os.path.dirname(self.file_path), 
-            "temp_images"
-        )
-        os.makedirs(self.temp_dir, exist_ok=True)
+
+        # W8: своя временная папка в системной временной (одна на файл), не в папке документов
+        if self.temp_dir is None:
+            self.temp_dir = tempfile.mkdtemp(prefix='project_med_docx_')
+        # self.temp_dir = os.path.join(
+        #     os.path.dirname(self.file_path),
+        #     "temp_images"
+        # )
+        # os.makedirs(self.temp_dir, exist_ok=True)
+        # ↑ до 2026-10-25 (W8): папка temp_images в папке документов удалялась целиком
+        #   (shutil.rmtree в parse_one_file) — одноимённая папка пользователя стиралась;
+        #   запись в папку документов (может быть общей / только для чтения).
 
         for drawing in cell._element.findall('.//' + qn('w:drawing')):
             blip = drawing.find('.//' + qn('a:blip'))
@@ -1066,76 +1077,101 @@ def update_patient_if_needed(
 # ----------------------------------------------------------------------
 
 def parse_one_file(
-    session,
-    file_path: str,
-    patient_service: PatientService,
-    appointment_service: AppointmentService,
-    photo_service: PhotoService,
-    update_existing_patient: bool = False,
+    session                 : Session,                      # сессия SQLAlchemy (транзакцией управляет вызывающий)
+    file_path               : str,                          # путь к .docx
+    patient_service         : PatientService,               # сервис пациентов
+    appointment_service     : AppointmentService,           # сервис приёмов
+    photo_service           : PhotoService,                 # сервис фото
+    update_existing_patient : bool = False,                 # искать совпадающего пациента и обновлять его
+    warnings                : Optional[List[str]] = None,   # куда добавить предупреждения (W2); None — не собирать
 ) -> bool:
     """
     Обрабатывает один Word-файл в рамках переданной сессии.
 
+    Порядок: разбор файла (``WordFileParser``) → нормализация пациента и строк → проверка
+    обязательных полей → поиск / создание пациента → приёмы → фото. Временные файлы фото
+    и их папка удаляются в любом случае (W8 — папка своя, системная временная).
+
     Args:
-        session: Сессия SQLAlchemy (управляется вызывающим кодом).
+        session (Session): Сессия SQLAlchemy (управляется вызывающим кодом).
         file_path (str): Путь к .docx файлу.
         patient_service (PatientService): Сервис для работы с пациентами.
         appointment_service (AppointmentService): Сервис для работы с приёмами.
         photo_service (PhotoService): Сервис для работы с фотографиями.
         update_existing_patient (bool): Если True, при совпадении пациента его данные обновляются,
                                         иначе создаётся новый пациент.
+        warnings (Optional[List[str]]): Список для предупреждений — нераспознанный телефон
+            (W2: телефон не записан, пациент импортирован); None — не собирать.
 
     Returns:
-        bool: True – успешная обработка, False – ошибка (исключение выбрасывается).
+        bool: True – успешная обработка (при ошибке — исключение).
 
     Raises:
         ValueError: При ошибках структуры документа, отсутствии обязательных полей,
                     проблемах с датами и т.п.
+
+    Пример:
+        >>> found = []
+        >>> with db.session_scope() as session:
+        ...     parse_one_file(
+        ...         session,
+        ...         'doc/Иванов.docx',
+        ...         patient_service,
+        ...         appointment_service,
+        ...         photo_service,
+        ...         warnings = found,
+        ...     )
+        True
     """
-    temp_dir = None
+
+    parser = None
     temps_path = []
     try:
         parser = WordFileParser(
-            file_path, 
-            field_metadata=appointment_service.get_field_metadata()
+            file_path,
+            field_metadata = appointment_service.get_field_metadata(),  # заголовки столбцов — по title полей
         )
         patient_dto, rows = parser.parse()
-
-        temp_dir = parser.temp_dir
 
         for row in rows:
             if 'photos' in row and row['photos']:
                 for temp_path in row['photos']:
                     temps_path.append(temp_path)
-            
+
         if not patient_dto:
             raise ValueError("Не удалось извлечь данные пациента (отсутствует шапка)")
-        
+
         if not rows:
             raise ValueError("Не удалось извлечь данные приёмов (отсутствует таблица)")
 
         # ----- ЦЕНТРАЛИЗОВАННАЯ НОРМАЛИЗАЦИЯ ДАННЫХ -----
         # ----- НОРМАЛИЗАЦИЯ ДАННЫХ ПАЦИЕНТА -----
-        patient_dto = normalize_patient_dto(patient_dto)
+        # W2: нераспознанный телефон — предупреждение в warnings, телефон не записывается
+        patient_dto = normalize_patient_dto(
+            patient_dto,
+            warnings = warnings,  # список вызывающего (None — не собирать)
+        )
+        # patient_dto = normalize_patient_dto(patient_dto)
+        # ↑ до 2026-10-25 (W2): нераспознанный телефон терялся молча
 
         # ----- НОРМАЛИЗАЦИЯ И ПРОВЕРКА СТРОК ТАБЛИЦЫ -----
         normalized_rows = []
         for row in rows:
             norm_row = normalize_appointment_row(row, parser)
 
-            # Проверяем обязательные поля 
+            # Проверяем обязательные поля
             try:
                 parser.validate_required_fields(norm_row)
             except ValueError as e:
                 # Добавляем в сообщение имя файла и исходные данные строки для отладки
                 raise ValueError(f"В файле {os.path.basename(file_path)}: {e}. Данные строки: {row}") from e
-            
+
             for key in row.keys(): # Проверяем, что все обязательные поля были нормализованы
                 if key in parser.required_fields:
                     if (
                         row.get(key, None) is not None
                     ) and (
-                        norm_row.get(key, None) is None    
+                        norm_row.get(key, None) is None
                     ):
                         raise ValueError(f"В файле {os.path.basename(file_path)}: Не удалось нормализовать строку: {row}")
 
@@ -1161,34 +1197,37 @@ def parse_one_file(
 
         else:
             created = patient_service.create(
-                patient_dto, 
-                session=session
+                patient_dto,
+                session = session,  # транзакция файла
             )
             patient_id = created.id
 
         # ----- СОЗДАНИЕ ПРИЁМОВ -----
         for row in normalized_rows:
             app_dto = AppointmentDTO(
-                patient_id=patient_id,
-                date=row['date'],
-                reason_text=row.get('reason_text'),
-                procedure_text=row.get('procedure_text'),
-                recommendations_text=row.get('recommendations_text'),
-                cost_procedure_text=row.get('cost_procedure_text'),
-                note_text=row.get('note_text'),
+                patient_id           = patient_id,                        # пациент файла
+                date                 = row['date'],                       # дата приёма (обязательна)
+                reason_text          = row.get('reason_text'),            # причина обращения
+                procedure_text       = row.get('procedure_text'),         # выполненная процедура
+                recommendations_text = row.get('recommendations_text'),   # рекомендации
+                cost_procedure_text  = row.get('cost_procedure_text'),    # стоимость процедуры
+                note_text            = row.get('note_text'),              # примечание
             )
 
-            saved = appointment_service.create_appointment(app_dto, session=session)
+            saved = appointment_service.create_appointment(
+                app_dto,
+                session = session,  # транзакция файла
+            )
 
             # Обработка фото
             if 'photos' in row and row['photos']:
                 for temp_path in row['photos']:
                     # 0==0
                     photo_service.add_photo_to_appointment(
-                        saved.id, 
-                        temp_path, 
-                        row.get('note_text', ''), 
-                        session=session
+                        saved.id,                    # приём
+                        temp_path,                   # временный файл рисунка
+                        row.get('note_text', ''),    # описание фото — примечание строки
+                        session = session,           # транзакция файла
                     )
 
                     # 0==0
@@ -1196,67 +1235,113 @@ def parse_one_file(
         return True
     except Exception as e:
         raise e
-    
+
     finally:
         for temp_path in temps_path:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-        if temp_dir:
-            if os.path.exists(temp_dir):   
-                # try:
-                shutil.rmtree(
-                    temp_dir,
-                    ignore_errors=True
-                )
-                # except OSError as e:
-                #     # print(f"Ошибка при удалении папки: {e}") 
-                #     pass
-        
+        # W8: временная папка — своя (tempfile.mkdtemp в WordFileParser), удаляется целиком;
+        # берётся у парсера и тогда, когда parse() упал посередине
+        temp_dir = parser.temp_dir if parser is not None else None
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(
+                temp_dir,
+                ignore_errors = True,  # не мешать результату файла
+            )
+        # temp_dir = None  (в начале)  …  temp_dir = parser.temp_dir  (после parser.parse())
+        # if temp_dir:
+        #     if os.path.exists(temp_dir):
+        #         # try:
+        #         shutil.rmtree(
+        #             temp_dir,
+        #             ignore_errors=True
+        #         )
+        #         # except OSError as e:
+        #         #     # print(f"Ошибка при удалении папки: {e}")
+        #         #     pass
+        # ↑ до 2026-10-25 (W8): папка temp_images была в папке документов (rmtree стирал
+        #   одноимённую папку пользователя); при ошибке внутри parse() не удалялась.
+
 
 
 # ----------------------------------------------------------------------
 # Пакетная обработка (папка / список файлов)
 # ----------------------------------------------------------------------
 
-def batch_parse(
-    folder_path: str,
-    specific_files: List[str] = None,
-    update_existing_patient : bool= False,
-    db: Database = None,
-    patient_service: PatientService = None,
-    appointment_service: AppointmentService = None,
-    photo_service: PhotoService = None,
-    
-    progress_callback_start: Optional[Callable[[List[str]], None]] = None,
-    progress_callback_update: Optional[Callable[[str, str, str], None]] = None,
-
-) -> Dict[str, Any]:
+def _empty_results() -> Dict[str, Any]:
     """
-    Обрабатывает все .docx файлы в папке (или указанные).
-    Создаёт общий лог-файл parser.log в подпапке logs_parser.
-    Каждый файл обрабатывается в отдельной транзакции.
+    Пустой словарь результатов пакетной обработки (общий вид для всех веток).
+
+    Returns:
+        Dict[str, Any]: ``total``, ``success``, ``failed`` — 0; ``success_files``,
+        ``error_files``, ``warnings`` — пустые списки.
+
+    Пример:
+        >>> _empty_results()['warnings']
+        []
+    """
+
+    return {
+        'total'         : 0,
+        'success'       : 0,
+        'failed'        : 0,
+        'success_files' : [],
+        'error_files'   : [],
+        'warnings'      : [],   # W2: [{'file_name': ..., 'warning': ...}]
+    }
+
+
+def batch_parse(
+    folder_path              : str,                                             # папка с .docx
+    specific_files           : Optional[List[str]] = None,                      # имена файлов; None — все необработанные (W7)
+    update_existing_patient  : bool = False,                                    # обновлять совпадающего пациента
+    db                       : Optional[Database] = None,                       # база (None — из app.dependencies)
+    patient_service          : Optional[PatientService] = None,                 # сервис пациентов (None — из app.dependencies)
+    appointment_service      : Optional[AppointmentService] = None,             # сервис приёмов (None — из app.dependencies)
+    photo_service            : Optional[PhotoService] = None,                   # сервис фото (None — из app.dependencies)
+
+    progress_callback_start  : Optional[Callable[[List[str]], None]] = None,    # до начала: имена всех файлов
+    progress_callback_update : Optional[Callable[[str, str, str], None]] = None,  # по файлу: имя, статус, сообщение
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    Обрабатывает .docx файлы папки (указанные или все необработанные).
+
+    Создаёт общий лог-файл ``parser.log`` в подпапке ``logs_parser``. Каждый файл
+    обрабатывается в отдельной транзакции.
+
+    Без ``specific_files`` берутся все ``.docx`` папки, кроме временных ``~$…`` и уже
+    успешно обработанных по журналу (W7 — так вызывает окно).
 
     Args:
         folder_path (str): Путь к папке с файлами.
-        specific_files (List[str], optional): Список имён файлов для обработки (без путей).
+        specific_files (Optional[List[str]]): Список имён файлов для обработки (без путей).
         update_existing_patient (bool): Обновлять ли данные существующего пациента.
-        db (Database, optional): Экземпляр Database (если None – берётся из dependencies).
-        patient_service (PatientService, optional): Сервис пациентов.
-        appointment_service (AppointmentService, optional): Сервис приёмов.
-        photo_service (PhotoService, optional): Сервис фото.
-
-        progress_callback_start: вызывается перед началом, передаёт список всех имён файлов.
-        progress_callback_update: вызывается после обработки каждого файла,
-            параметры (file_name, status, error_msg). Статусы: 'processing', 'success', 'failed'.
+        db (Optional[Database]): Экземпляр Database (если None – берётся из dependencies).
+        patient_service (Optional[PatientService]): Сервис пациентов.
+        appointment_service (Optional[AppointmentService]): Сервис приёмов.
+        photo_service (Optional[PhotoService]): Сервис фото.
+        progress_callback_start: Вызывается перед началом, передаёт список всех имён файлов.
+        progress_callback_update: Вызывается до и после обработки каждого файла,
+            параметры (file_name, status, message) — все строки. Статусы: 'processing',
+            'success' (message — предупреждения через «; » или пусто), 'failed'
+            (message — текст ошибки).
 
     Returns:
-        Dict[str, Any]: Словарь с результатами обработки:
+        Tuple[Dict[str, Any], Optional[str]]: Результаты и папка журнала (None — файлов нет).
+            Результаты:
             - total (int): Всего обработано файлов.
             - success (int): Успешно.
             - failed (int): С ошибками.
             - success_files (List[str]): Имена успешных файлов.
-            - error_files (List[Dict]): Список словарей {file_name, error}.
+            - error_files (List[Dict]): Список словарей {file_name, error} (error — исключение).
+            - warnings (List[Dict]): Список словарей {file_name, warning} — предупреждения
+              успешных файлов (W2: телефон не распознан и не записан).
+
+    Пример:
+        >>> results, log_dir = batch_parse('doc')
+        >>> results['success'], os.path.basename(log_dir)
+        (4, 'logs_parser')
     """
 
     if db is None:
@@ -1275,34 +1360,43 @@ def batch_parse(
         from app.dependencies import get_photo_service # циклы
         photo_service = get_photo_service()
 
+    # Папка и файл журнала: общий журнал на все запуски
+    log_dir = os.path.join(folder_path, "logs_parser")
+    log_file = os.path.join(log_dir, "parser.log")
+    # log_file = os.path.join(
+    #     log_dir,
+    #     # f"parser_{timestamp}.log" # не используем, так как нужен общий лог
+    #     f"parser.log" # делаем общий лог на файлы
+    # )
+    # ↑ до 2026-10-25 (W7): путь журнала нужен до выбора файлов (фильтр по журналу)
+
     # Собираем файлы
     if specific_files:
         file_paths = [os.path.join(folder_path, f) for f in specific_files if f.endswith('.docx')]
     else:
-        file_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.docx')]
+        # W7: все .docx без временных «~$…» и без успешно обработанных по журналу — как pars_start
+        file_names = filter_unprocessed_files(
+            get_all_docx_files(folder_path),   # .docx папки без временных
+            log_file,                          # журнал прошлых запусков
+        )
+        file_paths = [os.path.join(folder_path, f) for f in file_names]
+        # file_paths = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith('.docx')]
+        # ↑ до 2026-10-25 (W7): окно (specific_files=None) импортировало заново уже
+        #   обработанные файлы (дубли пациентов) и временные файлы Word «~$…».
 
     if not file_paths:
-        return {'total': 0, 'success': 0, 'failed': 0, 'success_files': [], 'error_files': []}
+        # W7: всегда пара (результаты, папка журнала) — окно распаковывает её
+        return _empty_results(), None
+        # return {'total': 0, 'success': 0, 'failed': 0, 'success_files': [], 'error_files': []}
+        # ↑ до 2026-10-25 (W7): словарь вместо пары — окно падало «too many values to unpack»
 
     # Создаём папку для логов
-    log_dir = os.path.join(folder_path, "logs_parser")
-
     os.makedirs(log_dir, exist_ok=True)
 
     time_log = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    log_file = os.path.join(
-        log_dir, 
-        # f"parser_{timestamp}.log" # не используем, так как нужен общий лог
-        f"parser.log" # делаем общий лог на файлы
-    )
 
-    results = {
-        'total': len(file_paths),
-        'success': 0,
-        'failed': 0,
-        'success_files': [],
-        'error_files': []
-    }
+    results = _empty_results()
+    results['total'] = len(file_paths)
 
     # Вызываем callback начала
     if progress_callback_start:
@@ -1320,12 +1414,13 @@ def batch_parse(
                 "{time_pars_log}",    # Время парсера файла
                 "{file_name_pars}",   # Время файла
                 "{status_pars}",      # Статус парсинга
-                "{err_mas_pars}",     # Сообщени ошибки парсинга (ЕСЛИ ЕСТЬ)
+                "{err_mas_pars}",     # Сообщени ошибки парсинга (ЕСЛИ ЕСТЬ); у успешного — предупреждения (W2)
             ]
         ) + '\n'
 
         for file_path in file_paths:
             file_name = os.path.basename(file_path)
+            file_warnings: List[str] = []   # W2: предупреждения этого файла
             with db.session_scope() as session:
 
                 if progress_callback_update:
@@ -1333,32 +1428,45 @@ def batch_parse(
                 msg = None
                 try:
                     success = parse_one_file(
-                        session, file_path,
-                        patient_service, 
-                        appointment_service, 
+                        session,                                            # транзакция файла
+                        file_path,                                          # файл
+                        patient_service,                                    # сервисы
+                        appointment_service,
                         photo_service,
-                        update_existing_patient = update_existing_patient,
+                        update_existing_patient = update_existing_patient,  # обновлять совпадающего
+                        warnings                = file_warnings,            # W2: предупреждения
                     )
 
                 except Exception as e:
                     success = False
                     msg = e
 
+                # W2: предупреждения успешного файла — в журнал, результаты и колбэк; у файла
+                # с ошибкой они не нужны (по нему ничего не записано)
+                warning_text = '; '.join(file_warnings) if success else ''
+
                 log.write(
                     text_format_log.format(
-                        time_log=time_log,
-                        time_pars_log=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        file_name_pars=file_name,
-                        status_pars='success' if success else 'failed',
-                        err_mas_pars=str(msg) if msg else "",
+                        time_log       = time_log,                                       # запуск
+                        time_pars_log  = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),   # файл
+                        file_name_pars = file_name,                                      # имя файла
+                        status_pars    = 'success' if success else 'failed',             # статус
+                        err_mas_pars   = str(msg) if msg else warning_text,              # ошибка / предупреждения
                     )
                 )
 
                 if success:
                     results['success'] += 1
                     results['success_files'].append(file_name)
+                    for warning in file_warnings:
+                        results['warnings'].append(
+                            {
+                                'file_name' : file_name,
+                                'warning'   : warning,
+                            }
+                        )
                     if progress_callback_update:
-                        progress_callback_update(file_name, "success", "")
+                        progress_callback_update(file_name, "success", warning_text)
                 else:
                     results['failed'] += 1
                     results['error_files'].append(
@@ -1367,8 +1475,13 @@ def batch_parse(
                             'error': msg,
                         }
                     )
+                    # W10: в колбэк — текст ошибки (сигнал окна Signal(str, str, str)
+                    # превращал исключение в пустую строку: «❌ Ошибка:» без текста)
                     if progress_callback_update:
-                        progress_callback_update(file_name, "failed", msg)
+                        progress_callback_update(file_name, "failed", str(msg))
+                    # if progress_callback_update:
+                    #     progress_callback_update(file_name, "failed", msg)
+                    # ↑ до 2026-10-25 (W10): передавалось исключение, а не строка
 
 
                 # if msg:
@@ -1379,133 +1492,261 @@ def batch_parse(
     return results , log_dir
 
 
+def format_results(
+    results : Dict[str, Any],   # результаты batch_parse / pars_start
+) -> str:
+    """
+    Текст итогов импорта для пользователя: счётчики, ошибки, предупреждения, журнал.
+
+    Args:
+        results (Dict[str, Any]): Результаты ``batch_parse`` / ``pars_start``.
+
+    Returns:
+        str: Многострочный текст (без завершающего переноса).
+
+    Пример:
+        >>> print(format_results({'total': 1, 'success': 1, 'failed': 0, 'error_files': [],
+        ...     'warnings': [{'file_name': 'а.docx', 'warning': 'Телефон не распознан'}]}))
+        Обработано файлов: 1
+        Успешно: 1
+        Ошибок: 0
+        Предупреждения:
+          а.docx: Телефон не распознан
+    """
+
+    lines = [
+        f"Обработано файлов: {results.get('total', 0)}",
+        f"Успешно: {results.get('success', 0)}",
+        f"Ошибок: {results.get('failed', 0)}",
+    ]
+
+    for error in results.get('error_files', []):
+        lines.append(f"  {error['file_name']}: {error['error']}")
+
+    if results.get('warnings'):
+        lines.append("Предупреждения:")
+        for warning in results['warnings']:
+            lines.append(f"  {warning['file_name']}: {warning['warning']}")
+
+    if results.get('log_path'):
+        lines.append(f"Журнал: {results['log_path']}")
+
+    return '\n'.join(lines)
+
+
 # ----------------------------------------------------------------------
 # Точка входа для дебага
 # ----------------------------------------------------------------------
 
 def pars_start(
-    folder = None,
-    files = None , 
-    update_existing_patient:bool = False ,
+    folder                   : Optional[str] = None,                            # папка с .docx (нужна)
+    files                    : Optional[List[str]] = None,                      # имена файлов; None — все необработанные
+    update_existing_patient  : bool = False,                                    # обновлять совпадающего пациента
 
-    progress_callback_start: Optional[Callable[[List[str]], None]] = None,
-    progress_callback_update: Optional[Callable[[str, str, str], None]] = None,
-) -> dict:
+    progress_callback_start  : Optional[Callable[[List[str]], None]] = None,    # до начала: имена всех файлов
+    progress_callback_update : Optional[Callable[[str, str, str], None]] = None,  # по файлу: имя, статус, сообщение
+) -> Dict[str, Any]:
     """
     Точка входа для запуска парсера.
 
+    Без ``files`` берутся все необработанные ``.docx`` папки (отбор — в ``batch_parse``).
+
     Args:
-        folder (str, optional): Путь к папке .
-        files (List[str], optional): Список файлов .
+        folder (Optional[str]): Путь к папке.
+        files (Optional[List[str]]): Список имён файлов.
         update_existing_patient (bool): Флаг обновления существующих пациентов.
+        progress_callback_start: Как в ``batch_parse``.
+        progress_callback_update: Как в ``batch_parse``.
 
     Returns:
-        dict: Результат работы batch_parse (как указано выше) или пустой словарь при ошибке.
+        Dict[str, Any]: Результаты ``batch_parse`` и ``log_path`` — путь к ``parser.log``
+        (если файлы обрабатывались).
+
+    Пример:
+        >>> print(format_results(pars_start('doc')))
+        Обработано файлов: 0
+        Успешно: 0
+        Ошибок: 0
     """
 
-    results = {'total': 0, 'success': 0, 'failed': 0, 'success_files': [], 'error_files': []}
+    results, log_dir = batch_parse(
+        folder,
+        specific_files           = files or None,              # None — отбор в batch_parse (W7)
+        update_existing_patient  = update_existing_patient,
 
-    log_path = None
-    if not files:
-        files = get_all_docx_files(folder)
-        if not files:
-            # # raise ValueError("В указанной папке нет .docx файлов.")
-            # print("В указанной папке нет .docx файлов.")
-            return results
+        progress_callback_start  = progress_callback_start,
+        progress_callback_update = progress_callback_update,
+    )
 
-        # Путь к лог-файлу (предполагаем, что он лежит в той же папке)
-        log_path = os.path.join(folder, "logs_parser", "parser.log")
+    if log_dir:
+        results['log_path'] = os.path.join(log_dir, "parser.log")
 
-        # Если лог существует, отфильтровываем уже обработанные файлы
-        if os.path.exists(log_path):
-            to_process = filter_unprocessed_files(files, log_path)
-            # print(f"Из {len(files)} файлов уже обработано успешно: {len(files) - len(to_process)}")
-            files = to_process
-
-    if files:
-        results, log_path = batch_parse(
-            folder, 
-            specific_files=files,
-            update_existing_patient = update_existing_patient,
-
-            progress_callback_start=progress_callback_start,
-            progress_callback_update=progress_callback_update,
-        )
-
-        if log_path:
-            results['log_path'] = log_path
-    
     return results
+
+    # results = {'total': 0, 'success': 0, 'failed': 0, 'success_files': [], 'error_files': []}
+    #
+    # log_path = None
+    # if not files:
+    #     files = get_all_docx_files(folder)
+    #     if not files:
+    #         # # raise ValueError("В указанной папке нет .docx файлов.")
+    #         # print("В указанной папке нет .docx файлов.")
+    #         return results
+    #
+    #     # Путь к лог-файлу (предполагаем, что он лежит в той же папке)
+    #     log_path = os.path.join(folder, "logs_parser", "parser.log")
+    #
+    #     # Если лог существует, отфильтровываем уже обработанные файлы
+    #     if os.path.exists(log_path):
+    #         to_process = filter_unprocessed_files(files, log_path)
+    #         # print(f"Из {len(files)} файлов уже обработано успешно: {len(files) - len(to_process)}")
+    #         files = to_process
+    #
+    # if files:
+    #     results, log_path = batch_parse(
+    #         folder,
+    #         specific_files=files,
+    #         update_existing_patient = update_existing_patient,
+    #
+    #         progress_callback_start=progress_callback_start,
+    #         progress_callback_update=progress_callback_update,
+    #     )
+    #
+    #     if log_path:
+    #         results['log_path'] = log_path
+    #
+    # return results
+    # ↑ до 2026-10-25 (W7): отбор необработанных файлов — теперь в batch_parse (там же для
+    #   окна); log_path был папкой журнала, а не файлом.
 
 
 def pars_start_args(
-    folder = None,
-    files = None ,     
-) -> dict:
+    folder : Optional[str] = None,          # папка, если не задана --folder
+    files  : Optional[List[str]] = None,    # файлы, если не заданы --files
+    argv   : Optional[List[str]] = None,    # аргументы командной строки (None — sys.argv[1:])
+) -> Dict[str, Any]:
     """
     Точка входа для запуска парсера из командной строки (для отладки и автономного использования).
 
     Поддерживаемые аргументы командной строки:
-        --folder <path>               Обязательный путь к папке с .docx файлами.
-        --files file1.docx,file2.docx Опциональный список файлов (если не указан, берутся все .docx).
+        --folder <path>               Путь к папке с .docx файлами (обязателен, если не передан в вызове).
+        --files file1.docx,file2.docx Опциональный список файлов (если не указан, берутся все необработанные .docx).
         --update_existing_patient     Флаг: обновлять данные существующего пациента.
         --help                        Показать справку.
 
+    Аргументы командной строки главнее параметров вызова (Ф1.1.7: раньше папка из вызова
+    перекрывала ``--folder``, и в ``pars_start.py`` был зашит путь Linux). Нет папки или
+    папки не существует — сообщение и выход с кодом 2 (``argparse``).
+
     Args:
-        folder (str, optional): Путь к папке (будет переопределён аргументом --folder).
-        files (List[str], optional): Список файлов (будет переопределён аргументом --files).
+        folder (Optional[str]): Путь к папке (будет переопределён аргументом --folder).
+        files (Optional[List[str]]): Список файлов (будет переопределён аргументом --files).
+        argv (Optional[List[str]]): Аргументы (для тестов); None — ``sys.argv[1:]``.
 
     Returns:
-        dict: Результат работы pars_start (как указано выше) или пустой словарь при ошибке.
+        Dict[str, Any]: Результат работы ``pars_start``.
+
+    Пример:
+        >>> results = pars_start_args(argv=['--folder', 'doc', '--files', 'а.docx,б.docx'])
     """
-    
-    # import sys
+
     # Пример использования:
-    # python -m parsers.word_importer --folder /path/to/files --files file1.docx file2.docx
-    # или: python -m parsers.word_importer --folder /path/to/files (все файлы)
+    # python pars_start.py --folder /path/to/files --files file1.docx,file2.docx
+    # или: python pars_start.py --folder /path/to/files (все необработанные файлы)
 
-    # folder = None
-    _files = []
-    update_existing_patient = False
+    arg_parser = argparse.ArgumentParser(
+        prog        = 'pars_start.py',                                       # имя в справке
+        description = 'Импорт пациентов и приёмов из Word (.docx) в базу.',  # о программе
+    )
+    arg_parser.add_argument(
+        '--folder',
+        help = 'папка с .docx файлами',
+    )
+    arg_parser.add_argument(
+        '--files',
+        help = 'имена файлов через запятую (по умолчанию — все необработанные .docx папки)',
+    )
+    arg_parser.add_argument(
+        '--update_existing_patient',
+        action = 'store_true',                                 # флаг без значения
+        help   = 'обновлять данные совпадающего пациента',
+    )
+    args = arg_parser.parse_args(argv)
 
-    args = sys.argv[1:]
-    for i, arg in enumerate(args):
-        if arg == '--folder' :
-            if folder is None:
-                folder = args[i+1]
-
-        elif arg == '--update_existing_patient':
-            update_existing_patient = True
-
-        elif arg == '--files' and i+1 < len(args):
-            if files is None:
-                # _files = args[i+1].split(',')
-                _files = [f for f in args[i+1].split(',') if f.strip()] 
-
-        elif arg == '--help':
-            print("Usage: python word_importer.py --folder <path> [--files file1.docx,file2.docx]")
-            sys.exit(0)
-
-    if files is None:
-        files = _files
+    # Командная строка главнее параметров вызова
+    folder = args.folder or folder
+    if args.files:
+        files = [f.strip() for f in args.files.split(',') if f.strip()]
 
     if not folder:
-        print("Укажите папку с файлами: --folder /path/to/docx")
-        sys.exit(1)
+        arg_parser.error("укажите папку с файлами: --folder <путь>")
+
+    if not os.path.isdir(folder):
+        arg_parser.error(f"папки нет: {folder}")
 
     results = pars_start(
-        folder = folder,
-        files = files,
-        update_existing_patient = update_existing_patient,
+        folder                  = folder,                     # папка
+        files                   = files,                      # файлы (None — все необработанные)
+        update_existing_patient = args.update_existing_patient,
     )
 
     return results
-    
 
-if __name__ == "__main__":   
-    # Пример вызова: python word_importer.py --folder /path/to/docx --files тест1.docx
-    
-    pars_start_args(
-        folder = '/home/admin-rkc/Git/My_cods/project_med/doc',
-        files = 'тест1.docx',
+    # _files = []
+    # update_existing_patient = False
+    #
+    # args = sys.argv[1:]
+    # for i, arg in enumerate(args):
+    #     if arg == '--folder' :
+    #         if folder is None:
+    #             folder = args[i+1]
+    #
+    #     elif arg == '--update_existing_patient':
+    #         update_existing_patient = True
+    #
+    #     elif arg == '--files' and i+1 < len(args):
+    #         if files is None:
+    #             # _files = args[i+1].split(',')
+    #             _files = [f for f in args[i+1].split(',') if f.strip()]
+    #
+    #     elif arg == '--help':
+    #         print("Usage: python word_importer.py --folder <path> [--files file1.docx,file2.docx]")
+    #         sys.exit(0)
+    #
+    # if files is None:
+    #     files = _files
+    #
+    # if not folder:
+    #     print("Укажите папку с файлами: --folder /path/to/docx")
+    #     sys.exit(1)
+    #
+    # results = pars_start(
+    #     folder = folder,
+    #     files = files,
+    #     update_existing_patient = update_existing_patient,
+    # )
+    #
+    # return results
+    # ↑ до 2026-10-25 (Ф1.1.7): папка из вызова перекрывала --folder (pars_start.py с
+    #   зашитым путём Linux не давал задать папку); «--folder» последним — IndexError.
+
+
+if __name__ == "__main__":
+    # Пример вызова: python -m parsers.word_importer --folder <папка> [--files тест1.docx]
+    from app.config.logging_setup import setup_logging
+
+    # Логгеры не читают конфиг сами: передаём его до любой работы (как pars_start.py)
+    setup_logging()
+
+    print(
+        format_results(
+            pars_start_args(),
+        )
     )
+
+    # pars_start_args(
+    #     folder = '/home/admin-rkc/Git/My_cods/project_med/doc',
+    #     files = 'тест1.docx',
+    # )
+    # ↑ до 2026-10-25 (Ф1.1.7): зашитый путь Linux; files — строка, а не список (перебор
+    #   по буквам — ни одного файла).

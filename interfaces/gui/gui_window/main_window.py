@@ -1432,7 +1432,27 @@ class ParsingProgressDialog(QDialog):
             self._items[name] = item
 
     @Slot(str, str, str)
-    def update_file_status(self, file_name: str, status: str, error_msg: str = ""):
+    def update_file_status(
+        self,
+        file_name : str,        # имя файла в списке
+        status    : str,        # 'processing' / 'success' / 'failed'
+        error_msg : str = "",   # текст ошибки; у 'success' — предупреждения (W2) или пусто
+    ) -> None:
+        """
+        Показывает статус файла в списке диалога импорта.
+
+        Args:
+            file_name (str): Имя файла (как в ``set_file_list``).
+            status (str): Статус от ``batch_parse``: 'processing', 'success', 'failed'.
+            error_msg (str): Текст ошибки; у 'success' — предупреждения через «; »
+                (например, телефон не распознан и не записан — ``parsers/IMPLEMENTATION.md``).
+
+        Returns:
+            None
+
+        Пример:
+            >>> dialog.update_file_status('а.docx', 'success', 'Телефон не распознан: «12-34-56» …')
+        """
         item = self._items.get(file_name)
         if not item:
             return
@@ -1440,7 +1460,13 @@ class ParsingProgressDialog(QDialog):
             self._set_status(item, "🔄 Обработка...")
             self.list_widget.scrollToItem(item)
         elif status == "success":
-            self._set_status(item, "✅ Готово")
+            # W2 (2026-10-25): предупреждения успешного файла — рядом со статусом
+            if error_msg:
+                self._set_status(item, f"✅ Готово ⚠️ {error_msg[:60]}")
+            else:
+                self._set_status(item, "✅ Готово")
+            # self._set_status(item, "✅ Готово")
+            # ↑ до 2026-10-25 (W2, parsers): предупреждения импорта не показывались
         elif status == "failed":
             self._set_status(item, f"❌ Ошибка: {error_msg[:60]}")
         else:
@@ -1859,7 +1885,24 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_parsing_finished(self, results):
+    def _on_parsing_finished(
+        self,
+        results : dict,   # результаты batch_parse (+ log_path)
+    ) -> None:
+        """
+        Итоги импорта из Word: закрывает диалог прогресса и показывает итоги — счётчики,
+        ошибки, предупреждения (W2: нераспознанный телефон не записан), путь к журналу
+        (``parsers.word_importer.format_results``); затем обновляет страницы.
+
+        Args:
+            results (dict): Результаты ``batch_parse`` с ключом ``log_path``.
+
+        Returns:
+            None
+
+        Пример:
+            >>> window._on_parsing_finished({'total': 1, 'success': 1, 'failed': 0, 'warnings': []})
+        """
         if hasattr(self, 'progress_dialog'):
             self.progress_dialog.accept()
             self.progress_dialog = None
@@ -1875,10 +1918,19 @@ class MainWindow(
                 self.progress_dialog.finished_closed.connect(self._on_parsing_dialog_closed)
                 self._parsing_closed_connected = True
         else:
+            # W2 (2026-10-25): итоги с ошибками и предупреждениями — общим текстом парсера
+            # (парсер уже загружен потоком импорта, если дошли до итогов)
+            from parsers.word_importer import format_results
             QMessageBox.information(
-                self, "Парсинг завершён",
-                f"Обработано файлов: {total}\nУспешно: {success}\nОшибок: {failed}\nЛог сохранён: {log_path}"
+                self,                       # родитель
+                "Парсинг завершён",         # заголовок
+                format_results(results),    # счётчики, ошибки, предупреждения, журнал
             )
+            # QMessageBox.information(
+            #     self, "Парсинг завершён",
+            #     f"Обработано файлов: {total}\nУспешно: {success}\nОшибок: {failed}\nЛог сохранён: {log_path}"
+            # )
+            # ↑ до 2026-10-25 (W2, parsers): без ошибок по файлам и предупреждений
             self._refresh_after_parsing()
 
     def _on_parsing_dialog_closed(self):

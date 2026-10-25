@@ -36,6 +36,21 @@ from app.exceptions import (
 EXCEPTIONS_DIR = os.path.dirname(exceptions_package.__file__)  # папка пакета
 
 
+def _param_id(
+    value : object,   # параметр теста: исключение или класс
+) -> str:
+    """
+    Имя параметра в выводе pytest: имя класса исключения или самого класса.
+
+    Пример:
+        >>> _param_id(TokenError()), _param_id(SyncError)
+        ('TokenError', 'SyncError')
+    """
+    if isinstance(value, Exception):
+        return type(value).__name__
+    return getattr(value, '__name__', repr(value))
+
+
 # ---------------------------------------------------------------------------
 # E9 — код 0 — тоже код
 # ---------------------------------------------------------------------------
@@ -147,7 +162,7 @@ def test_cover_base_default_and_custom_code(
     (DatabaseConnectionError('c'), DatabaseError),
     (PhotoStoragePermissionError('p', 'o'), PhotoFileError),
     (PhotoStorageNoSpaceError('p', 'o'), PhotoFileError),
-], ids=lambda value: type(value).__name__ if isinstance(value, Exception) else value.__name__)
+], ids=_param_id)
 def test_cover_caught_by_group_base(
     exc  : AppException,   # исключение
     base : type,           # базовый класс группы

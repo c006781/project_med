@@ -10,7 +10,7 @@
 | [file_deletions.py](file_deletions.py) | Удаление файлов/папок сразу или после COMMIT/ROLLBACK сессии (`DeletionContext`, `schedule_deletion`), копирование во временную папку, поиск файла фото | 2026-10-21, проход 1 |
 | [deferred_actions.py](deferred_actions.py) | Действия после COMMIT/ROLLBACK сессии (`ActionContext`, `add_deferred_action`, `execute_actions` — в цикле событий Qt) | 2026-10-21, проход 1 |
 | [virtual_fields.py](virtual_fields.py) | Виртуальные поля DTO: `compute_virtual_fields` (по `compute` в конфигурации), `enrich_dto_with_computed_fields` | 2026-10-21, проход 1 |
-| [colors.py](colors.py), [qt_meta.py](qt_meta.py) | Цвета интерфейса; метакласс Qt + ABC | нет |
+| [colors.py](colors.py), [qt_meta.py](qt_meta.py) | Цвета интерфейса; метакласс Qt + ABC (абстрактность не проверяет — QM1) | 2026-10-25, первая проверка (М5) |
 
 Обработчики `after_commit`/`after_rollback`, которые выполняют накопленные удаления и
 действия, регистрирует `app/database/database.py`.
@@ -98,3 +98,13 @@ FD7 — 1, FD8 — 2), FD9 (2, xfail strict).
 
 Ошибок не найдено. Тесты: `tests/test_virtual_fields_review_pass2.py` (5) — закрепляют
 записанное в докстрингах поведение.
+
+#### colors.py, qt_meta.py (первая проверка)
+
+| # | Файл | Что было | Почему плохо | Исправление |
+|---|---|---|---|---|
+| CL1 | `colors.py` | `get_color_for_entity_status` без докстринга; не описано, что цвета — общие объекты | Правило проекта; `QColor` уровня класса хранят модели таблиц — изменение на месте (`setAlpha`) перекрасило бы все таблицы | Докстринги с примерами (приоритет: удалена → новая → изменена `own`/`child`/`both` → обычная), предупреждение «не менять на месте». Сейчас никто не меняет (проверено поиском) |
+| QM1 | `qt_meta.py` | `QABCMeta(type(QObject), ABCMeta)` | Снимает конфликт метаклассов, но **абстрактность не проверяет**: класс создаёт `Shiboken.ObjectType.__new__`, `ABCMeta.__new__` не вызывается — `__abstractmethods__` пуст, экземпляр с нереализованным `@abstractmethod` создаётся, вызов метода выполняет тело заглушки. Проверка по всем классам окна (импорт `interfaces/gui/gui_window`, 2026-10-25): не реализован абстрактный `refresh_data` у `PatientListPage`, `PaginatedAppointmentListPage`, `PaginatedPhotoListPage` (и базового `PaginatedListPage`) | **Не исправлено** — включение проверки (`__new__` с `abc._abc_init` или проверка в `__call__`) сломает создание этих страниц: нужна правка окна (вне территории) и решение владельца. Описание модуля исправлено (раньше подразумевало обычный `ABC`), тест закрепляет текущее поведение |
+
+Тесты: `tests/test_utils_colors.py` (11), `tests/test_utils_qt_meta.py` (4) — до этого тестов
+не было.

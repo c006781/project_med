@@ -183,3 +183,67 @@ def test_m16_force_new_replaces_registered_instance(config_sandbox):
     assert b is not a
     assert AppConfigManager.get_instance(config_path='config.msgpack') is b
     assert len(AppConfigManager._instances) == 1
+
+
+# ---------------------------------------------------------------------------
+# E5: чтение .env не загружает его ключи в os.environ
+# ---------------------------------------------------------------------------
+
+def test_e5_save_env_file_does_not_load_other_keys(env_file):
+    """E5: запись ключа не загружает в os.environ остальные ключи .env."""
+    from app.config.conf.getenv import save_env_file
+
+    env_file.write_text("OTHER_SECRET=42\n", encoding='utf-8')
+    save_env_file(
+        {'NEW_KEY': 'v'},                # новый ключ
+        dotenv_path = str(env_file),     # .env песочницы
+    )
+    assert os.environ['NEW_KEY'] == 'v'
+    assert 'OTHER_SECRET' not in os.environ
+
+
+def test_e5_save_env_file_sees_key_in_file_without_environ(env_file):
+    """E5: ключ, который уже есть в файле (а в os.environ нет), без if_update не перезаписывается."""
+    from app.config.conf.getenv import save_env_file
+
+    env_file.write_text("K='old'\n", encoding='utf-8')
+    save_env_file(
+        {'K': 'new'},                    # ключ уже есть в файле
+        dotenv_path = str(env_file),     # .env песочницы
+    )
+    assert "'old'" in env_file.read_text(encoding='utf-8')
+    assert 'K' not in os.environ
+
+
+def test_e5_environment_wins_even_if_empty(env_file, monkeypatch):
+    """E5: пустая переменная окружения главнее файла (как с load_dotenv без override)."""
+    from app.config.conf.getenv import get_getenv
+
+    env_file.write_text("APP_CONFIG_PATH='from_file.msgpack'\n", encoding='utf-8')
+    monkeypatch.setenv('APP_CONFIG_PATH', '')
+    assert get_getenv('APP_CONFIG_PATH', start_value='default.msgpack') == 'default.msgpack'
+
+
+def test_e5_environment_wins_for_config_manager(env_file, monkeypatch, tmp_path):
+    """E5: ``APP_CONFIG_PATH`` из окружения главнее ``.env`` и для менеджера конфига."""
+    from app.config.config_manager.manager import AppConfigManager
+
+    env_file.write_text("APP_CONFIG_PATH='from_file.msgpack'\nGITHUB_TOKEN='t'\n", encoding='utf-8')
+    monkeypatch.setenv('APP_CONFIG_PATH', 'from_env.msgpack')
+    assert AppConfigManager.get_instance()._config_path == 'from_env.msgpack'
+    assert 'GITHUB_TOKEN' not in os.environ
+
+
+def test_e5_unreadable_env_does_not_crash(env_file, monkeypatch, capsys):
+    """E5: .env есть, но не читается (заблокирован) — значение по умолчанию и предупреждение."""
+    import app.config.conf.getenv as getenv_module
+    from app.config.conf.getenv import get_getenv
+
+    env_file.write_text("APP_CONFIG_PATH='a.msgpack'\n", encoding='utf-8')
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, 'файл заблокирован')
+
+    monkeypatch.setattr(getenv_module, 'dotenv_values', boom)
+    assert get_getenv('APP_CONFIG_PATH', start_value='config.msgpack') == 'config.msgpack'
+    assert 'не удалось прочитать' in capsys.readouterr().err

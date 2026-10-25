@@ -40,9 +40,10 @@ get_config_env(path=None)                         # manager.py — им поль
    │                 └─ _old_get_config_env()      # conf/get_config.py
    │                    ├─ get_getenv('APP_CONFIG_PATH', start_value='config.msgpack')
    │                    └─ get_getenv('GITHUB_TOKEN',   start_value='')
-   │                       └─ get_dotenv_path() (E3) → load_dotenv()→ (ключа нет в файле) set_key()
-   │                          → записанный ключ в os.environ (G1)
-   └─ экземпляр по пути (Multiton, под блокировкой — M13) → manager.get_all() (копия)
+   │                       └─ get_dotenv_path() (E3) → окружение, иначе dotenv_values() (E5)
+   │                          → (ключа нет в файле) set_key() → записанный ключ в os.environ (G1)
+   └─ экземпляр по нормализованному пути (Multiton, M16; под блокировкой — M13)
+      → manager.get_all() (копия)
 ```
 
 (До 2026-10-15 схема показывала чтение .env при каждом вызове и `load_dotenv(override=True)`
@@ -113,7 +114,7 @@ SettingsPage._save:
 | ✅ E2 |Если `.env` недоступен для записи (установка в `Program Files`, папка только для чтения, антивирус) — `PermissionError` при старте, **приложение не запускается** |
 | ✅ E3 (решение владельца 2026-10-15, см. §4) |`get_dotenv_path()` → `find_dotenv()` ищет `.env` от папки МОДУЛЯ вверх, а не от текущей папки: при разработке находится `.env` проекта независимо от того, откуда запущена программа; в собранном exe — не находится, берётся `.env` в текущей папке. Поведение разное в разработке и в exe |
 | ⏳ E4 (оставлено: .env создаётся с умолчаниями — так задумано) |Чтение конфига создаёт пустой `.env`, если его нет (`crete_env_file`) — побочный эффект чтения |
-| ⏳ E5 |`load_dotenv` при каждом чтении загружает ВСЕ ключи `.env` в `os.environ` |
+| ✅ E5 (2026-10-25) |`load_dotenv` при каждом чтении загружает ВСЕ ключи `.env` в `os.environ` |
 | ✅ E6 |`AppConfigManager.get_instance()` без пути при каждом вызове заново читает `.env` (через `_old_get_config_env`), хотя путь к конфигу за время работы не меняется |
 
 ### 3.2 `config.msgpack`
@@ -169,6 +170,11 @@ SettingsPage._save:
 * **M12/M12a.** `save()`: временный файл `<путь>.<pid>-<uuid>.tmp` рядом, `open(..., 'xb')`
   (права по umask), затем `os.replace`.
 * **M13.** `AppConfigManager.get_instance()` — под `_instances_lock` (RLock).
+* **E5.** `.env` читается без загрузки в `os.environ` (`_file_values` → `dotenv_values`);
+  значение ключа — `_current_value`: переменная окружения (даже пустая) главнее файла, как
+  было с `load_dotenv` без `override`. В `os.environ` попадают только ЗАПИСАННЫЕ ключи (G1).
+  Файл по-прежнему читается при каждом `get_getenv` (за старт — 2 раза, E6); кэша нет
+  намеренно — файл могут поправить вручную (`reset_default_config_path`).
 * **G1.** Записанные в .env ключи кладутся в `os.environ` по одному; .env не
   перезагружается с `override=True` — переменные окружения системы важнее файла.
 * **M3.** Слушатели-методы — `weakref.WeakMethod`; функции/лямбды — обычные ссылки.
@@ -319,6 +325,7 @@ AP3a, AP7, CLI1, M12a, AP2a) и 6 расхождений в описаниях (
 | # | Файл | Что было | Почему плохо | Исправление |
 |---|---|---|---|---|
 | К6 | `config_applier.py`, `app/dependencies.py`, `SettingsPage`, `cli apply_settings` | `config_applier` импортировал `app.dependencies` (`_SERVICE_PROVIDERS`, `get_photo_service`, `get_sync_service` и 3 неиспользуемых — замечания pyflakes) | Связь «снизу вверх»: настройки тянули сборку приложения → сервисы → базу; риск циклов импорта при перестановке; импорт `app.config` поднимал всё приложение | Сервисы приходят снаружи: `ServiceHooks` (поставщики сервисов, сервис фото, сервис синхронизации) в `ConfigApplier(services=…)`; создаёт `app.dependencies.create_config_applier()`; экран настроек и CLI вызывают её. Без обработчиков блоки `database`/`photos`/`sync` — в `errors` («обработчики сервисов не переданы»), а не молча |
+| E5 (Ф1.4.3) | `conf/getenv.py` | `get_getenv` и `save_env_file` вызывали `load_dotenv` | В `os.environ` попадали ВСЕ ключи `.env` при каждом чтении (окружение процесса засорялось, его наследовали дочерние процессы); нечитаемый `.env` ронял чтение | Файл читается `dotenv_values` без загрузки (`_file_values`, нечитаемый — предупреждение и умолчания); окружение главнее файла (`_current_value`); в `os.environ` — только записанные ключи (G1) |
 | M16 (часть M6, Ф1.4.2) | `manager.py` | Ключ реестра `AppConfigManager._instances` — путь как передан | `config.msgpack`, `./config.msgpack`, абсолютный путь, другой регистр (Windows) — разные менеджеры одного файла: правки одного не видны другому, сохранение одного затирает другой | Ключ — `_instance_key()`: `os.path.normcase(os.path.abspath(путь))`; менеджер хранит путь как передан (относительный — от текущей папки, как раньше) |
 
 Замечено вне модуля (К6): `get_sync_service()` не кэшируется — каждый вызов создаёт новый

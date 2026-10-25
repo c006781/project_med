@@ -23,7 +23,10 @@ import threading
 from typing import Dict, Optional
 
 # Сторонние библиотеки
-from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values # pip install python-dotenv
+# from dotenv import load_dotenv, set_key, find_dotenv, dotenv_values # pip install python-dotenv
+# ↑ до 2026-10-25 (E5): load_dotenv больше не используется — .env читается без загрузки
+#   в os.environ (dotenv_values).
+from dotenv import set_key, find_dotenv, dotenv_values # pip install python-dotenv
 # (find_dotenv с E3 не используется — импорт оставлен: на него ссылаются старые тесты/заглушки)
 
 # Глобальная блокировка для операций записи в .env файл
@@ -73,6 +76,62 @@ def _key_in_file(dotenv_path: str, key: str) -> bool:
         return key in dotenv_values(dotenv_path)
     except OSError:
         return False
+
+
+def _file_values(
+    dotenv_path : str,   # путь к .env
+) -> Dict[str, Optional[str]]:
+    """
+    Значения из файла .env, БЕЗ загрузки в ``os.environ`` (E5, 2026-10-25).
+
+    Файла нет — пустой словарь. Файл не читается (заблокирован, нет прав) — предупреждение
+    в stderr и пустой словарь (дальше — значения по умолчанию).
+
+    Args:
+        dotenv_path: Путь к .env.
+
+    Returns:
+        Словарь ``ключ → значение`` (``None`` — строка ``KEY`` без ``=``).
+
+    Пример:
+        >>> _file_values('.env')                      # в файле GITHUB_TOKEN=''
+        {'GITHUB_TOKEN': ''}
+    """
+    if not dotenv_path or not os.path.exists(dotenv_path):
+        return {}
+    try:
+        return dict(dotenv_values(dotenv_path))
+    except OSError as e:
+        _report(f"не удалось прочитать {dotenv_path}: {e}")
+        return {}
+
+
+def _current_value(
+    key         : str,                         # имя ключа
+    file_values : Dict[str, Optional[str]],    # значения из .env (_file_values)
+) -> Optional[str]:
+    """
+    Значение ключа: переменная окружения главнее файла (даже пустая).
+
+    Так же, как раньше делал ``load_dotenv`` без ``override``: ключ, уже заданный в
+    окружении процесса, файлом не перекрывается (G1, правило ``APP_CONFIG_PATH`` /
+    ``PROJECT_MED_ENV_DIR`` из окружения главнее файла).
+
+    Args:
+        key: Имя ключа.
+        file_values: Значения из файла.
+
+    Returns:
+        Значение или ``None``, если ключа нет ни в окружении, ни в файле.
+
+    Пример:
+        >>> os.environ['APP_CONFIG_PATH'] = 'env.msgpack'
+        >>> _current_value('APP_CONFIG_PATH', {'APP_CONFIG_PATH': 'file.msgpack'})
+        'env.msgpack'
+    """
+    if key in os.environ:
+        return os.environ[key]
+    return file_values.get(key)
 
 
 # Переменная окружения: папка с .env (приоритет над папкой запуска). Для тестов и
@@ -155,8 +214,10 @@ def get_getenv(
     Значение ключа из окружения/.env; при отсутствии — значение по умолчанию.
 
     Порядок:
-        1. Загрузить .env в ``os.environ`` (существующие переменные окружения не
-           перезаписываются); если .env нет — создать пустой.
+        1. Если .env нет — создать пустой (E4). Значение — из переменной окружения, если
+           она задана (даже пустая), иначе из файла. Файл читается без загрузки в
+           ``os.environ`` (E5, 2026-10-25; раньше ``load_dotenv`` загружал туда все
+           ключи .env).
         2. Пустое или отсутствующее значение → ``start_value``. Если ключа нет в самом
            ФАЙЛЕ — дописать его со ``start_value`` (с 2026-10-14 ключ с пустым значением
            не дописывается повторно — E1).
@@ -184,22 +245,36 @@ def get_getenv(
     if not dotenv_path:
         dotenv_path = get_dotenv_path() 
 
-    # Загрузка .env
-    load_dotenv_thec = load_dotenv(
-        dotenv_path = dotenv_path
-    )
+    # # Загрузка .env
+    # load_dotenv_thec = load_dotenv(
+    #     dotenv_path = dotenv_path
+    # )
+    #
+    # # Если .env не существует, то создаем его
+    # if not load_dotenv_thec:
+    #     crete_env_file(dotenv_path)
+    #
+    #     # И снова загружаем .env
+    #     load_dotenv_thec = load_dotenv(
+    #         dotenv_path = dotenv_path
+    #     )
+    #
+    # # Получение значения ключа
+    # thec = os.getenv(key)
+    # ↑ до 2026-10-25 (E5): load_dotenv при каждом чтении загружал в os.environ ВСЕ ключи
+    #   .env (не только запрошенный) — окружение процесса засорялось содержимым файла,
+    #   его видели дочерние процессы. Теперь файл читается без загрузки (dotenv_values),
+    #   переменная окружения по-прежнему главнее файла (_current_value).
 
-    # Если .env не существует, то создаем его
-    if not load_dotenv_thec:
+    # Если .env не существует, то создаем его (E4: так задумано)
+    if not os.path.exists(dotenv_path):
         crete_env_file(dotenv_path)
 
-        # И снова загружаем .env
-        load_dotenv_thec = load_dotenv(
-            dotenv_path = dotenv_path
-        )
-
-    # Получение значения ключа
-    thec = os.getenv(key)
+    # Значение ключа: окружение главнее файла
+    thec = _current_value(
+        key,
+        _file_values(dotenv_path),
+    )
 
     # # Если ключа нет в .env, то добавляем его с start_value
     # if (not thec) and (start_value is not None):
@@ -285,7 +360,8 @@ def save_env_file(
     """
     Записывает ключи в .env и кладёт записанные в ``os.environ``.
 
-    Без ``if_update`` записывает только ключи, которых нет в окружении (или они пустые).
+    Без ``if_update`` записывает только ключи, которых нет ни в окружении, ни в файле (или
+    они пустые). Прочие ключи .env в ``os.environ`` не загружаются (E5, 2026-10-25).
     Остальные переменные окружения не трогаются (до G1 весь .env перезагружался с
     перезаписью — системные переменные подменялись значениями из файла).
 
@@ -310,11 +386,14 @@ def save_env_file(
         if not dotenv_path:
             dotenv_path = get_dotenv_path()
 
-        # Загрузка .env
-        load_dotenv(
-            dotenv_path =   dotenv_path,
-            # override    =   True,
-        )
+        # # Загрузка .env
+        # load_dotenv(
+        #     dotenv_path =   dotenv_path,
+        #     # override    =   True,
+        # )
+        # ↑ до 2026-10-25 (E5): загружал в os.environ все ключи .env, чтобы проверить
+        #   наличие записываемых. Теперь файл читается без загрузки.
+        file_values = _file_values(dotenv_path)
 
         iterated = False
         written = []   # ключи, записанные в файл (G1: только они попадают в os.environ)
@@ -323,7 +402,10 @@ def save_env_file(
         for key, value in env_key.items():
             # Если ключа нет в .env (или принудительная замена значения ключа)
             if (
-                not os.getenv(key)  # проверка наличия ключа
+                # not os.getenv(key)  # проверка наличия ключа
+                # ↑ до 2026-10-25 (E5): os.environ после load_dotenv; теперь — окружение,
+                #   иначе файл (тот же порядок)
+                not _current_value(key, file_values)  # проверка наличия ключа
                 ) or (if_update):  # если нет ключа или принудительная замена значения ключа
                 iterated = True
 

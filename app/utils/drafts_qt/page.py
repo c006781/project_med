@@ -112,7 +112,7 @@ class DraftTablePage(QWidget):
     ) -> None:
         """
         Args:
-            store: Хранилище черновиков (общее для приложения).
+            store: Хранилище черновиков (общее для экранов окна; не глобальное).
             entity: Тип записей.
             columns: Колонки.
             source: Источник строк.
@@ -159,6 +159,12 @@ class DraftTablePage(QWidget):
         self.view.selectionModel().selectionChanged.connect(lambda *_: self._update_buttons())
 
         self._build_toolbar(title)
+        # DR5 (2026-10-25): кнопки («Отменить», «Удалить», «Восстановить») пересчитывались
+        # только при смене выделения — после правки ячейки или отмены из другого места
+        # оставались в прежнем состоянии. Теперь — и при любом изменении строк модели.
+        for signal in (self.model.dataChanged, self.model.rowsInserted, self.model.rowsRemoved,
+                       self.model.modelReset):
+            signal.connect(lambda *_: self._update_buttons())
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(self._toolbar)

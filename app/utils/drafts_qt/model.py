@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Hashable, List, Mapping, Optional, Sequence
 
@@ -125,7 +126,7 @@ class DraftTableModel(QAbstractTableModel):
     ) -> None:
         """
         Args:
-            store: Хранилище черновиков (общее для приложения).
+            store: Хранилище черновиков (общее для экранов окна; не глобальное).
             entity: Тип записей таблицы (из схемы хранилища).
             columns: Колонки.
             id_field: Поле id в строках.
@@ -148,6 +149,17 @@ class DraftTableModel(QAbstractTableModel):
         self._parent_id: Any = MISSING              # родитель (контекст) таблицы
         self._reload_pending = False                # перечитывание уже запланировано
         store.subscribe(self._on_store_event)
+        # DR6 (2026-10-25): модель удалена вместе со страницей (окно закрыли), а detach()
+        # не вызвали — хранилище держало подписку: утечка и ошибка «Internal C++ object
+        # already deleted» в журнале на КАЖДОЕ событие. Теперь отписка при уничтожении.
+        # partial держит обработчик модели (привязанный метод — и саму модель), как и
+        # подписка в хранилище, — новой ссылки на модель нет (уточнено при слиянии М4).
+        self.destroyed.connect(
+            functools.partial(
+                store.unsubscribe,     # отписать от этого хранилища
+                self._on_store_event,  # обработчик этой модели
+            )
+        )
 
     # ------------------------------------------------------------------
     # Данные страницы
@@ -155,7 +167,8 @@ class DraftTableModel(QAbstractTableModel):
 
     def detach(self) -> None:
         """
-        Отписывается от хранилища (перед удалением модели).
+        Отписывается от хранилища (перед удалением модели; при уничтожении модели — само,
+        DR6; повторный вызов ничего не делает).
 
         Returns:
             None
@@ -582,9 +595,9 @@ class DraftTableModel(QAbstractTableModel):
 
     def _sync_new_row(self, node: NodeKey, row: int) -> None:
         """
-        Приводит строку новой записи в соответствие с хранилищем: нет черновика — строка
-        убирается; черновик появился (и относится к этой таблице) — строка добавляется;
-        есть — данные обновляются.
+        Приводит строку новой записи в соответствие с хранилищем: нет черновика или запись
+        перенесена к другому родителю — строка убирается; черновик появился (и относится к
+        этой таблице) — строка добавляется; есть — данные обновляются.
 
         Args:
             node: Узел этой таблицы.
@@ -597,7 +610,10 @@ class DraftTableModel(QAbstractTableModel):
             >>> model._sync_new_row(('photo', -1), -1)     # после redo создания
         """
         draft = self.store.get(*node)
-        if row >= 0 and node[1] in self._new_ids and draft is None:
+        # if row >= 0 and node[1] in self._new_ids and draft is None:
+        # ↑ до 2026-10-25 (DR4): строка убиралась, только если черновика нет; новая запись,
+        #   перенесённая правкой поля связи к другому родителю, оставалась в чужой таблице.
+        if row >= 0 and node[1] in self._new_ids and not self._belongs_here(node[1]):
             self.beginRemoveRows(QModelIndex(), row, row)
             del self._rows[row]
             self._new_ids.discard(node[1])
@@ -708,11 +724,16 @@ class DraftTableModel(QAbstractTableModel):
                     self._rows[old_row][self.id_field] = node[1]
                     self._new_ids.discard(event.old_id)
                     self.row_id_changed.emit(event.old_id, node[1])
-            elif event.kind == 'modified' and row >= 0:
-                draft = self.store.get(*node)
-                if draft is not None and draft.is_new:
-                    self._rows[row] = {**draft.data, self.id_field: draft.id}
-            elif event.kind == 'restored':
+            # elif event.kind == 'modified' and row >= 0:
+            #     draft = self.store.get(*node)
+            #     if draft is not None and draft.is_new:
+            #         self._rows[row] = {**draft.data, self.id_field: draft.id}
+            # elif event.kind == 'restored':
+            #     self._sync_new_row(node, row)
+            # ↑ до 2026-10-25 (DR4): 'reparented' не обрабатывался — новая запись, перенесённая
+            #   к другому родителю, оставалась строкой в таблице старого и не появлялась в
+            #   таблице нового. Теперь правка, перенос и отмена/повтор — одной сверкой строки.
+            elif event.kind in ('modified', 'reparented', 'restored'):
                 # Q1 (финальный проход 2026-10-16): отмена/повтор (undo/redo) — новая
                 # запись могла исчезнуть или появиться снова; раньше строка оставалась
                 # призраком / не появлялась.

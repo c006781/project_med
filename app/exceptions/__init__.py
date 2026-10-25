@@ -1,9 +1,22 @@
 # app/exceptions/__init__.py
 
 """
-Пакет кастомных исключений приложения.
-Здесь собраны все исключения, которые могут возникать в процессе работы.
-Используются в сервисах и других слоях для передачи специфических ошибок.
+Исключения приложения — экспорт из ``app/exceptions/exceptions_all.py``.
+
+Иерархия, коды и правила выбора исключения — в описании ``exceptions_all``; заметки и
+журнал проверок — ``app/exceptions/IMPLEMENTATION.md``. Бросают их сервисы
+(``app/services``), ловят командная строка и окно.
+
+``__all__`` — все классы, кроме прежнего имени ``ConnectionError`` (псевдоним
+``DatabaseConnectionError``): ``from app.exceptions import *`` не перекрывает встроенный
+``ConnectionError``; явный ``from app.exceptions import ConnectionError`` по-прежнему работает.
+
+Пример:
+    >>> from app.exceptions import EntityNotFoundError, PatientNotFoundError
+    >>> isinstance(PatientNotFoundError(1), EntityNotFoundError)
+    True
+    >>> 'ConnectionError' in __all__
+    False
 """
 
 
@@ -33,8 +46,13 @@ from app.exceptions.exceptions_all import (
 
     # База данных
     DatabaseError, IntegrityError, DatabaseConnectionError,
-    ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
+    # ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
+    # ↑ до 2026-10-25 (E11): pyflakes — «imported but unused» (имени нет в __all__).
 )
+
+# Прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет — import * не
+# перекрывает встроенный ConnectionError). Присваивание, а не импорт: pyflakes без замечаний.
+ConnectionError = DatabaseConnectionError
 
 # Что экспортируется при импорте * (без ConnectionError — не перекрывать встроенный)
 __all__ = [

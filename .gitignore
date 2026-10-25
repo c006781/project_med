@@ -52,3 +52,5 @@ _dev/test_runs/
 _dev/backup/
 _dev/research/*/data/
 _dev/hashes.checked
+# хеши — у каждой машины свои (Windows: рабочая копия с CRLF), 2026-10-25
+_dev/hashes.sha256

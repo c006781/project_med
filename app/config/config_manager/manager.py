@@ -1,4 +1,5 @@
-# app/controllers/config_manager/manager.py
+# app/config/config_manager/manager.py
+# (до 2026-10-25, D5: в заголовке был старый путь app/controllers/config_manager/manager.py)
 
 """
 Модуль управления конфигурацией приложения с использованием MessagePack.
@@ -47,6 +48,11 @@ import msgpack # pip install msgpack
 # from cryptography.fernet import Fernet # pip install cryptography
 
 
+# Ключ настройки «Папка документов Word» (M17, 2026-10-25): папка .docx для импорта
+# (parsers/word_importer.pars_start_args без --folder; экран настроек — М19, окно — М18).
+WORD_DOCUMENTS_PATH_KEY = 'WORD_DOCUMENTS_PATH'
+
+
 
 class BaseConfigManager:
     """
@@ -56,6 +62,12 @@ class BaseConfigManager:
         _config_path (str): путь к файлу конфигурации (формат MessagePack).
         _defaults (dict): словарь со значениями по умолчанию.
         _config (dict): кеш текущих настроек (объединение defaults и загруженных из файла).
+
+    Пример:
+        >>> m = BaseConfigManager('my.msgpack', defaults={'theme': 'dark', 'size': 10})
+        >>> m.set('size', 12); m.save()
+        >>> BaseConfigManager('my.msgpack', defaults={'theme': 'dark', 'size': 10}).get('size')
+        12
     """
 
     _config_path = 'config.msgpack'
@@ -286,12 +298,88 @@ class BaseConfigManager:
             self._recover_broken_file(f"содержит не словарь, а {type(data).__name__}")
             return
         # Обновляем кеш: значения из файла перезаписывают defaults
-        self._config.update(data)
+        # self._config.update(data)
+        # ↑ до 2026-10-25 (M6): строки старых файлов ('False', '10485760') попадали в
+        #   память как есть — рядом с bool / int, сохранёнными экраном настроек.
+        self._config.update(
+            self._coerce_types(data),
+        )
         # 0==0
         # except (msgpack.UnpackException, EOFError, OSError) as e:
         #     # В случае ошибки чтения (повреждённый файл) оставляем defaults
         #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
         #     pass
+
+    # Строки, означающие «да» / «нет» (как у логгера BaseAppLogger._to_bool для «да»)
+    _TRUE_STRINGS = ('true', '1', 'yes')
+    _FALSE_STRINGS = ('false', '0', 'no', '')
+
+    @classmethod
+    def _coerce_value(
+        cls,
+        value   : Any,   # значение из файла
+        default : Any,   # умолчание того же ключа (задаёт тип)
+    ) -> Any:
+        """
+        Переводит строку из старого файла в тип умолчания (bool / int); иначе — как есть (M6).
+
+        Переводятся только строки и только для ключей, у которых умолчание — ``bool`` или
+        ``int``. Строка, которую не перевести (``'on'``, ``'10 МБ'``), остаётся как есть —
+        без потерь (её поймёт или отвергнет читатель, например логгер).
+
+        Args:
+            value: Значение из файла.
+            default: Умолчание ключа.
+
+        Returns:
+            Значение нужного типа или исходное.
+
+        Пример:
+            >>> AppConfigManager._coerce_value('False', True), AppConfigManager._coerce_value('5', 1)
+            (False, 5)
+            >>> AppConfigManager._coerce_value('on', False)
+            'on'
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if isinstance(default, bool):          # bool раньше int: bool — подкласс int
+            if text.lower() in cls._TRUE_STRINGS:
+                return True
+            if text.lower() in cls._FALSE_STRINGS:
+                return False
+            return value
+        if isinstance(default, int):
+            try:
+                return int(text)
+            except ValueError:
+                return value
+        return value
+
+    def _coerce_types(
+        self,
+        data : Dict[str, Any],   # значения из файла
+    ) -> Dict[str, Any]:
+        """
+        Значения из файла с типами умолчаний (M6, 2026-10-25): старые строки → bool / int.
+
+        Ключи без умолчания и значения других типов — как есть. Файл не переписывается:
+        типы — в памяти, в файл попадут при следующем ``save()``.
+
+        Args:
+            data: Значения из файла.
+
+        Returns:
+            Новый словарь.
+
+        Пример:
+            >>> m._coerce_types({'LOG_ARGS': 'False', 'LOG_MAX_BYTES': '10485760', 'X': 'False'})
+            {'LOG_ARGS': False, 'LOG_MAX_BYTES': 10485760, 'X': 'False'}
+        """
+        return {
+            key: (self._coerce_value(value, self._defaults[key]) if key in self._defaults else value)
+            for key, value in data.items()
+        }
 
     def _report_unreadable_file(self, error: OSError) -> None:
         """
@@ -569,6 +657,16 @@ class AppConfigManager(BaseConfigManager):
         load() -> Dict[str, Any]
         reset_to_defaults() -> None
         add_change_listener(callback) -> None
+
+    Значения флагов и чисел — ``bool`` / ``int``; строки старых файлов (``'False'``,
+    ``'10485760'``) переводятся при чтении (M6, 2026-10-25). Один экземпляр на файл при
+    любом написании пути (M16).
+
+    Пример:
+        >>> manager = AppConfigManager.get_instance()
+        >>> manager.get('LOG_MAX_BYTES'), manager.get('system_enabled')
+        (10485760, False)
+        >>> manager.set('LOG_LEVEL', 'DEBUG'); manager.save()
     """
 
     _config_path = 'config.msgpack'
@@ -603,27 +701,41 @@ class AppConfigManager(BaseConfigManager):
     #     'LOG_ARGS': 'False',   # или False, но в msgpack можно хранить bool
     # }
 
+    # ↓ M6 (2026-10-25): умолчания флагов и чисел были строками ('False', '10485760'), а
+    #   экран настроек сохраняет bool / int — в одном файле смешивались типы, 'False' и
+    #   False считались разными значениями (лишняя перенастройка логгеров). Теперь
+    #   умолчания — bool / int; строки из старых файлов переводятся при чтении
+    #   (_coerce_types, по типу умолчания). Строковые прежние значения — в комментариях
+    #   у ключей.
     _defaults = {
         'YANDEX_TOKEN': '----',
         'database_local_path': os.path.join('.', 'clinic.db'),
         'database_remote_path': 'Проекты/test/bd/clinic.db',
-        
+
         # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
         'LOG_DIR': os.path.join('.', 'logs'),          # вместо LOG_FILE
         # 'LOG_LEVEL': 'DEBUG',
         'LOG_LEVEL': 'INFO',
-        'LOG_MAX_BYTES': str(10 * 1024 * 1024),       # 10 MB
-        'LOG_BACKUP_COUNT': '5',
-        'LOG_ARGS': 'False',
-        
-        
+        # 'LOG_MAX_BYTES': str(10 * 1024 * 1024),       # 10 MB
+        # 'LOG_BACKUP_COUNT': '5',
+        # 'LOG_ARGS': 'False',
+        # ↑ до 2026-10-25 (M6): строки
+        'LOG_MAX_BYTES': 10 * 1024 * 1024,            # 10 MB
+        'LOG_BACKUP_COUNT': 5,
+        'LOG_ARGS': False,
+
+
         # Для системного логгера
         # 'system_enabled': 'True',
-        'system_enabled': 'False',
+        # 'system_enabled': 'False',
         # 'system_console_enabled': 'True',
-        'system_console_enabled': 'False',
+        # 'system_console_enabled': 'False',
         # 'system_file_enabled': 'True',
-        'system_file_enabled': 'False',
+        # 'system_file_enabled': 'False',
+        # ↑ до 2026-10-25 (M6): строки
+        'system_enabled': False,
+        'system_console_enabled': False,
+        'system_file_enabled': False,
         'system_LEVEL': 'DEBUG',
         # 'system_enabled': 'False', 
         # 'system_console_enabled': 'False',
@@ -632,11 +744,15 @@ class AppConfigManager(BaseConfigManager):
         
         # Для пользовательского логгера
         # 'user_enabled': 'True',
-        'user_enabled': 'False',
+        # 'user_enabled': 'False',
         # 'user_console_enabled': 'True',
-        'user_console_enabled': 'False',
+        # 'user_console_enabled': 'False',
         # 'user_file_enabled': 'True',
-        'user_file_enabled': 'False',
+        # 'user_file_enabled': 'False',
+        # ↑ до 2026-10-25 (M6): строки
+        'user_enabled': False,
+        'user_console_enabled': False,
+        'user_file_enabled': False,
         'user_LEVEL': 'DEBUG',
         # 'user_enabled': 'False',
         # 'user_console_enabled': 'False',
@@ -644,21 +760,33 @@ class AppConfigManager(BaseConfigManager):
         # 'user_LEVEL': 'INFO',
         
         # Общие флаги (могут быть переопределены специфичными)
-        'enabled': 'True',
-        'console_enabled': 'True',
-        'file_enabled': 'True',
+        # 'enabled': 'True',
+        # 'console_enabled': 'True',
+        # 'file_enabled': 'True',
+        # ↑ до 2026-10-25 (M6): строки
+        'enabled': True,
+        'console_enabled': True,
+        'file_enabled': True,
         # 'enabled': 'False',
         # 'console_enabled': 'False',
         # 'file_enabled': 'False',
 
-        'use_timestamp': 'False',      # добавлять ли дату в имя файла лога
-        
+        # 'use_timestamp': 'False',      # добавлять ли дату в имя файла лога
+        # ↑ до 2026-10-25 (M6): строка
+        'use_timestamp': False,        # добавлять ли дату в имя файла лога
+
         # Остальные настройки
         'PHOTOS_STORAGE_PATH': os.path.join('.', 'photos'),
         'APP_CONFIG_PATH': 'config.msgpack', # путь по умолчанию для файла конфигурации
 
         # 'show_call_depth': 'True',  # или False, но с возможностью переключения
-        'show_call_depth': 'False',  # или False, но с возможностью переключения
+        # 'show_call_depth': 'False',  # или False, но с возможностью переключения
+        # ↑ до 2026-10-25 (M6): строка
+        'show_call_depth': False,    # отступ «>» по глубине вызова в журнале
+
+        # Папка документов Word для импорта (M17, Ф1.4.4; решение владельца 2026-10-25,
+        # вариант В): pars_start.py без --folder берёт её; пусто — --folder обязателен
+        WORD_DOCUMENTS_PATH_KEY: '',
 
         # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
         # 'GITHUB_TOKEN': '',
@@ -707,6 +835,30 @@ class AppConfigManager(BaseConfigManager):
         """
         cls._resolved_default_path = None
 
+    @staticmethod
+    def _instance_key(
+        config_path : str,   # путь к файлу конфигурации (как передан)
+    ) -> str:
+        """
+        Ключ реестра экземпляров: один файл — один ключ, как бы ни был записан путь (M16).
+
+        Абсолютный путь (относительный — от текущей папки), без ``.``/``..``; на Windows —
+        без учёта регистра и с ``\\`` (``os.path.normcase``).
+
+        Args:
+            config_path: Путь к файлу конфигурации.
+
+        Returns:
+            Нормализованный абсолютный путь.
+
+        Пример:
+            >>> AppConfigManager._instance_key('./config.msgpack')   # Windows, папка C:\\app
+            'c:\\app\\config.msgpack'
+        """
+        return os.path.normcase(
+            os.path.abspath(config_path),
+        )
+
     def __init__(self, config_path: Optional[str] = None) -> None:
         """
         Менеджер с умолчаниями приложения (``_defaults``).
@@ -734,6 +886,10 @@ class AppConfigManager(BaseConfigManager):
         """
         Возвращает экземпляр менеджера конфигурации (паттерн Multiton).
 
+        Один экземпляр на файл: ключ реестра — нормализованный абсолютный путь
+        (``_instance_key``, M16), поэтому ``'config.msgpack'`` и ``'./config.msgpack'`` —
+        один менеджер.
+
         Параметры:
             force_new (bool): Если True, создаёт новый экземпляр даже если уже есть.
             config_path (Optional[str]): Путь к файлу конфигурации. Если не указан,
@@ -757,15 +913,30 @@ class AppConfigManager(BaseConfigManager):
                 #   GUI). Путь к конфигу за время работы не меняется — читаем один раз.
                 config_path = cls._default_config_path()
 
+            # # Если не требуем новый экземпляр и такой уже есть – возвращаем его
+            # if not force_new and config_path in cls._instances:
+            #     return cls._instances[config_path]
+            #
+            # # Создаём новый экземпляр
+            # instance = cls(config_path)
+            # cls._instances[config_path] = instance
+            # ↑ до 2026-10-25 (M16): ключ реестра — путь как передан: 'config.msgpack' и
+            #   './config.msgpack' (или другой регистр на Windows) давали два менеджера
+            #   одного файла — правки одного не видны другому. Теперь ключ — нормализованный
+            #   абсолютный путь; сам менеджер хранит путь как передан (как раньше).
+            key = cls._instance_key(config_path)
+
             # Если не требуем новый экземпляр и такой уже есть – возвращаем его
-            if not force_new and config_path in cls._instances:
-                return cls._instances[config_path]
+            if not force_new and key in cls._instances:
+                return cls._instances[key]
 
             # Создаём новый экземпляр
             instance = cls(config_path)
-            cls._instances[config_path] = instance
+            cls._instances[key] = instance
 
-            if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+            # if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+            # ↑ до 2026-10-25 (D5): устаревшая пометка — свойство config_exists давно есть
+            if create_if_missing and not instance.config_exists:  # файла нет — записать умолчания
                 instance.save()  # сохраняем умолчания
 
             return instance

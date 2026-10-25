@@ -210,9 +210,15 @@ def test_ap3_failing_service_does_not_stop_others(monkeypatch, caplog):
     def bad_provider():
         return type('B', (), {'reload_config': lambda self: bad()})()
 
-    monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [bad_provider, lambda: good])
+    # monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [bad_provider, lambda: good])
+    # ↑ до 2026-10-25 (К6): поставщики — через обработчики ServiceHooks
     a = ca.ConfigApplier.__new__(ca.ConfigApplier)
     a.logger = logging.getLogger('test.applier')
+    a.services = ca.ServiceHooks(
+        service_providers = lambda: [bad_provider, lambda: good],   # сбойный и рабочий
+        photo_service     = lambda: None,                           # не нужен
+        sync_service      = lambda: None,                           # не нужен
+    )
     # (до AP3a, проход 3: apply_database возвращал True — сбой не доходил до экрана)
     with caplog.at_level(logging.ERROR, logger='test.applier'):
         with pytest.raises(RuntimeError, match='bad_provider'):

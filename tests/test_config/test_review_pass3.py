@@ -87,11 +87,18 @@ def test_ap3a_database_failure_reaches_errors(monkeypatch):
             raise RuntimeError('db locked')
         return type('B', (), {'reload_config': fail})()
 
-    monkeypatch.setattr(ca, '_SERVICE_PROVIDERS',
-                        [broken, lambda: type('S', (), {'reload_config': lambda self: reloaded.append(1)})()])
-    monkeypatch.setattr(ca, 'get_sync_service', lambda: type('Y', (), {})())
+    # monkeypatch.setattr(ca, '_SERVICE_PROVIDERS',
+    #                     [broken, lambda: type('S', (), {'reload_config': lambda self: reloaded.append(1)})()])
+    # monkeypatch.setattr(ca, 'get_sync_service', lambda: type('Y', (), {})())
+    # ↑ до 2026-10-25 (К6): сервисы — через обработчики ServiceHooks
+    good = type('S', (), {'reload_config': lambda self: reloaded.append(1)})()
     a = ca.ConfigApplier.__new__(ca.ConfigApplier)
     a.logger = logging.getLogger('test.applier')
+    a.services = ca.ServiceHooks(
+        service_providers = lambda: [broken, lambda: good],   # сбойный и рабочий
+        photo_service     = lambda: None,                     # не нужен
+        sync_service      = lambda: type('Y', (), {})(),      # заглушка синхронизации
+    )
     blocks = a.apply_changes({'database_local_path': 'a'}, {'database_local_path': 'b'})
     assert 'database' in blocks
     assert reloaded == [1]                                   # остальные перезагружены

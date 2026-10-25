@@ -116,11 +116,19 @@ def test_unwritable_env_dir_does_not_crash(config_sandbox, monkeypatch, capsys):
     assert 'не удалось создать' in capsys.readouterr().err
 
 
-def test_values_loaded_into_os_environ(env_file):
-    """E5: load_dotenv кладёт в os.environ все ключи .env, а не только запрошенный."""
+# def test_values_loaded_into_os_environ(env_file):
+#     """E5: load_dotenv кладёт в os.environ все ключи .env, а не только запрошенный."""
+#     _write_env(env_file, "APP_CONFIG_PATH='a.msgpack'\nOTHER_SECRET=42\n")
+#     get_getenv('APP_CONFIG_PATH', start_value='x')
+#     assert os.environ.get('OTHER_SECRET') == '42'
+# ↑ до 2026-10-25 (E5): характеризовал проблему; теперь чтение os.environ не меняет.
+
+def test_values_not_loaded_into_os_environ(env_file):
+    """E5: чтение ключа не кладёт ключи .env в os.environ (раньше — все ключи файла)."""
     _write_env(env_file, "APP_CONFIG_PATH='a.msgpack'\nOTHER_SECRET=42\n")
-    get_getenv('APP_CONFIG_PATH', start_value='x')
-    assert os.environ.get('OTHER_SECRET') == '42'
+    assert get_getenv('APP_CONFIG_PATH', start_value='x') == 'a.msgpack'
+    assert 'OTHER_SECRET' not in os.environ
+    assert 'APP_CONFIG_PATH' not in os.environ
 
 
 def test_environment_variable_wins_over_env_file(env_file, monkeypatch):

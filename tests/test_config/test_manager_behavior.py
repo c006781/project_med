@@ -47,7 +47,9 @@ def test_defaults_without_file(cfg_path):
     m = AppConfigManager.get_instance(config_path=cfg_path)
     assert m.config_exists is False
     assert m.get('LOG_LEVEL') == 'INFO'
-    assert m.get('system_enabled') == 'False'           # умолчания — строки (M6)
+    # assert m.get('system_enabled') == 'False'           # умолчания — строки (M6)
+    # ↑ до 2026-10-25 (M6): умолчания были строками; теперь — bool / int
+    assert m.get('system_enabled') is False
     assert not os.path.exists(cfg_path)                 # файл не создаётся до save()
 
 
@@ -307,9 +309,18 @@ def applier(monkeypatch):
     import app.config.config_applier as ca
     sync, photo, reloads = _Sync(), type('P', (), {})(), []
     photo._ensure_storage_exists = lambda: None
-    monkeypatch.setattr(ca, 'get_sync_service', lambda: sync)
-    monkeypatch.setattr(ca, 'get_photo_service', lambda: photo)
-    monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [lambda: type('S', (), {'reload_config': lambda self: reloads.append(1)})()])
+    # monkeypatch.setattr(ca, 'get_sync_service', lambda: sync)
+    # monkeypatch.setattr(ca, 'get_photo_service', lambda: photo)
+    # monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [lambda: type('S', (), {'reload_config': lambda self: reloads.append(1)})()])
+    # ↑ до 2026-10-25 (К6): сервисы подменялись в модуле config_applier (он импортировал
+    #   их из app.dependencies). Теперь — обработчики ServiceHooks; поставщиков тест
+    #   меняет через make.providers.
+    providers = [lambda: type('S', (), {'reload_config': lambda self: reloads.append(1)})()]
+    hooks = ca.ServiceHooks(
+        service_providers = lambda: providers,   # список можно менять в тесте
+        photo_service     = lambda: photo,       # заглушка сервиса фото
+        sync_service      = lambda: sync,        # заглушка сервиса синхронизации
+    )
     import app.dependencies as deps
     monkeypatch.setattr(deps, 'clear_services_cache', lambda: None, raising=False)
 
@@ -317,7 +328,9 @@ def applier(monkeypatch):
         a = ca.ConfigApplier.__new__(ca.ConfigApplier)
         a.manager = _Manager(saved)
         a.logger = logging.getLogger('test.applier')
+        a.services = hooks
         return a
+    make.providers = providers
     return make, sync, photo, reloads
 
 
@@ -355,13 +368,14 @@ def test_apply_without_snapshot_forces(applier, method, key):
 
 def test_apply_database_reloads_cached_services_without_clearing(applier, monkeypatch):
     """Перезагружаются те же объекты сервисов, что держат страницы; кэш не очищается."""
-    import app.config.config_applier as ca
     make, _, _, reloads = applier
     cleared = []
     import app.dependencies as deps
     monkeypatch.setattr(deps, 'clear_services_cache', lambda: cleared.append(1), raising=False)
     service = type('S', (), {'reload_config': lambda self: reloads.append(id(self))})()
-    monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [lambda: service, lambda: service])
+    # monkeypatch.setattr(ca, '_SERVICE_PROVIDERS', [lambda: service, lambda: service])
+    # ↑ до 2026-10-25 (К6): поставщики — через обработчики ServiceHooks фикстуры
+    make.providers[:] = [lambda: service, lambda: service]
     assert make({}).apply_database({'database_local_path': 'b.db'}, {'database_local_path': 'a.db'})
     assert reloads == [id(service), id(service)]
     assert cleared == []

@@ -135,6 +135,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Импорт app.* создаёт логгеры, а они читают конфиг через get_getenv(),
 # который перезаписывает .env, если ключ пустой (GITHUB_TOKEN='' в .env).
 # load_dotenv не переопределяет уже заданные переменные, поэтому .env не трогается.
+# (2026-10-25, М6/E5: .env больше не грузится в os.environ — читается dotenv_values,
+#  переменная окружения главнее файла; заглушка по-прежнему нужна и работает.)
 os.environ.setdefault('GITHUB_TOKEN', 'test-placeholder')
 
 # E3 (2026-10-15): .env ищется в папке ЗАПУЩЕННОГО файла, а под pytest это сам pytest

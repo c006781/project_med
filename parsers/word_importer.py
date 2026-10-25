@@ -2098,18 +2098,22 @@ def pars_start_args(
     Точка входа для запуска парсера из командной строки (для отладки и автономного использования).
 
     Поддерживаемые аргументы командной строки:
-        --folder <path>               Путь к папке с .docx файлами (обязателен, если не передан в вызове).
+        --folder <path>               Путь к папке с .docx файлами (без него — папка из вызова,
+                                      иначе из настройки «Папка документов Word»).
         --files file1.docx,file2.docx Опциональный список файлов (если не указан, берутся все необработанные .docx).
         --find_existing_patient       Флаг: искать пациента по ФИО + году рождения (ТД-8);
                                       старое имя --update_existing_patient — то же самое.
         --help                        Показать справку.
 
     Аргументы командной строки главнее параметров вызова (Ф1.1.7: раньше папка из вызова
-    перекрывала ``--folder``, и в ``pars_start.py`` был зашит путь Linux). Нет папки или
-    папки не существует — сообщение и выход с кодом 2 (``argparse``).
+    перекрывала ``--folder``, и в ``pars_start.py`` был зашит путь Linux). Папка: ``--folder``
+    → параметр ``folder`` → настройка ``WORD_DOCUMENTS_PATH`` в ``config.msgpack`` («Папка
+    документов Word», Ф1.4.4, 2026-10-25; читается в момент вызова). Нигде нет или папки не
+    существует — сообщение и выход с кодом 2 (``argparse``).
 
     Args:
-        folder (Optional[str]): Путь к папке (будет переопределён аргументом --folder).
+        folder (Optional[str]): Путь к папке (будет переопределён аргументом --folder;
+            не задан — настройка «Папка документов Word»).
         files (Optional[List[str]]): Список файлов (будет переопределён аргументом --files).
         argv (Optional[List[str]]): Аргументы (для тестов); None — ``sys.argv[1:]``.
 
@@ -2118,6 +2122,7 @@ def pars_start_args(
 
     Пример:
         >>> results = pars_start_args(argv=['--folder', 'doc', '--files', 'а.docx,б.docx'])
+        >>> results = pars_start_args(argv=[])   # папка — из настройки «Папка документов Word»
     """
 
     # Пример использования:
@@ -2130,7 +2135,9 @@ def pars_start_args(
     )
     arg_parser.add_argument(
         '--folder',
-        help = 'папка с .docx файлами',
+        # help = 'папка с .docx файлами',
+        # ↑ до 2026-10-25 (Ф1.4.4): без --folder папка теперь берётся из настройки
+        help = 'папка с .docx файлами (по умолчанию — «Папка документов Word» из настроек)',
     )
     arg_parser.add_argument(
         '--files',
@@ -2150,6 +2157,19 @@ def pars_start_args(
     folder = args.folder or folder
     if args.files:
         files = [f.strip() for f in args.files.split(',') if f.strip()]
+
+    # Ни --folder, ни папки в вызове — настройка «Папка документов Word» (Ф1.4.4, решение
+    # владельца 2026-10-25, вариант В). Читается в момент вызова; импорт здесь, а не в
+    # начале модуля — менеджер конфига нужен только запуску из командной строки.
+    if not folder:
+        from app.config.config_manager.manager import (
+            AppConfigManager,
+            WORD_DOCUMENTS_PATH_KEY,
+        )
+        folder = AppConfigManager.get_instance().get(
+            WORD_DOCUMENTS_PATH_KEY,   # ключ настройки
+            '',                        # нет ключа — пусто
+        )
 
     if not folder:
         arg_parser.error("укажите папку с файлами: --folder <путь>")

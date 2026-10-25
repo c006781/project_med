@@ -13,7 +13,20 @@
     - Централизовать логику применения настроек для повторного использования в GUI, CLI и других интерфейсах.
     - Упростить добавление новых блоков настроек в будущем.
 
-Пример использования в GUI (с 2026-10-15 — один вызов apply_changes):
+Сервисы приложения (перезагрузка на новую БД, папка фото, синхронизация) применитель
+получает снаружи — обработчиками ``ServiceHooks``; в приложении его создаёт
+``app.dependencies.create_config_applier()`` (К6, 2026-10-25: ``app.config`` не
+импортирует ``app.dependencies``).
+
+Пример использования в GUI (с 2026-10-25 — через create_config_applier):
+    >>> from app.dependencies import create_config_applier
+    >>> old_config = config_manager.get_all().copy()
+    >>> config_manager.save()
+    >>> applier = create_config_applier()
+    >>> applier.apply_changes(old_config, config_manager.get_all())
+    {'database', 'sync'}
+
+С 2026-10-15 до 2026-10-25 (сервисы ConfigApplier брал сам из app.dependencies):
     old_config = config_manager.get_all().copy()
     config_manager.save()
     changed_blocks = ConfigApplier().apply_changes(old_config, config_manager.get_all())
@@ -32,15 +45,17 @@
     # ... и т.д.
 
 Пример использования в CLI:
-    applier = ConfigApplier()
-    applier.apply_full_config(config_manager.get_all())
+    >>> applier = create_config_applier()
+    >>> applier.apply_full_config(config_manager.get_all())
 """
 
 # import os
+from dataclasses import dataclass
 from typing import (
     Dict, Any, Set,
     # Optional
     Optional, Tuple, Callable,
+    Iterable,
 )
 
 from app.utils.logger.logger import AppLogger
@@ -48,13 +63,48 @@ from app.utils.logger.logger import AppLogger
 from app.config.config_manager.manager import AppConfigManager
 # from app.database import Database
 # from app.services import PhotoService, SyncService
-from app.dependencies import (
-    _SERVICE_PROVIDERS,
-    get_sync_service,
-    # get_db,
-    get_patient_service,
-    get_appointment_service, get_note_service, get_photo_service
-)
+# from app.dependencies import (
+#     _SERVICE_PROVIDERS,
+#     get_sync_service,
+#     # get_db,
+#     get_patient_service,
+#     get_appointment_service, get_note_service, get_photo_service
+# )
+# ↑ до 2026-10-25 (К6): настройки импортировали сборку приложения (app.dependencies →
+#   сервисы → база) — связь «снизу вверх», риск циклов импорта. Теперь сервисы приходят
+#   снаружи обработчиками ServiceHooks (создаёт app.dependencies.create_config_applier).
+
+
+@dataclass(frozen=True)
+class ServiceHooks:
+    """
+    Обработчики сервисов приложения для ``ConfigApplier`` (К6, 2026-10-25).
+
+    ``app.config`` не знает, где и как собираются сервисы: их отдаёт тот, кто создаёт
+    применитель (``app.dependencies.create_config_applier``). Обработчики вызываются в
+    момент применения блока — берутся текущие объекты из кэша сборки.
+
+    Атрибуты:
+        service_providers: Возвращает поставщиков сервисов с ``reload_config()``
+            (блок ``database``: все перезагружаются на новую БД).
+        photo_service: Возвращает сервис фото (блок ``photos``: ``_storage_path``,
+            ``_ensure_storage_exists()``).
+        sync_service: Возвращает сервис синхронизации (блок ``sync``: ``token``,
+            ``remote_path``, ``local_path``).
+
+    Пример:
+        >>> hooks = ServiceHooks(
+        ...     service_providers = lambda: list(_SERVICE_PROVIDERS),
+        ...     photo_service     = get_photo_service,
+        ...     sync_service      = get_sync_service,
+        ... )
+        >>> ConfigApplier(services=hooks).apply_changes(old_config, new_config)
+        {'database', 'sync'}
+    """
+
+    service_providers : Callable[[], Iterable[Callable[[], Any]]]  # поставщики сервисов (reload_config)
+    photo_service     : Callable[[], Any]                          # сервис фото
+    sync_service      : Callable[[], Any]                          # сервис синхронизации
 
 
 # Блоки настроек и их ключи — единый источник для get_changed_blocks и apply_logging.
@@ -95,7 +145,25 @@ class ConfigApplier:
     Атрибуты:
         manager (AppConfigManager): Экземпляр менеджера конфигурации.
         logger (AppLogger): Логгер для записи событий.
+        services (Optional[ServiceHooks]): Обработчики сервисов (К6); ``None`` — блоки
+            ``database``, ``photos``, ``sync`` не применяются (ошибка в ``errors``).
+        errors (Dict[str, Exception]): Ошибки последнего применения по блокам (AP4).
+
+    В приложении создаётся через ``app.dependencies.create_config_applier()`` — с
+    обработчиками сервисов приложения.
+
+    Пример:
+        >>> applier = create_config_applier()           # app.dependencies
+        >>> old = manager.get_all(); manager.set('system_LEVEL', 'ERROR'); manager.save()
+        >>> applier.apply_changes(old, manager.get_all())
+        {'logging_system'}
+        >>> applier.errors
+        {}
     """
+
+    # Обработчики сервисов (К6). На уровне класса — чтобы и объект без __init__ (тесты)
+    # сообщал «обработчики не переданы», а не AttributeError.
+    services: Optional[ServiceHooks] = None
 
     @AppLogger.get_instance(
         name = 'ConfigApplier',
@@ -105,19 +173,31 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self) -> None:
+    # def __init__(self) -> None:
+    # ↑ до 2026-10-25 (К6): сервисы брались из app.dependencies (импорт «снизу вверх»).
+    def __init__(
+        self,
+        services : Optional[ServiceHooks] = None,  # обработчики сервисов приложения (К6)
+    ) -> None:
         """
-        Берёт менеджер конфигурации по умолчанию и логгер.
+        Берёт менеджер конфигурации по умолчанию, логгер и обработчики сервисов.
+
+        Args:
+            services: Обработчики сервисов (``ServiceHooks``); ``None`` — применяются
+                только блоки без сервисов (логирование, резервные копии), остальные
+                попадают в ``errors``.
 
         Returns:
             None
 
         Пример:
-            >>> applier = ConfigApplier()
+            >>> applier = ConfigApplier(services=hooks)   # в приложении — create_config_applier()
             >>> applier.apply_changes(old_config, new_config)
+            {'logging_system'}
         """
 
         self.manager = AppConfigManager.get_instance()
+        self.services = services
 
         # self.logger = AppLogger.get_instance('config_applier')
         # ↑ до AP5 (проверка 2, 2026-10-15): логгер без файла — ошибки применения
@@ -336,7 +416,9 @@ class ConfigApplier:
         #   писал «сохранены», хотя часть сервисов осталась на старой БД. Теперь после
         #   попытки перезагрузить ВСЕ сервисы сбой сообщается исключением.
         failed = []
-        for provider in _SERVICE_PROVIDERS:
+        # for provider in _SERVICE_PROVIDERS:
+        # ↑ до 2026-10-25 (К6): реестр поставщиков импортировался из app.dependencies.
+        for provider in self._hooks().service_providers():
             name = getattr(provider, '__name__', repr(provider))
             try:
                 provider().reload_config()
@@ -427,7 +509,9 @@ class ConfigApplier:
         self.logger.info(f"Изменение пути к фото: {old_path} -> {new_path}")
 
         # Обновляем путь в сервисе (свойство _storage_path сервиса фото — с сеттером)
-        photo_service = get_photo_service()
+        # photo_service = get_photo_service()
+        # ↑ до 2026-10-25 (К6): сервис брался из app.dependencies.
+        photo_service = self._hooks().photo_service()
         photo_service._storage_path = new_path
         photo_service._ensure_storage_exists()
         return True
@@ -572,7 +656,9 @@ class ConfigApplier:
             >>> applier.apply_sync({'YANDEX_TOKEN': 'новый'}, {'YANDEX_TOKEN': 'старый'})
             True
         """
-        sync_service = get_sync_service()
+        # sync_service = get_sync_service()
+        # ↑ до 2026-10-25 (К6): сервис брался из app.dependencies.
+        sync_service = self._hooks().sync_service()
         changed = False
         for key, attr in (('YANDEX_TOKEN', 'token'),
                           ('database_remote_path', 'remote_path'),
@@ -916,3 +1002,25 @@ class ConfigApplier:
             self.errors[name] = e
             self.logger.exception(f"Не удалось применить настройки блока '{name}': {e}")
             return None
+
+    def _hooks(self) -> ServiceHooks:
+        """
+        Обработчики сервисов, переданные при создании (К6).
+
+        Returns:
+            ``self.services``.
+
+        Raises:
+            RuntimeError: Обработчики не переданы — блок, которому нужны сервисы, не
+                применяется (``_run_block`` запишет ошибку в ``errors``).
+
+        Пример:
+            >>> ConfigApplier(services=hooks)._hooks() is hooks
+            True
+        """
+        if self.services is None:
+            raise RuntimeError(
+                "обработчики сервисов не переданы — создайте применитель через "
+                "app.dependencies.create_config_applier()"
+            )
+        return self.services

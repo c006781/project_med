@@ -244,7 +244,9 @@ from app.dependencies import (
 #         init_db,
 #     )
 
-from app.config.config_applier import ConfigApplier
+# from app.config.config_applier import ConfigApplier
+# ↑ до 2026-10-25 (К6): применитель создаётся через app.dependencies (с сервисами).
+from app.dependencies import create_config_applier
 from app.config.config_manager import AppConfigManager
 
 # Сторонние библиотеки
@@ -1289,7 +1291,9 @@ def create_cli():
         # from app.config.config_applier import ConfigApplier
         manager = AppConfigManager.get_instance()
         config = manager.get_all()
-        applier = ConfigApplier()
+        # applier = ConfigApplier()
+        # ↑ до 2026-10-25 (К6): сервисы ConfigApplier брал сам из app.dependencies.
+        applier = create_config_applier()
         applier.apply_full_config(config)
         # click.echo("Настройки применены.")
         # ↑ до CLI1 (проверка конфига 4, 2026-10-15): после AP4 сбой блока не бросает

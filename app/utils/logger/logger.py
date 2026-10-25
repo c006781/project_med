@@ -34,10 +34,10 @@
     logger1 = AppLogger.get_instance(name='default1')
     logger1.info("Приложение запущено. Добавлен в лог default1")
 
-    # Использовать декоратор для метода класса
-    class PatientService:
+    # Использовать декоратор для метода класса (учебный класс, не сервис приложения)
+    class ExampleService:
         def __init__(self):
-            self.logger = AppLogger.get_instance('patient')
+            self.logger = AppLogger.get_instance('example')
 
         @AppLogger.get_instance().log_execution_time(description="Получение пациента")
         def get_patient(self, patient_id):
@@ -354,7 +354,7 @@ class AppLogger(BaseAppLogger):
                логгеры ``system``/``user`` и все их «наследники»
                (``enable_file_logging='system'``) получают свои настройки.
             5. Переносит ``show_call_depth``, если он задан (отступ ``>`` по глубине
-               стека; дорогой — ``inspect.stack()`` на каждую запись).
+               стека; дополнительный обход стека на каждую запись).
 
         Значения не приводятся к типам (``'True'`` остаётся строкой) — это делает
         BaseAppLogger при чтении.
@@ -638,41 +638,99 @@ if __name__ == '__main__':
     AppLogger.get_instance(name='default1').info("Приложение запущено. Добавлен в лог default2")
 
     # Использовать декоратор для метода класса
-    class PatientService:
+    # К8 (2026-10-25): учебный класс назывался PatientService — при поиске и в описи кода
+    # путался с сервисом пациентов app.services (PatientService); переименован, логика та же.
+    class ExampleService:
+        """
+        Учебный класс для демонстрации декоратора на методах (не сервис приложения).
+
+        Пример:
+            >>> ExampleService().get_patient(1)
+        """
+
         logger0 = AppLogger.get_instance('logger0')
 
-        def __init__(self):
+        def __init__(self) -> None:
+            """
+            Логгер экземпляра — ``logger``.
+
+            Пример:
+                >>> ExampleService().logger.name
+                'logger'
+            """
             self.logger = AppLogger.get_instance('logger')
 
         @logger0.log_execution_time(description="logger0 Получение пациента")
-        def get_patient(self, patient_id):
+        def get_patient(
+            self,
+            patient_id : int,   # id записи (для текста в журнале)
+        ) -> None:
+            """
+            Декоратор логгера, взятого атрибутом класса, и запись логгером экземпляра.
+
+            Пример:
+                >>> ExampleService().get_patient(1)
+            """
             self.logger.debug(f"logger Запрос пациента с id={patient_id}")
 
         @AppLogger.get_instance().log_execution_time(description="logger avto Получение пациента")
-        def get_patient2(self, patient_id):
+        def get_patient2(
+            self,
+            patient_id : int,   # id записи (для текста в журнале)
+        ) -> None:
+            """
+            Декоратор логгера по умолчанию (``default``).
+
+            Пример:
+                >>> ExampleService().get_patient2(2)
+            """
             AppLogger.get_instance().debug(f"Запрос пациента с id={patient_id}")
             # ... логика ...
-        
+
         @AppLogger.get_instance(name='logger1').log_execution_time(description="Получение пациента")
-        def get_patient3(self, patient_id):
+        def get_patient3(
+            self,
+            patient_id : int,   # id записи (для текста в журнале)
+        ) -> None:
+            """
+            Декоратор именованного логгера ``logger1``.
+
+            Пример:
+                >>> ExampleService().get_patient3(3)
+            """
             AppLogger.get_instance(name='logger1').debug(f"Запрос пациента с id={patient_id}")
             # ... логика ...
-            #    
+
         @AppLogger.get_instance().log_execution_time()
-        def get_patient4(self, patient_id):
+        def get_patient4(
+            self,
+            patient_id : int,   # id записи (для текста в журнале)
+        ) -> None:
+            """
+            Декоратор без описания (в журнале — имя функции).
+
+            Пример:
+                >>> ExampleService().get_patient4(4)
+            """
             AppLogger.get_instance(name='logger1').debug(f"Запрос пациента с id={patient_id}")
-            # ... логика ...    
+            # ... логика ...
 
     # Использовать декоратор для обычной функции
     @AppLogger.get_instance().log_execution_time(description="Вспомогательная функция")
-    def helper():
+    def helper() -> None:
+        """
+        Декоратор на обычной функции.
+
+        Пример:
+            >>> helper()
+        """
         pass
-    
-    PatientService_ = PatientService()
-    PatientService_.get_patient(1)
-    PatientService_.get_patient2(2)
-    PatientService_.get_patient3(3)
-    PatientService_.get_patient4(4)
+
+    example_service = ExampleService()
+    example_service.get_patient(1)
+    example_service.get_patient2(2)
+    example_service.get_patient3(3)
+    example_service.get_patient4(4)
 
     helper()
 

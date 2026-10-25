@@ -126,17 +126,6 @@ ROWS = [
 ]
 
 
-@pytest.fixture
-def services(database, patient_service, appointment_service, photo_service):
-    """Сервисы и БД (в памяти) для импорта — как их собирает приложение."""
-    return {
-        'db'                  : database,
-        'patient_service'     : patient_service,
-        'appointment_service' : appointment_service,
-        'photo_service'       : photo_service,
-    }
-
-
 def _patients(patient_service):
     """Все пациенты из БД (DTO)."""
     return patient_service.get_all()
@@ -392,7 +381,7 @@ def test_pars_start_args_folder_from_command_line(tmp_path, captured_pars_start)
         {
             'folder'                  : str(tmp_path),
             'files'                   : ['а.docx', 'б.docx'],
-            'update_existing_patient' : True,
+            'find_existing_patient'   : True,
         }
     ]
 

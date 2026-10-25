@@ -15,7 +15,7 @@ import pytest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import QApplication, QCheckBox, QMessageBox, QWidget  # noqa: E402
 
 from interfaces.gui.gui_window import main_window  # noqa: E402
 
@@ -69,3 +69,45 @@ def test_w2_finished_message_has_warnings(qapp, monkeypatch):
     assert title == 'Парсинг завершён'
     assert 'Предупреждения:' in text
     assert 'а.docx: Телефон не распознан: «12-34-56»' in text
+
+
+@pytest.mark.parametrize(
+    'answer, checked, expected',
+    [
+        (QMessageBox.Ok, False, False),       # «Импорт», флажок снят — без поиска
+        (QMessageBox.Ok, True, True),         # «Импорт», флажок — искать пациентов
+        (QMessageBox.Cancel, True, None),     # «Отмена» — импорт не начинается
+    ],
+)
+def test_td8_ask_find_existing(qapp, monkeypatch, answer, checked, expected):
+    """ТД-8: перед импортом — вопрос с флажком «искать существующих пациентов» (снят по умолчанию)."""
+    seen = {}
+
+    def fake_exec(box):
+        """Вместо показа: запоминает флажок по умолчанию, ставит ответ пользователя."""
+        check = box.findChild(QCheckBox)
+        seen['default'] = check.isChecked()
+        check.setChecked(checked)
+        return answer
+
+    monkeypatch.setattr(QMessageBox, 'exec', fake_exec)
+    parent = QWidget()          # методу нужен только родитель вопроса — окно не строим
+
+    assert main_window.MainWindow._ask_find_existing(parent, 'C:/Документы') is expected
+    assert seen['default'] is False
+    parent.deleteLater()
+
+
+def test_td8_thread_passes_flag(monkeypatch):
+    """ТД-8: поток импорта передаёт выбор пользователя в batch_parse."""
+    import parsers.word_importer as word_importer
+    calls = []
+    monkeypatch.setattr(
+        word_importer,
+        'batch_parse',
+        lambda **kwargs: calls.append(kwargs) or ({'total': 0}, None),
+    )
+
+    main_window.ParsingThread('C:/Документы', find_existing=True).run()
+
+    assert calls[0]['find_existing_patient'] is True

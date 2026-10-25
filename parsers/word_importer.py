@@ -14,6 +14,8 @@
       предупреждения); повторный запуск пропускает успешно обработанные файлы.
     - Телефон — только номера РФ; нераспознанный не записывается, пользователю —
       предупреждение (решение владельца 2026-10-25).
+    - Поиск существующего пациента (ФИО + год рождения) — по выбору пользователя
+      (``find_existing_patient``); по умолчанию каждый документ — новый пациент (ТД-8).
 
 Входы: окно (``batch_parse``), командная строка (``pars_start.py`` → ``pars_start_args``).
 Устройство, решения и журнал правок — ``parsers/IMPLEMENTATION.md``.
@@ -1181,112 +1183,292 @@ class WordFileParser:
 # Вспомогательные функции для работы с пациентом
 # ----------------------------------------------------------------------
 
-def find_matching_patient(
+# Поля приёма, по которым приём считается повторным (ТД-8: дата и все тексты)
+APPOINTMENT_KEY_FIELDS = (
+    'date',
+    'reason_text',
+    'procedure_text',
+    'recommendations_text',
+    'cost_procedure_text',
+    'note_text',
+)
+
+
+def patient_key(
+    last_name   : Optional[str],    # фамилия
+    first_name  : Optional[str],    # имя
+    middle_name : Optional[str],    # отчество (None и '' — одно и то же)
+    birth_date  : Optional[date],   # дата рождения (берётся только год)
+) -> Tuple[str, str, str, Optional[int]]:
+    """
+    Ключ «тот же пациент» — ФИО + год рождения (решение владельца 2026-10-25, ТД-8).
+
+    ФИО сравнивается после ``normalize_match`` (регистр, «ё», пунктуация, пробелы не
+    важны); от даты рождения — только год: в документе есть только год, а в базе может
+    стоять полная дата, введённая вручную.
+
+    Args:
+        last_name (Optional[str]): Фамилия.
+        first_name (Optional[str]): Имя.
+        middle_name (Optional[str]): Отчество.
+        birth_date (Optional[date]): Дата рождения.
+
+    Returns:
+        Tuple[str, str, str, Optional[int]]: Ключ для сравнения.
+
+    Пример:
+        >>> patient_key('Ёлкин', 'Иван', None, date(1990, 5, 12))
+        ('елкин', 'иван', '', 1990)
+    """
+
+    return (
+        normalize_match(last_name),
+        normalize_match(first_name),
+        normalize_match(middle_name),
+        birth_date.year if birth_date else None,
+    )
+
+
+def find_patients_by_key(
     session     : Session,      # сессия SQLAlchemy (транзакция файла)
     patient_dto : PatientDTO,   # пациент из документа (после нормализации)
-) -> Optional['Patient']:
+) -> List['Patient']:
     """
-    Ищет пациента, у которого совпадают все непустые поля из patient_dto.
+    Пациенты базы с тем же ключом ``patient_key`` (ФИО + год рождения), ТД-8.
 
-    Перебирает всех пациентов базы. ТД-8 (`_dev/ТЕХДОЛГ.md`): у ORM-модели нет
-    ``description_text`` — при описании в шапке падает AttributeError; совпадение по всем
-    полям сразу делает обновление (``update_patient_if_needed``) бессмысленным. Вызывается
-    только при ``update_existing_patient=True`` (окно его не включает).
+    Перебирает всех пациентов базы (для клиники — десятки / сотни записей).
 
     Args:
         session (Session): Сессия SQLAlchemy.
-        patient_dto (PatientDTO): DTO пациента, полученный из Word-файла.
+        patient_dto (PatientDTO): Пациент из документа.
 
     Returns:
-        Optional[Patient]: ORM-объект пациента, если найден, иначе None.
+        List[Patient]: Найденные ORM-объекты (пусто — нет; больше одного — в базе дубли).
 
     Пример:
-        >>> find_matching_patient(session, PatientDTO(last_name='Иванов', first_name='Иван')).id
-        7
+        >>> [p.id for p in find_patients_by_key(session, PatientDTO(
+        ...     last_name='Иванов', first_name='Иван', birth_date=date(1990, 1, 1)))]
+        [7]
     """
 
-    repo = PatientRepository(session)
-    candidates = repo.get_all()
-    for p in candidates:
-        match = True
+    key = patient_key(
+        patient_dto.last_name,
+        patient_dto.first_name,
+        patient_dto.middle_name,
+        patient_dto.birth_date,
+    )
 
-        if patient_dto.last_name and p.last_name != patient_dto.last_name:
-            match = False
+    return [
+        patient
+        for patient in PatientRepository(session).get_all()
+        if patient_key(patient.last_name, patient.first_name, patient.middle_name, patient.birth_date) == key
+    ]
 
-        if match and patient_dto.first_name and p.first_name != patient_dto.first_name:
-            match = False
 
-        if match and patient_dto.middle_name and p.middle_name != patient_dto.middle_name:
-            match = False
-
-        if match and patient_dto.birth_date and p.birth_date != patient_dto.birth_date:
-            match = False
-
-        if match and patient_dto.phone and p.phone != patient_dto.phone:
-            match = False
-
-        if match and patient_dto.description_text and p.description_text != patient_dto.description_text:
-            match = False
-
-        if match:
-
-            return p
-        
-    return None
-
-def update_patient_if_needed(
-    existing_patient : 'Patient',    # найденный пациент (ORM)
-    patient_dto      : PatientDTO,   # данные из документа
-    session          : Session,      # сессия SQLAlchemy (транзакция файла)
-) -> PatientDTO:
+def appointment_key(
+    appointment : Any,  # строка документа (словарь) или приём из базы (DTO — атрибуты)
+) -> Tuple[Any, ...]:
     """
-    Обновляет поля существующего пациента значениями из DTO, если они отличаются.
+    Ключ повторного приёма — дата и все тексты (``APPOINTMENT_KEY_FIELDS``), ТД-8.
+
+    Тексты сравниваются после ``normalize_text`` (пустой текст — None): приём, введённый
+    в окне с лишними пробелами, совпадает с приёмом из документа.
 
     Args:
-        existing_patient (Patient): ORM-объект существующего пациента.
-        patient_dto (PatientDTO): DTO с новыми данными (из Word-файла).
-        session (Session): Сессия SQLAlchemy.
+        appointment (Any): Словарь строки документа или объект с атрибутами (``AppointmentDTO``).
 
     Returns:
-        PatientDTO: Обновлённый DTO после синхронизации с БД (или исходный, если менять нечего).
+        Tuple[Any, ...]: Ключ для сравнения.
 
     Пример:
-        >>> update_patient_if_needed(patient, PatientDTO(last_name='Иванов', first_name='Иван',
-        ...     phone='+7 (999) 123-45-67'), session).phone
-        '+7 (999) 123-45-67'
+        >>> appointment_key({'date': date(2026, 3, 14), 'reason_text': 'боль  '})
+        (datetime.date(2026, 3, 14), 'боль', None, None, None, None)
     """
 
-    updated = False
-    if patient_dto.last_name and existing_patient.last_name != patient_dto.last_name:
-        existing_patient.last_name = patient_dto.last_name
-        updated = True
+    if isinstance(appointment, dict):
+        values = [appointment.get(name) for name in APPOINTMENT_KEY_FIELDS]
+    else:
+        values = [getattr(appointment, name, None) for name in APPOINTMENT_KEY_FIELDS]
 
-    if patient_dto.first_name and existing_patient.first_name != patient_dto.first_name:
-        existing_patient.first_name = patient_dto.first_name
-        updated = True
+    return (values[0],) + tuple(
+        normalize_text(value) or None
+        for value in values[1:]
+    )
 
-    if patient_dto.middle_name and existing_patient.middle_name != patient_dto.middle_name:
-        existing_patient.middle_name = patient_dto.middle_name
-        updated = True
 
-    if patient_dto.birth_date and existing_patient.birth_date != patient_dto.birth_date:
-        existing_patient.birth_date = patient_dto.birth_date
-        updated = True
+def _add_warning(
+    warnings : Optional[List[str]],  # список вызывающего (None — не собирать)
+    text     : str,                  # текст предупреждения
+) -> None:
+    """
+    Добавляет предупреждение, если вызывающий их собирает.
 
-    if patient_dto.phone and existing_patient.phone != patient_dto.phone:
-        existing_patient.phone = patient_dto.phone
-        updated = True
+    Args:
+        warnings (Optional[List[str]]): Список предупреждений или None.
+        text (str): Текст.
 
-    if patient_dto.description_text and existing_patient.description_text != patient_dto.description_text:
-        existing_patient.description_text = patient_dto.description_text
-        updated = True
-    
-    if updated:
-        session.flush()
-        # Обновляем DTO, чтобы отразить изменения
-        return PatientDTO.model_validate(existing_patient)
-    
-    return patient_dto
+    Returns:
+        None
+
+    Пример:
+        >>> found = []; _add_warning(found, 'текст'); found
+        ['текст']
+    """
+
+    if warnings is not None:
+        warnings.append(text)
+
+
+def _report_patient_differences(
+    stored      : PatientDTO,             # найденный пациент (из базы)
+    patient_dto : PatientDTO,             # пациент из документа
+    warnings    : Optional[List[str]],    # куда добавить предупреждения
+) -> None:
+    """
+    Предупреждения об отличиях телефона и описания найденного пациента от документа (ТД-8).
+
+    Данные найденного пациента не меняются (решение 2026-10-25: при импорте не
+    перезаписывать, отличия — сообщить; поправить — в программе).
+
+    Args:
+        stored (PatientDTO): Найденный пациент.
+        patient_dto (PatientDTO): Пациент из документа.
+        warnings (Optional[List[str]]): Список предупреждений или None.
+
+    Returns:
+        None
+
+    Пример:
+        >>> found = []
+        >>> _report_patient_differences(stored, PatientDTO(last_name='Иванов', first_name='Иван',
+        ...     phone='+7 (999) 000-00-00'), found)
+        >>> found
+        ['Пациент Иванов Иван найден в базе (id 7): телефон в базе «+7 (999) 123-45-67», в документе «+7 (999) 000-00-00» — не изменён']
+    """
+
+    for field, title in (('phone', 'телефон'), ('description_text', 'описание')):
+        new_value = getattr(patient_dto, field)
+        old_value = getattr(stored, field)
+        if new_value and new_value != old_value:
+            _add_warning(
+                warnings,
+                f"Пациент {patient_full_name(stored)} найден в базе (id {stored.id}): "
+                f"{title} в базе «{old_value or ''}», в документе «{new_value}» — не изменён",
+            )
+
+
+# def find_matching_patient(
+#     session     : Session,      # сессия SQLAlchemy (транзакция файла)
+#     patient_dto : PatientDTO,   # пациент из документа (после нормализации)
+# ) -> Optional['Patient']:
+#     """
+#     Ищет пациента, у которого совпадают все непустые поля из patient_dto.
+#
+#     Перебирает всех пациентов базы. ТД-8 (`_dev/ТЕХДОЛГ.md`): у ORM-модели нет
+#     ``description_text`` — при описании в шапке падает AttributeError; совпадение по всем
+#     полям сразу делает обновление (``update_patient_if_needed``) бессмысленным. Вызывается
+#     только при ``update_existing_patient=True`` (окно его не включает).
+#
+#     Args:
+#         session (Session): Сессия SQLAlchemy.
+#         patient_dto (PatientDTO): DTO пациента, полученный из Word-файла.
+#
+#     Returns:
+#         Optional[Patient]: ORM-объект пациента, если найден, иначе None.
+#
+#     Пример:
+#         >>> find_matching_patient(session, PatientDTO(last_name='Иванов', first_name='Иван')).id
+#         7
+#     """
+#
+#     repo = PatientRepository(session)
+#     candidates = repo.get_all()
+#     for p in candidates:
+#         match = True
+#
+#         if patient_dto.last_name and p.last_name != patient_dto.last_name:
+#             match = False
+#
+#         if match and patient_dto.first_name and p.first_name != patient_dto.first_name:
+#             match = False
+#
+#         if match and patient_dto.middle_name and p.middle_name != patient_dto.middle_name:
+#             match = False
+#
+#         if match and patient_dto.birth_date and p.birth_date != patient_dto.birth_date:
+#             match = False
+#
+#         if match and patient_dto.phone and p.phone != patient_dto.phone:
+#             match = False
+#
+#         if match and patient_dto.description_text and p.description_text != patient_dto.description_text:
+#             match = False
+#
+#         if match:
+#
+#             return p
+#
+#     return None
+#
+# def update_patient_if_needed(
+#     existing_patient : 'Patient',    # найденный пациент (ORM)
+#     patient_dto      : PatientDTO,   # данные из документа
+#     session          : Session,      # сессия SQLAlchemy (транзакция файла)
+# ) -> PatientDTO:
+#     """
+#     Обновляет поля существующего пациента значениями из DTO, если они отличаются.
+#
+#     Args:
+#         existing_patient (Patient): ORM-объект существующего пациента.
+#         patient_dto (PatientDTO): DTO с новыми данными (из Word-файла).
+#         session (Session): Сессия SQLAlchemy.
+#
+#     Returns:
+#         PatientDTO: Обновлённый DTO после синхронизации с БД (или исходный, если менять нечего).
+#
+#     Пример:
+#         >>> update_patient_if_needed(patient, PatientDTO(last_name='Иванов', first_name='Иван',
+#         ...     phone='+7 (999) 123-45-67'), session).phone
+#         '+7 (999) 123-45-67'
+#     """
+#
+#     updated = False
+#     if patient_dto.last_name and existing_patient.last_name != patient_dto.last_name:
+#         existing_patient.last_name = patient_dto.last_name
+#         updated = True
+#
+#     if patient_dto.first_name and existing_patient.first_name != patient_dto.first_name:
+#         existing_patient.first_name = patient_dto.first_name
+#         updated = True
+#
+#     if patient_dto.middle_name and existing_patient.middle_name != patient_dto.middle_name:
+#         existing_patient.middle_name = patient_dto.middle_name
+#         updated = True
+#
+#     if patient_dto.birth_date and existing_patient.birth_date != patient_dto.birth_date:
+#         existing_patient.birth_date = patient_dto.birth_date
+#         updated = True
+#
+#     if patient_dto.phone and existing_patient.phone != patient_dto.phone:
+#         existing_patient.phone = patient_dto.phone
+#         updated = True
+#
+#     if patient_dto.description_text and existing_patient.description_text != patient_dto.description_text:
+#         existing_patient.description_text = patient_dto.description_text
+#         updated = True
+#
+#     if updated:
+#         session.flush()
+#         # Обновляем DTO, чтобы отразить изменения
+#         return PatientDTO.model_validate(existing_patient)
+#
+#     return patient_dto
+# ↑ до 2026-10-25 (ТД-8): find_matching_patient сравнивал Patient.description_text (у ORM
+#   его нет — AttributeError при описании в шапке) и требовал совпадения ВСЕХ полей, поэтому
+#   update_patient_if_needed ничего не обновлял. Решение владельца: поиск по ФИО + году
+#   рождения по выбору пользователя (find_patients_by_key), данные найденного не меняются,
+#   дубли объединяются в программе (_dev/ПЛАН.md Ф1.6.10а).
+
 
 # ----------------------------------------------------------------------
 # Обработка одного файла (с транзакцией)
@@ -1298,7 +1480,7 @@ def parse_one_file(
     patient_service         : PatientService,               # сервис пациентов
     appointment_service     : AppointmentService,           # сервис приёмов
     photo_service           : PhotoService,                 # сервис фото
-    update_existing_patient : bool = False,                 # искать совпадающего пациента и обновлять его
+    find_existing_patient   : bool = False,                 # искать пациента по ФИО + году (ТД-8)
     warnings                : Optional[List[str]] = None,   # куда добавить предупреждения (W2); None — не собирать
 ) -> bool:
     """
@@ -1314,8 +1496,11 @@ def parse_one_file(
         patient_service (PatientService): Сервис для работы с пациентами.
         appointment_service (AppointmentService): Сервис для работы с приёмами.
         photo_service (PhotoService): Сервис для работы с фотографиями.
-        update_existing_patient (bool): Если True, при совпадении пациента его данные обновляются,
-                                        иначе создаётся новый пациент.
+        find_existing_patient (bool): True — искать пациента по ФИО + году рождения (ТД-8):
+            один найденный — приёмы добавляются к нему (повторные — та же дата и тексты —
+            пропускаются, отличия телефона / описания — предупреждением, данные пациента не
+            меняются); несколько — создаётся новый и предупреждение «возможный дубль».
+            False — всегда новый пациент.
         warnings (Optional[List[str]]): Список для предупреждений — нераспознанный телефон
             (W2: телефон не записан, пациент импортирован); None — не собирать.
 
@@ -1422,25 +1607,69 @@ def parse_one_file(
             raise ValueError("После нормализации не осталось корректных строк с приёмами")
 
         # ----- ПОИСК ИЛИ СОЗДАНИЕ ПАЦИЕНТА -----
-        existing = None
-        if update_existing_patient:
-            existing = find_matching_patient(session, patient_dto)
+        # ТД-8 (решение владельца 2026-10-25): поиск — по выбору пользователя, ключ — ФИО +
+        # год рождения; один найденный — приёмы к нему; несколько — новый и «возможный дубль»
+        patient_id = None
+        existing_appointments = set()   # ключи приёмов найденного пациента
+        if find_existing_patient:
+            found = find_patients_by_key(session, patient_dto)
 
-        if existing:
-            patient_id = existing.id
-            if update_existing_patient:
-                # Обновляем найденного пациента данными из DTO
-                patient_dto = update_patient_if_needed(existing, patient_dto, session)
+            if len(found) == 1:
+                patient_id = found[0].id
+                _report_patient_differences(
+                    patient_service.get_by_id(patient_id, session),   # DTO с описанием
+                    patient_dto,
+                    warnings,
+                )
+                existing_appointments = {
+                    appointment_key(appointment)
+                    for appointment in appointment_service.get_appointments_by_patient(
+                        patient_id,
+                        session = session,  # транзакция файла
+                    )
+                }
 
-        else:
+            elif len(found) > 1:
+                _add_warning(
+                    warnings,
+                    f"Возможный дубль: в базе несколько пациентов {patient_full_name(patient_dto)} "
+                    f"{patient_dto.birth_date.year if patient_dto.birth_date else ''} г. р. "
+                    f"(id {', '.join(str(p.id) for p in found)}) — создан новый; объедините дубли в программе",
+                )
+
+        if patient_id is None:
             created = patient_service.create(
                 patient_dto,
                 session = session,  # транзакция файла
             )
             patient_id = created.id
+        # existing = None
+        # if update_existing_patient:
+        #     existing = find_matching_patient(session, patient_dto)
+        #
+        # if existing:
+        #     patient_id = existing.id
+        #     if update_existing_patient:
+        #         # Обновляем найденного пациента данными из DTO
+        #         patient_dto = update_patient_if_needed(existing, patient_dto, session)
+        #
+        # else:
+        #     created = patient_service.create(...)
+        #     patient_id = created.id
+        # ↑ до 2026-10-25 (ТД-8): поиск по всем полям падал на описании и ничего не обновлял
 
         # ----- СОЗДАНИЕ ПРИЁМОВ -----
         for row in normalized_rows:
+            # ТД-8: у найденного пациента такой приём уже есть (дата и тексты) — пропустить
+            if appointment_key(row) in existing_appointments:
+                _add_warning(
+                    warnings,
+                    f"Приём {row['date']:%d.%m.%Y} уже есть у пациента "
+                    f"{patient_full_name(patient_dto)} — пропущен"
+                    + (" (фото строки не добавлены)" if row.get('photos') else ""),
+                )
+                continue
+
             app_dto = AppointmentDTO(
                 patient_id           = patient_id,                        # пациент файла
                 date                 = row['date'],                       # дата приёма (обязательна)
@@ -1532,7 +1761,7 @@ def _empty_results() -> Dict[str, Any]:
 def batch_parse(
     folder_path              : str,                                             # папка с .docx
     specific_files           : Optional[List[str]] = None,                      # имена файлов; None — все необработанные (W7)
-    update_existing_patient  : bool = False,                                    # обновлять совпадающего пациента
+    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + году (ТД-8)
     db                       : Optional[Database] = None,                       # база (None — из app.dependencies)
     patient_service          : Optional[PatientService] = None,                 # сервис пациентов (None — из app.dependencies)
     appointment_service      : Optional[AppointmentService] = None,             # сервис приёмов (None — из app.dependencies)
@@ -1553,7 +1782,7 @@ def batch_parse(
     Args:
         folder_path (str): Путь к папке с файлами.
         specific_files (Optional[List[str]]): Список имён файлов для обработки (без путей).
-        update_existing_patient (bool): Обновлять ли данные существующего пациента.
+        find_existing_patient (bool): Искать пациента по ФИО + году рождения (см. ``parse_one_file``).
         db (Optional[Database]): Экземпляр Database (если None – берётся из dependencies).
         patient_service (Optional[PatientService]): Сервис пациентов.
         appointment_service (Optional[AppointmentService]): Сервис приёмов.
@@ -1673,7 +1902,7 @@ def batch_parse(
                         patient_service,                                    # сервисы
                         appointment_service,
                         photo_service,
-                        update_existing_patient = update_existing_patient,  # обновлять совпадающего
+                        find_existing_patient   = find_existing_patient,    # ТД-8: искать по ФИО + году
                         warnings                = file_warnings,            # W2: предупреждения
                     )
 
@@ -1781,7 +2010,7 @@ def format_results(
 def pars_start(
     folder                   : Optional[str] = None,                            # папка с .docx (нужна)
     files                    : Optional[List[str]] = None,                      # имена файлов; None — все необработанные
-    update_existing_patient  : bool = False,                                    # обновлять совпадающего пациента
+    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + году (ТД-8)
 
     progress_callback_start  : Optional[Callable[[List[str]], None]] = None,    # до начала: имена всех файлов
     progress_callback_update : Optional[Callable[[str, str, str], None]] = None,  # по файлу: имя, статус, сообщение
@@ -1794,7 +2023,7 @@ def pars_start(
     Args:
         folder (Optional[str]): Путь к папке.
         files (Optional[List[str]]): Список имён файлов.
-        update_existing_patient (bool): Флаг обновления существующих пациентов.
+        find_existing_patient (bool): Искать пациента по ФИО + году рождения (ТД-8).
         progress_callback_start: Как в ``batch_parse``.
         progress_callback_update: Как в ``batch_parse``.
 
@@ -1812,7 +2041,7 @@ def pars_start(
     results, log_dir = batch_parse(
         folder,
         specific_files           = files or None,              # None — отбор в batch_parse (W7)
-        update_existing_patient  = update_existing_patient,
+        find_existing_patient    = find_existing_patient,
 
         progress_callback_start  = progress_callback_start,
         progress_callback_update = progress_callback_update,
@@ -1871,7 +2100,8 @@ def pars_start_args(
     Поддерживаемые аргументы командной строки:
         --folder <path>               Путь к папке с .docx файлами (обязателен, если не передан в вызове).
         --files file1.docx,file2.docx Опциональный список файлов (если не указан, берутся все необработанные .docx).
-        --update_existing_patient     Флаг: обновлять данные существующего пациента.
+        --find_existing_patient       Флаг: искать пациента по ФИО + году рождения (ТД-8);
+                                      старое имя --update_existing_patient — то же самое.
         --help                        Показать справку.
 
     Аргументы командной строки главнее параметров вызова (Ф1.1.7: раньше папка из вызова
@@ -1907,9 +2137,12 @@ def pars_start_args(
         help = 'имена файлов через запятую (по умолчанию — все необработанные .docx папки)',
     )
     arg_parser.add_argument(
-        '--update_existing_patient',
+        '--find_existing_patient',
+        '--update_existing_patient',                           # старое имя (до 2026-10-25, ТД-8)
+        dest   = 'find_existing_patient',
         action = 'store_true',                                 # флаг без значения
-        help   = 'обновлять данные совпадающего пациента',
+        help   = 'искать существующего пациента по ФИО + году рождения: приёмы добавятся к нему, '
+                 'повторные пропускаются (по умолчанию каждый документ — новый пациент)',
     )
     args = arg_parser.parse_args(argv)
 
@@ -1927,7 +2160,7 @@ def pars_start_args(
     results = pars_start(
         folder                  = folder,                     # папка
         files                   = files,                      # файлы (None — все необработанные)
-        update_existing_patient = args.update_existing_patient,
+        find_existing_patient   = args.find_existing_patient,  # ТД-8
     )
 
     return results

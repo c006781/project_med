@@ -1,6 +1,20 @@
 # app/utils/file_deletions.py
 """
 Утилиты для безопасного удаления файлов и папок с поддержкой отложенного выполнения.
+
+Удаление выполняется сразу или откладывается до исхода транзакции SQLAlchemy: пути
+копятся в ``session._deletions[DeletionType]``, обработчики ``after_commit`` /
+``after_rollback`` (``app/database/database.py``) вызывают для них
+`del_file_and_parent_dir`. Ещё здесь — копирование файла во временную папку черновика
+(`copy_file_to_temp_dir`) и поиск файла фото (`resolve_photo_path`).
+
+Ограничение: списки очищаются только своим событием — см. FD9 в IMPLEMENTATION.md.
+
+Пример:
+    >>> ctx = DeletionContext.create(session, DeletionType.COMMIT)
+    >>> schedule_deletion('photos/app_1/a.png', remove_parent_if_empty=True, ctx=ctx)
+    (True, None)
+    >>> session.commit()  # after_commit удалит файл и пустую папку app_1
 """
 
 import os
@@ -20,6 +34,10 @@ class DeletionType(Enum):
 
     COMMIT   – удалить после успешного коммита транзакции.
     ROLLBACK – удалить при откате транзакции.
+
+    Пример:
+        >>> DeletionType('rollback') is DeletionType.ROLLBACK
+        True
     """
     COMMIT = "commit"
     ROLLBACK = "rollback"
@@ -61,6 +79,9 @@ class DeletionContext:
 
         Returns:
             AppLogger: Журнал ``api.DeletionContext``.
+
+        Пример:
+            >>> DeletionContext._get_logger().warning('удаление без сессии')
         """
         if cls._class_logger is None:
             cls._class_logger = AppLogger.get_instance(
@@ -72,7 +93,13 @@ class DeletionContext:
 
     @property
     def logger(self) -> AppLogger:
-        """Журнал (общий для класса)."""
+        """
+        Журнал (общий для класса).
+
+        Пример:
+            >>> ctx.logger is DeletionContext._get_logger()
+            True
+        """
         return type(self)._get_logger()
 
     # @property
@@ -96,7 +123,14 @@ class DeletionContext:
     #   «удалить сразу»); у экземпляра _logger не записывался (__slots__) (FD1)
 
     @classmethod
-    def create(cls, session, deletion_type):
+    # def create(cls, session, deletion_type):
+    # ↑ до 2026-10-25 (FD12): без аннотаций (полная типизация — правило проекта; формат
+    #   skill п. 7).
+    def create(
+        cls,
+        session       : Optional[Session],  # сессия (None — удалять сразу)
+        deletion_type : 'DeletionType',     # после коммита или при откате
+    ) -> Optional['DeletionContext']:
         """
         Создаёт контекст отложенного удаления.
 
@@ -128,16 +162,45 @@ class DeletionContext:
             return None
         return cls(session, deletion_type)
 
+    # def __init__(
+    #     self,
+    #     session: Session,
+    #     deletion_type: 'DeletionType'
+    # ):
+    # ↑ до 2026-10-25 (FD12): без аннотации возврата и докстринга (правило проекта;
+    #   формат skill п. 7).
     def __init__(
         self,
-        session: Session,
-        deletion_type: 'DeletionType'
-    ):
+        session       : Optional[Session],         # сессия SQLAlchemy (None — контекст ложный)
+        deletion_type : Optional['DeletionType'],  # после коммита или при откате
+    ) -> None:
+        """
+        Запоминает сессию и тип удаления.
+
+        Args:
+            session: Сессия, к исходу транзакции которой привязано удаление.
+            deletion_type: Тип удаления (COMMIT или ROLLBACK).
+
+        Пример:
+            >>> DeletionContext(session, DeletionType.COMMIT).deletion_type
+            <DeletionType.COMMIT: 'commit'>
+        """
         self.session = session
         self.deletion_type = deletion_type
 
     def __bool__(self) -> bool:
-        """Возвращает True, если контекст задан (отложенное удаление)."""
+        """
+        Возвращает True, если контекст задан (отложенное удаление).
+
+        Активность сессии здесь не проверяется — это делает `schedule_deletion`.
+
+        Returns:
+            bool: ``True`` — заданы и сессия, и тип.
+
+        Пример:
+            >>> bool(DeletionContext(None, DeletionType.COMMIT))
+            False
+        """
         return self.session is not None and self.deletion_type is not None
 
 @AppLogger.get_instance(
@@ -145,10 +208,23 @@ class DeletionContext:
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-def ensure_deletions_dict(session: Session) -> None:
+# def ensure_deletions_dict(session: Session) -> None:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментария к параметру (формат skill п. 7).
+def ensure_deletions_dict(
+    session : Session,  # сессия, к которой привязаны списки удалений
+) -> None:
     """
     Гарантирует, что в сессии есть словарь _deletions с ключами COMMIT и ROLLBACK.
+
     Для обратной совместимости также переносит старый список _pending_deletions в COMMIT.
+
+    Args:
+        session: Сессия SQLAlchemy (или любой объект с атрибутами).
+
+    Пример:
+        >>> ensure_deletions_dict(session)
+        >>> session._deletions
+        {<DeletionType.COMMIT: 'commit'>: [], <DeletionType.ROLLBACK: 'rollback'>: []}
     """
     if not hasattr(session, '_deletions'):
         session._deletions = {
@@ -165,11 +241,18 @@ def ensure_deletions_dict(session: Session) -> None:
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def add_deferred_deletion(
+#     ctx: DeletionContext,
+#     path: str,
+#     remove_parent_if_empty: bool = False,
+#     force: bool = False,
+# ) -> None:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
 def add_deferred_deletion(
-    ctx: DeletionContext,
-    path: str,
-    remove_parent_if_empty: bool = False,
-    force: bool = False,
+    ctx                    : Optional[DeletionContext],  # контекст (ложный — ничего не делать)
+    path                   : str,                        # файл или папка
+    remove_parent_if_empty : bool = False,               # затем удалить родителя, если пуст
+    force                  : bool = False,               # папку — рекурсивно
 ) -> None:
     """
     Добавляет файл или папку в отложенное удаление согласно контексту.
@@ -179,6 +262,11 @@ def add_deferred_deletion(
         path: Путь к файлу или папке.
         remove_parent_if_empty: Удалить родительскую папку, если она станет пустой.
         force: Принудительное рекурсивное удаление (для папок).
+
+    Пример:
+        >>> add_deferred_deletion(DeletionContext(session, DeletionType.COMMIT), 'a.png')
+        >>> session._deletions[DeletionType.COMMIT]
+        [{'path': 'a.png', 'remove_parent_if_empty': False, 'force': False}]
     """
     if not ctx:
         return
@@ -195,8 +283,28 @@ def add_deferred_deletion(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-def get_deletions_by_type(session: Session, dt: DeletionType) -> List[dict]:
-    """Возвращает список отложенных удалений для указанного типа."""
+# def get_deletions_by_type(session: Session, dt: DeletionType) -> List[dict]:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
+def get_deletions_by_type(
+    session : Session,       # сессия со списками удалений
+    dt      : DeletionType,  # какой список
+) -> List[dict]:
+    """
+    Возвращает список отложенных удалений для указанного типа.
+
+    Возвращается сам список сессии (не копия).
+
+    Args:
+        session: Сессия SQLAlchemy.
+        dt: Тип удаления.
+
+    Returns:
+        List[dict]: Записи ``{'path', 'remove_parent_if_empty', 'force'}``.
+
+    Пример:
+        >>> get_deletions_by_type(session, DeletionType.ROLLBACK)
+        []
+    """
     ensure_deletions_dict(session)
     return session._deletions.get(dt, [])
 
@@ -205,8 +313,24 @@ def get_deletions_by_type(session: Session, dt: DeletionType) -> List[dict]:
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-def clear_deletions_by_type(session: Session, dt: DeletionType) -> None:
-    """Очищает список отложенных удалений для указанного типа."""
+# def clear_deletions_by_type(session: Session, dt: DeletionType) -> None:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
+def clear_deletions_by_type(
+    session : Session,       # сессия со списками удалений
+    dt      : DeletionType,  # какой список очистить
+) -> None:
+    """
+    Очищает список отложенных удалений для указанного типа.
+
+    Args:
+        session: Сессия SQLAlchemy (без списков — ничего не делает).
+        dt: Тип удаления.
+
+    Пример:
+        >>> clear_deletions_by_type(session, DeletionType.COMMIT)
+        >>> get_deletions_by_type(session, DeletionType.COMMIT)
+        []
+    """
     if hasattr(session, '_deletions') and dt in session._deletions:
         session._deletions[dt].clear()
 
@@ -215,9 +339,14 @@ def clear_deletions_by_type(session: Session, dt: DeletionType) -> None:
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def delete_file_safely(
+#     file_path: str,
+#     logger: Optional[AppLogger] = None
+# ) -> Tuple[bool, Optional[str]]:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
 def delete_file_safely(
-    file_path: str, 
-    logger: Optional[AppLogger] = None
+    file_path : str,                        # путь к файлу
+    logger    : Optional[AppLogger] = None, # журнал (None — журнал модуля)
 ) -> Tuple[bool, Optional[str]]:
     """
     Удаляет файл, если он существует и является файлом.
@@ -234,6 +363,12 @@ def delete_file_safely(
         Tuple[bool, Optional[str]]: (успех, ошибка)
             - `(True, None)` – файл успешно удалён или не существовал.
             - `(False, str)` – ошибка при удалении (файл заблокирован, нет прав): текст ошибки.
+
+    Пример:
+        >>> delete_file_safely('temp/a.png')
+        (True, None)
+        >>> delete_file_safely('нет.png')  # нечего удалять — тоже успех
+        (True, None)
     """
 
     if logger is None:
@@ -263,11 +398,17 @@ def delete_file_safely(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def delete_empty_directory(
+#         dir_path: str,
+#         force: bool = False,
+#         logger: Optional[AppLogger] = None,
+#     ) -> Tuple[bool, Optional[str]]:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
 def delete_empty_directory(
-        dir_path: str, 
-        force: bool = False,
-        logger: Optional[AppLogger] = None,
-    ) -> Tuple[bool, Optional[str]]:
+    dir_path : str,                        # папка
+    force    : bool = False,               # True — со всем содержимым
+    logger   : Optional[AppLogger] = None, # журнал (None — журнал модуля)
+) -> Tuple[bool, Optional[str]]:
     """
     Удаляет директорию.
 
@@ -286,6 +427,13 @@ def delete_empty_directory(
             - `(True, None)` – директории нет (удалять нечего).
             - `(False, None)` – директория не пуста (при force=False).
             - `(False, str)` – ошибка доступа/удаления: текст ошибки.
+            - `(True, None)` – пустой путь (предупреждение в журнал).
+
+    Пример:
+        >>> delete_empty_directory('temp/draft_1')  # не пуста
+        (False, None)
+        >>> delete_empty_directory('temp/draft_1', force=True)
+        (True, None)
     """
 
     if logger is None:
@@ -336,19 +484,34 @@ def delete_empty_directory(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def schedule_deletion(
+#     path: str,
+#     remove_parent_if_empty: bool = False,
+#     force: bool = False,
+#     # session: Optional[Session] = None,
+#     ctx: Optional[DeletionContext] = None,
+#     logger: Optional[AppLogger] = None
+# ) -> Tuple[bool, Optional[str]]:
+# ↑ до 2026-10-25 (FD12): сигнатура без комментариев к параметрам (формат skill п. 7).
 def schedule_deletion(
-    path: str,
-    remove_parent_if_empty: bool = False,
-    force: bool = False,
+    path                   : str,                               # файл или папка
+    remove_parent_if_empty : bool = False,                      # затем удалить родителя, если пуст
+    force                  : bool = False,                      # папку — рекурсивно (только сам объект)
     # session: Optional[Session] = None,
-    ctx: Optional[DeletionContext] = None,
-    logger: Optional[AppLogger] = None
+    ctx                    : Optional[DeletionContext] = None,  # когда удалять (None — сразу)
+    logger                 : Optional[AppLogger] = None,        # журнал (None — журнал модуля)
 ) -> Tuple[bool, Optional[str]]:
     """
-    Планирует удаление файла или папки после успешного коммита транзакции.
+    Планирует удаление файла или папки после исхода транзакции (или удаляет сразу).
 
     Если передан `ctx` с активной сессией, удаление откладывается до соответствующего
     события (COMMIT или ROLLBACK). Файлы добавляются в список `session._deletions[deletion_type]`.
+
+    Без отложенного удаления:
+        - ``ctx is None`` или сессия неактивна (``is_active=False``) — удаляется сразу
+          (для COMMIT при неактивной сессии — тоже сразу, хотя коммита не будет: FD10);
+        - контекст ROLLBACK без сессии — ничего не удаляется (откатывать нечего, DATA6),
+          контекст COMMIT без сессии — сразу.
 
     Args:
         path: Путь к файлу или папке.
@@ -362,6 +525,12 @@ def schedule_deletion(
         Tuple[bool, Optional[str]]: (успех, ошибка)
             При отложенном удалении всегда возвращает `(True, None)`.
             При немедленном удалении возвращает результат `del_file_and_parent_dir`.
+
+    Пример:
+        >>> schedule_deletion('temp/a.png', ctx=DeletionContext(session, DeletionType.COMMIT))
+        (True, None)
+        >>> schedule_deletion('temp/b.png')  # без контекста — сразу
+        (True, None)
     """
 
     if logger is None:

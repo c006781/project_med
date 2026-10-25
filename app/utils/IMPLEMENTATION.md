@@ -3,13 +3,13 @@
 > Файл для разработчиков: что делают отдельные модули `app/utils/*.py`, почему так и журнал
 > проверок. У подпакетов (`dataset`, `drafts`, `drafts_qt`, `filtering`, `logger`) — свои
 > IMPLEMENTATION.md.
-> Последнее обновление: 2026-10-25 (ветка `rework-windows-baseline`).
+> Последнее обновление: 2026-10-25 (ветка `rework-w1-utils`, заход М5 — проход 2).
 
 | Файл | Назначение | Проверен |
 |---|---|---|
-| [file_deletions.py](file_deletions.py) | Удаление файлов/папок сразу или после COMMIT/ROLLBACK сессии (`DeletionContext`, `schedule_deletion`), копирование во временную папку, поиск файла фото | 2026-10-21, проход 1 |
-| [deferred_actions.py](deferred_actions.py) | Действия после COMMIT/ROLLBACK сессии (`ActionContext`, `add_deferred_action`, `execute_actions` — в цикле событий Qt) | 2026-10-21, проход 1 |
-| [virtual_fields.py](virtual_fields.py) | Виртуальные поля DTO: `compute_virtual_fields` (по `compute` в конфигурации), `enrich_dto_with_computed_fields` | 2026-10-21, проход 1 |
+| [file_deletions.py](file_deletions.py) | Удаление файлов/папок сразу или после COMMIT/ROLLBACK сессии (`DeletionContext`, `schedule_deletion`), копирование во временную папку, поиск файла фото | 2026-10-21 проход 1; 2026-10-25 проход 2 (М5) |
+| [deferred_actions.py](deferred_actions.py) | Действия после COMMIT/ROLLBACK сессии (`ActionContext`, `add_deferred_action`, `execute_actions` — в цикле событий Qt) | 2026-10-21 проход 1; 2026-10-25 проход 2 (М5) |
+| [virtual_fields.py](virtual_fields.py) | Виртуальные поля DTO: `compute_virtual_fields` (по `compute` в конфигурации), `enrich_dto_with_computed_fields` | 2026-10-21 проход 1; 2026-10-25 проход 2 (М5) |
 | [colors.py](colors.py), [qt_meta.py](qt_meta.py) | Цвета интерфейса; метакласс Qt + ABC (абстрактность не проверяет — QM1) | 2026-10-25, первая проверка (М5) |
 
 Обработчики `after_commit`/`after_rollback`, которые выполняют накопленные удаления и
@@ -111,3 +111,16 @@ FD7 — 1, FD8 — 2), FD9 (2, xfail strict), FD11 (6; на старом код�
 
 Тесты: `tests/test_utils_colors.py` (11), `tests/test_utils_qt_meta.py` (4) — до этого тестов
 не было.
+
+#### Итоговая перепроверка (2026-10-25)
+
+Ревью всех пяти модулей целиком; у всех функций, методов и классов — докстринги с
+«Пример:» и полная типизация (проверено разбором `ast`).
+
+| # | Файл | Что было | Исправление |
+|---|---|---|---|
+| FD12 | `file_deletions.py` | Нетронутые функции — без примеров, `DeletionContext.create`/`__init__` без аннотаций, `schedule_deletion` не описывал немедленные случаи (неактивная сессия, контекст без сессии) | Докстринги с примерами, описание модуля, сигнатуры — формат skill п. 7 (старые — закомментированы). Поведение не менялось |
+| — | `app/utils/__init__.py` | Пустой | Описание пакета (модули, подпакеты; импорт пакета ничего не тянет) |
+
+`pyflakes` по пяти модулям: только 4 ожидаемых замечания DA4 (неиспользуемые импорты,
+оставлены по правилу проекта). Тесты пяти модулей: 75 прошли, 3 xfail (FD9 — 2, DA5 — 1).

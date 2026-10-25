@@ -39,7 +39,7 @@ AppException (message, code; __str__ → "[code] message"; __reduce__ → pickle
 | Исключения таблиц — наследники общих `EntityNotFoundError` / `EntityValidationError` | Один `except` на «не найдено»/«ошибку поля» любой таблицы; поле и причина доступны окну (`exc.field`) |
 | `ConnectionError` → `DatabaseConnectionError`, старое имя — псевдоним вне `__all__` | `from app.exceptions import *` перекрывал встроенный `ConnectionError` — `except ConnectionError` переставал ловить сетевые ошибки (их бросает, например, `app.network`) |
 | `__reduce__` в `AppException` | `__init__` наследников принимает данные, а не текст: `pickle` падал (`PhotoFileError`) |
-| Неиспользуемые исключения синхронизации и БД оставлены | Публичный API; кандидаты на удаление — ИДЕИ.txt И-9 |
+| Неиспользуемые исключения синхронизации и БД оставлены | Публичный API; кандидаты на удаление — `_dev/ИДЕИ.md` И-9 |
 
 ---
 

@@ -16,7 +16,7 @@ DTO (Data Transfer Objects) на базе Pydantic.
 
 PatientDTO, AppointmentDTO, PhotoDTO строятся из описаний таблиц (``app/schema/clinic.py``,
 ``TableDef.build_dto``): новое поле — в описании таблицы, не здесь. AppointmentNoteDTO пока
-написан вручную (ОСТАЛОСЬ.txt п. 4.4).
+написан вручную (_dev/ОСТАЛОСЬ.md п. 4.4).
 
 Пример:
     >>> dto = PatientDTO(first_name="Иван", last_name="Петров")

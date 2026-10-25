@@ -44,3 +44,11 @@ MedicalApp-linux.tar.gz
 MedicalApp-windows/
 venv_project_med/
 doc/
+
+# Служебные файлы разработки (_dev/) — вне git: разовое, вывод прогонов, бэкапы,
+# данные исследований, дата проверки хешей (skill dev-rules, 2026-10-25)
+_dev/tmp/
+_dev/test_runs/
+_dev/backup/
+_dev/research/*/data/
+_dev/hashes.checked

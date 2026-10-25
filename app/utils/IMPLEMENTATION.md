@@ -31,7 +31,7 @@
 Проверено и оставлено: неиспользуемые импорты (`weakref`, `QMetaObject`, `Qt`, `Q_ARG` —
 были раньше, правило проекта); `del_file_and_parent_dir` для несуществующего пути —
 `(False, None)` с предупреждением (вызывающие опираются на это); `resolve_photo_path` —
-проверка префикса хранилища строкой (ИДЕИ.txt И-10).
+проверка префикса хранилища строкой (_dev/ИДЕИ.md И-10).
 
 Тесты: `tests/test_file_deletions_review_pass1.py` (20; на старом коде 5 падают — FD1, FD6),
 `tests/test_deferred_actions_review_pass1.py` (12, с настоящим циклом событий Qt; на

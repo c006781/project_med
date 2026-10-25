@@ -3,9 +3,11 @@
 """
 Тесты проверки модуля app.utils.file_deletions, проход 2 (2026-10-25).
 
-Номера (FD7 …) — журнал проверок в ``app/utils/IMPLEMENTATION.md``.
+Номера (FD7 …; FD11 — И-10) — журнал проверок в ``app/utils/IMPLEMENTATION.md``.
 """
 
+import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +18,7 @@ from app.utils.file_deletions import (
     DeletionType,
     copy_file_to_temp_dir,
     del_file_and_parent_dir,
+    resolve_photo_path,
     schedule_deletion,
 )
 
@@ -209,3 +212,69 @@ def test_fd9_rollback_list_dropped_after_commit(
             raise RuntimeError('другая ошибка')
 
     assert photo.exists(), 'закоммиченный файл удалён откатом чужой транзакции'
+
+
+# ---------------------------------------------------------------------------
+# FD11 (И-10) — «путь уже в хранилище»: по частям пути (commonpath), а не префиксом строки
+# ---------------------------------------------------------------------------
+
+windows_only = pytest.mark.skipif(
+    sys.platform != 'win32',
+    reason = 'регистр и разделители путей — особенность Windows',
+)
+
+
+@pytest.fixture
+def cwd_with_photos(
+    tmp_path    : Path,  # временная папка
+    monkeypatch,         # смена рабочей папки
+) -> Path:
+    """Рабочая папка с хранилищем ``photos/app_1/a.png`` и соседней ``photos2/a.png``."""
+    (tmp_path / 'photos' / 'app_1').mkdir(parents=True)
+    (tmp_path / 'photos' / 'app_1' / 'a.png').write_bytes(b'1')
+    (tmp_path / 'photos2').mkdir()
+    (tmp_path / 'photos2' / 'a.png').write_bytes(b'2')
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+def test_fd11_sibling_prefix_is_not_storage(cwd_with_photos: Path) -> None:
+    """'./photos2/…' не внутри './photos': файл соседней папки не выдаётся за фото хранилища."""
+    assert resolve_photo_path('./photos2/a.png', storage_path='./photos') is None
+
+
+def test_fd11_path_inside_storage(cwd_with_photos: Path) -> None:
+    """Путь, уже содержащий хранилище, не дублируется (как раньше)."""
+    found = resolve_photo_path('./photos/app_1/a.png', storage_path='./photos')
+    assert found == os.path.normpath('photos/app_1/a.png')
+
+
+def test_fd11_relative_inside_storage_falls_back_to_join(cwd_with_photos: Path) -> None:
+    """Похоже на путь в хранилище, но такого файла нет — ищется и внутри хранилища (как раньше)."""
+    (cwd_with_photos / 'photos' / 'photos').mkdir()
+    (cwd_with_photos / 'photos' / 'photos' / 'b.png').write_bytes(b'3')
+    found = resolve_photo_path('photos/b.png', storage_path='./photos')
+    assert found == os.path.normpath('photos/photos/b.png')
+
+
+@windows_only
+def test_fd11_windows_case_insensitive(cwd_with_photos: Path) -> None:
+    """Windows: регистр букв хранилища и пути не важен (раньше — не находилось)."""
+    found = resolve_photo_path('./photos/app_1/a.png', storage_path='./Photos')
+    assert found == os.path.normpath('photos/app_1/a.png')
+
+
+@windows_only
+def test_fd11_windows_backslashes(cwd_with_photos: Path) -> None:
+    """Windows: обратная косая в пути и прямая в настройке — одно и то же (раньше — не находилось)."""
+    rel = os.path.join('.', 'photos', 'app_1', 'a.png')  # на Windows — с обратной косой
+    found = resolve_photo_path(rel, storage_path='./photos')
+    assert found == os.path.normpath('photos/app_1/a.png')
+
+
+@windows_only
+def test_fd11_windows_other_drive_no_error(cwd_with_photos: Path) -> None:
+    """Windows: хранилище на другом диске — commonpath бросает ValueError; функция — нет."""
+    drive = os.path.splitdrive(os.getcwd())[0].upper()
+    other = 'Y:' if drive != 'Y:' else 'X:'
+    assert resolve_photo_path('photos/app_1/a.png', storage_path=f'{other}/photos') is None

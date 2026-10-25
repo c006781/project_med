@@ -569,7 +569,11 @@ def resolve_photo_path(
         1. Если rel_path пустой – вернуть None.
         2. Если rel_path – абсолютный путь и файл существует – вернуть его.
         3. Если передан temp_dir и файл существует в нём – вернуть полный путь.
-        4. Если передан storage_path и файл существует в нём – вернуть полный путь.
+        4. Если передан storage_path: путь, уже лежащий внутри хранилища (по частям пути,
+           ``_is_inside_dir``; на Windows без учёта регистра и вида косой), — как есть, если
+           файл существует; иначе — ``storage_path/rel_path``, если файл существует.
+           (До FD11 / И-10 — строковым префиксом: ``./photos2/…`` считался лежащим в
+           ``./photos``.)
         5. Иначе вернуть None.
 
     Возвращаемый путь нормализован (``os.path.normpath``): на Windows разделители — ``\\``,
@@ -611,17 +615,74 @@ def resolve_photo_path(
 
     # Проверяем основное хранилище
     if storage_path:
-        # Если rel_path уже содержит storage_path как префикс – не дублируем
-        if rel_path.startswith(storage_path):
-            cand = rel_path
-        else:
-            cand = os.path.join(storage_path, rel_path)
-        if os.path.exists(cand):
-            # return cand
-            # ↑ до 2026-10-25 (FD-W1): без нормализации (см. выше).
-            return os.path.normpath(cand)
+        # # Если rel_path уже содержит storage_path как префикс – не дублируем
+        # if rel_path.startswith(storage_path):
+        #     cand = rel_path
+        # else:
+        #     cand = os.path.join(storage_path, rel_path)
+        # if os.path.exists(cand):
+        #     # return cand
+        #     # ↑ до 2026-10-25 (FD-W1): без нормализации (см. выше).
+        #     return os.path.normpath(cand)
+        # ↑ до 2026-10-25 (FD11, И-10): «путь уже в хранилище» — строковым префиксом:
+        #   './photos2/a.png' считался лежащим в './photos' (выдавался файл соседней папки),
+        #   а на Windows './Photos' и '.\photos\…' — нет (другой регистр / разделитель:
+        #   путь дублировался и фото не находилось).
+        candidates = []
+        # Путь уже внутри хранилища (по частям пути) — не дублируем
+        if _is_inside_dir(rel_path, storage_path):
+            candidates.append(rel_path)
+        # Внутри хранилища — всегда (и запасным вариантом: внутри хранилища может быть
+        # подпапка с тем же именем, раньше для такого пути искалось только здесь)
+        candidates.append(
+            os.path.join(storage_path, rel_path),
+        )
+        for cand in candidates:
+            if os.path.exists(cand):
+                return os.path.normpath(cand)
 
     return None
+
+
+def _is_inside_dir(
+    path : str,  # проверяемый путь (относительный — от рабочей папки)
+    base : str,  # папка (относительная — от рабочей папки)
+) -> bool:
+    """
+    Лежит ли путь внутри папки (или совпадает с ней) — по частям пути, а не префиксом строки.
+
+    Оба пути приводятся к абсолютным (``abspath`` — от рабочей папки) и к одному регистру и
+    разделителю (``normcase``: на Windows — нижний регистр и ``\\``, на Linux — без
+    изменений), затем сравниваются через ``os.path.commonpath``. Пути на разных дисках
+    Windows (``commonpath`` бросает ``ValueError``) — «не внутри».
+
+    Args:
+        path: Проверяемый путь.
+        base: Папка.
+
+    Returns:
+        bool: ``True`` — ``path`` внутри ``base`` или совпадает с ней.
+
+    Пример:
+        >>> _is_inside_dir('./photos/app_1/a.png', './photos')
+        True
+        >>> _is_inside_dir('./photos2/a.png', './photos')  # префикс строки, но другая папка
+        False
+        >>> _is_inside_dir('photos/a.png', 'D:/photos')  # Windows, рабочая папка на C:
+        False
+    """
+    abs_path = os.path.normcase(
+        os.path.abspath(path),
+    )
+    abs_base = os.path.normcase(
+        os.path.abspath(base),
+    )
+    try:
+        common = os.path.commonpath([abs_path, abs_base])
+    except ValueError:
+        # Разные диски Windows (или смесь абсолютного и относительного) — не внутри
+        return False
+    return common == abs_base
 
 
 

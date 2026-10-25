@@ -7,6 +7,7 @@
 """
 
 import functools
+import os  # копия окружения для подпроцесса (DA3-W, 2026-10-25)
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -103,8 +104,20 @@ def test_da3_with_qt_app_runs_in_event_loop():
         "app.exec()\n"
         "print(before, done)\n"
     )
-    result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=60,
-                            env={'QT_QPA_PLATFORM': 'offscreen', 'PATH': ''}, cwd='.')
+    # result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, timeout=60,
+    #                         env={'QT_QPA_PLATFORM': 'offscreen', 'PATH': ''}, cwd='.')
+    # ↑ до 2026-10-25 (DA3-W): окружение из двух ключей — на Windows Python без SYSTEMROOT
+    #   не запускается («failed to get random numbers»), вывод пуст, тест падал IndexError.
+    #   Копия окружения (как в tests/test_logger) — тот же процесс, плюс временные .env и
+    #   конфиг из tests/conftest.py.
+    result = subprocess.run(
+        [sys.executable, '-c', code],                         # отдельный процесс со своим QCoreApplication
+        capture_output = True,                                # вывод — для проверки
+        text           = True,                                # строки, а не байты
+        timeout        = 60,                                  # не ждать вечно
+        env            = {**os.environ, 'QT_QPA_PLATFORM': 'offscreen'},  # копия окружения + Qt без экрана
+        cwd            = '.',                                 # корень проекта (импорт app)
+    )
     assert result.stdout.strip().splitlines()[-1] == '[] [0, 1, 2]'
 
 

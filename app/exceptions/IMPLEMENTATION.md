@@ -105,5 +105,29 @@ AppException (message, code; __str__ → "[code] message" / message при code=
 
 ## 4. Дальше
 
+### 4.1 Неиспользуемые исключения (И-9) — предложение владельцу (2026-10-25)
+
+Проверено поиском по `app/`, `interfaces/`, `parsers/`, `tests/` (2026-10-25): ниже —
+классы, которые **нигде не бросаются и не ловятся** (только тесты этого модуля). Решения
+нет — ничего не удалено и не подключено.
+
+| Исключение | Где можно использовать (что там сейчас) | Или убрать — почему |
+|---|---|---|
+| `SyncError`, `DownloadError`, `UploadError`, `TokenError` (5000–5003) | `app/network/ya_dop.py` — `yadisk_download_file` / `yadisk_upload_file` при `if_err=True` бросают встроенные `ConnectionError` (токен/связь), `FileNotFoundError`, `IsADirectoryError`, `FileExistsError` и исходные ошибки `yadisk`; при `if_err=False` — коды `YaDiskResult`. `YaDiskThread.run` (`thread_network.py`) показывает `str(exc)`. Можно: `TokenError` — вместо `ConnectionError` при недействительном токене; `DownloadError` / `UploadError` — обёртка прочих сбоев передачи (`raise DownloadError(str(exc)) from exc`) | У сети уже своя проверенная схема (коды `YaDiskResult` + встроенные исключения, T1); перевод потребует двойного наследования (`TokenError(SyncError, ConnectionError)`), иначе сломаются `except ConnectionError` / `FileNotFoundError` у вызывающих и тесты `tests/test_network`; пользователь увидит префикс `[5001]`. `interfaces/cli/cli.py` импортирует `DownloadError`, `UploadError` без использования (pyflakes) |
+| `DatabaseError`, `IntegrityError`, `DatabaseConnectionError` (6000–6002) | `DatabaseConnectionError` — `app/database/database.py` `Database.__init__`: отказ открыть базу (занята / только чтение / нет файла) сейчас уходит исключением SQLAlchemy, текст для пользователя строит `app/database/migrate.py` `startup_error_text` (обходит `__cause__` — `raise DatabaseConnectionError(...) from exc` его не сломает). `IntegrityError` — `Database.session_scope`: `sqlalchemy.exc.IntegrityError` (UNIQUE, внешний ключ) сейчас логируется и пробрасывается как есть; можно переводить в `IntegrityError(detail) from exc`, чтобы командная строка и окно ловили одно исключение приложения (сейчас `sqlalchemy.exc.IntegrityError` нигде не ловят) | Если перевод ошибок SQLAlchemy не нужен — убрать (комментарием): имена совпадают с `sqlalchemy.exc.DatabaseError` / `IntegrityError` и путают |
+| `PhotoStoragePermissionError`, `PhotoStorageNoSpaceError` (4003, errno 13 / 28) | Копирование файла в хранилище: `app/services/services_all.py` (`_new_file_field` → `app/utils/file_deletions.copy_file_to_temp_dir`, `add_photo_to_appointment`) — сейчас сырой `OSError`; по `errno` `EACCES` / `ENOSPC` — эти классы. Они — `PhotoFileError`, который `interfaces/cli/cli.py` уже ловит | Убрать, если понятного текста для «нет прав» / «нет места» не нужно |
+| `ConnectionError` (псевдоним `DatabaseConnectionError`) | Не импортируется по старому имени нигде (кроме тестов модуля) | Можно убрать в конце переработки (Ф4.8); пока — совместимость |
+
+Варианты решения:
+
+* **А — использовать по месту** (рекомендую для базы и хранилища фото): подключать в заходах
+  своих модулей — `DatabaseConnectionError` / `IntegrityError` в М8 (`app/database`),
+  `PhotoStorage*Error` в М11 (`app/services`); тексты для пользователя — короткие,
+  `from exc` сохраняет исходную ошибку.
+* **Б — убрать комментарием** с пометкой `↑ до <дата> (И-9)` (рекомендую для синхронизации:
+  схема `YaDiskResult` + встроенные исключения уже есть и покрыта тестами); вместе — убрать
+  неиспользуемый импорт в `interfaces/cli/cli.py` (М20) и строки в `__init__.py`, тестах.
+* **В — оставить как есть** до Ф4 (финальная шлифовка) — заглушка без вреда, но мёртвый код.
+
 * ~~Сервисы: `BaseService._validation_error` для таблицы без своего класса —
   `EntityValidationError`~~ — сделано 2026-10-21 (app/services/IMPLEMENTATION.md §3.3, SE1).

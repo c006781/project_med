@@ -25,15 +25,17 @@ Qt, на которые подписываются таблицы (значки 
     >>> bridge.has_changes_changed.connect(save_button.setEnabled)
 """
 
+import functools
 from typing import Optional
 
 from PySide6.QtCore import QObject, Signal
 
 try:
-    from ..drafts import DraftEvent, DraftStore, NodeKey
+    from ..drafts import DraftEvent, DraftStore
 except ImportError:  # pragma: no cover
-    from drafts import DraftEvent, DraftStore, NodeKey
-
+    from drafts import DraftEvent, DraftStore
+# from ..drafts import DraftEvent, DraftStore, NodeKey
+# ↑ до 2026-10-25 (DR8): неиспользуемый NodeKey (замечание pyflakes); так же в запасном импорте
 
 
 class DraftsQtBridge(QObject):
@@ -64,10 +66,19 @@ class DraftsQtBridge(QObject):
         self.store = store
         self._had_changes = not store.is_empty
         store.subscribe(self._on_event)
+        # DR6 (2026-10-25): мост уничтожен без detach() — отписка сама (иначе хранилище
+        # держит подписку и пишет в журнал ошибку на каждое событие)
+        self.destroyed.connect(
+            functools.partial(
+                store.unsubscribe,  # отписать от этого хранилища
+                self._on_event,     # обработчик этого моста
+            )
+        )
 
     def detach(self) -> None:
         """
-        Отписывается от хранилища (при закрытии окна).
+        Отписывается от хранилища (при закрытии окна; при уничтожении моста — само, DR6;
+        повторный вызов ничего не делает).
 
         Returns:
             None

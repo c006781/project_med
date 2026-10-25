@@ -23,6 +23,9 @@ from app.utils.logger import AppLogger
 from app.database import Database
 # from .controllers.conf.get_config import get_config_env
 from app.config.config_manager.manager import get_config_env
+# Применитель настроек получает сервисы отсюда (К6, 2026-10-25): app.config не импортирует
+# app.dependencies, связь только сверху вниз.
+from app.config.config_applier import ConfigApplier, ServiceHooks
 from app.dto.field_configs import (
     PATIENT_CONFIG, 
     APPOINTMENT_CONFIG,
@@ -265,6 +268,34 @@ def get_sync_service() -> SyncService:
     Возвращает экземпляр SyncService, инициализированный с помощью токена Яндекс.Диска.
     """
     return SyncService()
+
+
+def create_config_applier() -> ConfigApplier:
+    """
+    Применитель настроек с обработчиками сервисов приложения (К6, 2026-10-25).
+
+    ``app.config`` больше не импортирует этот модуль: сервисы передаются применителю
+    отсюда. Поставщики берутся из реестра в момент применения (``_SERVICE_PROVIDERS`` —
+    те же объекты из кэша, что у страниц GUI). Новый применитель на каждый вызов: у него
+    свои ``errors`` последнего применения.
+
+    Returns:
+        ``ConfigApplier`` с ``ServiceHooks``.
+
+    Пример:
+        >>> applier = create_config_applier()
+        >>> applier.apply_changes(old_config, new_config)
+        {'database', 'sync'}
+        >>> applier.errors
+        {}
+    """
+    return ConfigApplier(
+        services = ServiceHooks(
+            service_providers = lambda: list(_SERVICE_PROVIDERS),  # реестр на момент применения
+            photo_service     = get_photo_service,                 # сервис фото (кэш)
+            sync_service      = get_sync_service,                  # сервис синхронизации
+        ),
+    )
 
 @AppLogger.get_instance(
     name = 'dependencies.py',

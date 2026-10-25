@@ -57,12 +57,15 @@ SettingsPage._save:
   old = manager.get_all().copy()                    # снимок ДО сохранения
   manager.set(...)…; manager.save()                 # атомарно; слушателей нет
   new = manager.get_all()
-  applier = ConfigApplier()
+  applier = create_config_applier()                 # app.dependencies: ConfigApplier + ServiceHooks (К6)
   blocks = applier.apply_changes(old, new)          # только изменившиеся блоки
   main_window.on_settings_changed(blocks)           # обновление страниц/виджетов
   applier.errors → «Настройки сохранены частично»   # сбой блока не прерывает остальные (AP4)
 ```
 
+* сервисы применитель получает обработчиками `ServiceHooks` от того, кто его создаёт
+  (`app.dependencies.create_config_applier`); сам `app.config` не импортирует
+  `app.dependencies` (К6, 2026-10-25);
 * `database` — `reload_config()` у сервисов из кэша `dependencies` (те же объекты, что у
   страниц GUI; кэш не очищается);
 * `photos` — новая папка в сервисе фото; `sync` — токен и пути в `SyncService`;
@@ -307,6 +310,20 @@ AP3a, AP7, CLI1, M12a, AP2a) и 6 расхождений в описаниях (
 (M12a, AP2a, AP3a) и регрессия M10a были внесены самими исправлениями и пойманы
 следующими проходами. Тесты: `tests/test_config/test_review_pass1…4.py` (35 тестов, один
 — только POSIX).
+
+### Заход М6 переработки (2026-10-25, ветка `rework-w1-config`)
+
+План — `_dev/ПЛАН.md` Ф1.4, Ф1.7.1, Ф1.6.4. Тесты — `tests/test_config/test_rework_w1.py`;
+каждый тест исправления проверен на старом коде (падал).
+
+| # | Файл | Что было | Почему плохо | Исправление |
+|---|---|---|---|---|
+| К6 | `config_applier.py`, `app/dependencies.py`, `SettingsPage`, `cli apply_settings` | `config_applier` импортировал `app.dependencies` (`_SERVICE_PROVIDERS`, `get_photo_service`, `get_sync_service` и 3 неиспользуемых — замечания pyflakes) | Связь «снизу вверх»: настройки тянули сборку приложения → сервисы → базу; риск циклов импорта при перестановке; импорт `app.config` поднимал всё приложение | Сервисы приходят снаружи: `ServiceHooks` (поставщики сервисов, сервис фото, сервис синхронизации) в `ConfigApplier(services=…)`; создаёт `app.dependencies.create_config_applier()`; экран настроек и CLI вызывают её. Без обработчиков блоки `database`/`photos`/`sync` — в `errors` («обработчики сервисов не переданы»), а не молча |
+
+Замечено вне модуля (К6): `get_sync_service()` не кэшируется — каждый вызов создаёт новый
+`SyncService`, поэтому `apply_sync` меняет поля временного объекта (новые экземпляры и так
+читают настройки при создании — вреда нет, но блок `sync` по сути ничего не делает).
+Для М11/М12.
 
 Замечено вне модуля:`TextEditPopupDelegate.eventFilter` обращается к `self.logger`,
 которого нет (`interfaces/gui/gui_window/widgets/delegate/type_delegate.py:400`) —

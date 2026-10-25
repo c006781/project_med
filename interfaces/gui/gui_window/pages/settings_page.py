@@ -5,6 +5,7 @@ import sys
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
+from app.dependencies import create_config_applier  # применитель с сервисами (К6)
 from app.utils.logger.logger import AppLogger
 
 from app.network.ya_dop import check_and_create_path
@@ -992,7 +993,10 @@ class SettingsPage(BasePage):
             #     applier.apply_backup(new_config)
             # ↑ до 2026-10-14: методы сравнивали с уже сохранённым менеджером и ничего не
             #   применяли (A1). Теперь — один вызов со снимком ДО сохранения.
-            applier = ConfigApplier()
+            # applier = ConfigApplier()
+            # ↑ до 2026-10-25 (К6): ConfigApplier сам импортировал сервисы из
+            #   app.dependencies; теперь их передаёт create_config_applier().
+            applier = create_config_applier()
             changed_blocks = applier.apply_changes(old_config, new_config)
 
 

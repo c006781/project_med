@@ -519,41 +519,65 @@ def del_file_and_parent_dir(
     enable_file_logging='system',
     use_name_in_filename=False,
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# def resolve_photo_path(
+#     rel_path: Optional[str],
+#     temp_dir: Optional[str] = None,
+#     storage_path: Optional[str] = None,
+# ) -> Optional[str]:
+# ↑ до 2026-10-25 (FD-W1): сигнатура без комментариев к параметрам (формат skill п. 7 —
+#   правимая функция приводится к нему).
 def resolve_photo_path(
-    rel_path: Optional[str],
-    temp_dir: Optional[str] = None,
-    storage_path: Optional[str] = None,
+    rel_path     : Optional[str],         # относительный путь (или имя файла) или абсолютный путь
+    temp_dir     : Optional[str] = None,  # временная папка черновика (None — не искать в ней)
+    storage_path : Optional[str] = None,  # папка хранилища фото (None — не искать в ней)
 ) -> Optional[str]:
     """
-    Преобразует относительный путь к фото в абсолютный.
-    
+    Преобразует путь к фото в абсолютный путь к существующему файлу.
+
     Алгоритм:
         1. Если rel_path пустой – вернуть None.
         2. Если rel_path – абсолютный путь и файл существует – вернуть его.
         3. Если передан temp_dir и файл существует в нём – вернуть полный путь.
         4. Если передан storage_path и файл существует в нём – вернуть полный путь.
         5. Иначе вернуть None.
-    
+
+    Возвращаемый путь нормализован (``os.path.normpath``): на Windows разделители — ``\\``,
+    даже если в БД путь записан через ``/``. Иначе один файл получал два написания
+    (``…\\photos\\app_1/a.png`` и ``…\\photos\\app_1\\a.png``), и кэш миниатюр по пути
+    (``ImageThumbnailDelegate``) держал и загружал его дважды.
+
     Args:
         rel_path: Относительный путь (или просто имя файла) или абсолютный путь.
         temp_dir: Временная папка черновика (может быть None).
         storage_path: Базовый путь к хранилищу фотографий (может быть None).
-    
+
     Returns:
-        Абсолютный путь к существующему файлу или None.
+        Нормализованный абсолютный путь к существующему файлу или None.
+
+    Пример:
+        >>> resolve_photo_path('app_1/a.png', storage_path='C:/data/photos')  # файл есть
+        'C:\\\\data\\\\photos\\\\app_1\\\\a.png'
+        >>> resolve_photo_path('нет.png', storage_path='C:/data/photos') is None
+        True
     """
     if not rel_path:
         return None
-    
+
+    # Абсолютный путь — как есть (если файл существует)
     if os.path.isabs(rel_path):
-        return rel_path if os.path.exists(rel_path) else None
-    
+        # return rel_path if os.path.exists(rel_path) else None
+        # ↑ до 2026-10-25 (FD-W1): путь возвращался без нормализации — на Windows один файл
+        #   имел два написания (`/` и `\`), сравнение путей и кэш миниатюр их различали.
+        return os.path.normpath(rel_path) if os.path.exists(rel_path) else None
+
     # Проверяем временную папку
     if temp_dir:
         cand = os.path.join(temp_dir, rel_path)
         if os.path.exists(cand):
-            return cand
-    
+            # return cand
+            # ↑ до 2026-10-25 (FD-W1): без нормализации (см. выше).
+            return os.path.normpath(cand)
+
     # Проверяем основное хранилище
     if storage_path:
         # Если rel_path уже содержит storage_path как префикс – не дублируем
@@ -562,8 +586,10 @@ def resolve_photo_path(
         else:
             cand = os.path.join(storage_path, rel_path)
         if os.path.exists(cand):
-            return cand
-    
+            # return cand
+            # ↑ до 2026-10-25 (FD-W1): без нормализации (см. выше).
+            return os.path.normpath(cand)
+
     return None
 
 

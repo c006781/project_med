@@ -32,8 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    TYPE_CHECKING, Any, Callable, Dict, Hashable, Iterable, List, Optional, Protocol, Sequence, Tuple,
-    Union, runtime_checkable,
+    TYPE_CHECKING, Any, Callable, Dict, Hashable, Iterable, List, Optional, Protocol, Sequence, Set,
+    Tuple, Union, runtime_checkable,
 )
 
 from .backend import DataBackend, RowOverlay
@@ -142,7 +142,10 @@ class AggregateDef:
         """
         return self.child is dataset or self.child is getattr(dataset, 'backend', None)
 
-    def _rows(self, keys: Sequence[Hashable]) -> List[Dict[str, Any]]:
+    def _rows(
+        self,
+        keys : Sequence[Hashable],  # ключи главных строк
+    ) -> List[Dict[str, Any]]:
         """
         Подчинённые строки для этих ключей главных строк (с не сохранённым, если
         подчинённый — набор с ``RowOverlay``; помеченные на удаление — без них).
@@ -161,18 +164,49 @@ class AggregateDef:
         backend = dataset.backend if dataset is not None else self.child
         writer = dataset.writer if dataset is not None else None
         result: List[Dict[str, Any]] = []
+        seen: Set[Hashable] = set()          # DS5: ключи подчинённых строк, уже взятых в итог
         for start in range(0, len(keys), CHUNK):
             part = list(keys[start:start + CHUNK])
-            query = Query(conditions=(Condition(self.link_field, Op.IN, part),) + self.where)
+            link = Condition(self.link_field, Op.IN, part)       # главные строки куска
+            query = Query(
+                conditions = (link,) + self.where,  # связь и условия итога
+            )
             if backend.capabilities.filter:
                 rows = [dict(r) for r in backend.fetch(query).rows]
             else:
-                rows = [dict(r) for r in apply_in_memory(backend.fetch(Query()).rows, query, sort=False,
-                                                         window=False)]
+                # источник не фильтрует — все строки, условия в памяти
+                matched = apply_in_memory(
+                    backend.fetch(Query()).rows,  # все строки источника
+                    query,                        # связь и условия итога
+                    sort   = False,               # порядок итогу не нужен
+                    window = False,               # окна нет — все подходящие
+                )
+                rows = [dict(r) for r in matched]
             if isinstance(writer, RowOverlay):
-                rows = [dict(r) for r in writer.overlay(dataset, rows, query, True)]
+                overlaid = writer.overlay(
+                    dataset,  # подчинённый набор
+                    rows,     # строки хранилища
+                    query,    # запрос, которым их прочли
+                    True,     # «первое окно» — с новыми несохранёнными строками
+                )
+                rows = [dict(r) for r in overlaid]
                 key_field = backend.key_field
                 rows = [r for r in rows if writer.row_status(dataset, r.get(key_field)) != 'deleted']
+                # DS5 (2026-10-25): поверх хранилища — несохранённые значения, поэтому
+                # условия итога (where) — заново: строка, переставшая им отвечать в
+                # отложенной записи, раньше всё равно считалась. Новые строки способа
+                # записи, не проверяющего условий запроса, приходят в каждом куске
+                # ключей — берутся один раз (раньше — по разу на кусок). Условие связи
+                # (IN ключей куска) заново не проверяется: строку, перенесённую к другой
+                # главной, итог видит у новой (её отбирает compute)
+                rows = [r for r in rows if all(c.matches(r) for c in self.where)]
+                unique = []
+                for row in rows:
+                    key = row.get(key_field)
+                    if key is None or key not in seen:
+                        seen.add(key)
+                        unique.append(row)
+                rows = unique
             result.extend(rows)
         return result
 
@@ -367,7 +401,10 @@ class KeyedTotals:
                     result[key][name] = (result[key].get(name) or 0) + delta
         return result
 
-    def _count_delta(self, keys: set) -> Dict[Hashable, int]:
+    def _count_delta(
+        self,
+        keys : Set[Hashable],  # ключи главных строк
+    ) -> Dict[Hashable, int]:
         """
         Поправка числа строк на не сохранённое подчинённого набора (``PendingChanges``).
 

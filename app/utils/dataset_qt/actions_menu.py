@@ -23,6 +23,7 @@ import datetime
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDateEdit, QDateTimeEdit, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QSpinBox, QWidget,
@@ -226,7 +227,7 @@ class ActionsMenu(QMenu):
         self.action_set = actions
         self._confirm = confirm or ask_confirm
         self._ask_value = ask_value or ask_field_value
-        self._items: Dict[str, Any] = {}
+        self._items: Dict[str, QAction] = {}
         self.rebuild()
         source.subscribe(self._on_event)
         self.aboutToShow.connect(self.update_items)
@@ -254,7 +255,10 @@ class ActionsMenu(QMenu):
             self._items[action.name] = item
         self.update_items()
 
-    def item(self, name: str) -> Any:
+    def item(
+        self,
+        name : str,  # имя действия
+    ) -> QAction:
         """
         Пункт меню по имени действия.
 

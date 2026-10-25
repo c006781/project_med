@@ -613,7 +613,14 @@ class DataSet:
         elif sample:
             self._fields = Fields.from_names(sample[0].keys())
 
-    def _read(self, offset: int, limit: Optional[int]) -> Tuple[List[Dict[str, Any]], Optional[int], int]:
+    # def _read(self, offset: int, limit: Optional[int]) -> Tuple[List[Dict[str, Any]], Optional[int], int]:
+    # ↑ до 2026-10-25 (DS3): ключей строк, полученных от источника, не было — смещение
+    # догрузки считалось и по строкам, которые добавил способ записи (новые несохранённые)
+    def _read(
+        self,
+        offset : int,            # смещение окна в источнике
+        limit  : Optional[int],  # размер окна (None — все)
+    ) -> Tuple[List[Dict[str, Any]], Optional[int], int, List[Hashable]]:
         """
         Читает окно строк: что источник не умеет, делается в памяти; затем — поверх
         не сохранённое (``RowOverlay`` способа записи).
@@ -623,30 +630,52 @@ class DataSet:
             limit: Размер окна (``None`` — все).
 
         Returns:
-            ``(строки, всего, сколько получено от источника)``.
+            ``(строки, всего, сколько получено от источника, ключи полученных от
+            источника строк)`` — по ключам набор знает, какие строки сдвигают смещение
+            догрузки (строки, добавленные способом записи, — нет).
 
         Пример:
             >>> ds._read(0, 10)
-            ([{'id': 1}], 1, 1)
+            ([{'id': -1}, {'id': 1}], 1, 1, [1])
         """
         query = self.query
         caps = self.backend.capabilities
         if caps.filter and caps.sort and caps.window:
-            page = self.backend.fetch(query.window(offset, limit))
+            page = self.backend.fetch(
+                query.window(offset, limit),  # окно — у источника
+            )
             rows, total = [dict(r) for r in page.rows], page.total if caps.count else None
         else:
             # источник отдаёт всё — остальное в памяти
-            page = self.backend.fetch(query.window(0, None))
-            matched = apply_in_memory(page.rows, query, filter_=not caps.filter,
-                                      sort=not caps.sort, window=False)
+            page = self.backend.fetch(
+                query.window(0, None),  # все строки
+            )
+            matched = apply_in_memory(
+                page.rows,                    # все строки источника
+                query,                        # условия и сортировка набора
+                filter_ = not caps.filter,    # условия — если источник не умеет
+                sort    = not caps.sort,      # сортировка — если источник не умеет
+                window  = False,              # окно — ниже (нужно общее число)
+            )
             end = None if limit is None else offset + limit
             rows, total = [dict(r) for r in matched[offset:end]], len(matched)
         received = len(rows)
+        source_keys = [r.get(self.key_field) for r in rows]
         if isinstance(self.writer, RowOverlay):
-            rows = [dict(r) for r in self.writer.overlay(self, rows, query, offset == 0)]
+            overlaid = self.writer.overlay(
+                self,          # набор
+                rows,          # строки окна из источника
+                query,         # запрос, которым их прочли
+                offset == 0,   # первое окно — с новыми несохранёнными строками
+            )
+            rows = [dict(r) for r in overlaid]
         rows = [self._apply_local(r) for r in rows]
-        self._compute_aggregates([r.get(self.key_field) for r in rows])
-        return rows, total, received
+        self._compute_aggregates(
+            [r.get(self.key_field) for r in rows],  # ключи строк окна
+        )
+        # return rows, total, received
+        # ↑ до 2026-10-25 (DS3): см. сигнатуру
+        return rows, total, received, source_keys
 
     def _compute_aggregates(self, keys: Sequence[Hashable],
                             names: Optional[Sequence[str]] = None) -> Dict[str, Dict[Hashable, Any]]:
@@ -739,9 +768,16 @@ class DataSet:
             row[definition.name] = remembered.get(definition.name, definition.default_value())
         return row
 
-    def _load_first(self, at_least: int = 0) -> None:
+    def _load_first(
+        self,
+        at_least : int = 0,  # загрузить не меньше стольких строк
+    ) -> None:
         """
         Загружает первое окно заново (``ALL`` — всё).
+
+        Сначала чтение, потом замена строк: ошибка источника оставляет набор как был
+        (строки, смещение догрузки, число строк) — номер текущей строки не указывает за
+        конец (DS6).
 
         Args:
             at_least: Загрузить не меньше стольких строк (``refresh`` сохраняет
@@ -750,21 +786,36 @@ class DataSet:
         Returns:
             None
 
+        Raises:
+            Exception: Ошибка источника (набор не изменился).
+
         Пример:
-            >>> ds._load_first()
+            >>> ds._load_first(at_least=20); ds.row_count
+            20
         """
-        self._rows, self._fetched, self._fetched_keys = [], 0, set()
-        self._total, self._exhausted = None, True
+        # self._rows, self._fetched, self._fetched_keys = [], 0, set()
+        # self._total, self._exhausted = None, True
+        # if self._master_blocked:
+        #     return
+        # ↑ до 2026-10-25 (DS6): строки стирались ДО чтения — при ошибке источника набор
+        # оставался без строк, а номер текущей строки указывал за конец (правило H1)
         if self._master_blocked:
+            self._rows, self._fetched, self._fetched_keys = [], 0, set()
+            self._total, self._exhausted = None, True
             return
         limit = (None if self.fetch_mode is FetchMode.ALL or self._client_sort
                  else max(self.fetch_size, at_least))
-        rows, total, received = self._read(0, limit)
+        # rows, total, received = self._read(0, limit)
+        # ↑ до 2026-10-25 (DS3): см. _read
+        rows, total, received, source_keys = self._read(0, limit)
         if self._client_sort:
             rows = self._sorted_in_memory(rows)
         self._rows = rows
         self._fetched = received
-        self._fetched_keys = {r.get(self.key_field) for r in rows}
+        # self._fetched_keys = {r.get(self.key_field) for r in rows}
+        # ↑ до 2026-10-25 (DS3): сюда попадали и новые несохранённые строки способа записи —
+        # их удаление уменьшало смещение догрузки, следующая порция читалась с повтором
+        self._fetched_keys = set(source_keys)
         self._total = total
         self._exhausted = self._is_exhausted(limit, received)
 
@@ -896,7 +947,10 @@ class DataSet:
                 return i
         return None
 
-    def fetch_more(self, count: Optional[int] = None) -> int:
+    def fetch_more(
+        self,
+        count : Optional[int] = None,  # сколько строк (None — fetch_size)
+    ) -> int:
         """
         Догружает следующую порцию (``ON_DEMAND``). Повторы по ключу отбрасываются.
 
@@ -915,11 +969,17 @@ class DataSet:
             return 0
         limit = count or self.fetch_size
         try:
-            rows, total, received = self._read(self._fetched, limit)
+            # rows, total, received = self._read(self._fetched, limit)
+            # ↑ до 2026-10-25 (DS3): см. _read
+            rows, total, received, source_keys = self._read(self._fetched, limit)
         except Exception as exc:
-            self._emit(EventKind.ERROR, error=exc)
+            self._emit(
+                EventKind.ERROR,  # ошибка источника — подписчикам
+                error = exc,      # исключение
+            )
             raise
         self._fetched += received
+        self._fetched_keys.update(source_keys)            # DS3: только строки источника
         self._total = total if total is not None else self._total
         self._exhausted = self._is_exhausted(limit, received)
         known = {r.get(self.key_field) for r in self._rows}
@@ -928,8 +988,13 @@ class DataSet:
             return 0
         start = len(self._rows)
         self._rows.extend(fresh)
-        self._fetched_keys.update(r.get(self.key_field) for r in fresh)
-        self._emit(EventKind.ROWS_INSERTED, index=start, count=len(fresh))
+        # self._fetched_keys.update(r.get(self.key_field) for r in fresh)
+        # ↑ до 2026-10-25 (DS3): ключи — после поправки способа записи, а не от источника
+        self._emit(
+            EventKind.ROWS_INSERTED,  # строки добавлены в конец
+            index = start,            # первая новая
+            count = len(fresh),       # сколько
+        )
         return len(fresh)
 
     def fetch_all(self) -> int:
@@ -1166,7 +1231,10 @@ class DataSet:
             raise DataSetError("сначала сохраните или отмените правку")
         self.post()
 
-    def move_to(self, index: int) -> None:
+    def move_to(
+        self,
+        index : int,  # номер строки
+    ) -> None:
         """
         Делает текущей строку ``index`` (не загружена — догружает, ``ON_DEMAND``).
 
@@ -1187,9 +1255,14 @@ class DataSet:
         if index == self._index:
             return
         self.check_browse_mode()
+        # while index >= len(self._rows) and self.has_more:
+        #     if not self.fetch_more():
+        #         break
+        # ↑ до 2026-10-25 (DS2): порция, из которой не добавилось строк (способ записи их
+        # спрятал, повторы по ключу), обрывала догрузку, хотя строки ещё были. Цикл конечен:
+        # каждая порция либо сдвигает смещение, либо исчерпывает источник
         while index >= len(self._rows) and self.has_more:
-            if not self.fetch_more():
-                break
+            self.fetch_more()
         if not 0 <= index < len(self._rows):
             raise IndexError(f"нет строки {index} (всего {len(self._rows)})")
         self._set_index(index)
@@ -1206,6 +1279,10 @@ class DataSet:
             True
         """
         self._require_active()
+        # DS2 (2026-10-25): первое окно пустое (способ записи спрятал его строки), а строки
+        # ещё есть — догрузить до первой; раньше — сразу «строк нет»
+        while not self._rows and self.has_more:
+            self.fetch_more()
         if not self._rows:
             return False
         self.move_to(0)
@@ -1244,7 +1321,13 @@ class DataSet:
         self._require_active()
         if self._index + 1 >= len(self._rows):
             self.check_browse_mode()
-            if not self.fetch_more():
+            # if not self.fetch_more():
+            #     return False
+            # ↑ до 2026-10-25 (DS2): пустая порция (строки спрятаны способом записи,
+            # повторы) считалась концом набора
+            while self._index + 1 >= len(self._rows) and self.has_more:
+                self.fetch_more()
+            if self._index + 1 >= len(self._rows):
                 return False
         self.move_to(self._index + 1)
         return True
@@ -1295,7 +1378,10 @@ class DataSet:
 
     # ------------------------------------------------------------------ условия
 
-    def set_filter(self, *conditions: Condition) -> None:
+    def set_filter(
+        self,
+        *conditions : Condition,  # условия (пусто — без фильтра)
+    ) -> None:
         """
         Заменяет свои условия (связь «главная → подчинённая» — отдельно) и перечитывает.
 
@@ -1305,14 +1391,27 @@ class DataSet:
         Returns:
             None
 
+        Raises:
+            DataSetError / ValidationError: См. ``check_browse_mode``.
+            Exception: Ошибка источника — набор и условия остаются прежними (DS6).
+
         Пример:
             >>> ds.set_filter(Condition('name', Op.STARTSWITH, 'А'))
         """
         self.check_browse_mode()
+        saved = self._query_state()
         self._conditions = tuple(conditions)
-        self._reload_if_active(keep_position=False)
+        # self._reload_if_active(keep_position=False)
+        # ↑ до 2026-10-25 (DS6): ошибка чтения оставляла новые условия при старых строках
+        self._reload_or_restore(
+            saved,                  # условия до изменения
+            keep_position = False,  # курсор — на первую строку
+        )
 
-    def set_order(self, *order: OrderLike) -> None:
+    def set_order(
+        self,
+        *order : OrderLike,  # Order или 'поле' / '-поле'
+    ) -> None:
         """
         Заменяет сортировку и перечитывает (курсор остаётся на той же записи).
 
@@ -1321,6 +1420,11 @@ class DataSet:
 
         Returns:
             None
+
+        Raises:
+            DataSetError: Сортировка по полю, которое считает программа, а загружено не всё;
+                см. также ``check_browse_mode``.
+            Exception: Ошибка источника — набор и сортировка остаются прежними (DS6).
 
         Пример:
             >>> ds.set_order('-date', 'id')
@@ -1333,9 +1437,15 @@ class DataSet:
             raise DataSetError(
                 f"сортировка по «{label}» (считает программа) — только когда загружено всё: "
                 "загрузка «всё сразу» или сначала догрузить всё (fetch_all)")
+        saved = self._query_state()
         self._order = orders
         self._client_sort = bool(client)
-        self._reload_if_active(keep_position=True)
+        # self._reload_if_active(keep_position=True)
+        # ↑ до 2026-10-25 (DS6): см. set_filter
+        self._reload_or_restore(
+            saved,                 # сортировка до изменения
+            keep_position = True,  # курсор — на ту же запись
+        )
 
     def computed_by_program(self, name: str) -> bool:
         """
@@ -1413,7 +1523,10 @@ class DataSet:
             result.sort(key=lambda r: self._value_of(r, o.field) is None)
         return result
 
-    def set_params(self, **params: Any) -> None:
+    def set_params(
+        self,
+        **params : Any,  # параметры запроса (None — убрать параметр)
+    ) -> None:
         """
         Параметры запроса для источника (именованные запросы) и перечитать.
 
@@ -1423,16 +1536,91 @@ class DataSet:
         Returns:
             None
 
+        Raises:
+            DataSetError / ValidationError: См. ``check_browse_mode``.
+            Exception: Ошибка источника — набор и параметры остаются прежними (DS6).
+
         Пример:
             >>> ds.set_params(search='Пет')
         """
         self.check_browse_mode()
+        saved = self._query_state()
         for name, value in params.items():
             if value is None:
                 self._params.pop(name, None)
             else:
                 self._params[name] = value
-        self._reload_if_active(keep_position=False)
+        # self._reload_if_active(keep_position=False)
+        # ↑ до 2026-10-25 (DS6): см. set_filter
+        self._reload_or_restore(
+            saved,                  # условия до изменения
+            keep_position = False,  # курсор — на первую строку
+        )
+
+    def _query_state(self) -> Tuple[Any, ...]:
+        """
+        Снимок того, чем набор читает источник: свои условия, сортировка, параметры, связь
+        с главной строкой (для отката, если перечитать не удалось — DS6).
+
+        Returns:
+            Кортеж значений (передаётся в ``_restore_query_state``).
+
+        Пример:
+            >>> saved = ds._query_state(); ds._restore_query_state(saved)
+        """
+        return (self._conditions, self._order, self._client_sort, dict(self._params),
+                self._master_conditions, dict(self._master_defaults), self._master_blocked)
+
+    def _restore_query_state(
+        self,
+        saved : Tuple[Any, ...],  # снимок _query_state
+    ) -> None:
+        """
+        Возвращает условия, сортировку, параметры и связь из снимка ``_query_state``.
+
+        Args:
+            saved: Снимок.
+
+        Returns:
+            None
+
+        Пример:
+            >>> saved = ds._query_state(); ds._conditions = (); ds._restore_query_state(saved)
+        """
+        (self._conditions, self._order, self._client_sort, self._params,
+         self._master_conditions, self._master_defaults, self._master_blocked) = saved
+
+    def _reload_or_restore(
+        self,
+        saved         : Tuple[Any, ...],  # снимок _query_state до изменения
+        keep_position : bool,             # курсор — на ту же запись (иначе — первая строка)
+    ) -> None:
+        """
+        Перечитывает открытый набор после смены условий; ошибка чтения — условия
+        возвращаются к снимку (строки набора не менялись, ``_load_first``), ошибка — дальше.
+
+        DS6 (2026-10-25): раньше после ошибки оставались новые условия при старых строках —
+        следующая порция читалась уже с новыми условиями со старого смещения.
+
+        Args:
+            saved: Снимок ``_query_state`` до изменения.
+            keep_position: Вернуть курсор на ту же запись.
+
+        Returns:
+            None
+
+        Raises:
+            Exception: Ошибка источника (событие ``ERROR`` уже разослано).
+
+        Пример:
+            >>> saved = ds._query_state(); ds._conditions = (cond,)
+            >>> ds._reload_or_restore(saved, keep_position=False)
+        """
+        try:
+            self._reload_if_active(keep_position)
+        except Exception:
+            self._restore_query_state(saved)
+            raise
 
     def _reload_if_active(self, keep_position: bool) -> None:
         """
@@ -1462,7 +1650,10 @@ class DataSet:
         self._emit(EventKind.REFRESHED)
         self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=self._index)
 
-    def set_master(self, values: Optional[Mapping[str, Any]]) -> None:
+    def set_master(
+        self,
+        values : Optional[Mapping[str, Any]],  # «поле → значение главной строки»; None — её нет
+    ) -> None:
         """
         Условия связи с главной строкой (зовёт ``MasterDetailLink``).
 
@@ -1473,12 +1664,18 @@ class DataSet:
         Returns:
             None
 
+        Raises:
+            DataSetError / ValidationError: Правка подчинённой строки не сохранилась
+                (``check_browse_mode``).
+            Exception: Ошибка источника — набор и условия связи остаются прежними (DS6).
+
         Пример:
             >>> appointments.set_master({'patient_id': 5})
         """
         if self._state.editing:
             # правка подчинённой строки при смене главной — по правилу auto_post
             self.check_browse_mode()
+        saved = self._query_state()
         if values is None:
             changed = not self._master_blocked
             self._master_blocked = True
@@ -1489,7 +1686,12 @@ class DataSet:
             self._master_blocked = False
             self._master_conditions, self._master_defaults = conditions, dict(values)
         if changed:
-            self._reload_if_active(keep_position=False)
+            # self._reload_if_active(keep_position=False)
+            # ↑ до 2026-10-25 (DS6): см. set_filter
+            self._reload_or_restore(
+            saved,                  # условия до изменения
+            keep_position = False,  # курсор — на первую строку
+        )
 
     # ------------------------------------------------------------------ правка
 
@@ -1933,20 +2135,43 @@ class DataSet:
         if self.row_status() == 'deleted':
             return                               # D5: уже помечена — повторно не удаляем
         try:
-            self.writer.delete(self, key, copy.deepcopy(row))
+            self.writer.delete(
+                self,                # набор
+                key,                 # ключ записи
+                copy.deepcopy(row),  # последнее известное состояние строки
+            )
         except Exception as exc:
-            self._emit(EventKind.ERROR, error=exc)
+            self._emit(
+                EventKind.ERROR,  # ошибка записи — подписчикам
+                error = exc,      # исключение
+            )
             raise
         if isinstance(self.writer, RowOverlay) and self.writer.row_status(self, key) == 'deleted':
-            self._emit(EventKind.ROW_CHANGED, index=at, fields=())
+            # способ записи оставил строку с пометкой — перерисовать
+            self._emit(
+                EventKind.ROW_CHANGED,  # строка та же, состояние сменилось
+                index  = at,            # номер строки
+                fields = (),            # значения не менялись
+            )
             return
         del self._rows[at]
+        # DS4 (2026-10-25): удалённая запись — без своих полей (отметка «чек» оставалась, и
+        # «отмеченные» показывали удалённые записи); раньше этой строки не было
+        self._local.pop(key, None)
         if key in self._fetched_keys:
             self._fetched_keys.discard(key)
             self._fetched = max(self._fetched - 1, 0)   # следующая порция — без пропуска
         self._index = min(at, len(self._rows) - 1) if self._rows else -1   # H1: до событий
-        self._emit(EventKind.ROWS_REMOVED, index=at, count=1)
-        self._emit(EventKind.CURRENT_CHANGED, old=at, new=self._index)
+        self._emit(
+            EventKind.ROWS_REMOVED,  # строка убрана
+            index = at,              # её номер
+            count = 1,               # одна
+        )
+        self._emit(
+            EventKind.CURRENT_CHANGED,  # текущая — соседняя
+            old = at,                   # прежний номер
+            new = self._index,          # новый номер
+        )
 
     def touch(self, keys: Optional[Iterable[Hashable]] = None) -> int:
         """
@@ -1977,15 +2202,25 @@ class DataSet:
                 touched += 1
         return touched
 
-    def reload_row(self, index: Optional[int] = None) -> bool:
+    def reload_row(
+        self,
+        index : Optional[int] = None,  # номер строки (None — текущая)
+    ) -> bool:
         """
         Перечитывает одну строку из источника (после изменения в другом месте).
+
+        Строки больше нет (или способ записи её спрятал) — она убирается из набора вместе
+        со своими полями (отметками, DS4).
 
         Args:
             index: Номер (``None`` — текущая).
 
         Returns:
             ``True`` — строка нашлась и обновлена; ``False`` — её больше нет (убрана).
+
+        Raises:
+            DataSetError: Набор не открыт / строка в правке.
+            IndexError: Нет строки с таким номером.
 
         Пример:
             >>> ds.reload_row()
@@ -1998,24 +2233,46 @@ class DataSet:
         key = self.key_at(i)
         fresh = self.backend.get(key) if key is not None else None
         if fresh is not None and isinstance(self.writer, RowOverlay):
-            overlaid = self.writer.overlay(self, [dict(fresh)], self.query, False)
+            overlaid = self.writer.overlay(
+                self,           # набор
+                [dict(fresh)],  # строка из источника
+                self.query,     # запрос набора
+                False,          # не первое окно — без новых строк
+            )
             fresh = overlaid[0] if overlaid else None
         if fresh is not None:
-            fresh = self._apply_local(dict(fresh))
-            self._compute_aggregates([fresh.get(self.key_field)])
+            fresh = self._apply_local(
+                dict(fresh),  # копия строки — своё поле набора дописывается в неё
+            )
+            self._compute_aggregates(
+                [fresh.get(self.key_field)],  # итоги этой строки — заново
+            )
         if fresh is None:
             del self._rows[i]
+            self._local.pop(key, None)       # DS4 (2026-10-25): записи нет — и отметки нет
             old_index = self._index
             if i < self._index:
                 self._index -= 1                         # та же запись, номер на 1 меньше
             elif i == self._index:
                 self._index = min(i, len(self._rows) - 1) if self._rows else -1
-            self._emit(EventKind.ROWS_REMOVED, index=i, count=1)       # H1: номер уже верный
+            self._emit(                                                # H1: номер уже верный
+                EventKind.ROWS_REMOVED,  # строка убрана
+                index = i,               # её номер
+                count = 1,               # одна
+            )
             if i <= old_index:
-                self._emit(EventKind.CURRENT_CHANGED, old=old_index, new=self._index)
+                self._emit(
+                    EventKind.CURRENT_CHANGED,  # номер текущей сдвинулся / другая запись
+                    old = old_index,            # прежний номер
+                    new = self._index,          # новый номер
+                )
             return False
         self._rows[i] = dict(fresh)
-        self._emit(EventKind.ROW_CHANGED, index=i, fields=tuple(fresh))
+        self._emit(
+            EventKind.ROW_CHANGED,  # значения строки обновлены
+            index  = i,             # номер строки
+            fields = tuple(fresh),  # все поля
+        )
         return True
 
 

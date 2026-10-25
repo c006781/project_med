@@ -64,12 +64,17 @@ class Condition:
     op: Op = Op.EQ
     value: Any = None
 
-    def matches(self, row: Mapping[str, Any]) -> bool:
+    def matches(
+        self,
+        row : Mapping[str, Any],  # проверяемая строка
+    ) -> bool:
         """
         Подходит ли строка под условие (для источников без своей фильтрации).
 
         Сравнение с пустым значением (``None``) — всегда «не подходит» (как в SQL),
-        кроме ``EQ None``/``NE None`` и ``IS_NULL``.
+        кроме ``EQ None``/``NE None`` и ``IS_NULL``. В том числе ``IN``: пустое значение
+        строки не подходит, даже если ``None`` есть в списке; пустой список (``None``) —
+        ничего не подходит.
 
         Args:
             row: Строка.
@@ -90,7 +95,10 @@ class Condition:
         if op is Op.NE:
             return value != self.value
         if op is Op.IN:
-            return value in tuple(self.value)
+            # return value in tuple(self.value)
+            # ↑ до 2026-10-25 (DS1): пустое значение строки подходило, если None есть в
+            # списке (в SQL и у источника поверх БД — нет), а пустой список ронял проверку
+            return value is not None and value in tuple(self.value or ())
         if value is None or self.value is None:
             return False
         if op in (Op.CONTAINS, Op.STARTSWITH):

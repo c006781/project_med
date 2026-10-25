@@ -26,7 +26,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 from PySide6.QtCore import QDate, QDateTime, QTime, Qt
 from PySide6.QtGui import QPixmap
@@ -47,6 +47,9 @@ _REFRESH_EVENTS = frozenset({
 })
 
 ErrorHandler = Callable[[str], None]
+# Список выбора QComboBox: «(значение, подпись)» — готовый или функция, его возвращающая
+ChoiceItems = Sequence[Tuple[Any, str]]
+Choices = Union[ChoiceItems, Callable[[], ChoiceItems]]
 
 
 class Binding:
@@ -62,9 +65,16 @@ class Binding:
         >>> b = bind(edit, source, 'name'); b.unbind()
     """
 
-    def __init__(self, widget: QWidget, source: DataSource, field: str, *,
-                 choices: Optional[Sequence[Tuple[Any, str]]] = None, image: bool = False,
-                 on_error: Optional[ErrorHandler] = None) -> None:
+    def __init__(
+        self,
+        widget   : QWidget,                    # виджет (поддержанные — в описании модуля)
+        source   : DataSource,                 # источник набора
+        field    : str,                        # имя поля
+        *,
+        choices  : Optional[Choices] = None,   # QComboBox: список или функция, его отдающая
+        image    : bool = False,               # QLabel: картинка, а не текст
+        on_error : Optional[ErrorHandler] = None,  # куда сообщать отказ ввода
+    ) -> None:
         """
         Args:
             widget: Виджет (см. поддержанные в описании модуля).
@@ -90,7 +100,7 @@ class Binding:
         # список выбора: готовый или функция (перечитывается при каждом обновлении —
         # например, ссылка на таблицу, куда добавили новую несохранённую запись)
         self._choices = choices
-        self._shown_choices: Optional[tuple] = None
+        self._shown_choices: Optional[Tuple[Tuple[Any, str], ...]] = None
         # P7 (2026-10-18): список-функция перечитывается не на каждое событие (переход по
         # строкам вызывал запрос к БД на каждую строку), а когда набор перечитан или
         # начинается правка

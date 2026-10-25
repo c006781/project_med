@@ -37,6 +37,7 @@ from app.services.services_all import (
     PhotoService
 )
 from app.repositories.repositories_all import PatientRepository
+from app.schema.clinic import patient_full_name
 # from app.utils.logger.logger import AppLogger
 
 
@@ -135,27 +136,47 @@ def get_all_docx_files(folder_path: str) -> List[str]:
 # Нормализация и очистка текста (с сохранением переносов строк)
 # ----------------------------------------------------------------------
 
-def normalize_text(text: str) -> str:
+def normalize_text(
+    text : Optional[str],  # исходный текст (None — как пустой)
+) -> str:
     """
     Очищает текст, но сохраняет переносы строк.
 
-    - Заменяет \\r на \\n.
-    - Удаляет лишние пробелы и табуляции, но не трогает \\n.
-    - Убирает пустые строки в начале и конце.
+    - Заменяет ``\\r\\n`` и ``\\r`` на ``\\n``.
+    - В каждой строке убирает пробелы по краям и сворачивает повторные пробельные
+      символы (пробелы, табуляции, неразрывные пробелы) в один пробел; ``\\n`` не трогает.
+    - Убирает пустые строки в начале и конце; внутренние пустые строки сохраняет
+      (строка из одних пробелов становится пустой).
 
     Args:
-        text (str): Исходный текст.
+        text (Optional[str]): Исходный текст.
 
     Returns:
         str: Очищенная строка с сохранёнными внутренними переносами.
+
+    Пример:
+        >>> normalize_text('  Тест  1 1\\r\\n причина ')
+        'Тест 1 1\\nпричина'
+        >>> normalize_text(None)
+        ''
     """
 
     if not text:
         return ""
-    
-    text = text.replace('\r', '\n')
-    text = re.sub(r'[\t\x0b\x0c]', ' ', text)   # табуляции -> пробел
-    lines = text.splitlines()
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    # W1: пробелы по краям строки и повторные внутри — убрать (split() без аргумента
+    # режет по любым пробельным символам, включая табуляции и неразрывный пробел)
+    lines = [
+        ' '.join(line.split())
+        for line in text.split('\n')
+    ]
+    # text = text.replace('\r', '\n')
+    # text = re.sub(r'[\t\x0b\x0c]', ' ', text)   # табуляции -> пробел
+    # lines = text.splitlines()
+    # ↑ до 2026-10-25 (W1): описание обещало убирать лишние пробелы, но пробелы по краям
+    #   и повторные оставались («  Иван  » попадал в ФИО); \r\n давал пустую строку.
 
     # Убираем только пустые строки в начале и конце, внутренние сохраняем
     if lines:
@@ -170,73 +191,197 @@ def normalize_text(text: str) -> str:
 
     return '\n'.join(lines)
 
-def normalize_phone(phone_raw: str) -> Optional[str]:
-    """"
-    Приводит номер телефона к формату +7 (XXX) XXX-XX-XX.
+# Первая цифра 10-значного номера РФ без кода страны: 3, 4, 8 — коды городов, 9 — мобильные
+# (W3, 2026-10-25; было только 8 и 9 — городские 495…, 3842… без «8» терялись)
+_RU_NATIONAL_FIRST_DIGITS = '3489'
+
+# Длины кода города, которые меняют вид номера: +7 (3842) 12-34-56, +7 (38451) 2-34-56
+_LONG_AREA_CODE_LENGTHS = (4, 5)
+
+
+def _area_code_length(
+    phone_raw  : str,  # номер как в тексте (с пробелами, скобками, дефисами)
+    prefix_len : int,  # сколько цифр кода страны в номере (0 — нет, 1 — «8» или «7»)
+) -> Optional[int]:
+    """
+    Длина кода города по исходной группировке номера (W3).
+
+    Код — цифры в скобках, а без скобок — первая группа цифр после кода страны
+    (группа — цифры подряд, разделённые пробелами или дефисами). Если код страны слит
+    с кодом города (``'8495…'``) или групп нет, — длина неизвестна.
+
+    Args:
+        phone_raw (str): Номер как в тексте.
+        prefix_len (int): Число цифр кода страны в номере (0 или 1).
+
+    Returns:
+        Optional[int]: Длина кода города или None, если по записи её не понять.
+
+    Пример:
+        >>> _area_code_length('8 (3842) 12-34-56', 1)
+        4
+        >>> _area_code_length('8 3842 123456', 1)
+        4
+        >>> _area_code_length('951 164 9014', 0)
+        3
+        >>> _area_code_length('83842123456', 1) is None
+        True
+    """
+
+    # Код в скобках
+    in_brackets = re.search(
+        r'\(\s*(\d+)\s*\)',
+        phone_raw,
+    )
+    if in_brackets:
+        return len(in_brackets.group(1))
+
+    groups = re.findall(
+        r'\d+',
+        phone_raw,
+    )
+
+    # Код страны — отдельной группой («8 3842 …», «+7 3842 …»), иначе код не выделен
+    if prefix_len:
+        if len(groups) < 2 or len(groups[0]) != prefix_len:
+            return None
+        groups = groups[1:]
+
+    # Одна группа — номер слитно, группировки нет
+    if len(groups) < 2:
+        return None
+
+    return len(groups[0])
+
+
+def normalize_phone(
+    phone_raw : Optional[str],  # номер как в тексте (пробелы, дефисы, скобки, +)
+) -> Optional[str]:
+    """
+    Приводит номер телефона РФ к виду ``+7 (XXX) XXX-XX-XX``.
+
+    Распознаёт 11 цифр с ``7`` или ``8`` в начале и 10 цифр без кода страны (первая цифра —
+    3, 4, 8 или 9). Код города из 4–5 цифр, выделенный в записи скобками или отдельной
+    группой, сохраняется: ``+7 (3842) 12-34-56``, ``+7 (38451) 2-34-56`` (W3). Остальное
+    (городской без кода, добавочный, другие страны) — не распознаётся: решение владельца
+    2026-10-25 — только номера РФ, нераспознанный не записывается (сообщение —
+    ``normalize_patient_dto``, W2).
 
     Поддерживает:
-        - '999 999 99999' → +7 (999) 999-99-99
         - '951 164 9014' → +7 (951) 164-90-14
         - '8-999-123-45-67' → +7 (999) 123-45-67
         - '+79991234567' → +7 (999) 123-45-67
         - '9991234567' (10 цифр) → +7 (999) 123-45-67
         - '89991234567' (11 цифр, начинается с 8) → +7 (999) 123-45-67
+        - '8 (3842) 12-34-56' → +7 (3842) 12-34-56
+        - '4951234567' → +7 (495) 123-45-67
 
     Args:
-        phone_raw (str): Сырая строка телефона (может содержать пробелы, дефисы, скобки).
+        phone_raw (Optional[str]): Сырая строка телефона.
 
     Returns:
         Optional[str]: Отформатированный номер или None, если формат не распознан.
+
+    Пример:
+        >>> normalize_phone('8 (3842) 12-34-56')
+        '+7 (3842) 12-34-56'
+        >>> normalize_phone('12-34-56') is None
+        True
     """
+    # Было в описании (до 2026-10-25): '999 999 99999' → +7 (999) 999-99-99 — неверно:
+    # это 11 цифр с 9 в начале, номер не распознавался и не распознаётся.
 
     if not phone_raw:
         return None
-    
+
     # Оставляем только цифры
     digits = re.sub(r'\D', '', phone_raw)
-    if not digits:
-        return None
-    
-    len_digits = len(digits)
-    digits_0 = digits[0]
-    
-    # Если номер начинается с 8 или 9 и имеет 10 цифр, добавляем +7
-    if len_digits == 10 and digits_0 in ('8', '9'):
-        digits = '7' + digits
 
-    # Если номер имеет 11 цифр и начинается с 8, заменяем на +7
-    elif len_digits == 11 and digits_0 == '8':
-        digits = '7' + digits[1:]
+    # Национальный номер (10 цифр) без кода страны
+    if len(digits) == 11 and digits[0] in ('7', '8'):
+        national = digits[1:]
 
-    # Если номер имеет 11 цифр и начинается с 7, оставляем как есть
-    elif len_digits == 11 and digits_0 == '7':
-        pass
+    elif len(digits) == 10 and digits[0] in _RU_NATIONAL_FIRST_DIGITS:
+        national = digits
 
     else:
-        # Неподдерживаемый формат – возвращаем как есть (или None)
+        # Неподдерживаемый формат (W2: вызывающий сообщает пользователю)
         return None
 
-    # Форматируем: +7 (XXX) XXX-XX-XX
-    # digits должно быть 11 цифр (7 + 10)
-    if len(digits) == 11:
-        return f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
-    
-    return None
+    # Код города из 4–5 цифр — номер по исходной группировке (W3)
+    code_len = _area_code_length(
+        phone_raw,
+        len(digits) - 10,
+    )
+    if code_len in _LONG_AREA_CODE_LENGTHS:
+        code, rest = national[:code_len], national[code_len:]
+        if len(rest) == 6:
+            return f"+7 ({code}) {rest[0:2]}-{rest[2:4]}-{rest[4:6]}"
+        return f"+7 ({code}) {rest[0:1]}-{rest[1:3]}-{rest[3:5]}"
 
-def normalize_patient_dto(dto: PatientDTO) -> PatientDTO:
+    return f"+7 ({national[0:3]}) {national[3:6]}-{national[6:8]}-{national[8:10]}"
+
+    # if not digits:
+    #     return None
+    #
+    # len_digits = len(digits)
+    # digits_0 = digits[0]
+    #
+    # # Если номер начинается с 8 или 9 и имеет 10 цифр, добавляем +7
+    # if len_digits == 10 and digits_0 in ('8', '9'):
+    #     digits = '7' + digits
+    #
+    # # Если номер имеет 11 цифр и начинается с 8, заменяем на +7
+    # elif len_digits == 11 and digits_0 == '8':
+    #     digits = '7' + digits[1:]
+    #
+    # # Если номер имеет 11 цифр и начинается с 7, оставляем как есть
+    # elif len_digits == 11 and digits_0 == '7':
+    #     pass
+    #
+    # else:
+    #     # Неподдерживаемый формат – возвращаем как есть (или None)
+    #     return None
+    #
+    # # Форматируем: +7 (XXX) XXX-XX-XX
+    # # digits должно быть 11 цифр (7 + 10)
+    # if len(digits) == 11:
+    #     return f"+7 ({digits[1:4]}) {digits[4:7]}-{digits[7:9]}-{digits[9:11]}"
+    #
+    # return None
+    # ↑ до 2026-10-25 (W3): код города из 4–5 цифр («8 (3842) 12-34-56») выводился как
+    #   +7 (384) 212-34-56 (цифры верны, вид неверный); 10 цифр с кодом города на 3 и 4
+    #   (без «8») не распознавались.
+
+def normalize_patient_dto(
+    dto      : PatientDTO,                   # DTO пациента из шапки документа
+    warnings : Optional[List[str]] = None,   # куда добавить предупреждения (None — не собирать)
+) -> PatientDTO:
     """
     Централизованная нормализация данных пациента.
 
     - ФИО: удаление лишних пробелов.
-    - Телефон: приведение к формату +7 (...) ... .
+    - Телефон: приведение к формату +7 (...) ... . Нераспознанный номер не записывается
+      (поле — None), в ``warnings`` — предупреждение с исходным текстом и ФИО (W2,
+      решение владельца 2026-10-25: пациент импортируется, пользователю сообщается).
     - Описание: удаление лишних пробелов.
     - Дата рождения: уже нормализована при создании DTO.
 
     Args:
         dto (PatientDTO): DTO пациента, возможно с неочищенными полями.
+        warnings (Optional[List[str]]): Список для предупреждений; None — не собирать.
 
     Returns:
         PatientDTO: Тот же объект DTO после изменений (поля перезаписываются in-place).
+
+    Пример:
+        >>> found = []
+        >>> dto = normalize_patient_dto(
+        ...     PatientDTO(last_name='Иванов', first_name='Иван', phone='12-34-56'),
+        ...     warnings = found,
+        ... )
+        >>> dto.phone is None, found
+        (True, ['Телефон не распознан: «12-34-56» (пациент Иванов Иван) — не записан'])
     """
 
     if dto.first_name:
@@ -249,8 +394,16 @@ def normalize_patient_dto(dto: PatientDTO) -> PatientDTO:
         dto.middle_name = normalize_text(dto.middle_name)
 
     if dto.phone:
-        dto.phone = normalize_phone(dto.phone)
-        
+        phone_raw = dto.phone
+        dto.phone = normalize_phone(phone_raw)
+
+        # W2: нераспознанный номер не записываем, но сообщаем (исходный текст и пациент)
+        if dto.phone is None and warnings is not None:
+            warnings.append(
+                f"Телефон не распознан: «{phone_raw}» "
+                f"(пациент {patient_full_name(dto)}) — не записан"
+            )
+
     if dto.description_text:
         dto.description_text = normalize_text(dto.description_text)
 
@@ -323,7 +476,12 @@ class PatientInfoExtractor:
     Извлекает данные пациента из первых строк документа до первой таблицы.
 
     Ожидаемый формат строки:
-        "Фамилия Имя Отчество [Год] [Телефон] [Контакт]"
+        "Фамилия Имя [Отчество] [Год[г]] [Телефон] [Контакт]"
+
+    Отчество — слово, которое не начинается с цифры, «+» или «(»; год — ровно 4 цифры
+    (за ними не цифра), с пометкой «г» / «г.» или без; телефон — с цифры, «+» или «(»,
+    внутри цифры, пробелы, скобки, дефисы, в конце цифра. Телефон сохраняется как в
+    тексте (с группировкой — для кода города, W3), приводит его ``normalize_phone``.
 
     Пример:
         "Постольник Анастасия Александровна 2012г 951 164 9014 Анна тётя"
@@ -333,11 +491,23 @@ class PatientInfoExtractor:
     """
 
     PATTERN = re.compile(
-        r'^(?P<last_name>\S+)\s+(?P<first_name>\S+)\s+(?P<middle_name>\S+)?\s*'
-        r'(?P<birth_year>\d{4})?г?\s*'
-        r'(?P<phone>[\d\s]+)?\s*'
-        r'(?P<contact>.*)$'
+        r'^(?P<last_name>\S+)\s+(?P<first_name>\S+)'
+        r'(?:\s+(?P<middle_name>(?![\d+(])\S+))?'          # отчество — не год и не телефон
+        r'(?:\s+(?P<birth_year>\d{4})(?!\d)'               # год — ровно 4 цифры (W6)
+        r'(?:\s*г\.?(?!\w))?)?'                            # пометка «г» / «г.», не начало слова
+        r'(?:\s+(?P<phone>\+?\(?\d[\d\s()\-]*\d))?'        # телефон с +, скобками, дефисами (W5)
+        r'\s*(?P<contact>.*)$'
     )
+    # PATTERN = re.compile(
+    #     r'^(?P<last_name>\S+)\s+(?P<first_name>\S+)\s+(?P<middle_name>\S+)?\s*'
+    #     r'(?P<birth_year>\d{4})?г?\s*'
+    #     r'(?P<phone>[\d\s]+)?\s*'
+    #     r'(?P<contact>.*)$'
+    # )
+    # ↑ до 2026-10-25 (W5, W6): телефон — только цифры и пробелы («+7 …», «8-999-…»,
+    #   «8 (3842) …» уходили в описание); год без «г» склеивался с телефоном
+    #   («… 89991234567» → год 8999, телефон 1234567); без отчества год становился
+    #   отчеством; «Фамилия Имя» без продолжения не распознавалась.
 
     @classmethod
     def extract(cls, text: str) -> Optional[PatientDTO]:
@@ -374,23 +544,28 @@ class PatientInfoExtractor:
             except ValueError:
                 pass
 
+        # Телефон — как в тексте, пробелы свёрнуты: группировка нужна normalize_phone (W3)
         phone_raw = data.get('phone')
-        phone = ''.join(phone_raw.split()) if phone_raw else None
+        phone = ' '.join(phone_raw.split()) if phone_raw else None
+        # phone = ''.join(phone_raw.split()) if phone_raw else None
+        # ↑ до 2026-10-25 (W5): пробелы убирались — код города из 4–5 цифр не выделить
         # phone = normalize_phone(phone) if phone_raw else None
 
         # Контактная информация (описание пациента) – то, что после телефона
-        description = data.get('contact', '').strip()
+        description = (data.get('contact') or '').strip()
         if not description:
             description = None
 
         return PatientDTO(
-            first_name=data['first_name'].strip(),
-            last_name=data['last_name'].strip(),
-            middle_name=data.get('middle_name', '').strip() or None,
-            birth_date=birth_date,
-            phone=phone,
-            description_text=description,
+            first_name       = data['first_name'].strip(),
+            last_name        = data['last_name'].strip(),
+            middle_name      = (data.get('middle_name') or '').strip() or None,  # группа может не совпасть — None
+            birth_date       = birth_date,
+            phone            = phone,
+            description_text = description,
         )
+        # middle_name=data.get('middle_name', '').strip() or None,
+        # ↑ до 2026-10-25 (W6): отчество стало необязательным — группа может быть None
 
 
 # ----------------------------------------------------------------------
@@ -662,7 +837,11 @@ class WordFileParser:
 
         # Стандартный поиск
         for idx, cell in enumerate(header_row.cells):
-            header = self._clean_text(cell.text).lower()
+            # W9: заголовок — тем же normalize_match, что и ключи self.mapping
+            header = normalize_match(cell.text)
+            # header = self._clean_text(cell.text).lower()
+            # ↑ до 2026-10-25 (W9): ключи mapping нормализованы (ё → е, без пунктуации), а
+            #   заголовок — только в нижнем регистре: «Дата приёма» не совпадала с title
             for pattern, field_name in self.mapping.items():
                 if pattern in header:
                     mapping[field_name] = idx

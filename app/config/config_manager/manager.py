@@ -1,4 +1,5 @@
-# app/controllers/config_manager/manager.py
+# app/config/config_manager/manager.py
+# (до 2026-10-25, D5: в заголовке был старый путь app/controllers/config_manager/manager.py)
 
 """
 Модуль управления конфигурацией приложения с использованием MessagePack.
@@ -61,6 +62,12 @@ class BaseConfigManager:
         _config_path (str): путь к файлу конфигурации (формат MessagePack).
         _defaults (dict): словарь со значениями по умолчанию.
         _config (dict): кеш текущих настроек (объединение defaults и загруженных из файла).
+
+    Пример:
+        >>> m = BaseConfigManager('my.msgpack', defaults={'theme': 'dark', 'size': 10})
+        >>> m.set('size', 12); m.save()
+        >>> BaseConfigManager('my.msgpack', defaults={'theme': 'dark', 'size': 10}).get('size')
+        12
     """
 
     _config_path = 'config.msgpack'
@@ -650,6 +657,16 @@ class AppConfigManager(BaseConfigManager):
         load() -> Dict[str, Any]
         reset_to_defaults() -> None
         add_change_listener(callback) -> None
+
+    Значения флагов и чисел — ``bool`` / ``int``; строки старых файлов (``'False'``,
+    ``'10485760'``) переводятся при чтении (M6, 2026-10-25). Один экземпляр на файл при
+    любом написании пути (M16).
+
+    Пример:
+        >>> manager = AppConfigManager.get_instance()
+        >>> manager.get('LOG_MAX_BYTES'), manager.get('system_enabled')
+        (10485760, False)
+        >>> manager.set('LOG_LEVEL', 'DEBUG'); manager.save()
     """
 
     _config_path = 'config.msgpack'
@@ -869,6 +886,10 @@ class AppConfigManager(BaseConfigManager):
         """
         Возвращает экземпляр менеджера конфигурации (паттерн Multiton).
 
+        Один экземпляр на файл: ключ реестра — нормализованный абсолютный путь
+        (``_instance_key``, M16), поэтому ``'config.msgpack'`` и ``'./config.msgpack'`` —
+        один менеджер.
+
         Параметры:
             force_new (bool): Если True, создаёт новый экземпляр даже если уже есть.
             config_path (Optional[str]): Путь к файлу конфигурации. Если не указан,
@@ -913,7 +934,9 @@ class AppConfigManager(BaseConfigManager):
             instance = cls(config_path)
             cls._instances[key] = instance
 
-            if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+            # if create_if_missing and not instance.config_exists:  # config_exists добавим позже
+            # ↑ до 2026-10-25 (D5): устаревшая пометка — свойство config_exists давно есть
+            if create_if_missing and not instance.config_exists:  # файла нет — записать умолчания
                 instance.save()  # сохраняем умолчания
 
             return instance

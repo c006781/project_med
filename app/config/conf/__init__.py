@@ -4,7 +4,13 @@
 
 Содержит модули:
 - getenv.py: функции для работы с .env файлом (загрузка, создание, запись ключей).
-- get_config.py: функция get_config_env(), собирающая все настройки из окружения.
+- get_config.py: функция get_config_env() — «загрузочный» конфиг из .env
+  (APP_CONFIG_PATH, GITHUB_TOKEN).
+
+Пример:
+    >>> from app.config.conf import get_getenv
+    >>> get_getenv('APP_CONFIG_PATH', start_value='config.msgpack')
+    'config.msgpack'
 """
 
 # Импортируем функцию получения всех настроек из модуля get_config

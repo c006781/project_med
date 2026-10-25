@@ -151,6 +151,14 @@ class ConfigApplier:
 
     В приложении создаётся через ``app.dependencies.create_config_applier()`` — с
     обработчиками сервисов приложения.
+
+    Пример:
+        >>> applier = create_config_applier()           # app.dependencies
+        >>> old = manager.get_all(); manager.set('system_LEVEL', 'ERROR'); manager.save()
+        >>> applier.apply_changes(old, manager.get_all())
+        {'logging_system'}
+        >>> applier.errors
+        {}
     """
 
     # Обработчики сервисов (К6). На уровне класса — чтобы и объект без __init__ (тесты)

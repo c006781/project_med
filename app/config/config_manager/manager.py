@@ -47,6 +47,11 @@ import msgpack # pip install msgpack
 # from cryptography.fernet import Fernet # pip install cryptography
 
 
+# Ключ настройки «Папка документов Word» (M17, 2026-10-25): папка .docx для импорта
+# (parsers/word_importer.pars_start_args без --folder; экран настроек — М19, окно — М18).
+WORD_DOCUMENTS_PATH_KEY = 'WORD_DOCUMENTS_PATH'
+
+
 
 class BaseConfigManager:
     """
@@ -761,6 +766,10 @@ class AppConfigManager(BaseConfigManager):
         # 'show_call_depth': 'False',  # или False, но с возможностью переключения
         # ↑ до 2026-10-25 (M6): строка
         'show_call_depth': False,    # отступ «>» по глубине вызова в журнале
+
+        # Папка документов Word для импорта (M17, Ф1.4.4; решение владельца 2026-10-25,
+        # вариант В): pars_start.py без --folder берёт её; пусто — --folder обязателен
+        WORD_DOCUMENTS_PATH_KEY: '',
 
         # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
         # 'GITHUB_TOKEN': '',

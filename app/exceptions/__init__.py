@@ -1,9 +1,22 @@
 # app/exceptions/__init__.py
 
 """
-Пакет кастомных исключений приложения.
-Здесь собраны все исключения, которые могут возникать в процессе работы.
-Используются в сервисах и других слоях для передачи специфических ошибок.
+Исключения приложения — экспорт из ``app/exceptions/exceptions_all.py``.
+
+Иерархия, коды и правила выбора исключения — в описании ``exceptions_all``; заметки и
+журнал проверок — ``app/exceptions/IMPLEMENTATION.md``. Бросают их сервисы
+(``app/services``), ловят командная строка и окно.
+
+``__all__`` — все классы, кроме прежнего имени ``ConnectionError`` (псевдоним
+``DatabaseConnectionError``): ``from app.exceptions import *`` не перекрывает встроенный
+``ConnectionError``; явный ``from app.exceptions import ConnectionError`` по-прежнему работает.
+
+Пример:
+    >>> from app.exceptions import EntityNotFoundError, PatientNotFoundError
+    >>> isinstance(PatientNotFoundError(1), EntityNotFoundError)
+    True
+    >>> 'ConnectionError' in __all__
+    False
 """
 
 

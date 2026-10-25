@@ -16,10 +16,13 @@
     │   ├── AppointmentNoteValidationError                             3002
     │   └── PhotoValidationError                                       4002
     ├── PhotoFileError                            path, operation, reason, errno  4003
-    │   ├── PhotoStoragePermissionError
-    │   └── PhotoStorageNoSpaceError
+    │   ├── PhotoStoragePermissionError                                errno 13
+    │   └── PhotoStorageNoSpaceError                                   errno 28
     ├── SyncError → DownloadError, UploadError, TokenError             5000–5003
     └── DatabaseError → IntegrityError, DatabaseConnectionError        6000–6002
+
+Сейчас нигде не бросаются ``PhotoStorage*Error``, исключения синхронизации и базы данных
+(``_dev/ИДЕИ.md`` И-9; варианты — ``app/exceptions/IMPLEMENTATION.md`` §4).
 
 Новой таблице свой класс не нужен: ``EntityNotFoundError('Назначение', 5)`` и
 ``EntityValidationError('Доза', 'обязательное поле', entity='Назначение')``. Свой класс —
@@ -31,7 +34,7 @@
 
 Подробности и журнал проверок — ``app/exceptions/IMPLEMENTATION.md``.
 
-Example:
+Пример:
     >>> str(PatientNotFoundError(42))
     '[1001] Пациент с идентификатором 42 не найден.'
     >>> isinstance(PatientNotFoundError(42), EntityNotFoundError)
@@ -41,18 +44,20 @@ Example:
     ('Фотография', 'file_path', 'пустой путь', True)
 """
 
-from typing import Any, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 
 def _restore_exception(
-    cls: Type['AppException'], # класс исключения
-    state: Dict[str, Any], # атрибуты экземпляра (__dict__)
+    cls   : Type['AppException'],  # класс исключения
+    state : Dict[str, Any],        # атрибуты экземпляра (__dict__)
 ) -> 'AppException':
     """
     Восстановление исключения при ``pickle``/``copy`` без вызова ``__init__``.
 
     ``__init__`` наследников принимает не текст, а данные (``patient_id``, ``path`` …),
-    поэтому стандартное восстановление ``cls(*args)`` у них ломается.
+    поэтому стандартное восстановление ``cls(*args)`` у них ломается. Здесь экземпляр
+    создаётся через ``__new__``, ``args`` — как у ``Exception(message)``, атрибуты
+    переносятся из ``state``.
 
     Args:
         cls (Type[AppException]): Класс.
@@ -60,9 +65,18 @@ def _restore_exception(
 
     Returns:
         AppException: Копия исключения.
+
+    Пример:
+        >>> exc = _restore_exception(PatientNotFoundError, {'message': 'нет', 'code': 1001})
+        >>> (type(exc).__name__, str(exc), exc.args)
+        ('PatientNotFoundError', '[1001] нет', ('нет',))
     """
     exc = cls.__new__(cls)
-    Exception.__init__(exc, state.get('message', ''))
+    # args — как после AppException.__init__ (Exception(message))
+    Exception.__init__(
+        exc,                         # экземпляр
+        state.get('message', ''),    # текст ошибки
+    )
     exc.__dict__.update(state)
     return exc
 
@@ -77,7 +91,7 @@ class AppException(Exception):
         message (str): Текст ошибки.
         code (Optional[int]): Код ошибки для программной обработки.
 
-    Example:
+    Пример:
         >>> str(AppException('сбой', code=7))
         '[7] сбой'
         >>> str(AppException('сбой'))
@@ -86,13 +100,20 @@ class AppException(Exception):
 
     def __init__(
         self,
-        message: str, # текст ошибки
-        code: Optional[int] = None, # код ошибки (None — без кода)
-    ):
+        message : str,                    # текст ошибки
+        code    : Optional[int] = None,   # код ошибки (None — без кода)
+    ) -> None:
         """
+        Создание исключения с текстом и кодом.
+
         Args:
             message (str): Текст ошибки.
             code (Optional[int]): Код ошибки.
+
+        Пример:
+            >>> exc = AppException('сбой', code=7)
+            >>> (exc.message, exc.code, exc.args)
+            ('сбой', 7, ('сбой',))
         """
         # Вызываем конструктор родителя с сообщением
         super().__init__(message)
@@ -106,24 +127,38 @@ class AppException(Exception):
 
         Returns:
             str: Текст.
+
+        Пример:
+            >>> str(AppException('сбой', code=7))
+            '[7] сбой'
         """
         if self.code:
             return f"[{self.code}] {self.message}"
         return self.message
 
-    def __reduce__(self) -> Tuple[Any, Tuple[Type['AppException'], Dict[str, Any]]]:
+    def __reduce__(self) -> Tuple[
+        Callable[..., 'AppException'],
+        Tuple[Type['AppException'], Dict[str, Any]],
+    ]:
         """
         Поддержка ``pickle``/``copy`` для наследников с любой сигнатурой ``__init__``.
 
         Returns:
-            tuple: Функция восстановления и её аргументы.
+            Tuple[Callable, tuple]: Функция восстановления (``_restore_exception``) и её
+            аргументы — класс и копия ``__dict__``.
 
-        Example:
+        Пример:
             >>> import pickle
             >>> str(pickle.loads(pickle.dumps(PhotoFileError('a.png', 'чтения', 'нет файла'))))
             "[4003] Ошибка чтения файла 'a.png': нет файла"
         """
-        return _restore_exception, (type(self), dict(self.__dict__))
+        return (
+            _restore_exception,         # функция восстановления
+            (
+                type(self),             # класс
+                dict(self.__dict__),    # атрибуты (копия)
+            ),
+        )
 
 
 # ----------------------------------------------------------------------------------------
@@ -141,7 +176,7 @@ class EntityNotFoundError(AppException, LookupError):
         entity (str): Что не найдено (имя модели или по-русски).
         entity_id (Any): Идентификатор.
 
-    Example:
+    Пример:
         >>> raise EntityNotFoundError('Prescription', 5)  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
         EntityNotFoundError: [9001] Prescription с идентификатором 5 не найден(а).
@@ -151,22 +186,32 @@ class EntityNotFoundError(AppException, LookupError):
 
     def __init__(
         self,
-        entity: str, # что не найдено
-        entity_id: Any, # идентификатор записи
-        code: int = 9001, # код ошибки (у наследников — свой)
-        message: Optional[str] = None, # свой текст (None — общий)
-    ):
+        entity    : str,                    # что не найдено
+        entity_id : Any,                    # идентификатор записи
+        code      : int = 9001,             # код ошибки (у наследников — свой)
+        message   : Optional[str] = None,   # свой текст (None — общий)
+    ) -> None:
         """
+        Создание «не найдено» с общим или своим текстом.
+
         Args:
             entity (str): Что не найдено.
             entity_id (Any): Идентификатор.
             code (int): Код ошибки.
             message (Optional[str]): Текст; по умолчанию —
                 ``'<entity> с идентификатором <id> не найден(а).'``.
+
+        Пример:
+            >>> exc = EntityNotFoundError('X', 1, code=77, message='нет X')
+            >>> (str(exc), exc.entity, exc.entity_id)
+            ('[77] нет X', 'X', 1)
         """
         if message is None:
             message = f"{entity} с идентификатором {entity_id} не найден(а)."
-        super().__init__(message, code=code)
+        super().__init__(
+            message,        # текст
+            code = code,    # код
+        )
         self.entity = entity
         self.entity_id = entity_id
 
@@ -183,7 +228,7 @@ class EntityValidationError(AppException, ValueError):
         reason (str): Причина.
         entity (Optional[str]): Таблица/запись (``None`` — не указана).
 
-    Example:
+    Пример:
         >>> str(EntityValidationError('Доза', 'обязательное поле', entity='Назначение'))
         "[9002] Ошибка валидации Назначение, поле 'Доза': обязательное поле."
         >>> str(EntityValidationError('Доза', 'обязательное поле'))
@@ -192,13 +237,15 @@ class EntityValidationError(AppException, ValueError):
 
     def __init__(
         self,
-        field: str, # поле с ошибкой
-        reason: str, # причина
-        entity: Optional[str] = None, # таблица/запись
-        code: int = 9002, # код ошибки (у наследников — свой)
-        message: Optional[str] = None, # свой текст (None — общий)
-    ):
+        field   : str,                    # поле с ошибкой
+        reason  : str,                    # причина
+        entity  : Optional[str] = None,   # таблица/запись
+        code    : int = 9002,             # код ошибки (у наследников — свой)
+        message : Optional[str] = None,   # свой текст (None — общий)
+    ) -> None:
         """
+        Создание ошибки проверки поля с общим или своим текстом.
+
         Args:
             field (str): Поле.
             reason (str): Причина.
@@ -206,11 +253,19 @@ class EntityValidationError(AppException, ValueError):
             code (int): Код ошибки.
             message (Optional[str]): Текст; по умолчанию —
                 ``"Ошибка валидации <entity>, поле '<field>': <reason>."``.
+
+        Пример:
+            >>> exc = EntityValidationError('Доза', 'пусто', entity='Назначение')
+            >>> (exc.field, exc.reason, exc.entity, exc.code)
+            ('Доза', 'пусто', 'Назначение', 9002)
         """
         if message is None:
             where = f" {entity}" if entity else ""
             message = f"Ошибка валидации{where}, поле '{field}': {reason}."
-        super().__init__(message, code=code)
+        super().__init__(
+            message,        # текст
+            code = code,    # код
+        )
         self.field = field
         self.reason = reason
         self.entity = entity
@@ -220,20 +275,31 @@ class PatientNotFoundError(EntityNotFoundError):
     """
     Пациент с указанным идентификатором не найден в базе данных.
 
-    Example:
-        >>> PatientNotFoundError(7).entity_id
-        7
+    Пример:
+        >>> str(PatientNotFoundError(7))
+        '[1001] Пациент с идентификатором 7 не найден.'
     """
 
     def __init__(
         self,
-        patient_id: Any, # идентификатор пациента
-    ):
+        patient_id : Any,   # идентификатор пациента
+    ) -> None:
+        """
+        Создание «пациент не найден» (код 1001, прежний текст).
+
+        Args:
+            patient_id (Any): Идентификатор пациента.
+
+        Пример:
+            >>> exc = PatientNotFoundError(7)
+            >>> (exc.entity, exc.entity_id, exc.code)
+            ('Пациент', 7, 1001)
+        """
         super().__init__(
-            'Пациент', # что не найдено
-            patient_id, # идентификатор
-            code=1001, # код пациентов
-            message=f"Пациент с идентификатором {patient_id} не найден.", # прежний текст
+            'Пациент',                                                  # что не найдено
+            patient_id,                                                 # идентификатор
+            code    = 1001,                                             # код пациентов
+            message = f"Пациент с идентификатором {patient_id} не найден.",  # прежний текст
         )
 
 
@@ -244,37 +310,66 @@ class PatientValidationError(EntityValidationError):
     """
     Ошибка проверки данных пациента (например, пустое имя).
 
-    Example:
+    Пример:
         >>> str(PatientValidationError('first_name', 'пусто'))
         "[1002] Ошибка валидации поля 'first_name': пусто."
     """
 
     def __init__(
         self,
-        field: str, # поле с ошибкой
-        reason: str, # причина
-    ):
+        field  : str,   # поле с ошибкой
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки проверки пациента (код 1002, прежний текст).
+
+        Args:
+            field (str): Поле.
+            reason (str): Причина.
+
+        Пример:
+            >>> exc = PatientValidationError('first_name', 'пусто')
+            >>> (exc.entity, exc.field, exc.reason, exc.code)
+            ('Пациент', 'first_name', 'пусто', 1002)
+        """
         super().__init__(
-            field, # поле
-            reason, # причина
-            entity='Пациент', # таблица
-            code=1002, # код пациентов
-            message=f"Ошибка валидации поля '{field}': {reason}.", # прежний текст
+            field,                                                    # поле
+            reason,                                                   # причина
+            entity  = 'Пациент',                                      # таблица
+            code    = 1002,                                           # код пациентов
+            message = f"Ошибка валидации поля '{field}': {reason}.",  # прежний текст
         )
 
 
 class AppointmentNotFoundError(EntityNotFoundError):
-    """Приём с указанным идентификатором не найден."""
+    """
+    Приём с указанным идентификатором не найден.
+
+    Пример:
+        >>> str(AppointmentNotFoundError(3))
+        '[2001] Приём с идентификатором 3 не найден.'
+    """
 
     def __init__(
         self,
-        appointment_id: Any, # идентификатор приёма
-    ):
+        appointment_id : Any,   # идентификатор приёма
+    ) -> None:
+        """
+        Создание «приём не найден» (код 2001, прежний текст).
+
+        Args:
+            appointment_id (Any): Идентификатор приёма.
+
+        Пример:
+            >>> exc = AppointmentNotFoundError(3)
+            >>> (exc.entity, exc.entity_id, exc.code)
+            ('Приём', 3, 2001)
+        """
         super().__init__(
-            'Приём', # что не найдено
-            appointment_id, # идентификатор
-            code=2001, # код приёмов
-            message=f"Приём с идентификатором {appointment_id} не найден.", # прежний текст
+            'Приём',                                                     # что не найдено
+            appointment_id,                                              # идентификатор
+            code    = 2001,                                              # код приёмов
+            message = f"Приём с идентификатором {appointment_id} не найден.",  # прежний текст
         )
 
 
@@ -282,34 +377,69 @@ class AppointmentNotFoundError(EntityNotFoundError):
 # ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
 #   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
 class AppointmentValidationError(EntityValidationError):
-    """Ошибка проверки данных приёма."""
+    """
+    Ошибка проверки данных приёма.
+
+    Пример:
+        >>> str(AppointmentValidationError('date', 'в будущем'))
+        "[2002] Ошибка валидации приёма, поле 'date': в будущем."
+    """
 
     def __init__(
         self,
-        field: str, # поле с ошибкой
-        reason: str, # причина
-    ):
+        field  : str,   # поле с ошибкой
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки проверки приёма (код 2002, прежний текст).
+
+        Args:
+            field (str): Поле.
+            reason (str): Причина.
+
+        Пример:
+            >>> exc = AppointmentValidationError('date', 'в будущем')
+            >>> (exc.entity, exc.field, exc.code)
+            ('Приём', 'date', 2002)
+        """
         super().__init__(
-            field, # поле
-            reason, # причина
-            entity='Приём', # таблица
-            code=2002, # код приёмов
-            message=f"Ошибка валидации приёма, поле '{field}': {reason}.", # прежний текст
+            field,                                                            # поле
+            reason,                                                           # причина
+            entity  = 'Приём',                                                # таблица
+            code    = 2002,                                                   # код приёмов
+            message = f"Ошибка валидации приёма, поле '{field}': {reason}.",  # прежний текст
         )
 
 
 class AppointmentNoteNotFoundError(EntityNotFoundError):
-    """Заметка приёма с указанным идентификатором не найдена."""
+    """
+    Заметка приёма с указанным идентификатором не найдена.
+
+    Пример:
+        >>> str(AppointmentNoteNotFoundError(5))
+        '[3001] Заметка приёма с идентификатором 5 не найдена.'
+    """
 
     def __init__(
         self,
-        note_id: Any, # идентификатор заметки
-    ):
+        note_id : Any,   # идентификатор заметки
+    ) -> None:
+        """
+        Создание «заметка не найдена» (код 3001, прежний текст).
+
+        Args:
+            note_id (Any): Идентификатор заметки.
+
+        Пример:
+            >>> exc = AppointmentNoteNotFoundError(5)
+            >>> (exc.entity, exc.entity_id, exc.code)
+            ('Заметка приёма', 5, 3001)
+        """
         super().__init__(
-            'Заметка приёма', # что не найдено
-            note_id, # идентификатор
-            code=3001, # код заметок
-            message=f"Заметка приёма с идентификатором {note_id} не найдена.", # прежний текст
+            'Заметка приёма',                                                 # что не найдено
+            note_id,                                                          # идентификатор
+            code    = 3001,                                                   # код заметок
+            message = f"Заметка приёма с идентификатором {note_id} не найдена.",  # прежний текст
         )
 
 
@@ -317,34 +447,69 @@ class AppointmentNoteNotFoundError(EntityNotFoundError):
 # ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
 #   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
 class AppointmentNoteValidationError(EntityValidationError):
-    """Ошибка проверки данных заметки."""
+    """
+    Ошибка проверки данных заметки.
+
+    Пример:
+        >>> str(AppointmentNoteValidationError('text', 'пусто'))
+        "[3002] Ошибка валидации заметки, поле 'text': пусто."
+    """
 
     def __init__(
         self,
-        field: str, # поле с ошибкой
-        reason: str, # причина
-    ):
+        field  : str,   # поле с ошибкой
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки проверки заметки (код 3002, прежний текст).
+
+        Args:
+            field (str): Поле.
+            reason (str): Причина.
+
+        Пример:
+            >>> exc = AppointmentNoteValidationError('text', 'пусто')
+            >>> (exc.entity, exc.field, exc.code)
+            ('Заметка', 'text', 3002)
+        """
         super().__init__(
-            field, # поле
-            reason, # причина
-            entity='Заметка', # таблица
-            code=3002, # код заметок
-            message=f"Ошибка валидации заметки, поле '{field}': {reason}.", # прежний текст
+            field,                                                             # поле
+            reason,                                                            # причина
+            entity  = 'Заметка',                                               # таблица
+            code    = 3002,                                                    # код заметок
+            message = f"Ошибка валидации заметки, поле '{field}': {reason}.",  # прежний текст
         )
 
 
 class PhotoNotFoundError(EntityNotFoundError):
-    """Фотография с указанным идентификатором не найдена."""
+    """
+    Фотография с указанным идентификатором не найдена.
+
+    Пример:
+        >>> str(PhotoNotFoundError(9))
+        '[4001] Фотография с идентификатором 9 не найдена.'
+    """
 
     def __init__(
         self,
-        photo_id: Any, # идентификатор фотографии
-    ):
+        photo_id : Any,   # идентификатор фотографии
+    ) -> None:
+        """
+        Создание «фотография не найдена» (код 4001, прежний текст).
+
+        Args:
+            photo_id (Any): Идентификатор фотографии.
+
+        Пример:
+            >>> exc = PhotoNotFoundError(9)
+            >>> (exc.entity, exc.entity_id, exc.code)
+            ('Фотография', 9, 4001)
+        """
         super().__init__(
-            'Фотография', # что не найдено
-            photo_id, # идентификатор
-            code=4001, # код фото
-            message=f"Фотография с идентификатором {photo_id} не найдена.", # прежний текст
+            'Фотография',                                                 # что не найдено
+            photo_id,                                                     # идентификатор
+            code    = 4001,                                               # код фото
+            message = f"Фотография с идентификатором {photo_id} не найдена.",  # прежний текст
         )
 
 
@@ -352,19 +517,37 @@ class PhotoNotFoundError(EntityNotFoundError):
 # ↑ до DATA9 (2026-10-16): только AppException. Теперь и ValueError — общая проверка
 #   полей бросает это исключение, а интерфейс по-прежнему ловит ValueError.
 class PhotoValidationError(EntityValidationError):
-    """Ошибка проверки данных фотографии."""
+    """
+    Ошибка проверки данных фотографии.
+
+    Пример:
+        >>> str(PhotoValidationError('file_path', 'пустой путь'))
+        "[4002] Ошибка валидации фотографии, поле 'file_path': пустой путь."
+    """
 
     def __init__(
         self,
-        field: str, # поле с ошибкой
-        reason: str, # причина
-    ):
+        field  : str,   # поле с ошибкой
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки проверки фотографии (код 4002, прежний текст).
+
+        Args:
+            field (str): Поле.
+            reason (str): Причина.
+
+        Пример:
+            >>> exc = PhotoValidationError('file_path', 'пустой путь')
+            >>> (exc.entity, exc.field, exc.code)
+            ('Фотография', 'file_path', 4002)
+        """
         super().__init__(
-            field, # поле
-            reason, # причина
-            entity='Фотография', # таблица
-            code=4002, # код фото
-            message=f"Ошибка валидации фотографии, поле '{field}': {reason}.", # прежний текст
+            field,                                                                # поле
+            reason,                                                               # причина
+            entity  = 'Фотография',                                               # таблица
+            code    = 4002,                                                       # код фото
+            message = f"Ошибка валидации фотографии, поле '{field}': {reason}.",  # прежний текст
         )
 
 
@@ -378,26 +561,44 @@ class PhotoFileError(AppException):
 
     Attributes:
         path (str): Файл.
-        operation (str): Операция (``'копирования'``, ``'удаления'`` …).
+        operation (str): Операция в родительном падеже (``'копирования'``, ``'удаления'`` …)
+            — она подставляется в «Ошибка <operation> файла».
         reason (str): Причина.
         errno (Optional[int]): Код ошибки ОС.
 
-    Example:
+    Пример:
         >>> str(PhotoFileError('a.png', 'чтения', 'нет файла', errno=2))
         "[4003] Ошибка чтения файла 'a.png': нет файла (код ошибки: 2)"
     """
 
     def __init__(
         self,
-        path: str, # файл
-        operation: str, # операция (в родительном падеже: 'копирования')
-        reason: str, # причина
-        errno: Optional[int] = None, # код ошибки ОС
-    ):
+        path      : str,                    # файл
+        operation : str,                    # операция (в родительном падеже: 'копирования')
+        reason    : str,                    # причина
+        errno     : Optional[int] = None,   # код ошибки ОС
+    ) -> None:
+        """
+        Создание ошибки файла фотографии (код 4003).
+
+        Args:
+            path (str): Файл.
+            operation (str): Операция в родительном падеже.
+            reason (str): Причина.
+            errno (Optional[int]): Код ошибки ОС; добавляется в текст, если задан.
+
+        Пример:
+            >>> exc = PhotoFileError('a.png', 'копирования', 'занят')
+            >>> (exc.path, exc.operation, exc.reason, exc.errno, exc.code)
+            ('a.png', 'копирования', 'занят', None, 4003)
+        """
         message = f"Ошибка {operation} файла '{path}': {reason}"
         if errno:
             message += f" (код ошибки: {errno})"
-        super().__init__(message, code=4003)
+        super().__init__(
+            message,        # текст
+            code = 4003,    # код файлов фото
+        )
         self.path = path
         self.operation = operation
         self.reason = reason
@@ -405,86 +606,222 @@ class PhotoFileError(AppException):
 
 
 class PhotoStoragePermissionError(PhotoFileError):
-    """Нет прав на файл/папку хранилища фото (errno 13)."""
+    """
+    Нет прав на файл/папку хранилища фото (errno 13).
+
+    Пример:
+        >>> str(PhotoStoragePermissionError('a.png', 'записи'))
+        "[4003] Ошибка записи файла 'a.png': недостаточно прав доступа (код ошибки: 13)"
+    """
 
     def __init__(
         self,
-        path: str, # файл
-        operation: str, # операция
-    ):
-        super().__init__(path, operation, "недостаточно прав доступа", errno=13)
+        path      : str,   # файл
+        operation : str,   # операция (в родительном падеже)
+    ) -> None:
+        """
+        Создание ошибки прав хранилища (причина и errno 13 — заданы).
+
+        Args:
+            path (str): Файл.
+            operation (str): Операция в родительном падеже.
+
+        Пример:
+            >>> PhotoStoragePermissionError('a.png', 'записи').errno
+            13
+        """
+        super().__init__(
+            path,                           # файл
+            operation,                      # операция
+            "недостаточно прав доступа",    # причина
+            errno = 13,                     # EACCES
+        )
 
 
 class PhotoStorageNoSpaceError(PhotoFileError):
-    """Нет места на диске хранилища фото (errno 28)."""
+    """
+    Нет места на диске хранилища фото (errno 28).
+
+    Пример:
+        >>> str(PhotoStorageNoSpaceError('a.png', 'записи'))
+        "[4003] Ошибка записи файла 'a.png': недостаточно места на диске (код ошибки: 28)"
+    """
 
     def __init__(
         self,
-        path: str, # файл
-        operation: str, # операция
-    ):
-        super().__init__(path, operation, "недостаточно места на диске", errno=28)
+        path      : str,   # файл
+        operation : str,   # операция (в родительном падеже)
+    ) -> None:
+        """
+        Создание ошибки нехватки места (причина и errno 28 — заданы).
+
+        Args:
+            path (str): Файл.
+            operation (str): Операция в родительном падеже.
+
+        Пример:
+            >>> PhotoStorageNoSpaceError('a.png', 'записи').errno
+            28
+        """
+        super().__init__(
+            path,                             # файл
+            operation,                        # операция
+            "недостаточно места на диске",    # причина
+            errno = 28,                       # ENOSPC
+        )
 
 
 # ----------------------------------------------------------------------------------------
-# Синхронизация (сейчас не используются: Яндекс.Диск — коды YaDiskResult, app/network)
+# Синхронизация (сейчас не используются: Яндекс.Диск — коды YaDiskResult, app/network;
+# _dev/ИДЕИ.md И-9)
 # ----------------------------------------------------------------------------------------
 
 class SyncError(AppException):
-    """Базовое исключение для ошибок синхронизации."""
+    """
+    Базовое исключение для ошибок синхронизации.
+
+    Пример:
+        >>> str(SyncError('сбой'))
+        '[5000] сбой'
+    """
 
     def __init__(
         self,
-        message: str, # текст ошибки
-        code: int = 5000, # код ошибки
-    ):
+        message : str,          # текст ошибки
+        code    : int = 5000,   # код ошибки
+    ) -> None:
+        """
+        Создание ошибки синхронизации.
+
+        Args:
+            message (str): Текст ошибки.
+            code (int): Код ошибки (наследники задают свой).
+
+        Пример:
+            >>> SyncError('сбой', code=5999).code
+            5999
+        """
         super().__init__(message, code)
 
 
 class DownloadError(SyncError):
-    """Ошибка при скачивании файла."""
+    """
+    Ошибка при скачивании файла.
+
+    Пример:
+        >>> str(DownloadError('нет сети'))
+        '[5001] Ошибка скачивания: нет сети'
+    """
 
     def __init__(
         self,
-        reason: str, # причина
-    ):
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки скачивания (код 5001).
+
+        Args:
+            reason (str): Причина.
+
+        Пример:
+            >>> DownloadError('нет сети').reason
+            'нет сети'
+        """
         message = f"Ошибка скачивания: {reason}"
-        super().__init__(message, code=5001)
+        super().__init__(
+            message,        # текст
+            code = 5001,    # код скачивания
+        )
         self.reason = reason
 
 
 class UploadError(SyncError):
-    """Ошибка при загрузке файла."""
+    """
+    Ошибка при загрузке файла.
+
+    Пример:
+        >>> str(UploadError('нет места'))
+        '[5002] Ошибка загрузки: нет места'
+    """
 
     def __init__(
         self,
-        reason: str, # причина
-    ):
+        reason : str,   # причина
+    ) -> None:
+        """
+        Создание ошибки загрузки (код 5002).
+
+        Args:
+            reason (str): Причина.
+
+        Пример:
+            >>> UploadError('нет места').reason
+            'нет места'
+        """
         message = f"Ошибка загрузки: {reason}"
-        super().__init__(message, code=5002)
+        super().__init__(
+            message,        # текст
+            code = 5002,    # код загрузки
+        )
         self.reason = reason
 
 
 class TokenError(SyncError):
-    """Ошибка, связанная с токеном Яндекс.Диска."""
+    """
+    Ошибка, связанная с токеном Яндекс.Диска.
 
-    def __init__(self):
+    Пример:
+        >>> str(TokenError())
+        '[5003] Неверный или отсутствующий токен Яндекс.Диска.'
+    """
+
+    def __init__(self) -> None:
+        """
+        Создание ошибки токена (код 5003, текст постоянный).
+
+        Пример:
+            >>> TokenError().code
+            5003
+        """
         message = "Неверный или отсутствующий токен Яндекс.Диска."
-        super().__init__(message, code=5003)
+        super().__init__(
+            message,        # текст
+            code = 5003,    # код токена
+        )
 
 
 # ----------------------------------------------------------------------------------------
-# База данных
+# База данных (сейчас не используются: ошибки SQLAlchemy идут как есть, текст для
+# пользователя — app/database/migrate.py startup_error_text; _dev/ИДЕИ.md И-9)
 # ----------------------------------------------------------------------------------------
 
 class DatabaseError(AppException):
-    """Базовое исключение для ошибок базы данных."""
+    """
+    Базовое исключение для ошибок базы данных.
+
+    Не путать с ``sqlalchemy.exc.DatabaseError`` (ошибка драйвера).
+
+    Пример:
+        >>> str(DatabaseError('сбой'))
+        '[6000] сбой'
+    """
 
     def __init__(
         self,
-        message: str, # текст ошибки
-        code: int = 6000, # код ошибки
-    ):
+        message : str,          # текст ошибки
+        code    : int = 6000,   # код ошибки
+    ) -> None:
+        """
+        Создание ошибки базы данных.
+
+        Args:
+            message (str): Текст ошибки.
+            code (int): Код ошибки (наследники задают свой).
+
+        Пример:
+            >>> DatabaseError('сбой', code=6999).code
+            6999
+        """
         super().__init__(message, code)
 
 
@@ -493,14 +830,31 @@ class IntegrityError(DatabaseError):
     Нарушение целостности данных (дубликат, внешний ключ и т. д.).
 
     Не путать с ``sqlalchemy.exc.IntegrityError`` (ошибка драйвера).
+
+    Пример:
+        >>> str(IntegrityError('дубликат'))
+        '[6001] Нарушение целостности данных: дубликат'
     """
 
     def __init__(
         self,
-        detail: str, # подробности
-    ):
+        detail : str,   # подробности
+    ) -> None:
+        """
+        Создание ошибки целостности (код 6001).
+
+        Args:
+            detail (str): Подробности.
+
+        Пример:
+            >>> IntegrityError('дубликат').detail
+            'дубликат'
+        """
         message = f"Нарушение целостности данных: {detail}"
-        super().__init__(message, code=6001)
+        super().__init__(
+            message,        # текст
+            code = 6001,    # код целостности
+        )
         self.detail = detail
 
 
@@ -508,7 +862,7 @@ class DatabaseConnectionError(DatabaseError):
     """
     Ошибка подключения к базе данных.
 
-    Example:
+    Пример:
         >>> str(DatabaseConnectionError('файл занят'))
         '[6002] Ошибка подключения к БД: файл занят'
         >>> issubclass(DatabaseConnectionError, OSError)
@@ -517,10 +871,23 @@ class DatabaseConnectionError(DatabaseError):
 
     def __init__(
         self,
-        detail: str, # подробности
-    ):
+        detail : str,   # подробности
+    ) -> None:
+        """
+        Создание ошибки подключения к базе (код 6002).
+
+        Args:
+            detail (str): Подробности.
+
+        Пример:
+            >>> DatabaseConnectionError('файл занят').detail
+            'файл занят'
+        """
         message = f"Ошибка подключения к БД: {detail}"
-        super().__init__(message, code=6002)
+        super().__init__(
+            message,        # текст
+            code = 6002,    # код подключения
+        )
         self.detail = detail
 
 

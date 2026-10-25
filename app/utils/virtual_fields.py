@@ -2,6 +2,17 @@
 
 """
 Утилита для вычисления виртуальных полей на основе конфигурации.
+
+Виртуальное поле — поле DTO, которого нет в таблице: его значение вычисляется функцией из
+конфигурации поля (ключ ``compute``: ``func``, ``args`` — имена аргументов, ``kwargs``) или
+берётся из ``extra_data`` (связи ORM-объекта по ``source_attr``, значения ``sql_compute``).
+
+Пример:
+    >>> configs = {'full_name': {'compute': {
+    ...     'func': lambda last, first: f'{last} {first}',
+    ...     'args': ['last_name', 'first_name']}}}
+    >>> compute_virtual_fields({'last_name': 'Иванов', 'first_name': 'Иван'}, configs)['full_name']
+    'Иванов Иван'
 """
 
 from typing import (
@@ -23,18 +34,39 @@ from pydantic import BaseModel
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
+# def compute_virtual_fields(
+#     data: Dict[str, Any],
+#     field_configs: Dict[str, Dict[str, Any]],
+#     extra_data: Optional[Dict[str, Any]] = None
+# ) -> Dict[str, Any]:
+# ↑ до 2026-10-25 (VF2): сигнатура без комментариев к параметрам (формат skill п. 7 —
+#   правимая функция приводится к нему).
 def compute_virtual_fields(
-    data: Dict[str, Any], 
-    field_configs: Dict[str, Dict[str, Any]],
-    extra_data: Optional[Dict[str, Any]] = None
+    data          : Dict[str, Any],                    # исходные данные (форма, DTO)
+    field_configs : Dict[str, Dict[str, Any]],         # конфигурация полей
+    extra_data    : Optional[Dict[str, Any]] = None,   # дополнительные данные (связи и т. п.)
 ) -> Dict[str, Any]:
     """
     Вычисляет значения для полей, у которых в конфигурации есть ключ 'compute'.
 
-    :param data: исходный словарь данных (например, из формы)
-    :param field_configs: конфигурация полей
-    :param extra_data: дополнительные данные (например, из extra_data)
-    :return: словарь с вычисленными значениями (может содержать и исходные поля)
+    Аргумент вычисления (имя из ``compute['args']``) ищется сначала в ``data`` (и уже
+    вычисленных полях — порядок конфигурации), затем в ``extra_data``; нет нигде — ``None``.
+    Поля без ``compute`` или с невызываемой ``func`` пропускаются. Ошибка функции — поле
+    ``None`` (в журнал), остальные поля вычисляются. Исходный ``data`` не меняется.
+
+    Args:
+        data: Исходный словарь данных (например, из формы).
+        field_configs: Конфигурация полей ``{имя: {'compute': {'func', 'args', 'kwargs'}, …}}``.
+        extra_data: Дополнительные данные для аргументов (None — пустой словарь, VF1).
+
+    Returns:
+        Dict[str, Any]: Копия ``data`` с вычисленными полями.
+
+    Пример:
+        >>> configs = {'age_text': {'compute': {'func': lambda age, unit: f'{age} {unit}',
+        ...                                     'args': ['age'], 'kwargs': {'unit': 'лет'}}}}
+        >>> compute_virtual_fields({'age': 30}, configs)
+        {'age': 30, 'age_text': '30 лет'}
     """
     result = data.copy() # копируем исходный словарь
     # extra_data=None (значение по умолчанию) — пустой словарь: журнал ниже проверяет
@@ -103,20 +135,47 @@ def compute_virtual_fields(
 ).log_execution_time(
     level=AppLogger._parse_log_level('DEBUG')
 )
+# def enrich_dto_with_computed_fields(
+#     dto: BaseModel,
+#     model_obj: Any,
+#     field_configs: Dict[str, Dict[str, Any]],
+#     extra_data: Optional[Dict[str, Any]] = None,
+# ) -> BaseModel:
+# ↑ до 2026-10-25 (VF2): сигнатура без комментариев к параметрам (формат skill п. 7 —
+#   правимая функция приводится к нему).
 def enrich_dto_with_computed_fields(
-    dto: BaseModel,
-    model_obj: Any,
-    field_configs: Dict[str, Dict[str, Any]],
-    extra_data: Optional[Dict[str, Any]] = None,
+    dto           : BaseModel,                         # DTO, который заполняется (меняется на месте)
+    model_obj     : Any,                               # ORM-объект — источник связей (source_attr)
+    field_configs : Dict[str, Dict[str, Any]],         # конфигурация полей
+    extra_data    : Optional[Dict[str, Any]] = None,   # дополнительные данные (дополняется!)
 ) -> BaseModel:
     """
     Заполняет виртуальные поля DTO значениями из вычислений.
 
-    :param dto: DTO, который нужно обогатить.
-    :param model_obj: ORM-объект, из которого можно извлечь связанные данные (по source_attr).
-    :param field_configs: конфигурация полей.
-    :param extra_data: дополнительные данные для вычислений (будет дополнено из model_obj).
-    :return: обогащённый DTO.
+    Алгоритм:
+        1. В ``extra_data`` добавляются связи ``model_obj`` по ``source_attr`` конфигурации
+           (незагруженная связь с ``eager_load: False`` не грузится — DATA12, без N+1).
+        2. ``compute_virtual_fields`` по непустым полям DTO и ``extra_data``.
+        3. Виртуальные поля без вычисления берутся из ``extra_data`` (``sql_compute``).
+        4. В DTO записываются только вычисленные и виртуальные поля, и только не ``None``
+           (B5: обычные поля обратно не пишутся — вложенные DTO не превращаются в словари).
+
+    Переданный ``extra_data`` дополняется на месте (связи из шага 1).
+
+    Args:
+        dto: DTO, который нужно обогатить.
+        model_obj: ORM-объект, из которого можно извлечь связанные данные (по source_attr).
+        field_configs: Конфигурация полей.
+        extra_data: Дополнительные данные для вычислений (будет дополнено из model_obj).
+
+    Returns:
+        BaseModel: Тот же объект ``dto`` (заполненный).
+
+    Пример:
+        >>> configs = {'patient_name': {'virtual': True, 'source_attr': 'patient',
+        ...            'compute': {'func': lambda p: p.full_name, 'args': ['patient']}}}
+        >>> enrich_dto_with_computed_fields(dto, appointment, configs).patient_name
+        'Иванов Иван'
     """
 
     # AppLogger.get_instance( name='user',  ).debug(

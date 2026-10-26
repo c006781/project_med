@@ -26,6 +26,8 @@ cp scripts/install_linux.sh "$BUILD_DIR/install.sh"
 cp scripts/run_linux.sh "$BUILD_DIR/run.sh"
 # install.sh вызывает ./setup_prod.sh (venv и пакеты из requirements.txt) — он нужен рядом
 cp scripts/setup_prod.sh "$BUILD_DIR/setup_prod.sh"
+# Выбор интерпретатора Python — его подключает setup_prod.sh (ТД-11)
+cp scripts/find_python.sh "$BUILD_DIR/find_python.sh"
 chmod +x "$BUILD_DIR/install.sh" "$BUILD_DIR/run.sh" "$BUILD_DIR/setup_prod.sh"
 # chmod +x "$BUILD_DIR/install.sh" "$BUILD_DIR/run.sh"
 # ↑ до 2026-10-26 (W19): setup_prod.sh в архив не попадал — install.sh падал

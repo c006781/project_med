@@ -723,6 +723,10 @@ class AppConfigManager(BaseConfigManager):
         'LOG_MAX_BYTES': 10 * 1024 * 1024,            # 10 MB
         'LOG_BACKUP_COUNT': 5,
         'LOG_ARGS': False,
+        # Значения запросов к базе (ФИО, телефоны, тексты — личные данные) в ошибках
+        # SQLAlchemy и подробностях DbIntegrityError: False — скрыты (hide_parameters),
+        # True — пишутся в журнал (для отладки). Смена — база переоткрывается (2026-10-31, М8)
+        'LOG_SQL_PARAMS': False,
 
 
         # Для системного логгера

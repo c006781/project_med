@@ -21,7 +21,7 @@ AppException (message, code; details, original, original_text, log_text(); __str
 ├── EntityValidationError (+ValueError): entity, field, reason 9002 / по таблицам 1002…4002
 ├── PhotoFileError: path, operation, reason, errno             4003 (+ Permission/NoSpace)
 ├── SyncError → Download/Upload/TokenError                     5000–5003 (не используются)
-└── DatabaseError → DbIntegrityError, DatabaseConnectionError  6000–6002 (не используются)
+└── DatabaseError → DbIntegrityError, DatabaseConnectionError  6000–6002 (с 2026-10-31 — app/database)
 
 photo_error_from_os_error(path, operation, exc) — OSError → PhotoStoragePermissionError /
 PhotoStorageNoSpaceError / PhotoFileError (original=exc)
@@ -181,6 +181,11 @@ PhotoStorageNoSpaceError / PhotoFileError (original=exc)
 `original` у всех, `IntegrityError` → `DbIntegrityError` (в таблице выше — прежнее имя),
 `photo_error_from_os_error` для ошибок ОС при копировании фото. Подключение по местам — М8
 (`Database.__init__`, `session_scope`), М11 (сервисы фото), М13 (Яндекс.Диск).
+
+**Подключено 2026-10-31 (М8, Ф1.6.7в):** `DatabaseConnectionError` — `Database.__init__`
+(ошибка драйвера при открытии / обновлении), `DbIntegrityError` — `session_scope`
+(`sqlalchemy.exc.IntegrityError`); подробно — `app/database/IMPLEMENTATION.md` §9. Остались
+фото (М11) и Яндекс.Диск (М13).
 
 **Решение владельца 2026-10-26:** база и фото — **А** (подключить в М8 / М11); синхронизация —
 не убирать, а сделать свои подробные исключения Яндекс.Диска (М13). До подключения —

@@ -867,47 +867,105 @@ def describe_differences(diffs: List) -> List[str]:
     return result
 
 
-def startup_error_text(exc: BaseException) -> Optional[str]:
+def database_error_text(
+    exc : BaseException,   # ошибка драйвера (sqlalchemy.exc.DatabaseError, sqlite3.Error)
+) -> str: # понятный пользователю текст ошибки открытия базы
     """
-    Понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7, 2026-10-18).
+    Возвращает понятный пользователю текст ошибки базы при её открытии: «занята другой
+    копией», «нет доступа на запись» или общий текст с исходным сообщением драйвера.
+
+    Один источник текста для ``Database.__init__`` (``DatabaseConnectionError``) и
+    ``startup_error_text`` (2026-10-31, М8; до этого разбор жил только в
+    ``startup_error_text``). Сообщение драйвера — из ``orig`` (SQLAlchemy) или самой ошибки
+    (``sqlite3`` — резервная копия через backup-API идёт мимо SQLAlchemy).
+
+    Args:
+        exc : (BaseException) Ошибка драйвера.
+
+    Returns:
+        (str) Текст для сообщения пользователю.
+
+    Example:
+        >>> import sqlite3
+        >>> database_error_text(
+        ...     sqlite3.OperationalError('database is locked'),   # другая копия пишет
+        ... )
+        'База данных занята другой копией программы (идёт обновление или запись). ...'
+    """
+    source = getattr(exc, 'orig', None) or exc
+    detail = str(source).lower()
+    if 'locked' in detail or 'busy' in detail:
+        return ("База данных занята другой копией программы (идёт обновление или запись). "
+                "Закройте другие копии и запустите программу снова.")
+    if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
+        return ("Нет доступа на запись к файлу базы данных или его папке. "
+                "Проверьте права и путь к базе в настройках.")
+    return (f"Ошибка базы данных при запуске: {source}. "
+            "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+
+
+# def startup_error_text(exc: BaseException) -> Optional[str]:
+# ↑ до 2026-10-31 (М8): сигнатура без комментария (формат skill п. 7).
+def startup_error_text(
+    exc : BaseException,   # ошибка, поднятая при открытии базы
+) -> Optional[str]: # понятный пользователю текст или None — ошибка не про базу
+    """
+    Возвращает понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7,
+    2026-10-18).
 
     Раньше отказ миграции или заблокированная база вылетали из ``Database.__init__``
     необработанным исключением: в exe без консоли программа молча закрывалась. Функция
     без Qt — её зовёт окно запуска (``interfaces/gui/gui_window/main.py``), её же
     проверяют тесты.
 
+    Обход цепочки ``__cause__`` / ``__context__``: ``DatabaseConnectionError`` (так
+    ``Database.__init__`` оборачивает ошибку драйвера с 2026-10-31) — её текст без кода;
+    ``MigrationError`` — «нельзя безопасно обновить»; ошибка драйвера SQLAlchemy —
+    ``database_error_text``.
+
     Args:
-        exc: Исключение, поднятое при открытии базы (в т. ч. обёрнутое — смотрится
-            цепочка ``__cause__``/``__context__``).
+        exc : (BaseException) Исключение (в том числе обёрнутое).
 
     Returns:
-        Текст для сообщения или ``None`` — ошибка не про базу (пусть идёт дальше как есть).
+        (str/None) Текст для сообщения; None — ошибка не про базу (пусть идёт дальше как
+        есть).
 
-    Пример:
-        >>> startup_error_text(MigrationError('нет обязательного столбца'))
+    Example:
+        >>> startup_error_text(
+        ...     MigrationError('нет обязательного столбца'),   # отказ миграции
+        ... )
         'Базу данных нельзя безопасно обновить: нет обязательного столбца. ...'
-        >>> startup_error_text(ValueError('x')) is None
+        >>> startup_error_text(
+        ...     ValueError('x'),   # не про базу
+        ... ) is None
         True
     """
     from sqlalchemy.exc import DatabaseError
+    from app.exceptions import DatabaseConnectionError
 
     seen = set()
     current: Optional[BaseException] = exc
     while current is not None and id(current) not in seen:      # обход цепочки причин
         seen.add(id(current))
+        if isinstance(current, DatabaseConnectionError): # текст уже собран — без кода [6002]
+            return current.detail
         if isinstance(current, MigrationError):
             return (f"Базу данных нельзя безопасно обновить: {current}. "
                     "База не изменена. Обратитесь к разработчику.")
         if isinstance(current, DatabaseError):
-            detail = str(getattr(current, 'orig', None) or current).lower()
-            if 'locked' in detail or 'busy' in detail:
-                return ("База данных занята другой копией программы (идёт обновление или запись). "
-                        "Закройте другие копии и запустите программу снова.")
-            if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
-                return ("Нет доступа на запись к файлу базы данных или его папке. "
-                        "Проверьте права и путь к базе в настройках.")
-            return (f"Ошибка базы данных при запуске: {getattr(current, 'orig', None) or current}. "
-                    "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+            # detail = str(getattr(current, 'orig', None) or current).lower()
+            # if 'locked' in detail or 'busy' in detail:
+            #     return ("База данных занята другой копией программы (идёт обновление или запись). "
+            #             "Закройте другие копии и запустите программу снова.")
+            # if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
+            #     return ("Нет доступа на запись к файлу базы данных или его папке. "
+            #             "Проверьте права и путь к базе в настройках.")
+            # return (f"Ошибка базы данных при запуске: {getattr(current, 'orig', None) or current}. "
+            #         "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+            # ↑ до 2026-10-31 (М8): разбор — здесь; теперь общий с Database.__init__.
+            return database_error_text(
+                current,   # ошибка драйвера
+            )
         current = current.__cause__ or current.__context__
     return None
 

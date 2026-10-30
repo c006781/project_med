@@ -112,7 +112,10 @@ class ServiceHooks:
 # и в обоих не было LOG_ARGS и общих флагов enabled/console_enabled/file_enabled —
 # их изменение не применялось.
 SETTINGS_BLOCKS: Dict[str, Tuple[str, ...]] = {
-    'database': ('database_local_path', 'database_remote_path'),
+    # 'database': ('database_local_path', 'database_remote_path'),
+    # ↑ до 2026-10-31 (М8): LOG_SQL_PARAMS задаётся при открытии базы (движок) — смена
+    #   флага тоже переоткрывает её.
+    'database': ('database_local_path', 'database_remote_path', 'LOG_SQL_PARAMS'),
     'photos': ('PHOTOS_STORAGE_PATH',),
     'sync': ('YANDEX_TOKEN', 'database_remote_path', 'database_local_path'),
     'logging_system': ('system_enabled', 'system_console_enabled',
@@ -367,13 +370,23 @@ class ConfigApplier:
     ).log_execution_time(
         level = AppLogger._parse_log_level('DEBUG')
     )
+    # def apply_database(
+    #     self,
+    #     new_config: Dict[str, Any],
+    #     old_config: Optional[Dict[str, Any]] = None,
+    # ) -> bool:
+    # ↑ до 2026-10-31 (М8): сигнатура без комментариев (формат skill п. 7).
     def apply_database(
         self,
-        new_config: Dict[str, Any],
-        old_config: Optional[Dict[str, Any]] = None,
-    ) -> bool:
+        new_config : Dict[str, Any],                    # конфиг после сохранения
+        old_config : Optional[Dict[str, Any]] = None,   # конфиг до сохранения (None — без сравнения)
+    ) -> bool: # переоткрывает базу у сервисов при смене пути или LOG_SQL_PARAMS
         """
-        Применяет новый путь к БД: перезагружает все сервисы из кэша ``dependencies``.
+        Применяет новый путь к БД или флаг ``LOG_SQL_PARAMS``: перезагружает все сервисы из
+        кэша ``dependencies``.
+
+        Флаг задаётся движку при открытии базы (``Database(log_sql_params=…)``), поэтому
+        его смена тоже переоткрывает базу (2026-10-31, М8).
 
         Сбой одного сервиса не мешает перезагрузить остальные (AP3); после цикла
         бросается ``RuntimeError`` со списком несработавших (AP3a) — ``apply_changes``
@@ -385,22 +398,45 @@ class ConfigApplier:
         старую ``Database`` и открывает новую по пути из менеджера.
 
         Args:
-            new_config: Конфиг после сохранения.
-            old_config: Конфиг до сохранения; ``None`` — применить без сравнения.
+            new_config : (Dict[str, Any]) Конфиг после сохранения.
+            old_config : (Dict[str, Any]/None) Конфиг до сохранения; None — применить без
+                         сравнения.
 
         Returns:
-            ``True``, если путь изменился и сервисы перезагружены.
+            (bool) ``True``, если путь или флаг изменились и сервисы перезагружены.
 
-        Пример:
-            >>> applier.apply_database(new_config, old_config)
+        Raises:
+            RuntimeError: Часть сервисов не перезагружена (``не перезагружены сервисы — …``).
+
+        Example:
+            >>> applier.apply_database(
+            ...     {'database_local_path': 'b.db'},   # после сохранения
+            ...     {'database_local_path': 'a.db'},   # до сохранения
+            ... )
             True
         """
-        changed, new_path = self._thec_update_key_config(new_config, 'database_local_path', old_config)
-        if not changed:
+        # changed, new_path = self._thec_update_key_config(new_config, 'database_local_path', old_config)
+        # if not changed:
+        #     return False
+        # ↑ до 2026-10-31 (М8): только путь; теперь и LOG_SQL_PARAMS.
+        changed, new_path = self._thec_update_key_config(
+            new_config,             # после сохранения
+            'database_local_path',  # путь к базе
+            old_config,             # до сохранения
+        )
+        flag_changed, new_flag = self._thec_update_key_config(
+            new_config,             # после сохранения
+            'LOG_SQL_PARAMS',       # значения запросов в журнал
+            old_config,             # до сохранения
+        )
+        if not changed and not flag_changed:
             return False
 
         old_path = (old_config or {}).get('database_local_path')
-        self.logger.info(f"Изменение пути к БД: {old_path} -> {new_path}")
+        if changed:
+            self.logger.info(f"Изменение пути к БД: {old_path} -> {new_path}")
+        if flag_changed: # флаг движка — база переоткрывается
+            self.logger.info(f"Значения запросов в журнал (LOG_SQL_PARAMS): {new_flag}")
 
         # from app.dependencies import clear_services_cache # оставить тут, так как циклы
         # clear_services_cache()

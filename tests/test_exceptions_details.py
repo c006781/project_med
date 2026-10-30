@@ -11,16 +11,76 @@
 """
 
 import copy
+import errno
 import pickle
 import sqlite3
 import threading
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import pytest
 
+import app.exceptions as exceptions_package
 from app.exceptions import (
     AppException,
+    AppointmentNoteNotFoundError,
+    AppointmentNoteValidationError,
+    AppointmentNotFoundError,
+    AppointmentValidationError,
+    DatabaseConnectionError,
+    DatabaseError,
+    DbIntegrityError,
+    DownloadError,
+    EntityNotFoundError,
+    EntityValidationError,
+    PatientNotFoundError,
+    PatientValidationError,
+    PhotoFileError,
+    PhotoNotFoundError,
+    PhotoStorageNoSpaceError,
+    PhotoStoragePermissionError,
+    PhotoValidationError,
+    SyncError,
+    TokenError,
+    UploadError,
+    photo_error_from_os_error,
 )
+
+# Как создать каждое исключение-наследник прежним вызовом (без новых полей)
+SUBCLASS_FACTORIES = [
+    (EntityNotFoundError,            ('X', 1)),
+    (EntityValidationError,          ('f', 'r')),
+    (PatientNotFoundError,           (1,)),
+    (PatientValidationError,         ('f', 'r')),
+    (AppointmentNotFoundError,       (1,)),
+    (AppointmentValidationError,     ('f', 'r')),
+    (AppointmentNoteNotFoundError,   (1,)),
+    (AppointmentNoteValidationError, ('f', 'r')),
+    (PhotoNotFoundError,             (1,)),
+    (PhotoValidationError,           ('f', 'r')),
+    (PhotoFileError,                 ('p', 'чтения', 'r')),
+    (PhotoStoragePermissionError,    ('p', 'записи')),
+    (PhotoStorageNoSpaceError,       ('p', 'записи')),
+    (SyncError,                      ('s',)),
+    (DownloadError,                  ('d',)),
+    (UploadError,                    ('u',)),
+    (TokenError,                     ()),
+    (DatabaseError,                  ('db',)),
+    (DbIntegrityError,               ('i',)),
+    (DatabaseConnectionError,        ('c',)),
+]
+
+
+def _factory_id(
+    value : Any,   # параметр теста: класс или аргументы
+) -> str:
+    """
+    Возвращает имя параметра в выводе pytest: имя класса или ``''`` для аргументов.
+
+    Example:
+        >>> _factory_id(SyncError), _factory_id(('s',))
+        ('SyncError', '')
+    """
+    return getattr(value, '__name__', '')
 
 
 def _raise_chain() -> AppException:
@@ -305,3 +365,136 @@ def test_copy_keeps_log_text() -> None:
     )
     for copied in (copy.copy(exc), copy.deepcopy(exc)):
         assert copied.log_text() == exc.log_text()
+
+
+# ---------------------------------------------------------------------------
+# Наследники — details / original именованными, прежний текст
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('cls, args', SUBCLASS_FACTORIES, ids=_factory_id)
+def test_subclass_accepts_details_and_original(
+    cls  : Callable[..., AppException],   # класс исключения
+    args : tuple,                         # прежние позиционные аргументы
+) -> None:
+    """Каждый наследник принимает details и original; текст и код — как без них."""
+    plain = cls(*args)
+    source = OSError('исходная')
+    exc = cls(
+        *args,
+        details  = {'таблица': 'patients'},   # подробности
+        original = source,                    # исходная ошибка
+    )
+    assert str(exc) == str(plain)
+    assert exc.code == plain.code
+    assert exc.args == plain.args
+    assert exc.details == {'таблица': 'patients'}
+    assert exc.original is source
+    assert exc.log_text() == (
+        f'{plain}\n'
+        '  Подробности: таблица=patients\n'
+        '  Исходная ошибка: OSError: исходная'
+    )
+    restored = pickle.loads(pickle.dumps(exc))
+    assert type(restored) is cls
+    assert restored.log_text() == exc.log_text()
+
+
+@pytest.mark.parametrize('cls, args', SUBCLASS_FACTORIES, ids=_factory_id)
+def test_subclass_old_call_has_no_extra(
+    cls  : Callable[..., AppException],   # класс исключения
+    args : tuple,                         # прежние позиционные аргументы
+) -> None:
+    """Прежний вызов наследника — без подробностей и исходной ошибки."""
+    exc = cls(*args)
+    assert exc.details is None
+    assert exc.original is None
+    assert exc.log_text() == str(exc)
+
+
+# ---------------------------------------------------------------------------
+# DbIntegrityError — имя не совпадает с sqlalchemy.exc.IntegrityError
+# ---------------------------------------------------------------------------
+
+def test_db_integrity_error_text_and_code() -> None:
+    """Прежний текст и код 6001; наследник DatabaseError."""
+    exc = DbIntegrityError('дубликат')
+    assert str(exc) == '[6001] Нарушение целостности данных: дубликат'
+    assert exc.detail == 'дубликат'
+    assert isinstance(exc, DatabaseError)
+
+
+def test_integrity_error_old_name_is_alias() -> None:
+    """Прежнее имя IntegrityError — тот же класс, импорт по имени работает, в __all__ нет."""
+    from app.exceptions import IntegrityError
+    from app.exceptions.exceptions_all import IntegrityError as module_alias
+    assert IntegrityError is DbIntegrityError
+    assert module_alias is DbIntegrityError
+    assert 'IntegrityError' not in exceptions_package.__all__
+    assert 'DbIntegrityError' in exceptions_package.__all__
+
+
+def test_star_import_does_not_shadow_sqlalchemy_integrity_error() -> None:
+    """import * не перекрывает IntegrityError драйвера (раньше перекрывал бы)."""
+    namespace: dict = {'IntegrityError': sqlite3.IntegrityError}
+    exec('from app.exceptions import *', namespace)
+    assert namespace['IntegrityError'] is sqlite3.IntegrityError
+    assert namespace['DbIntegrityError'] is DbIntegrityError
+
+
+# ---------------------------------------------------------------------------
+# photo_error_from_os_error — ошибка ОС при работе с файлом фото
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize('source, cls', [
+    (PermissionError(errno.EACCES, 'Permission denied'), PhotoStoragePermissionError),
+    (PermissionError(errno.EPERM, 'Operation not permitted'), PhotoStoragePermissionError),
+    (OSError(errno.EACCES, 'Permission denied'), PhotoStoragePermissionError),
+    (OSError(errno.ENOSPC, 'No space left on device'), PhotoStorageNoSpaceError),
+], ids=['EACCES', 'EPERM', 'OSError-EACCES', 'ENOSPC'])
+def test_photo_error_storage_classes(
+    source : OSError,                      # ошибка ОС
+    cls    : Callable[..., PhotoFileError], # ожидаемый класс
+) -> None:
+    """Нет прав / нет места — свои классы; исходная ошибка — в original."""
+    exc = photo_error_from_os_error(
+        'a.png',            # файл
+        'копирования',      # операция
+        source,             # ошибка ОС
+    )
+    assert type(exc) is cls
+    assert exc.path == 'a.png'
+    assert exc.operation == 'копирования'
+    assert exc.original is source
+
+
+def test_photo_error_other_errno() -> None:
+    """Прочие ошибки ОС — PhotoFileError с текстом ОС и её errno."""
+    source = FileNotFoundError(errno.ENOENT, 'No such file or directory', 'a.png')
+    exc = photo_error_from_os_error(
+        'a.png',                            # файл
+        'чтения',                           # операция
+        source,                             # ошибка ОС
+        details = {'приём': 5},             # подробности
+    )
+    assert type(exc) is PhotoFileError
+    assert exc.errno == errno.ENOENT
+    assert exc.reason == 'No such file or directory'
+    assert str(exc) == (
+        "[4003] Ошибка чтения файла 'a.png': No such file or directory "
+        f"(код ошибки: {errno.ENOENT})"
+    )
+    assert exc.details == {'приём': 5}
+    assert exc.original is source
+
+
+def test_photo_error_without_errno() -> None:
+    """Ошибка ОС без errno — текст самой ошибки, без кода."""
+    source = OSError('диск отключён')
+    exc = photo_error_from_os_error(
+        'a.png',        # файл
+        'записи',       # операция
+        source,         # ошибка ОС
+    )
+    assert type(exc) is PhotoFileError
+    assert exc.errno is None
+    assert str(exc) == "[4003] Ошибка записи файла 'a.png': диск отключён"

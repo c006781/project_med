@@ -47,6 +47,44 @@ def legacy_db(tmp_path, name='legacy.db', drop_index=True, extra_sql=()):
     return path, engine
 
 
+def drop_column(
+    conn   : object,   # соединение SQLAlchemy (внутри транзакции)
+    table  : str,      # таблица
+    column : str,      # удаляемый столбец
+) -> None: # удаляет столбец пересборкой таблицы, без ALTER TABLE … DROP COLUMN
+    """
+    Удаляет столбец пересборкой таблицы (Alembic ``batch_alter_table(recreate='always')``:
+    новая таблица без столбца, перенос данных, удаление старой, переименование).
+
+    ``ALTER TABLE … DROP COLUMN`` есть только с SQLite 3.35, в venv Linux — 3.34.1: на нём
+    3 теста падали (ТД-2, 2026-10-31). Индексы на удаляемом столбце снять заранее.
+
+    Args:
+        conn   : (Connection) Соединение SQLAlchemy.
+        table  : (str) Таблица.
+        column : (str) Удаляемый столбец.
+
+    Example:
+        >>> with engine.begin() as conn:
+        ...     drop_column(
+        ...         conn,          # соединение
+        ...         'patients',    # таблица
+        ...         'last_name',   # столбец
+        ...     )
+    """
+    from alembic.operations import Operations
+    from alembic.runtime.migration import MigrationContext
+
+    operations = Operations(
+        MigrationContext.configure(conn),
+    )
+    with operations.batch_alter_table(
+        table,
+        recreate   =   'always',   # пересборка, а не ALTER TABLE … DROP COLUMN
+    ) as batch:
+        batch.drop_column(column)
+
+
 def counts(engine):
     with engine.connect() as conn:
         return {t: conn.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in APP_TABLES}
@@ -388,7 +426,9 @@ def test_startup_error_text_for_refused_migration(tmp_path):
     path, engine = legacy_db(tmp_path, extra_sql=())
     with engine.begin() as conn:                      # обязательный столбец исчез — отказ
         conn.execute(text('DROP INDEX ix_patient_last_name'))
-        conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+        # conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+        # ↑ до 2026-10-31 (ТД-2): DROP COLUMN нет в SQLite 3.34 (venv Linux)
+        drop_column(conn, 'patients', 'last_name')
     with pytest.raises(MigrationError) as info:
         upgrade_database(engine)
     assert startup_error_text(info.value).startswith('Базу данных нельзя безопасно обновить')
@@ -609,7 +649,9 @@ def test_drift_missing_required_column_refused(tmp_path):
     path, engine = head_db(tmp_path)
     with engine.begin() as conn:
         conn.execute(text('DROP INDEX ix_patient_last_name'))
-        conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+        # conn.execute(text('ALTER TABLE patients DROP COLUMN last_name'))
+        # ↑ до 2026-10-31 (ТД-2): DROP COLUMN нет в SQLite 3.34 (venv Linux)
+        drop_column(conn, 'patients', 'last_name')
     engine.dispose()
     before = hashlib.sha256(path.read_bytes()).hexdigest()
     with pytest.raises(MigrationError, match='обязательного столбца patients.last_name'):
@@ -654,7 +696,9 @@ def test_drift_adds_column_before_its_index(tmp_path, with_0002):
     path, engine = head_db(tmp_path)
     with engine.begin() as conn:
         conn.execute(text('DROP INDEX ix_patient_email'))
-        conn.execute(text('ALTER TABLE patients DROP COLUMN email'))
+        # conn.execute(text('ALTER TABLE patients DROP COLUMN email'))
+        # ↑ до 2026-10-31 (ТД-2): DROP COLUMN нет в SQLite 3.34 (venv Linux)
+        drop_column(conn, 'patients', 'email')
     upgrade_database(engine)
     assert 'email' in {c['name'] for c in inspect(engine).get_columns('patients')}
     assert 'ix_patient_email' in {i['name'] for i in inspect(engine).get_indexes('patients')}

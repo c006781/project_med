@@ -110,7 +110,9 @@ class FieldSpec:
         relation: Имя связи на модели (``fk``: ``patient``; ``children``: ``photos``;
             ``note``: ``reason_note``).
         back: Имя обратной связи (``back_populates``).
-        cascade: Каскад связи (``children``).
+        cascade: Каскад связи (``children``; ``None`` — каскад SQLAlchemy по умолчанию).
+        foreign_keys: Явный внешний ключ связи строкой SQLAlchemy (``children``:
+            ``'[Appointment.note_id]'``; ``None`` — определяется сам).
         dto: Включать в DTO.
         dto_type: Тип поля DTO (по умолчанию — по типу столбца).
         dto_desc: Описание поля DTO.
@@ -138,6 +140,7 @@ class FieldSpec:
     relation: Optional[str] = None
     back: Optional[str] = None
     cascade: Optional[str] = None
+    foreign_keys: Optional[str] = None
     dto: bool = True
     dto_type: Any = None
     dto_desc: Optional[str] = None
@@ -286,35 +289,83 @@ def fk(name: str, target: str, target_model: str, *, title: str = '', nullable: 
                      config={'title': title, **ui} if config else None)
 
 
-def children(name: str, child_model: str, back: str, *, child_dto: Optional[str] = None,
-             cascade: str = 'all, delete-orphan', dto: bool = True, dto_desc: Optional[str] = None,
-             config: bool = True, title: str = '', **ui: Any) -> FieldSpec:
+def children(
+    name            : str,                                  # имя связи (photos)
+    child_model     : str,                                  # класс модели подчинённых (Photo)
+    back            : str,                                  # обратная связь у подчинённых (appointment)
+    *,
+    child_dto       : Optional[str] = None,                 # класс DTO подчинённых; None — поля DTO нет
+    cascade         : Optional[str] = 'all, delete-orphan', # каскад; None — по умолчанию SQLAlchemy
+    foreign_keys    : Optional[str] = None,                 # явный внешний ключ ('[Appointment.note_id]')
+    dto             : bool = True,                          # включать в DTO
+    dto_desc        : Optional[str] = None,                 # описание поля DTO
+    config          : bool = True,                          # делать запись в field_configs
+    title           : str = '',                             # подпись
+    **ui            : Any,                                  # свои ключи field_configs
+) -> FieldSpec: # связь «один ко многим»
     """
-    Подчинённые записи: связь «один ко многим» с каскадом (удаление владельца — удаление их).
+    Описывает подчинённые записи — связь «один ко многим».
+
+    По умолчанию с каскадом ``'all, delete-orphan'``: удаление владельца удаляет и их. Для
+    обратной стороны ссылки (``AppointmentNote.appointments`` — приёмы, ссылающиеся на
+    заметку) каскад не нужен (``cascade=None`` — каскад SQLAlchemy по умолчанию
+    ``save-update, merge``), а внешних ключей на владельца у подчинённой таблицы может быть
+    несколько — тогда нужный задаётся ``foreign_keys``. ``back_populates`` ставится только
+    на этой стороне: у полей ``note()`` обратной связи нет (как было до описаний).
 
     Args:
-        name: Имя связи (``photos``).
-        child_model: Класс модели подчинённых (``Photo``).
-        back: Имя обратной связи у подчинённых (``appointment``).
-        child_dto: Имя класса DTO подчинённых (для поля DTO ``Optional[List[…]]``).
-        cascade: Каскад связи.
-        dto: Включать в DTO.
-        dto_desc: Описание поля DTO.
-        config: Делать запись в ``field_configs``.
-        title: Подпись.
-        **ui: Свои ключи ``field_configs``.
+        name         : (str) Имя связи на модели владельца.
+        child_model  : (str) Имя класса модели подчинённых.
+        back         : (str) Имя связи у подчинённых, с которой связана эта
+            (``back_populates``).
+        child_dto    : (str/None) Имя класса DTO подчинённых (поле DTO ``Optional[List[…]]``);
+            None — поля в DTO нет.
+        cascade      : (str/None) Каскад связи; None — каскад SQLAlchemy по умолчанию.
+        foreign_keys : (str/None) Внешний ключ подчинённых на владельца строкой
+            SQLAlchemy (``'[Appointment.note_id]'``); None — определяется сам (ключ один).
+        dto          : (bool) Включать в DTO (нужен и ``child_dto``).
+        dto_desc     : (str/None) Описание поля DTO.
+        config       : (bool) Делать запись в ``field_configs``.
+        title        : (str) Подпись.
+        **ui         : (Any) Свои ключи ``field_configs``.
 
     Returns:
-        ``FieldSpec``.
+        (FieldSpec) Описание поля.
 
-    Пример:
-        >>> children('photos', 'Photo', 'appointment', child_dto='PhotoDTO').cascade
+    Example:
+        >>> children(
+        ...     'photos',                           # имя связи
+        ...     'Photo',                            # модель подчинённых
+        ...     'appointment',                      # обратная связь
+        ...     child_dto   =   'PhotoDTO',         # DTO подчинённых
+        ... ).cascade
         'all, delete-orphan'
+        >>> children(
+        ...     'appointments',                             # приёмы, ссылающиеся на заметку
+        ...     'Appointment',                              # модель подчинённых
+        ...     'note',                                     # связь приёма с заметкой
+        ...     cascade         =   None,                   # без каскада удаления
+        ...     foreign_keys    =   '[Appointment.note_id]',  # один из пяти ключей на заметки
+        ...     dto             =   False,                  # не в DTO
+        ...     config          =   False,                  # не в настройках
+        ... ).foreign_keys
+        '[Appointment.note_id]'
     """
     dto_type = Optional[List[child_dto]] if (dto and child_dto) else None
-    return FieldSpec(name, 'children', title, target_model=child_model, relation=name, back=back,
-                     cascade=cascade, dto=dto and child_dto is not None, dto_type=dto_type,
-                     dto_desc=dto_desc, config={'title': title, **ui} if config else None)
+    return FieldSpec(
+        name,                                                       # имя связи
+        'children',                                                 # вид поля
+        title,                                                      # подпись
+        target_model    =   child_model,                            # модель подчинённых
+        relation        =   name,                                   # связь — под тем же именем
+        back            =   back,                                   # обратная связь
+        cascade         =   cascade,                                # каскад
+        foreign_keys    =   foreign_keys,                           # явный внешний ключ
+        dto             =   dto and child_dto is not None,          # в DTO — только с классом DTO
+        dto_type        =   dto_type,                               # тип поля DTO
+        dto_desc        =   dto_desc,                               # описание поля DTO
+        config          =   {'title': title, **ui} if config else None,  # запись настроек
+    )
 
 
 def computed(name: str, title: str, *, dto_type: Any = Optional[str], dto_desc: Optional[str] = None,
@@ -518,21 +569,34 @@ class TableDef:
                                                  nullable=True, comment=spec.comment)
         return self._ordered(result, self.column_order)
 
-    def build_model(self, base: Any, namespace: Optional[Mapping[str, Any]] = None,
-                    module: Optional[str] = None) -> type:
+    def build_model(
+        self,
+        base        : Any,                                  # декларативная база
+        namespace   : Optional[Mapping[str, Any]] = None,   # свои атрибуты класса (методы)
+        module      : Optional[str] = None,                 # __module__ класса; None — этот модуль
+    ) -> type: # класс модели SQLAlchemy из описания
         """
-        Класс модели SQLAlchemy на базовом классе ``base``.
+        Строит класс модели SQLAlchemy на базовом классе ``base``.
+
+        Столбцы — в порядке ``column_order``; индексы, комментарий таблицы и
+        ``sqlite_autoincrement`` — в ``__table_args__``; связи: ``note`` — к общей таблице
+        заметок по своему столбцу, ``fk`` — к цели (с ``back_populates``, если задано),
+        ``children`` — к подчинённым (каскад и явный внешний ключ — если заданы). Атрибуты
+        ``namespace`` ставятся последними и перекрывают построенные (``__repr__``).
 
         Args:
-            base: Декларативная база (``Base`` приложения или своя — для проверок).
-            namespace: Свои атрибуты класса (методы).
-            module: Модуль класса (``__module__``; по умолчанию — этот).
+            base      : (Any) Декларативная база (``Base`` приложения или своя — для проверок).
+            namespace : (Mapping/None) Свои атрибуты класса (методы); None — без них.
+            module    : (str/None) Модуль класса (``__module__``); None — ``app.schema.define``.
 
         Returns:
-            Класс модели.
+            (type) Класс модели.
 
-        Пример:
-            >>> Patient = PATIENTS.build_model(Base)
+        Example:
+            >>> Patient = PATIENTS.build_model(
+            ...     Base,                       # декларативная база
+            ...     module  =   __name__,       # модуль класса
+            ... )
             >>> Patient.__tablename__
             'patients'
         """
@@ -550,8 +614,22 @@ class TableDef:
             elif spec.kind == 'fk' and spec.relation:
                 attrs[spec.relation] = relationship(spec.target_model, back_populates=spec.back)
             elif spec.kind == 'children':
-                attrs[spec.relation] = relationship(spec.target_model, back_populates=spec.back,
-                                                    cascade=spec.cascade)
+                # каскад и явный внешний ключ — только если заданы: иначе умолчания SQLAlchemy
+                options_rel: Dict[str, Any] = {}
+                if spec.cascade is not None:
+                    options_rel['cascade'] = spec.cascade
+                if spec.foreign_keys is not None: # у подчинённых несколько ключей на владельца
+                    options_rel['foreign_keys'] = spec.foreign_keys
+                attrs[spec.relation] = relationship(
+                    spec.target_model,                  # модель подчинённых
+                    back_populates  =   spec.back,      # обратная связь
+                    **options_rel,                      # каскад, внешний ключ
+                )
+                # attrs[spec.relation] = relationship(spec.target_model, back_populates=spec.back,
+                #                                     cascade=spec.cascade)
+                # ↑ до 2026-10-30 (Ф1.3.1): каскад передавался всегда, явного внешнего ключа не
+                #   было — обратную сторону ссылки (заметка → приёмы, пять ключей на заметки)
+                #   описанием не задать
         options: Dict[str, Any] = {'sqlite_autoincrement': self.sqlite_autoincrement}
         if self.comment:
             options['comment'] = self.comment

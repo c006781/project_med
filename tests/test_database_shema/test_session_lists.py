@@ -144,3 +144,46 @@ def test_failed_commit_deletion_retried_after_foreign_rollback(
 
     assert calls == [str(photo), str(photo)]
     assert not photo.exists(), 'повтор неудавшегося удаления потерян'
+
+
+def test_fd10_commit_deletion_after_failed_flush_keeps_file(
+    tmp_path : Path,                      # папка файлов
+    db       : database_module.Database,  # временная база
+) -> None:
+    """
+    FD10: flush упал (повтор ключа) — сессия неактивна, коммита не будет; удаление «после
+    коммита», запланированное после этого, файл не трогает (раньше удаляло сразу).
+    """
+    from app.database.database_shema.clinic import Patient
+
+    photo = tmp_path / 'a.png'
+    photo.write_bytes(b'1')
+
+    with db.session_scope() as session:
+        session.add(
+            Patient(
+                id         = 1,         # ключ
+                last_name  = 'Иванов',  # фамилия
+                first_name = 'Иван',    # имя
+            ),
+        )
+
+    with pytest.raises(Exception):
+        with db.session_scope() as session:
+            session.add(
+                Patient(
+                    id         = 1,         # тот же ключ — ошибка flush
+                    last_name  = 'Петров',  # фамилия
+                    first_name = 'Пётр',    # имя
+                ),
+            )
+            with pytest.raises(Exception):
+                session.flush()
+            assert not session.is_active          # транзакцию ждёт только откат
+            schedule_deletion(
+                str(photo),
+                ctx = DeletionContext(session, DeletionType.COMMIT),
+            )
+            raise RuntimeError('транзакция с ошибкой')
+
+    assert photo.exists(), 'файл удалён, хотя коммита не было'

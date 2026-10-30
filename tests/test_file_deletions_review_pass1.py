@@ -7,6 +7,7 @@
 """
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -92,11 +93,45 @@ def test_deferred_on_active_session(file_in_dir):
     assert get_deletions_by_type(session, DeletionType.ROLLBACK) == []
 
 
-def test_inactive_session_deletes_now(file_in_dir):
-    """Неактивная сессия — удаление сразу."""
+# def test_inactive_session_deletes_now(file_in_dir):
+#     """Неактивная сессия — удаление сразу."""
+#     _, target = file_in_dir
+#     ctx = DeletionContext(fake_session(active=False), DeletionType.COMMIT)
+#     schedule_deletion(str(target), ctx=ctx)
+#     assert not target.exists()
+# ↑ до 2026-10-31 (FD10): проверял прежнее поведение — «после коммита» при неактивной
+#   сессии удалялось сразу; теперь файл остаётся (решение владельца, В-4).
+
+
+def test_fd10_inactive_session_commit_keeps_file(
+    file_in_dir : tuple,   # (папка, файл)
+) -> None: # FD10: коммита не будет — файл остаётся
+    """FD10: неактивная сессия, контекст COMMIT — файл остаётся, в журнале предупреждение."""
     _, target = file_in_dir
-    ctx = DeletionContext(fake_session(active=False), DeletionType.COMMIT)
-    schedule_deletion(str(target), ctx=ctx)
+    session = fake_session(active=False)
+    logger = MagicMock()
+    result = schedule_deletion(
+        str(target),
+        ctx      =   DeletionContext(session, DeletionType.COMMIT),  # после коммита
+        logger   =   logger,                                         # журнал-заглушка
+    )
+    assert result == (True, None)
+    assert target.exists()
+    assert get_deletions_by_type(session, DeletionType.COMMIT) == []
+    (message,), _ = logger.warning.call_args
+    assert 'файл остаётся' in message and str(target) in message
+
+
+def test_fd10_inactive_session_rollback_deletes_now(
+    file_in_dir : tuple,   # (папка, файл)
+) -> None: # откат будет — удаление сразу, как раньше
+    """Неактивная сессия, контекст ROLLBACK — удаление сразу (откат всё равно будет)."""
+    _, target = file_in_dir
+    ctx = DeletionContext(fake_session(active=False), DeletionType.ROLLBACK)
+    assert schedule_deletion(
+        str(target),
+        ctx   =   ctx,   # при откате
+    ) == (True, None)
     assert not target.exists()
 
 

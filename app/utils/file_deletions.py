@@ -504,34 +504,46 @@ def schedule_deletion(
     """
     Планирует удаление файла или папки после исхода транзакции (или удаляет сразу).
 
-    Если передан `ctx` с активной сессией, удаление откладывается до соответствующего
-    события (COMMIT или ROLLBACK). Файлы добавляются в список `session._deletions[deletion_type]`.
+    Если передан ``ctx`` с активной сессией, удаление откладывается до соответствующего
+    события (COMMIT или ROLLBACK): запись добавляется в ``session._deletions[deletion_type]``.
 
     Без отложенного удаления:
-        - ``ctx is None`` или сессия неактивна (``is_active=False``) — удаляется сразу
-          (для COMMIT при неактивной сессии — тоже сразу, хотя коммита не будет: FD10);
+        - ``ctx is None`` — удаляется сразу;
+        - сессия неактивна (``is_active=False``: транзакция уже упала, её ждёт только
+          откат) и контекст COMMIT — **ничего не удаляется**: коммита не будет, файл
+          остаётся, в журнал — предупреждение (FD10, решение владельца 2026-10-26, В-4);
+          файлы без ссылок в БД находит сверка (Ф1.6.10г);
+        - сессия неактивна и контекст ROLLBACK — сразу (откат будет);
         - контекст ROLLBACK без сессии — ничего не удаляется (откатывать нечего, DATA6),
           контекст COMMIT без сессии — сразу.
 
     Args:
-        path: Путь к файлу или папке.
-        remove_parent_if_empty: Если True и удаляется файл, то после успешного удаления
-            файла родительская папка будет удалена, если она станет пустой.
-        force: Если True и удаляется папка, удаляет её рекурсивно (даже непустую).
-        ctx: Контекст отложенного удаления (сессия + тип). Если None – удаление немедленное.
-        logger: Опциональный логгер.
+        path                   : (str) Путь к файлу или папке.
+        remove_parent_if_empty : (bool) Удаляется файл — затем удалить его папку, если
+                                 она стала пустой.
+        force                  : (bool) Удаляется папка — рекурсивно (даже непустую).
+        ctx                    : (DeletionContext/None) Сессия и событие; None — удалить
+                                 сразу.
+        logger                 : (AppLogger/None) Журнал; None — журнал модуля.
 
     Returns:
-        Tuple[bool, Optional[str]]: (успех, ошибка)
-            При отложенном удалении всегда возвращает `(True, None)`.
-            При немедленном удалении возвращает результат `del_file_and_parent_dir`.
+        (Tuple[bool, Optional[str]]) ``(успех, текст ошибки)``: при отложенном удалении и
+        при оставленном файле (FD10) — ``(True, None)``; при немедленном — результат
+        ``del_file_and_parent_dir``.
 
-    Пример:
-        >>> schedule_deletion('temp/a.png', ctx=DeletionContext(session, DeletionType.COMMIT))
+    Example:
+        >>> schedule_deletion(
+        ...     'temp/a.png',                                       # файл
+        ...     ctx   =   DeletionContext(session, DeletionType.COMMIT),  # после коммита
+        ... )
         (True, None)
-        >>> schedule_deletion('temp/b.png')  # без контекста — сразу
+        >>> schedule_deletion(
+        ...     'temp/b.png',   # без контекста — сразу
+        ... )
         (True, None)
     """
+    # ↑ до 2026-10-31 (FD10): неактивная сессия с контекстом COMMIT — удаление сразу, хотя
+    #   коммита не будет; описание — в формате «Пример:».
 
     if logger is None:
         logger = AppLogger.get_instance(
@@ -547,14 +559,42 @@ def schedule_deletion(
         if ctx.deletion_type == DeletionType.ROLLBACK:
             return True, None
         ctx = None
-    if ctx is None or not ctx.session.is_active:
-        # Немедленное удаление
-        return del_file_and_parent_dir(path, remove_parent_if_empty, force, logger)
+    # if ctx is None or not ctx.session.is_active:
+    #     # Немедленное удаление
+    #     return del_file_and_parent_dir(path, remove_parent_if_empty, force, logger)
+    #
+    # else:
+    #     # Отложенное удаление
+    #     add_deferred_deletion(ctx, path, remove_parent_if_empty, force)
+    #     return True, None
+    # ↑ до 2026-10-31 (FD10): «после коммита» при неактивной сессии удалялось сразу —
+    #   транзакция уже упала, коммита не будет, а файл (фото записи) пропадал.
+    if ctx is not None and not ctx.session.is_active:
+        if ctx.deletion_type == DeletionType.COMMIT: # коммита не будет — файл остаётся
+            logger.warning(
+                f"Удаление после коммита не выполнено — транзакция с ошибкой, коммита не "
+                f"будет; файл остаётся: {path}"
+            )
+            return True, None
+        ctx = None  # откат будет — удалить сразу
 
-    else:
-        # Отложенное удаление
-        add_deferred_deletion(ctx, path, remove_parent_if_empty, force)
-        return True, None
+    if ctx is None:
+        # Немедленное удаление
+        return del_file_and_parent_dir(
+            path,                     # что удалить
+            remove_parent_if_empty,   # папку, если опустела
+            force,                    # папку — рекурсивно
+            logger,                   # журнал
+        )
+
+    # Отложенное удаление
+    add_deferred_deletion(
+        ctx,                      # сессия и событие
+        path,                     # что удалить
+        remove_parent_if_empty,   # папку, если опустела
+        force,                    # папку — рекурсивно
+    )
+    return True, None
 
     # if (
     #     (session is None)

@@ -143,9 +143,9 @@ def test_fd8_copy_error_deferred_until_rollback(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# FD9 — списки отложенных удалений переживают свою транзакцию (вне территории:
-# обработчики app/database/database.py). Тесты фиксируют ошибку; strict — когда
-# обработчики исправят, тест сообщит XPASS → снять пометку.
+# FD9 — списки отложенных удалений переживали свою транзакцию (обработчики
+# app/database/database.py). Исправлено 2026-10-30 (ТД-9) — пометки xfail сняты;
+# остальные случаи — tests/test_database_shema/test_session_lists.py.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -160,10 +160,11 @@ def db(tmp_path: Path):
     database.close()
 
 
-@pytest.mark.xfail(
-    strict = True,
-    reason = 'FD9: after_rollback не очищает список COMMIT (app/database/database.py)',
-)
+# @pytest.mark.xfail(
+#     strict = True,
+#     reason = 'FD9: after_rollback не очищает список COMMIT (app/database/database.py)',
+# )
+# ↑ до 2026-10-30 (ТД-9): ошибка исправлена в app/database/database.py
 def test_fd9_commit_list_dropped_after_rollback(
     tmp_path : Path,  # папка файлов
     db,               # временная база
@@ -187,10 +188,11 @@ def test_fd9_commit_list_dropped_after_rollback(
     assert photo.exists(), 'файл удалён коммитом чужой транзакции'
 
 
-@pytest.mark.xfail(
-    strict = True,
-    reason = 'FD9: after_commit не очищает список ROLLBACK (app/database/database.py)',
-)
+# @pytest.mark.xfail(
+#     strict = True,
+#     reason = 'FD9: after_commit не очищает список ROLLBACK (app/database/database.py)',
+# )
+# ↑ до 2026-10-30 (ТД-9): ошибка исправлена в app/database/database.py
 def test_fd9_rollback_list_dropped_after_commit(
     tmp_path : Path,  # папка файлов
     db,               # временная база

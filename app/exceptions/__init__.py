@@ -7,16 +7,24 @@
 журнал проверок — ``app/exceptions/IMPLEMENTATION.md``. Бросают их сервисы
 (``app/services``), ловят командная строка и окно.
 
-``__all__`` — все классы, кроме прежнего имени ``ConnectionError`` (псевдоним
-``DatabaseConnectionError``): ``from app.exceptions import *`` не перекрывает встроенный
-``ConnectionError``; явный ``from app.exceptions import ConnectionError`` по-прежнему работает.
+``__all__`` — все классы и ``photo_error_from_os_error``, кроме прежних имён
+``ConnectionError`` (псевдоним ``DatabaseConnectionError``) и ``IntegrityError`` (псевдоним
+``DbIntegrityError``): ``from app.exceptions import *`` не перекрывает встроенный
+``ConnectionError`` и ``sqlalchemy.exc.IntegrityError``; явный импорт прежнего имени
+(``from app.exceptions import ConnectionError``) по-прежнему работает.
 
-Пример:
+У каждого исключения — текст пользователю (``str(exc)``), подробности (``details``) и
+исходная ошибка (``original``) для журнала; всё вместе — ``exc.log_text()``.
+
+Example:
     >>> from app.exceptions import EntityNotFoundError, PatientNotFoundError
     >>> isinstance(PatientNotFoundError(1), EntityNotFoundError)
     True
-    >>> 'ConnectionError' in __all__
-    False
+    >>> 'ConnectionError' in __all__, 'IntegrityError' in __all__
+    (False, False)
+    >>> print(PatientNotFoundError(1, details='поиск по карточке').log_text())
+    [1001] Пациент с идентификатором 1 не найден.
+      Подробности: поиск по карточке
 """
 
 
@@ -40,12 +48,16 @@ from app.exceptions.exceptions_all import (
     # Фото
     PhotoNotFoundError, PhotoValidationError, PhotoFileError,
     PhotoStoragePermissionError, PhotoStorageNoSpaceError,
+    photo_error_from_os_error, # ошибка ОС → исключение файла фото
 
     # Синхронизация
     SyncError, DownloadError, UploadError, TokenError,
 
     # База данных
-    DatabaseError, IntegrityError, DatabaseConnectionError,
+    # DatabaseError, IntegrityError, DatabaseConnectionError,
+    # ↑ до 2026-10-31 (Ф1.6.8а): IntegrityError → DbIntegrityError (имя совпадало с
+    #   sqlalchemy.exc.IntegrityError); прежнее имя — присваиванием ниже.
+    DatabaseError, DbIntegrityError, DatabaseConnectionError,
     # ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
     # ↑ до 2026-10-25 (E11): pyflakes — «imported but unused» (имени нет в __all__).
 )
@@ -54,7 +66,12 @@ from app.exceptions.exceptions_all import (
 # перекрывает встроенный ConnectionError). Присваивание, а не импорт: pyflakes без замечаний.
 ConnectionError = DatabaseConnectionError
 
-# Что экспортируется при импорте * (без ConnectionError — не перекрывать встроенный)
+# Прежнее имя DbIntegrityError — так же: в __all__ нет, import * не перекрывает
+# sqlalchemy.exc.IntegrityError
+IntegrityError = DbIntegrityError
+
+# Что экспортируется при импорте * (без прежних имён ConnectionError, IntegrityError —
+# не перекрывать встроенный и драйверный)
 __all__ = [
     'AppException',
     'EntityNotFoundError', 'EntityValidationError',
@@ -63,8 +80,9 @@ __all__ = [
     'AppointmentNoteNotFoundError', 'AppointmentNoteValidationError',
     'PhotoNotFoundError', 'PhotoValidationError', 'PhotoFileError',
     'PhotoStoragePermissionError', 'PhotoStorageNoSpaceError',
+    'photo_error_from_os_error',
     'SyncError', 'DownloadError', 'UploadError', 'TokenError',
-    'DatabaseError', 'IntegrityError', 'DatabaseConnectionError',
+    'DatabaseError', 'DbIntegrityError', 'DatabaseConnectionError',
 ]
 
 # ↓ до rework-exceptions (2026-10-21): импорт и __all__ — без общих EntityValidationError,

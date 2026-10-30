@@ -7,9 +7,9 @@
 | Файл | Назначение |
 |---|---|
 | [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO`, `AppointmentNoteDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`; заметки — `NOTES`, с 2026-10-30) |
-| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG`, `NOTE_CONFIG` — из описаний (`build_config`; заметки — с 2026-10-30); `get_note_fields`; `MODEL_CONFIG_MAP` (устарело) |
+| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG`, `NOTE_CONFIG` — из описаний (`build_config`; заметки — с 2026-10-30); `get_note_fields`; `MODEL_CONFIG_MAP` — убран 2026-10-30 (комментарием) |
 | [compute_fields.py](compute_fields.py) | `get_patient_full_name`, `join_name_parts` (не используется приложением) |
-| Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_schema/` (совпадение с прежними DTO) |
+| Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_dto_layers.py` (слои), `tests/test_schema/` (совпадение с прежними DTO) |
 
 ---
 
@@ -18,9 +18,12 @@
 * Новое поле или таблица — в описании `app/schema/clinic.py`; DTO и конфигурация полей
   строятся из него. Заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) — тоже, из `NOTES`
   (2026-10-30, ОСТ п. 4.4; прежние — комментарием).
-* `MODEL_CONFIG_MAP` и `get_note_fields` нужны только регистрации `_NOTE_USAGE_MODELS` в
-  `app/dependencies.py`, которую никто не читает с DYN2 (сервис заметок узнаёт ссылки из
-  схемы БД). Новую таблицу туда добавлять не нужно; удаление — шаг `dependencies`.
+* `MODEL_CONFIG_MAP` убран комментарием вместе с импортом моделей (2026-10-30, Ф1.3.3,
+  Ф1.7.3): его читала только регистрация `_NOTE_USAGE_MODELS` в `app/dependencies.py`,
+  закомментированная с DP3 (сервис заметок узнаёт ссылки из схемы БД — DYN2), а импорт
+  моделей был связью слоёв «снизу вверх». `get_note_fields` (чистая функция) — оставлена.
+  `app.dto` не импортирует модели, `app.dependencies` и сервисы — тест
+  `tests/test_dto_layers.py` (разбор исходников).
 
 ---
 
@@ -48,3 +51,4 @@
 | Шаг | Файл | Что |
 |---|---|---|
 | Ф1.3.2 | `dto_all.py`, `field_configs.py` | `AppointmentNoteDTO`, `NOTE_CONFIG` — из описания `NOTES` (`app/schema/clinic.py`); совпадают со снимком написанных вручную (`tests/test_schema/test_notes_def.py`); прежние — комментарием. `BaseModel`, `ConfigDict`, `Field`, `Optional` в `dto_all.py` больше не используются — оставлены (старый код — комментарием, правило проекта), как `datetime`, `List` в проходе 1 |
+| Ф1.3.3, Ф1.7.3 | `field_configs.py` | `MODEL_CONFIG_MAP` и импорт `Patient`, `Appointment` — комментарием (карту никто не читал; импорт моделей — связь «снизу вверх»). Тесты `tests/test_dto_layers.py` (4; на старом коде 2 падают). Весь набор: 2016 / 0 / 8 / 5 xfail |

@@ -174,26 +174,28 @@ def _root_cause(
 def _restore_exception(
     cls   : Type['AppException'],  # класс исключения
     state : Dict[str, Any],        # атрибуты экземпляра (__dict__)
-) -> 'AppException':
+) -> 'AppException': # копия исключения без вызова __init__
     """
-    Восстановление исключения при ``pickle``/``copy`` без вызова ``__init__``.
+    Восстанавливает исключение при ``pickle``/``copy`` без вызова ``__init__``.
 
     ``__init__`` наследников принимает не текст, а данные (``patient_id``, ``path`` …),
     поэтому стандартное восстановление ``cls(*args)`` у них ломается. Здесь экземпляр
     создаётся через ``__new__``, ``args`` — как у ``Exception(message)``, атрибуты
-    переносятся из ``state``.
+    переносятся из ``state`` (что в него попадает — ``AppException.__reduce__``). Ключей
+    ``details``, ``_original``, ``_original_text`` в ``state`` может не быть (копия, снятая до
+    2026-10-31) — тогда действуют умолчания класса ``AppException`` (``None``).
 
     Args:
-        cls (Type[AppException]): Класс.
-        state (Dict[str, Any]): Атрибуты.
+        cls   : (Type[AppException]) Класс.
+        state : (Dict[str, Any]) Атрибуты.
 
     Returns:
-        AppException: Копия исключения.
+        (AppException) Копия исключения.
 
-    Пример:
+    Example:
         >>> exc = _restore_exception(PatientNotFoundError, {'message': 'нет', 'code': 1001})
-        >>> (type(exc).__name__, str(exc), exc.args)
-        ('PatientNotFoundError', '[1001] нет', ('нет',))
+        >>> (type(exc).__name__, str(exc), exc.args, exc.details, exc.log_text())
+        ('PatientNotFoundError', '[1001] нет', ('нет',), None, '[1001] нет')
     """
     exc = cls.__new__(cls)
     # args — как после AppException.__init__ (Exception(message))

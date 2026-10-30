@@ -435,7 +435,7 @@ def test_integrity_error_old_name_is_alias() -> None:
 
 def test_star_import_does_not_shadow_sqlalchemy_integrity_error() -> None:
     """import * не перекрывает IntegrityError драйвера (раньше перекрывал бы)."""
-    namespace: dict = {'IntegrityError': sqlite3.IntegrityError}
+    namespace : dict = {'IntegrityError': sqlite3.IntegrityError}   # «модуль» с драйверным именем
     exec('from app.exceptions import *', namespace)
     assert namespace['IntegrityError'] is sqlite3.IntegrityError
     assert namespace['DbIntegrityError'] is DbIntegrityError
@@ -452,8 +452,8 @@ def test_star_import_does_not_shadow_sqlalchemy_integrity_error() -> None:
     (OSError(errno.ENOSPC, 'No space left on device'), PhotoStorageNoSpaceError),
 ], ids=['EACCES', 'EPERM', 'OSError-EACCES', 'ENOSPC'])
 def test_photo_error_storage_classes(
-    source : OSError,                      # ошибка ОС
-    cls    : Callable[..., PhotoFileError], # ожидаемый класс
+    source : OSError,                         # ошибка ОС
+    cls    : Callable[..., PhotoFileError],   # ожидаемый класс
 ) -> None:
     """Нет прав / нет места — свои классы; исходная ошибка — в original."""
     exc = photo_error_from_os_error(

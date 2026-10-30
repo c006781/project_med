@@ -7,16 +7,24 @@
 журнал проверок — ``app/exceptions/IMPLEMENTATION.md``. Бросают их сервисы
 (``app/services``), ловят командная строка и окно.
 
-``__all__`` — все классы, кроме прежнего имени ``ConnectionError`` (псевдоним
-``DatabaseConnectionError``): ``from app.exceptions import *`` не перекрывает встроенный
-``ConnectionError``; явный ``from app.exceptions import ConnectionError`` по-прежнему работает.
+``__all__`` — все классы и ``photo_error_from_os_error``, кроме прежних имён
+``ConnectionError`` (псевдоним ``DatabaseConnectionError``) и ``IntegrityError`` (псевдоним
+``DbIntegrityError``): ``from app.exceptions import *`` не перекрывает встроенный
+``ConnectionError`` и ``sqlalchemy.exc.IntegrityError``; явный импорт прежнего имени
+(``from app.exceptions import ConnectionError``) по-прежнему работает.
 
-Пример:
+У каждого исключения — текст пользователю (``str(exc)``), подробности (``details``) и
+исходная ошибка (``original``) для журнала; всё вместе — ``exc.log_text()``.
+
+Example:
     >>> from app.exceptions import EntityNotFoundError, PatientNotFoundError
     >>> isinstance(PatientNotFoundError(1), EntityNotFoundError)
     True
-    >>> 'ConnectionError' in __all__
-    False
+    >>> 'ConnectionError' in __all__, 'IntegrityError' in __all__
+    (False, False)
+    >>> print(PatientNotFoundError(1, details='поиск по карточке').log_text())
+    [1001] Пациент с идентификатором 1 не найден.
+      Подробности: поиск по карточке
 """
 
 

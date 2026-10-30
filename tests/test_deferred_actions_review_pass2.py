@@ -69,14 +69,16 @@ def test_da4_inactive_session_still_queued() -> None:
 
 
 # ---------------------------------------------------------------------------
-# DA5 — списки действий переживают свою транзакцию (вне территории: обработчики
-# app/database/database.py; то же, что FD9 для удалений)
+# DA5 — списки действий переживали свою транзакцию (обработчики app/database/database.py;
+# то же, что FD9 для удалений). Исправлено 2026-10-30 (ТД-9) — пометка xfail снята;
+# действия «при откате» после коммита — tests/test_database_shema/test_session_lists.py.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    strict = True,
-    reason = 'DA5: after_rollback не очищает список COMMIT (app/database/database.py)',
-)
+# @pytest.mark.xfail(
+#     strict = True,
+#     reason = 'DA5: after_rollback не очищает список COMMIT (app/database/database.py)',
+# )
+# ↑ до 2026-10-30 (ТД-9): ошибка исправлена в app/database/database.py
 def test_da5_commit_actions_dropped_after_rollback(
     no_qt_app,  # действия — сразу
     db,         # временная база

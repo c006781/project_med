@@ -108,6 +108,7 @@ from app.database.database_shema.temp_data_bd import populate_test_data
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
+from typing import Any, Callable
 
 
 @AppLogger.get_instance(
@@ -115,19 +116,133 @@ from contextlib import contextmanager
     enable_file_logging='system',
     use_name_in_filename=False,  # 'system'
 ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-def _make_deletion_handler(deletion_type: DeletionType):
-    """Создаёт обработчик для указанного типа отложенного удаления."""
+# def _make_deletion_handler(deletion_type: DeletionType):
+#     """Создаёт обработчик для указанного типа отложенного удаления."""
+#     logger = AppLogger.get_instance(
+#         name='Database',
+#         enable_file_logging='user',
+#         use_name_in_filename=False,
+#     )
+#     @AppLogger.get_instance(
+#         name='api.Database',
+#         enable_file_logging = 'system',
+#         use_name_in_filename = False, # 'system'
+#     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+#     def handler(session, *args):
+#         items = get_deletions_by_type(session, deletion_type)
+#         if not items:
+#             return
+#
+#         failed_items = []
+#         for item in items:
+#             try:
+#                 del_file_and_parent_dir(
+#                     file_path=item['path'],
+#                     remove_parent_if_empty=item.get('remove_parent_if_empty', False),
+#                     force=item.get('force', False),
+#                     logger=logger,
+#                 )
+#             except Exception as e:
+#                 logger.warning(f"Ошибка удаления {item['path']}: {e}")
+#                 failed_items.append(item)
+#
+#         clear_deletions_by_type(session, deletion_type)
+#
+#         if failed_items:
+#             session._deletions[deletion_type].extend(failed_items)
+#
+#     return handler
+# ↑ до 2026-10-30 (ТД-9): чистился только список своего события. Сессия — scoped_session
+#   (одна на поток, close() её не заменяет), поэтому удаления «после коммита» из
+#   откатившейся транзакции выполнял следующий чужой коммит, а «при откате» из
+#   закоммиченной (новый файл фото) — следующий чужой откат: удалялся сохранённый файл.
+
+
+def _discard_other_deletions(
+    session  : Any,           # сессия со списками удалений
+    finished : DeletionType,  # чем закончилась транзакция (COMMIT / ROLLBACK)
+) -> None: # отбрасывает удаления противоположного события
+    """
+    Отбрасывает отложенные удаления противоположного события: транзакция закончилась
+    ``finished``, и записи другого списка к ней больше не относятся.
+
+    Записи с пометкой ``retry`` (удаление уже пытались выполнить своим событием, и оно не
+    удалось — например, файл занят) остаются: их повторит следующее событие их вида.
+
+    Args:
+        session  : (Any) Сессия SQLAlchemy со словарём ``_deletions``.
+        finished : (DeletionType) Событие, которым закончилась транзакция.
+
+    Example:
+        >>> _discard_other_deletions(
+        ...     session,                 # закоммиченная сессия
+        ...     DeletionType.COMMIT,     # закончилась коммитом
+        ... )
+        >>> get_deletions_by_type(session, DeletionType.ROLLBACK)
+        []
+    """
+    other = DeletionType.ROLLBACK if finished is DeletionType.COMMIT else DeletionType.COMMIT
+    items = get_deletions_by_type(session, other)
+    items[:] = [item for item in items if item.get('retry')]
+
+
+def _make_deletion_handler(
+    deletion_type : DeletionType,  # событие обработчика (COMMIT — after_commit, ROLLBACK — after_rollback)
+) -> Callable[..., None]: # обработчик события сессии
+    """
+    Создаёт обработчик события сессии для отложенных удалений вида ``deletion_type``.
+
+    Обработчик: 1) отбрасывает удаления противоположного события (ТД-9, кроме повторов);
+    2) удаляет файлы своего списка; 3) неудавшиеся оставляет в списке с пометкой ``retry`` —
+    их повторит следующее событие того же вида, даже если между ними была транзакция
+    другого вида.
+
+    Args:
+        deletion_type : (DeletionType) Какой список выполняет обработчик.
+
+    Returns:
+        (Callable[..., None]) Обработчик ``handler(session, *args)``.
+
+    Example:
+        >>> event.listen(
+        ...     Session,                                    # фабрика сессий
+        ...     'after_commit',                             # событие
+        ...     _make_deletion_handler(DeletionType.COMMIT),
+        ... )
+    """
     logger = AppLogger.get_instance(
-        name='Database',
-        enable_file_logging='user',
-        use_name_in_filename=False,
+        name                 = 'Database', # журнал базы
+        enable_file_logging  = 'user',     # файл пользователя
+        use_name_in_filename = False,      # имя не в имени файла
     )
+
     @AppLogger.get_instance(
-        name='api.Database',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def handler(session, *args):
+        name                 = 'api.Database', # журнал вызовов
+        enable_file_logging  = 'system',       # системный файл
+        use_name_in_filename = False,          # имя не в имени файла
+    ).log_execution_time(
+        level = AppLogger._parse_log_level('DEBUG'),
+    )
+    def handler(
+        session : Any,  # сессия, транзакция которой закончилась
+        *args   : Any,  # прочие аргументы события (не используются)
+    ) -> None: # выполняет удаления своего события
+        """
+        Выполняет отложенные удаления своего события и отбрасывает удаления противоположного.
+
+        Args:
+            session : (Any) Сессия SQLAlchemy.
+            *args   : (Any) Прочие аргументы события.
+
+        Example:
+            >>> handler(session)
+        """
+        # транзакция закончилась — записи противоположного события к ней больше не относятся
+        _discard_other_deletions(
+            session,
+            deletion_type,
+        )
+
         items = get_deletions_by_type(session, deletion_type)
         if not items:
             return
@@ -136,13 +251,14 @@ def _make_deletion_handler(deletion_type: DeletionType):
         for item in items:
             try:
                 del_file_and_parent_dir(
-                    file_path=item['path'],
-                    remove_parent_if_empty=item.get('remove_parent_if_empty', False),
-                    force=item.get('force', False),
-                    logger=logger,
+                    file_path              = item['path'],
+                    remove_parent_if_empty = item.get('remove_parent_if_empty', False),
+                    force                  = item.get('force', False),
+                    logger                 = logger,
                 )
             except Exception as e:
                 logger.warning(f"Ошибка удаления {item['path']}: {e}")
+                item['retry'] = True  # повтор — следующим событием этого вида
                 failed_items.append(item)
 
         clear_deletions_by_type(session, deletion_type)
@@ -324,18 +440,71 @@ class Database:
                 use_name_in_filename = False, # 'system',
             )
 
+            # @event.listens_for(Session, "after_commit")
+            # def execute_commit_actions(session, *args):
+            #     actions = get_actions_by_type(session, ActionType.COMMIT)
+            #     if actions:
+            #         execute_actions(actions, logger=logger)
+            #         clear_actions_by_type(session, ActionType.COMMIT)
+            #
+            # @event.listens_for(Session, "after_rollback")
+            # def execute_rollback_actions(session, *args):
+            #     actions = get_actions_by_type(session, ActionType.ROLLBACK)
+            #     if actions:
+            #         execute_actions(actions, logger=logger)
+            #         clear_actions_by_type(session, ActionType.ROLLBACK)
+            # ↑ до 2026-10-30 (ТД-9): список противоположного события не чистился — действие
+            #   «после коммита» из откатившейся транзакции выполнял следующий чужой коммит
+            #   той же сессии (scoped_session), «при откате» из закоммиченной — чужой откат.
+
             @event.listens_for(Session, "after_commit")
-            def execute_commit_actions(session, *args):
+            def execute_commit_actions(
+                session : Any,  # закоммиченная сессия
+                *args   : Any,  # прочие аргументы события (не используются)
+            ) -> None: # выполняет действия «после коммита», отбрасывает «при откате»
+                """
+                Выполняет отложенные действия «после коммита» и отбрасывает действия «при
+                откате» (транзакция закоммичена — они к ней больше не относятся, ТД-9).
+
+                Args:
+                    session : (Any) Сессия SQLAlchemy.
+                    *args   : (Any) Прочие аргументы события.
+
+                Example:
+                    >>> execute_commit_actions(session)
+                """
+                clear_actions_by_type(session, ActionType.ROLLBACK)
                 actions = get_actions_by_type(session, ActionType.COMMIT)
                 if actions:
-                    execute_actions(actions, logger=logger)
+                    execute_actions(
+                        actions,
+                        logger = logger,
+                    )
                     clear_actions_by_type(session, ActionType.COMMIT)
 
             @event.listens_for(Session, "after_rollback")
-            def execute_rollback_actions(session, *args):
+            def execute_rollback_actions(
+                session : Any,  # откатившаяся сессия
+                *args   : Any,  # прочие аргументы события (не используются)
+            ) -> None: # выполняет действия «при откате», отбрасывает «после коммита»
+                """
+                Выполняет отложенные действия «при откате» и отбрасывает действия «после
+                коммита» (транзакция откатилась — они к ней больше не относятся, ТД-9).
+
+                Args:
+                    session : (Any) Сессия SQLAlchemy.
+                    *args   : (Any) Прочие аргументы события.
+
+                Example:
+                    >>> execute_rollback_actions(session)
+                """
+                clear_actions_by_type(session, ActionType.COMMIT)
                 actions = get_actions_by_type(session, ActionType.ROLLBACK)
                 if actions:
-                    execute_actions(actions, logger=logger)
+                    execute_actions(
+                        actions,
+                        logger = logger,
+                    )
                     clear_actions_by_type(session, ActionType.ROLLBACK)
 
             Session._deferred_actions_registered = True
@@ -455,28 +624,27 @@ class Database:
     @contextmanager
     def session_scope(self):
         """
-        Контекстный менеджер для автоматической фиксации/отката изменений.
+        Даёт сессию на блок ``with``: без ошибки — коммит, с ошибкой — откат и повторный
+        выброс исключения; в конце сессия закрывается.
 
-        Обеспечивает:
-            - Автоматический коммит при успешном завершении блока.
-            - Откат (rollback) при возникновении исключения.
-            - Закрытие сессии и удаление привязки к потоку в блоке `finally`.
-            - Инициализацию атрибута `session._pending_deletions` (список путей для
-              отложенного удаления файлов после коммита).
+        Порядок: 1) сессия потока (``scoped_session`` — одна на поток, ``close()`` её не
+        заменяет); 2) словарь отложенных удалений ``session._deletions`` (COMMIT / ROLLBACK);
+        3) блок; 4) коммит — обработчики ``after_commit`` выполняют удаления и действия
+        «после коммита» и отбрасывают «при откате»; при ошибке — откат: обработчики
+        ``after_rollback`` наоборот. Если в блоке не было запросов (транзакция не
+        начиналась), перед откатом начинается пустая транзакция — иначе SQLAlchemy не
+        вызывает ``after_rollback``, и списки блока достались бы следующей транзакции (ТД-9).
+        ``session.remove()`` не вызывается — привязка к потоку остаётся.
 
-        Алгоритм:
-            1. Создаёт сессию.
-            2. Гарантирует наличие атрибута `_pending_deletions` (пустой список).
-            3. Возвращает сессию в контексте `with`.
-            4. Если в контексте не было ошибок, коммитит сессию. После коммита
-               обработчик `after_commit` удаляет файлы из `_pending_deletions`.
-            5. Если была ошибка, откатывает сессию и очищает `_pending_deletions`
-               (файлы не удаляются).
-            6. Закрывает сессию и удаляет привязку к потоку.
+        Raises:
+            Exception: Любое исключение блока или коммита — после отката.
 
-        Исключения:
-            Любое исключение, возникшее внутри блока, пробрасывается после отката.
+        Example:
+            >>> with db.session_scope() as session:
+            ...     patients = session.query(Patient).all()
         """
+        # ↑ до 2026-10-30 (ТД-9): описание называло прежний список _pending_deletions и
+        #   обещало «удаление привязки к потоку» (remove закомментирован).
         session = self.get_session()
 
         # # Создаём список для отложенных удалений, привязанный к сессии
@@ -498,6 +666,13 @@ class Database:
             # При откате просто очищаем список, файлы не удаляем
             # if hasattr(session, '_pending_deletions'):
             #     session._pending_deletions.clear()
+
+            # Транзакция не начиналась (в блоке не было запросов к БД): rollback() тогда ничего
+            # не делает и after_rollback не вызывается — отложенные удаления и действия этого
+            # блока достались бы следующей транзакции потока (ТД-9). Пустая транзакция
+            # соединения не открывает, её откат проходит через обработчики.
+            if not session.in_transaction():
+                session.begin()
 
             # Если была ошибка, откатывает сессию
             session.rollback()

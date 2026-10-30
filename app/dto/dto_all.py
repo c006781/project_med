@@ -14,9 +14,9 @@ DTO (Data Transfer Objects) на базе Pydantic.
 Для каждого DTO установлена конфигурация `from_attributes = True`, что позволяет
 создавать DTO из ORM-объектов SQLAlchemy через `model_validate(obj)`.
 
-PatientDTO, AppointmentDTO, PhotoDTO строятся из описаний таблиц (``app/schema/clinic.py``,
-``TableDef.build_dto``): новое поле — в описании таблицы, не здесь. AppointmentNoteDTO пока
-написан вручную (_dev/ОСТАЛОСЬ.md п. 4.4).
+Все DTO строятся из описаний таблиц (``app/schema/clinic.py``, ``TableDef.build_dto``):
+новое поле — в описании таблицы, не здесь. ``AppointmentNoteDTO`` — из ``NOTES`` (с
+2026-10-30; до этого был написан вручную).
 
 Пример:
     >>> dto = PatientDTO(first_name="Иван", last_name="Петров")
@@ -302,7 +302,7 @@ from pydantic import ( # pip install pydantic>=2.0
 #     )
 
 
-from app.schema.clinic import APPOINTMENTS, PATIENTS, PHOTOS  # noqa: E402
+from app.schema.clinic import APPOINTMENTS, NOTES, PATIENTS, PHOTOS  # noqa: E402
 from app.schema.define import rebuild_dtos  # noqa: E402
 
 PatientDTO = PATIENTS.build_dto(module=__name__)
@@ -312,36 +312,43 @@ rebuild_dtos(PatientDTO, AppointmentDTO, PhotoDTO)      # photos: List['PhotoDTO
 
 
 
-class AppointmentNoteDTO(BaseModel):
-    """
-    DTO для заметки приёма.
+# ↓ до 2026-10-30 (Ф1.3.2): AppointmentNoteDTO был написан здесь вручную; теперь строится
+#   из описания NOTES (app/schema/clinic.py). Поля, типы, умолчания, описания и порядок —
+#   те же (снимок tests/test_schema/legacy_snapshot_notes.py).
+# class AppointmentNoteDTO(BaseModel):
+#     """
+#     DTO для заметки приёма.
+#
+#     Используется для передачи текста заметки, которая может быть привязана
+#     к одному или нескольким приёмам.
+#
+#     Атрибуты:
+#         id (Optional[int]): Уникальный идентификатор заметки (None – для новой).
+#         text (str): Содержимое заметки (обязательное).
+#
+#     Конфигурация:
+#         model_config = ConfigDict(from_attributes=True).
+#
+#     Пример:
+#         >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
+#         >>> note_dto.text
+#         'Первичный осмотр. Жалобы на головную боль.'
+#         >>> note_dto.id is None
+#         True
+#     """
+#     # ↑ до rework-dto (2026-10-21): print(...) выводит текст без кавычек — doctest падал
+#
+#     model_config = ConfigDict(from_attributes=True)
+#
+#     id: Optional[int] = Field(
+#         None,
+#         description='ID заметки (None для новой)'
+#     )
+#     text: str = Field(
+#         ...,
+#         description='Содержимое заметки'
+#     )
 
-    Используется для передачи текста заметки, которая может быть привязана
-    к одному или нескольким приёмам.
-
-    Атрибуты:
-        id (Optional[int]): Уникальный идентификатор заметки (None – для новой).
-        text (str): Содержимое заметки (обязательное).
-
-    Конфигурация:
-        model_config = ConfigDict(from_attributes=True).
-
-    Пример:
-        >>> note_dto = AppointmentNoteDTO(text="Первичный осмотр. Жалобы на головную боль.")
-        >>> note_dto.text
-        'Первичный осмотр. Жалобы на головную боль.'
-        >>> note_dto.id is None
-        True
-    """
-    # ↑ до rework-dto (2026-10-21): print(...) выводит текст без кавычек — doctest падал
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: Optional[int] = Field(
-        None,
-        description='ID заметки (None для новой)'
-    )
-    text: str = Field(
-        ...,
-        description='Содержимое заметки'
-    )
+AppointmentNoteDTO = NOTES.build_dto(
+    module  =   __name__,   # класс «живёт» в модуле DTO
+)

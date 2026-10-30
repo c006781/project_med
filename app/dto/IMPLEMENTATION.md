@@ -6,8 +6,8 @@
 
 | Файл | Назначение |
 |---|---|
-| [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`); `AppointmentNoteDTO` — вручную |
-| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG` — из описаний (`build_config`); `NOTE_CONFIG` — вручную; `get_note_fields`; `MODEL_CONFIG_MAP` (устарело) |
+| [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO`, `AppointmentNoteDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`; заметки — `NOTES`, с 2026-10-30) |
+| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG`, `NOTE_CONFIG` — из описаний (`build_config`; заметки — с 2026-10-30); `get_note_fields`; `MODEL_CONFIG_MAP` (устарело) |
 | [compute_fields.py](compute_fields.py) | `get_patient_full_name`, `join_name_parts` (не используется приложением) |
 | Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_schema/` (совпадение с прежними DTO) |
 
@@ -16,8 +16,8 @@
 ## 1. Как устроено
 
 * Новое поле или таблица — в описании `app/schema/clinic.py`; DTO и конфигурация полей
-  строятся из него. Вручную остались заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) —
-  _dev/ОСТАЛОСЬ.md п. 4.4.
+  строятся из него. Заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) — тоже, из `NOTES`
+  (2026-10-30, ОСТ п. 4.4; прежние — комментарием).
 * `MODEL_CONFIG_MAP` и `get_note_fields` нужны только регистрации `_NOTE_USAGE_MODELS` в
   `app/dependencies.py`, которую никто не читает с DYN2 (сервис заметок узнаёт ссылки из
   схемы БД). Новую таблицу туда добавлять не нужно; удаление — шаг `dependencies`.
@@ -42,3 +42,9 @@
 11 проходят (поведение, которое не менялось).
 
 ### Проход 2 (2026-10-21) — замечаний нет
+
+### М7 (2026-10-30, ветка `rework_work/schema`)
+
+| Шаг | Файл | Что |
+|---|---|---|
+| Ф1.3.2 | `dto_all.py`, `field_configs.py` | `AppointmentNoteDTO`, `NOTE_CONFIG` — из описания `NOTES` (`app/schema/clinic.py`); совпадают со снимком написанных вручную (`tests/test_schema/test_notes_def.py`); прежние — комментарием. `BaseModel`, `ConfigDict`, `Field`, `Optional` в `dto_all.py` больше не используются — оставлены (старый код — комментарием, правило проекта), как `datetime`, `List` в проходе 1 |

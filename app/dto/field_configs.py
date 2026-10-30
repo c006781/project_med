@@ -34,7 +34,7 @@
 
 from typing import Dict, Any, List
 
-from app.schema.clinic import APPOINTMENTS, PATIENTS, PHOTOS
+from app.schema.clinic import APPOINTMENTS, NOTES, PATIENTS, PHOTOS
 
 # from app.dto.compute_fields import get_patient_full_name
 
@@ -353,21 +353,26 @@ PATIENT_CONFIG: Dict[str, Dict[str, Any]] = PATIENTS.build_config()
 APPOINTMENT_CONFIG: Dict[str, Dict[str, Any]] = APPOINTMENTS.build_config()
 
 # --- Заметки ---
-NOTE_CONFIG: Dict[str, Dict[str, Any]] = {
-    'id'            : {
-        'title'         : 'ID',     # заголовок колонки
-        'editable'      : False,    # редактируемый ли
-        'hidden'        : True,     # скрываем ли его объект
-        'updatable'     : False,    # полее не должно обновляться автоматически
-    },
-    'text'          : {
-        'title'         : 'Текст заметки',  # заголовок колонки
-        'editable'      : True,             # редактируемый ли
-        'required'      : True,             # Поле обязательно для заполнения (валидация на стороне сервиса).
-        'widget_type'   : 'textarea',       # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
-        'init_from_extra': 'text',          # ключ в extra_data
-    },
-}
+# ↓ до 2026-10-30 (Ф1.3.2): NOTE_CONFIG был написан здесь вручную; теперь строится из описания
+#   NOTES (app/schema/clinic.py, NOTES.build_config()). Ключи, значения и порядок — те же
+#   (снимок tests/test_schema/legacy_snapshot_notes.py).
+# NOTE_CONFIG: Dict[str, Dict[str, Any]] = {
+#     'id'            : {
+#         'title'         : 'ID',     # заголовок колонки
+#         'editable'      : False,    # редактируемый ли
+#         'hidden'        : True,     # скрываем ли его объект
+#         'updatable'     : False,    # полее не должно обновляться автоматически
+#     },
+#     'text'          : {
+#         'title'         : 'Текст заметки',  # заголовок колонки
+#         'editable'      : True,             # редактируемый ли
+#         'required'      : True,             # Поле обязательно для заполнения (валидация на стороне сервиса).
+#         'widget_type'   : 'textarea',       # виджет (указатель на тип виджета) # какой именно виджет Qt следует использовать для редактирования или отображения этого поля в динамической форме
+#         'init_from_extra': 'text',          # ключ в extra_data
+#     },
+# }
+
+NOTE_CONFIG: Dict[str, Dict[str, Any]] = NOTES.build_config()
 
 # --- Фотографии ---
 # ↓ до 2026-10-19: PHOTO_CONFIG был написан здесь вручную; теперь строится из описания таблицы

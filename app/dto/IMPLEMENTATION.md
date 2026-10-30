@@ -2,25 +2,29 @@
 
 > Файл для разработчиков: что делает модуль, как устроен, почему так и журнал проверок.
 > Обновляется вместе с кодом.
-> Последнее обновление: 2026-10-21, проходы 1–2 (ветка `rework-dto`).
+> Последнее обновление: 2026-10-30, М7 (ветка `rework_work/schema`); до этого — 2026-10-21,
+> проходы 1–2 (ветка `rework-dto`).
 
 | Файл | Назначение |
 |---|---|
-| [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`); `AppointmentNoteDTO` — вручную |
-| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG` — из описаний (`build_config`); `NOTE_CONFIG` — вручную; `get_note_fields`; `MODEL_CONFIG_MAP` (устарело) |
-| [compute_fields.py](compute_fields.py) | `get_patient_full_name`, `join_name_parts` (не используется приложением) |
-| Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_schema/` (совпадение с прежними DTO) |
+| [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO`, `AppointmentNoteDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`; заметки — `NOTES`, с 2026-10-30) |
+| [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG`, `NOTE_CONFIG` — из описаний (`build_config`; заметки — с 2026-10-30); `get_note_fields`; `MODEL_CONFIG_MAP` — убран 2026-10-30 (комментарием) |
+| [compute_fields.py](compute_fields.py) | `get_patient_full_name` (сервис — параметр, с 2026-10-30), `join_name_parts` (не используется приложением; ТД-13) |
+| Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_dto_layers.py` (слои), `tests/test_schema/` (совпадение с прежними DTO) |
 
 ---
 
 ## 1. Как устроено
 
 * Новое поле или таблица — в описании `app/schema/clinic.py`; DTO и конфигурация полей
-  строятся из него. Вручную остались заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) —
-  _dev/ОСТАЛОСЬ.md п. 4.4.
-* `MODEL_CONFIG_MAP` и `get_note_fields` нужны только регистрации `_NOTE_USAGE_MODELS` в
-  `app/dependencies.py`, которую никто не читает с DYN2 (сервис заметок узнаёт ссылки из
-  схемы БД). Новую таблицу туда добавлять не нужно; удаление — шаг `dependencies`.
+  строятся из него. Заметки (`AppointmentNoteDTO`, `NOTE_CONFIG`) — тоже, из `NOTES`
+  (2026-10-30, ОСТ п. 4.4; прежние — комментарием).
+* `MODEL_CONFIG_MAP` убран комментарием вместе с импортом моделей (2026-10-30, Ф1.3.3,
+  Ф1.7.3): его читала только регистрация `_NOTE_USAGE_MODELS` в `app/dependencies.py`,
+  закомментированная с DP3 (сервис заметок узнаёт ссылки из схемы БД — DYN2), а импорт
+  моделей был связью слоёв «снизу вверх». `get_note_fields` (чистая функция) — оставлена.
+  `app.dto` не импортирует модели, `app.dependencies` и сервисы — тест
+  `tests/test_dto_layers.py` (разбор исходников).
 
 ---
 
@@ -42,3 +46,12 @@
 11 проходят (поведение, которое не менялось).
 
 ### Проход 2 (2026-10-21) — замечаний нет
+
+### М7 (2026-10-30, ветка `rework_work/schema`)
+
+| Шаг | Файл | Что |
+|---|---|---|
+| Ф1.3.2 | `dto_all.py`, `field_configs.py` | `AppointmentNoteDTO`, `NOTE_CONFIG` — из описания `NOTES` (`app/schema/clinic.py`); совпадают со снимком написанных вручную (`tests/test_schema/test_notes_def.py`); прежние — комментарием. `BaseModel`, `ConfigDict`, `Field`, `Optional` в `dto_all.py` больше не используются — оставлены (старый код — комментарием, правило проекта), как `datetime`, `List` в проходе 1 |
+| Ф1.3.3, Ф1.7.3 | `field_configs.py` | `MODEL_CONFIG_MAP` и импорт `Patient`, `Appointment` — комментарием (карту никто не читал; импорт моделей — связь «снизу вверх»). Тесты `tests/test_dto_layers.py` (4; на старом коде 2 падают). Весь набор: 2016 / 0 / 8 / 5 xfail |
+| Ф1.7.2 | `compute_fields.py` | `get_patient_full_name(patient_id, patient_service)` — сервис параметром (решение владельца 2026-10-30, вариант А), импорт `app.dependencies` — комментарием; функцию никто не вызывает, скрытый импорт сборки оставлен; пересмотреть, если по итогу окажется костылём, — `_dev/ТЕХДОЛГ.md` ТД-13. Тест DT1/DT2 (`test_dto_review_pass1.py`) — подменённый сервис параметром вместо подмены фабрики (проверки ФИО и текстов — прежние). `tests/test_dto_layers.py`: `compute_fields.py` в проверке слоёв; `import app.dto` в отдельном процессе не загружает модели, сборку, сервисы, репозитории. Весь набор: 2019 / 0 / 8 / 5 xfail |
+| сверка Ф1.6.6 | весь модуль | У всех функций — докстринги и аннотации (старые «Аргументы:» / «Пример:» — только в закомментированном коде). pyflakes: 6 неиспользуемых импортов в `dto_all.py` — все нужны только закомментированным прежним классам, оставлены (правило проекта). `app.dto` не импортирует и не загружает модели, сборку, сервисы (`tests/test_dto_layers.py`). Повторный проход — чистый. Весь набор: 2023 / 0 / 8 / 5 xfail |

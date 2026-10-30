@@ -12,9 +12,14 @@
 ``children``, ``computed``, ``timestamp``) и строка в ``CLINIC_DEFS``. Модель, DTO,
 настройки полей, миграция (автомиграции), черновики, наборы, экран — по описанию.
 
+Общие заметки (``NOTES``) — тоже описание, но не в ``CLINIC_DEFS``: из него строятся модель,
+DTO и настройки заметок; строки реестра наборов у заметок пока нет (ПЛАН Ф1.3.4).
+
 Пример:
     >>> [d.name for d in CLINIC_DEFS]
     ['patients', 'appointments', 'photos']
+    >>> NOTES.name
+    'appointments_notes'
 """
 
 from __future__ import annotations
@@ -207,4 +212,54 @@ PHOTOS = TableDef(
     extras=(mark(), calc('image', 'Снимок', photo_image, visible=False, widget='image')),
 )
 
+# Общие заметки: текст, на который ссылаются поля note() других таблиц (переиспользуемый).
+# Совпадает с прежним AppointmentNote / AppointmentNoteDTO / NOTE_CONFIG один в один (снимок
+# tests/test_schema/legacy_snapshot_notes.py).
+NOTES = TableDef(
+    'appointments_notes',                               # таблица (define.NOTES_TABLE)
+    'AppointmentNote',                                  # модель (define.NOTES_MODEL)
+    'AppointmentNoteDTO',                               # DTO
+    doc         =   'Заметка: общий текст, на который ссылаются поля-заметки других таблиц.',
+    comment     =   'Таблица заметок приёмов',          # комментарий таблицы в БД
+    entity      =   'note',                             # тип записи (сервис — get_note_service)
+    title       =   'Заметки',                          # заголовок экрана
+    label       =   'Заметка',                          # одна запись
+    fields      =   (
+        key(
+            'Уникальный идентификатор заметки',         # комментарий столбца
+            dto_desc        =   'ID заметки (None для новой)',  # описание поля DTO
+        ),
+        column(
+            'text',                                     # имя
+            sa.Text(),                                  # тип
+            'Текст заметки',                            # подпись
+            nullable        =   False,                  # NOT NULL, обязательное поле DTO
+            index           =   'ix_appointment_note_text',  # индекс по тексту (поиск повторов)
+            comment         =   'Текст заметки',        # комментарий столбца
+            dto_desc        =   'Содержимое заметки',   # описание поля DTO
+            editable        =   True,                   # правится
+            required        =   True,                   # обязательное (проверка сервисом)
+            widget_type     =   'textarea',             # многострочный редактор
+            init_from_extra =   'text',                 # значение при переходе на страницу
+        ),
+        timestamp(
+            'created_at',                               # имя
+            'Дата и время создания заметки',            # комментарий столбца
+        ),
+        children(
+            'appointments',                             # приёмы, ссылающиеся на заметку
+            'Appointment',                              # модель приёма
+            'note',                                     # связь приёма с заметкой (поле note)
+            cascade         =   None,                   # заметка — не владелец: без каскада удаления
+            foreign_keys    =   '[Appointment.note_id]',  # из пяти ключей приёма на заметки — note_id
+            dto             =   False,                  # не в DTO
+            config          =   False,                  # не в настройках
+        ),
+    ),
+)
+
+# NOTES — НЕ в CLINIC_DEFS (решение 2026-10-30): CLINIC_DEFS — реестр наборов данных экранов
+# (app/tables); заметки там станут ссылками в реестре черновиков — ПЛАН Ф1.3.4 (М15), тогда и
+# решить, нужна ли заметкам строка реестра. Модель, DTO и настройки заметок строятся из NOTES
+# напрямую (app/database/database_shema/clinic.py, app/dto).
 CLINIC_DEFS = (PATIENTS, APPOINTMENTS, PHOTOS)

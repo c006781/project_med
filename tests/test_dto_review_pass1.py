@@ -8,7 +8,9 @@
 
 import doctest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+# from unittest.mock import MagicMock, patch
+# ↑ до 2026-10-30 (Ф1.7.2): patch подменял фабрику сервиса; сервис теперь — параметр
 
 import pytest
 
@@ -38,9 +40,11 @@ def _service_returning(patient=None, error=None):
 
 
 def _full_name(patient=None, error=None, patient_id=1):
-    """get_patient_full_name с подменённым сервисом."""
-    with patch.object(compute_module, 'get_patient_service', return_value=_service_returning(patient, error)):
-        return get_patient_full_name(patient_id)
+    """get_patient_full_name с подменённым сервисом (сервис — параметр с 2026-10-30, Ф1.7.2)."""
+    return get_patient_full_name(patient_id, _service_returning(patient, error))
+    # with patch.object(compute_module, 'get_patient_service', return_value=_service_returning(patient, error)):
+    #     return get_patient_full_name(patient_id)
+    # ↑ до 2026-10-30 (Ф1.7.2): сервис брался из app.dependencies — подменялась фабрика в модуле
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +106,13 @@ def test_dt2_other_error():
 
 def test_dt2_none_id():
     """ID не задан — пустая строка, сервис не вызывается."""
-    with patch.object(compute_module, 'get_patient_service') as factory:
-        assert get_patient_full_name(None) == ''
-    factory.assert_not_called()
+    service = MagicMock()
+    assert get_patient_full_name(None, service) == ''
+    service.get_patient_by_id.assert_not_called()
+    # with patch.object(compute_module, 'get_patient_service') as factory:
+    #     assert get_patient_full_name(None) == ''
+    # factory.assert_not_called()
+    # ↑ до 2026-10-30 (Ф1.7.2): сервис — из app.dependencies (подмена фабрики)
 
 
 def test_dt2_texts():

@@ -679,103 +679,153 @@ def _photo_repr(self: object) -> str:
             f"file={getattr(self, 'file_path', None)})>")
 
 
-from app.schema.clinic import APPOINTMENTS, PATIENTS, PHOTOS  # noqa: E402
+def _note_repr(
+    self : object,  # объект заметки
+) -> str: # строка заметки с началом текста
+    """
+    Возвращает строку заметки (как у прежнего класса): id и первые 30 символов текста.
+
+    Текст длиннее 30 символов обрезается с ``...``; заметка без текста (``None``) — пустое
+    начало, без ошибки (лог репозитория вызывает ``repr`` при каждом ``add``). Ошибка
+    (объект в неполном состоянии) пишется в журнал и пробрасывается — как было.
+
+    Args:
+        self : (object) Объект заметки.
+
+    Returns:
+        (str) ``<Note(id=…, text_preview=…)>``.
+
+    Raises:
+        Exception: Атрибуты объекта не читаются (ошибка — в журнале ``api.AppointmentNote``).
+
+    Example:
+        >>> repr(AppointmentNote(
+        ...     id      =   1,                  # id
+        ...     text    =   'Первичный осмотр', # текст
+        ... ))
+        '<Note(id=1, text_preview=Первичный осмотр)>'
+    """
+    try:
+        id_val = getattr(self, 'id', None)
+        text_val = getattr(self, 'text', None)
+        preview = (text_val or '')[:30]
+        more = '...' if text_val and len(text_val) > 30 else ''
+        return f"<Note(id={id_val}, text_preview={preview}{more})>"
+    except Exception as e:
+        AppLogger.get_instance(
+            name                    =   'api.AppointmentNote',  # журнал модели заметок
+            enable_file_logging     =   'user',                 # журнал пользователя
+            use_name_in_filename    =   False,                  # общий файл
+        ).exception(f'Err: {str(e)}')
+        raise
+
+
+from app.schema.clinic import APPOINTMENTS, NOTES, PATIENTS, PHOTOS  # noqa: E402
 
 Patient = PATIENTS.build_model(Base, {'__repr__': _patient_repr}, module=__name__)
 Appointment = APPOINTMENTS.build_model(Base, {'__repr__': _appointment_repr}, module=__name__)
 Photo = PHOTOS.build_model(Base, {'__repr__': _photo_repr}, module=__name__)
+AppointmentNote = NOTES.build_model(
+    Base,                                   # база приложения
+    {'__repr__': _note_repr},               # строка заметки — как у прежнего класса
+    module  =   __name__,                   # класс «живёт» в модуле моделей
+)
+# ↑ AppointmentNote — из описания с 2026-10-30 (Ф1.3.2); прежний класс — комментарием ниже
 
 
-class AppointmentNote(Base):
-    """
-    Таблица заметок к приёмам.
-
-    Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
-    через поле `note_id` в Appointment).
-
-    Атрибуты:
-        id (int): Первичный ключ.
-        text (str): Содержимое заметки (обязательное).
-        created_at (datetime): Дата создания.
-        appointments (list[Appointment]): Список приёмов, использующих эту заметку.
-
-    Пример:
-        >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
-        >>> session.add(note)
-    """
-
-    __tablename__ = 'appointments_notes'
-
-    id = Column(
-        Integer, 
-        primary_key=True , 
-        autoincrement=True,
-        comment='Уникальный идентификатор заметки',
-    )
-    
-    text = Column( # содержимое заметки (рекомендации, описание)
-        Text, 
-        nullable=False,
-        comment='Текст заметки',
-    )   
-
-    created_at = Column(
-        DateTime, 
-        default=datetime.now,
-        comment='Дата и время создания заметки',
-    )
-
-    # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
-    appointments = relationship(
-        "Appointment", 
-        foreign_keys='[Appointment.note_id]', 
-        back_populates="note"
-    )
-    
-    __table_args__ = (
-        Index('ix_appointment_note_text', 'text'),  
-        {
-            'comment': 'Таблица заметок приёмов', 
-            'sqlite_autoincrement': True,
-        }
-    )
-
-    # @AppLogger.get_instance(
-    #     name = 'AppointmentNote', 
-    #     # share_file_with = 'system',
-    #     enable_file_logging = 'system',
-    #     use_name_in_filename = False, # 'system',
-    # ).log_execution_time(
-    #     level=AppLogger._parse_log_level('DEBUG')
-    # )
-    def __repr__(self):
-        """
-        Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
-        """
-
-        try:
-            id_val = getattr(self, 'id', None)
-            text_val = getattr(self, 'text', None)
-
-            # rezult = f"<Note(id={id_val}, "
-            # f"text_preview={text_val[:30]}...)>"
-            # return text_val
-            # ↑ до DB1 (2026-10-16): text[:30] падал на заметке без текста (None), вторая
-            #   f-строка была отдельной инструкцией, а возвращался сам текст (repr = None →
-            #   TypeError) — лог репозитория вызывает repr при каждом add.
-            preview = (text_val or '')[:30]
-            more = '...' if text_val and len(text_val) > 30 else ''
-            rezult = f"<Note(id={id_val}, text_preview={preview}{more})>"
-            return rezult
-    
-        except Exception as e:
-            # tt = str(e)
-            AppLogger.get_instance(
-                name='api.AppointmentNote',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
-            ).exception(f'Err: {str(e)}')
-            raise e
+# ↓ до 2026-10-30 (Ф1.3.2): AppointmentNote был написан здесь вручную; теперь строится из
+#   описания NOTES (app/schema/clinic.py) — ниже, после класса. Схема та же (снимок
+#   tests/test_schema/legacy_snapshot_notes.py), __repr__ — тот же (_note_repr).
+# class AppointmentNote(Base):
+#     """
+#     Таблица заметок к приёмам.
+#
+#     Заметки могут быть переиспользованы несколькими приёмами (отношение one-to-many
+#     через поле `note_id` в Appointment).
+#
+#     Атрибуты:
+#         id (int): Первичный ключ.
+#         text (str): Содержимое заметки (обязательное).
+#         created_at (datetime): Дата создания.
+#         appointments (list[Appointment]): Список приёмов, использующих эту заметку.
+#
+#     Пример:
+#         >>> note = AppointmentNote(text="Первичный осмотр. Жалобы на головную боль.")
+#         >>> session.add(note)
+#     """
+#
+#     __tablename__ = 'appointments_notes'
+#
+#     id = Column(
+#         Integer, 
+#         primary_key=True , 
+#         autoincrement=True,
+#         comment='Уникальный идентификатор заметки',
+#     )
+#     
+#     text = Column( # содержимое заметки (рекомендации, описание)
+#         Text, 
+#         nullable=False,
+#         comment='Текст заметки',
+#     )   
+#
+#     created_at = Column(
+#         DateTime, 
+#         default=datetime.now,
+#         comment='Дата и время создания заметки',
+#     )
+#
+#     # Обратная связь: заметка может использоваться в нескольких приёмах (если нужно)
+#     appointments = relationship(
+#         "Appointment", 
+#         foreign_keys='[Appointment.note_id]', 
+#         back_populates="note"
+#     )
+#     
+#     __table_args__ = (
+#         Index('ix_appointment_note_text', 'text'),  
+#         {
+#             'comment': 'Таблица заметок приёмов', 
+#             'sqlite_autoincrement': True,
+#         }
+#     )
+#
+#     # @AppLogger.get_instance(
+#     #     name = 'AppointmentNote', 
+#     #     # share_file_with = 'system',
+#     #     enable_file_logging = 'system',
+#     #     use_name_in_filename = False, # 'system',
+#     # ).log_execution_time(
+#     #     level=AppLogger._parse_log_level('DEBUG')
+#     # )
+#     def __repr__(self):
+#         """
+#         Возвращает строку-representation объекта Note в виде "<Note(id=1, text_preview=Note text...)>"
+#         """
+#
+#         try:
+#             id_val = getattr(self, 'id', None)
+#             text_val = getattr(self, 'text', None)
+#
+#             # rezult = f"<Note(id={id_val}, "
+#             # f"text_preview={text_val[:30]}...)>"
+#             # return text_val
+#             # ↑ до DB1 (2026-10-16): text[:30] падал на заметке без текста (None), вторая
+#             #   f-строка была отдельной инструкцией, а возвращался сам текст (repr = None →
+#             #   TypeError) — лог репозитория вызывает repr при каждом add.
+#             preview = (text_val or '')[:30]
+#             more = '...' if text_val and len(text_val) > 30 else ''
+#             rezult = f"<Note(id={id_val}, text_preview={preview}{more})>"
+#             return rezult
+#     
+#         except Exception as e:
+#             # tt = str(e)
+#             AppLogger.get_instance(
+#                 name='api.AppointmentNote',
+#                 enable_file_logging = 'user',
+#                 use_name_in_filename = False, # 'system',
+#             ).exception(f'Err: {str(e)}')
+#             raise e
 
 # Функция для инициализации БД и создания тестовых данных
 

@@ -154,7 +154,13 @@ def main():
         text = startup_error_text(exc)
         if text is None:
             raise                                   # не про базу — как раньше
-        logger.exception(f"Не удалось открыть базу данных: {exc}")
+        # logger.exception(f"Не удалось открыть базу данных: {exc}")
+        # ↑ до 2026-10-31 (М8): без подробностей и исходной ошибки DatabaseConnectionError.
+        from app.exceptions import AppException
+        logger.exception(
+            "Не удалось открыть базу данных: "
+            + (exc.log_text() if isinstance(exc, AppException) else str(exc)),
+        )
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.critical(None, "Запуск программы", text)
         sys.exit(1)

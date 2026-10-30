@@ -1,4 +1,23 @@
 # app/database/database_shema/clinic.py
+"""
+Модели SQLAlchemy базы клиники.
+
+``Base`` (с правилом имён ограничений ``NAMING_CONVENTION`` — по нему миграции находят
+внешние ключи, A2) и модели ``Patient``, ``Appointment``, ``Photo``, ``AppointmentNote`` —
+строятся из описаний таблиц ``app/schema/clinic.py`` (``build_model``; заметки — с
+2026-10-30), прежние классы — комментарием. Строка модели (``__repr__``) — ``_*_repr``.
+Схема базы — миграциями (``app/database/migrate.py``); ``create_db`` / ``init_db`` —
+старый способ (``create_all``) для запуска файла напрямую и тестовой базы.
+
+Импорты ``Column``, ``Integer`` … ``relationship``, ``datetime`` нужны только прежним
+классам в комментариях — оставлены намеренно (pyflakes их отмечает; М7, 2026-10-30).
+
+Example:
+    >>> from app.database.database_shema.clinic import Patient
+    >>> Patient.__tablename__
+    'patients'
+"""
+# ↑ до 2026-10-31 (М8): описания модуля не было (К7).
 
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -136,6 +155,7 @@ from sqlalchemy.orm import (
 #   autogenerate сравнивает ключи по столбцам, а не по имени.
 
 from sqlalchemy import MetaData
+from sqlalchemy.engine import Engine   # тип возврата create_db
 
 # Имена ограничений по правилу (рекомендация Alembic для SQLite). Не менять: по этим
 # именам миграции находят ограничения. Индексы в моделях названы явно — правило не нужно.
@@ -838,28 +858,30 @@ AppointmentNote = NOTES.build_model(
     level=AppLogger._parse_log_level('DEBUG')
 )
 def create_db(
-    db_path: str = "clinic.db",
-    recreate=False,
-):
+    db_path  : str  = "clinic.db",   # файл базы
+    recreate : bool = False,         # удалить существующий файл перед созданием
+) -> Engine: # движок созданной базы
     """
-    Создаёт файл базы данных и все таблицы.
+    Создаёт файл базы и недостающие таблицы моделей (``Base.metadata.create_all``).
 
-    Параметры:
-        db_path (str): Путь к файлу БД. По умолчанию "clinic.db".
-        recreate (bool): Если True и файл существует, он будет удалён перед созданием таблиц.
-                         По умолчанию False.
+    Note:
+        Старый способ (до миграций, 2026-10-16): без отметки версии ``alembic_version``.
+        ``Database`` потом примет такую базу как «старую без отметки» — приведёт к
+        исходной схеме и отметит (``app/database/IMPLEMENTATION.md`` §3). Для рабочей
+        базы — ``Database`` (миграции, резервная копия). ``recreate=True`` удаляет файл.
 
-    Возвращает:
-        Engine: Движок SQLAlchemy, подключённый к созданной БД.
+    Args:
+        db_path  : (str) Путь к файлу базы.
+        recreate : (bool) Удалить существующий файл перед созданием.
 
-    Примечание:
-        Если БД уже существует и `recreate=False`, таблицы создаются только при их отсутствии.
-        Для SQLite автоматически устанавливается `check_same_thread=False`.
+    Returns:
+        (Engine) Движок SQLAlchemy (``check_same_thread=False``).
 
-    Пример:
-        >>> engine = create_db("./data/clinic.db", recreate=False)
-        >>> with engine.connect() as conn:
-        ...     result = conn.execute(text("SELECT * FROM patients"))
+    Example:
+        >>> engine = create_db(
+        ...     './data/clinic.db',     # файл
+        ...     recreate   =   False,   # существующий не трогать
+        ... )
     """
 
     logger = AppLogger.get_instance(
@@ -917,21 +939,22 @@ def create_db(
     level=AppLogger._parse_log_level('DEBUG')
 )
 def init_db(
-    db_path="clinic.db"
-):
+    db_path : str = "clinic.db",   # файл базы (пересоздаётся)
+) -> None: # пересоздаёт базу и заполняет тестовыми данными
     """
-    Полностью инициализирует БД: создаёт таблицы и заполняет тестовыми данными.
+    Пересоздаёт базу и заполняет её тестовыми данными: ``create_db(recreate=True)``
+    (существующий файл удаляется), затем ``generate_test_data()``.
 
-    Параметры:
-        db_path (str): Путь к файлу БД.
+    Note:
+        Удаляет существующую базу — только для тестовых баз.
 
-    Примечание:
-        Вызывает `create_db(recreate=True)` (перезаписывает существующую БД),
-        затем `generate_test_data()`.
+    Args:
+        db_path : (str) Путь к файлу базы.
 
-    Пример:
-        >>> init_db("test.db")
-        # После выполнения в БД будут созданы таблицы и добавлены тестовые пациенты, приёмы и фото.
+    Example:
+        >>> init_db(
+        ...     'test.db',   # тестовая база
+        ... )
     """
 
     create_db(

@@ -114,17 +114,34 @@ def register_service_provider(
 )
 def get_db() -> Database:
     """
-    Возвращает экземпляр Database, сконфигурированный из .env.
+    Возвращает новый ``Database`` по настройкам: путь — ``database_local_path``, значения
+    запросов в журнал — ``LOG_SQL_PARAMS`` (по умолчанию скрыты).
 
-    Database - это класс, который инкапсулирует логику работы с базой данных.
-    Он принимает строку подключения к базе данных в виде url (например, sqlite:///path/to/db.db).
+    ``Database`` инкапсулирует работу с базой; принимает строку подключения вида
+    ``sqlite:///path/to/db.db``. Каждый вызов — новый объект (ТД-6).
 
     Returns:
-        Database: экземпляр Database, готовый к работе.
+        (Database) База, готовая к работе.
+
+    Raises:
+        DatabaseConnectionError: Базу не удалось открыть (занята, нет доступа).
+        MigrationError: Базу нельзя безопасно обновить.
+
+    Example:
+        >>> db = get_db()
+        >>> db.log_sql_params
+        False
     """
+    # ↑ до 2026-10-31 (М8): описание — «из .env» (настройки — из менеджера), без флага.
     config = get_config_env()
     db_path = config['database_local_path']
     db_url = f"sqlite:///{db_path}"
+    log_sql_params = bool(
+        config.get(
+            'LOG_SQL_PARAMS',   # значения запросов в журнал
+            False,              # нет ключа — скрыты
+        ),
+    )
     
     # Логгирование: информируем о том, какой файл используется для базы данных
     AppLogger.get_instance(
@@ -136,7 +153,12 @@ def get_db() -> Database:
         f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
     )
 
-    return Database(db_url)
+    # return Database(db_url)
+    # ↑ до 2026-10-31 (М8): без флага LOG_SQL_PARAMS.
+    return Database(
+        db_url,
+        log_sql_params   =   log_sql_params,   # значения запросов в журнал
+    )
 
 @register_service_provider
 @lru_cache(maxsize=1)

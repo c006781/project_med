@@ -246,15 +246,15 @@ def schema_differences(engine: Engine, metadata=None) -> List:
     return [d for d in diffs if not _is_alembic_table(d)]
 
 
-def _default_metadata():
+def _default_metadata() -> sa.MetaData: # модели приложения по умолчанию
     """
-    Модели по умолчанию — ``Base.metadata`` приложения (одно место: тесты подменяют его,
-    чтобы модели других тестов на общей ``Base`` не попадали в сравнение).
+    Возвращает модели по умолчанию — ``Base.metadata`` приложения (одно место: тесты
+    подменяют его, чтобы модели других тестов на общей ``Base`` не попадали в сравнение).
 
     Returns:
-        ``MetaData`` моделей приложения.
+        (MetaData) Модели приложения.
 
-    Пример:
+    Example:
         >>> 'patients' in _default_metadata().tables
         True
     """
@@ -365,26 +365,49 @@ def _migration_engine(engine: Engine) -> Engine:
     migration = create_engine(engine.url)
 
     @event.listens_for(migration, 'connect')
-    def _no_driver_transactions(dbapi_connection, connection_record):
+    def _no_driver_transactions(
+        dbapi_connection  : sqlite3.Connection,   # новое соединение
+        connection_record : object,               # запись пула (не используется)
+    ) -> None: # драйвер не управляет транзакциями; внешние ключи выключены
         """
-        Драйвер не начинает и не фиксирует транзакции сам.
+        Отключает у драйвера собственное управление транзакциями: он не начинает и не
+        фиксирует их сам.
 
         Внешние ключи — явно ВЫКЛ (M10, 2026-10-18): SQLite пересобирает таблицу при
         ALTER (создать новую → скопировать → удалить старую). С включёнными ключами
         удаление старой таблицы каскадом стёрло бы дочерние строки (или упало бы).
         Включать/выключать ключи можно только вне транзакции — поэтому здесь, при
         подключении. Целостность после миграции проверяет ``_check_foreign_keys``.
+
+        Args:
+            dbapi_connection  : (sqlite3.Connection) Соединение.
+            connection_record : (object) Запись пула.
+
+        Example:
+            >>> _no_driver_transactions(
+            ...     sqlite3.connect(':memory:'),   # соединение
+            ...     None,                          # запись пула
+            ... )
         """
         dbapi_connection.isolation_level = None
         dbapi_connection.execute('PRAGMA foreign_keys=OFF')
 
     @event.listens_for(migration, 'begin')
-    def _explicit_begin(connection):
+    def _explicit_begin(
+        connection : sa.engine.Connection,   # соединение, начинающее транзакцию
+    ) -> None: # начинает транзакцию явно (BEGIN IMMEDIATE)
         """
-        Транзакция начинается явно — DDL откатывается вместе с остальным.
+        Начинает транзакцию явно — DDL откатывается вместе с остальным.
 
         IMMEDIATE (M3, 2026-10-16): блокировка записи берётся СРАЗУ — вторая копия
         программы, открывающая ту же базу одновременно, ждёт, а не меняет её параллельно.
+
+        Args:
+            connection : (Connection) Соединение SQLAlchemy.
+
+        Example:
+            >>> with migration.begin() as conn:   # вызывается событием begin
+            ...     pass
         """
         connection.exec_driver_sql('BEGIN IMMEDIATE')
 
@@ -589,55 +612,66 @@ def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[st
     return BASELINE, legacy_backup
 
 
-def _baseline_metadata():
+def _baseline_metadata() -> sa.MetaData: # схема исходной миграции
     """
-    Схема, которую строит исходная миграция (``BASELINE``).
+    Возвращает схему, которую строит исходная миграция (``BASELINE``).
 
     Returns:
-        ``MetaData`` исходной схемы (без служебной ``alembic_version``).
+        (MetaData) Исходная схема (без служебной ``alembic_version``).
 
-    Пример:
+    Example:
         >>> sorted(_baseline_metadata().tables)
         ['appointments', 'appointments_notes', 'patients', 'photos']
     """
     return schema_at(BASELINE)
 
 
-def schema_at(revision: str):
+def schema_at(
+    revision : str,   # ревизия (BASELINE, head_revision() …)
+) -> sa.MetaData: # схема, которую строят миграции до ревизии
     """
-    Схема, которую строят миграции до ``revision``, — собранная во временной базе в памяти
-    (а не текущие модели: модели меняются, миграции — нет).
+    Возвращает схему, которую строят миграции до ``revision``, — собранную во временной
+    базе в памяти (а не текущие модели: модели меняются, миграции — нет).
 
     Запоминается (по ревизии и папке миграций): строится один раз за процесс.
     Возвращаемый ``MetaData`` — общий, менять его нельзя.
 
     Args:
-        revision: Ревизия (``BASELINE``, ``head_revision()`` …).
+        revision : (str) Ревизия (``BASELINE``, ``head_revision()`` …).
 
     Returns:
-        ``MetaData`` схемы (без служебной ``alembic_version``).
+        (MetaData) Схема (без служебной ``alembic_version``).
 
-    Пример:
-        >>> 'patients' in schema_at(head_revision()).tables
+    Example:
+        >>> 'patients' in schema_at(
+        ...     head_revision(),   # последняя ревизия
+        ... ).tables
         True
     """
     return _schema_at(revision, MIGRATIONS_DIR)
 
 
 @functools.lru_cache(maxsize=8)
-def _schema_at(revision: str, migrations_dir: str):
+def _schema_at(
+    revision       : str,   # ревизия
+    migrations_dir : str,   # папка миграций (только для ключа кеша)
+) -> sa.MetaData: # схема ревизии (тело schema_at)
     """
-    Тело ``schema_at`` (ключ кеша включает папку миграций — тесты подменяют её).
+    Возвращает схему ревизии — тело ``schema_at`` (ключ кеша включает папку миграций —
+    тесты подменяют её).
 
     Args:
-        revision: Ревизия.
-        migrations_dir: Папка миграций (только для ключа кеша).
+        revision       : (str) Ревизия.
+        migrations_dir : (str) Папка миграций (только для ключа кеша).
 
     Returns:
-        ``MetaData``.
+        (MetaData) Схема.
 
-    Пример:
-        >>> _schema_at('0001_baseline', MIGRATIONS_DIR)
+    Example:
+        >>> _schema_at(
+        ...     '0001_baseline',   # исходная
+        ...     MIGRATIONS_DIR,    # папка миграций
+        ... )
         MetaData()
     """
     from sqlalchemy import MetaData
@@ -867,47 +901,105 @@ def describe_differences(diffs: List) -> List[str]:
     return result
 
 
-def startup_error_text(exc: BaseException) -> Optional[str]:
+def database_error_text(
+    exc : BaseException,   # ошибка драйвера (sqlalchemy.exc.DatabaseError, sqlite3.Error)
+) -> str: # понятный пользователю текст ошибки открытия базы
     """
-    Понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7, 2026-10-18).
+    Возвращает понятный пользователю текст ошибки базы при её открытии: «занята другой
+    копией», «нет доступа на запись» или общий текст с исходным сообщением драйвера.
+
+    Один источник текста для ``Database.__init__`` (``DatabaseConnectionError``) и
+    ``startup_error_text`` (2026-10-31, М8; до этого разбор жил только в
+    ``startup_error_text``). Сообщение драйвера — из ``orig`` (SQLAlchemy) или самой ошибки
+    (``sqlite3`` — резервная копия через backup-API идёт мимо SQLAlchemy).
+
+    Args:
+        exc : (BaseException) Ошибка драйвера.
+
+    Returns:
+        (str) Текст для сообщения пользователю.
+
+    Example:
+        >>> import sqlite3
+        >>> database_error_text(
+        ...     sqlite3.OperationalError('database is locked'),   # другая копия пишет
+        ... )
+        'База данных занята другой копией программы (идёт обновление или запись). ...'
+    """
+    source = getattr(exc, 'orig', None) or exc
+    detail = str(source).lower()
+    if 'locked' in detail or 'busy' in detail:
+        return ("База данных занята другой копией программы (идёт обновление или запись). "
+                "Закройте другие копии и запустите программу снова.")
+    if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
+        return ("Нет доступа на запись к файлу базы данных или его папке. "
+                "Проверьте права и путь к базе в настройках.")
+    return (f"Ошибка базы данных при запуске: {source}. "
+            "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+
+
+# def startup_error_text(exc: BaseException) -> Optional[str]:
+# ↑ до 2026-10-31 (М8): сигнатура без комментария (формат skill п. 7).
+def startup_error_text(
+    exc : BaseException,   # ошибка, поднятая при открытии базы
+) -> Optional[str]: # понятный пользователю текст или None — ошибка не про базу
+    """
+    Возвращает понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7,
+    2026-10-18).
 
     Раньше отказ миграции или заблокированная база вылетали из ``Database.__init__``
     необработанным исключением: в exe без консоли программа молча закрывалась. Функция
     без Qt — её зовёт окно запуска (``interfaces/gui/gui_window/main.py``), её же
     проверяют тесты.
 
+    Обход цепочки ``__cause__`` / ``__context__``: ``DatabaseConnectionError`` (так
+    ``Database.__init__`` оборачивает ошибку драйвера с 2026-10-31) — её текст без кода;
+    ``MigrationError`` — «нельзя безопасно обновить»; ошибка драйвера SQLAlchemy —
+    ``database_error_text``.
+
     Args:
-        exc: Исключение, поднятое при открытии базы (в т. ч. обёрнутое — смотрится
-            цепочка ``__cause__``/``__context__``).
+        exc : (BaseException) Исключение (в том числе обёрнутое).
 
     Returns:
-        Текст для сообщения или ``None`` — ошибка не про базу (пусть идёт дальше как есть).
+        (str/None) Текст для сообщения; None — ошибка не про базу (пусть идёт дальше как
+        есть).
 
-    Пример:
-        >>> startup_error_text(MigrationError('нет обязательного столбца'))
+    Example:
+        >>> startup_error_text(
+        ...     MigrationError('нет обязательного столбца'),   # отказ миграции
+        ... )
         'Базу данных нельзя безопасно обновить: нет обязательного столбца. ...'
-        >>> startup_error_text(ValueError('x')) is None
+        >>> startup_error_text(
+        ...     ValueError('x'),   # не про базу
+        ... ) is None
         True
     """
     from sqlalchemy.exc import DatabaseError
+    from app.exceptions import DatabaseConnectionError
 
     seen = set()
     current: Optional[BaseException] = exc
     while current is not None and id(current) not in seen:      # обход цепочки причин
         seen.add(id(current))
+        if isinstance(current, DatabaseConnectionError): # текст уже собран — без кода [6002]
+            return current.detail
         if isinstance(current, MigrationError):
             return (f"Базу данных нельзя безопасно обновить: {current}. "
                     "База не изменена. Обратитесь к разработчику.")
         if isinstance(current, DatabaseError):
-            detail = str(getattr(current, 'orig', None) or current).lower()
-            if 'locked' in detail or 'busy' in detail:
-                return ("База данных занята другой копией программы (идёт обновление или запись). "
-                        "Закройте другие копии и запустите программу снова.")
-            if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
-                return ("Нет доступа на запись к файлу базы данных или его папке. "
-                        "Проверьте права и путь к базе в настройках.")
-            return (f"Ошибка базы данных при запуске: {getattr(current, 'orig', None) or current}. "
-                    "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+            # detail = str(getattr(current, 'orig', None) or current).lower()
+            # if 'locked' in detail or 'busy' in detail:
+            #     return ("База данных занята другой копией программы (идёт обновление или запись). "
+            #             "Закройте другие копии и запустите программу снова.")
+            # if 'readonly' in detail or 'read-only' in detail or 'unable to open' in detail:
+            #     return ("Нет доступа на запись к файлу базы данных или его папке. "
+            #             "Проверьте права и путь к базе в настройках.")
+            # return (f"Ошибка базы данных при запуске: {getattr(current, 'orig', None) or current}. "
+            #         "Если база обновлялась — рядом с файлом есть резервная копия (.bak-…).")
+            # ↑ до 2026-10-31 (М8): разбор — здесь; теперь общий с Database.__init__.
+            return database_error_text(
+                current,   # ошибка драйвера
+            )
         current = current.__cause__ or current.__context__
     return None
 

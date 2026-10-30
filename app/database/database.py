@@ -2,16 +2,27 @@
 """
 Управление подключением к SQLite базе данных.
 
-Модуль предоставляет класс :class:`Database`, который инкапсулирует создание движка SQLAlchemy,
-управление сессиями и контекстный менеджер для автоматической фиксации/отката изменений.
+Модуль предоставляет класс :class:`Database`: движок SQLAlchemy, сессии потока
+(``scoped_session``), контекстный менеджер ``session_scope`` (коммит / откат), отложенные
+удаления файлов и действия после коммита / отката (обработчики событий сессии, ТД-9),
+доведение базы до последней схемы миграциями при открытии (``app/database/migrate.py``).
 
-Пример использования:
-    >>> db = Database("sqlite:///clinic.db")
+Ошибки (2026-10-31, М8): отказ открыть базу — ``DatabaseConnectionError``, нарушение
+целостности в ``session_scope`` — ``DbIntegrityError``; значения запросов (личные данные) в
+ошибках скрыты, для отладки — ``Database(log_sql_params=True)`` (настройка
+``LOG_SQL_PARAMS``). Подробно — ``app/database/IMPLEMENTATION.md`` §6, §9.
+
+Example:
+    >>> db = Database(
+    ...     'sqlite:///clinic.db',   # файл базы
+    ... )
     >>> with db.session_scope() as session:
     ...     patients = session.query(Patient).all()
     >>> db.close()
 """
-import os
+# ↑ до 2026-10-31 (М8): описание без ошибок и отложенных действий, «Пример использования:».
+# import os
+# ↑ до 2026-10-31 (М8): не используется (pyflakes).
 
 # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -106,16 +117,24 @@ from app.database.database_shema.temp_data_bd import populate_test_data
 # Сторонние библиотеки
 
 from sqlalchemy import create_engine, event
+from sqlalchemy import exc as sa_exc   # ошибки драйвера — имена совпадают с исключениями приложения
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+import re
+import sqlite3
+
+from app.exceptions import AppException, DatabaseConnectionError, DbIntegrityError
 
 
-@AppLogger.get_instance(
-    name='api.Database',
-    enable_file_logging='system',
-    use_name_in_filename=False,  # 'system'
-).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# @AppLogger.get_instance(
+#     name='api.Database',
+#     enable_file_logging='system',
+#     use_name_in_filename=False,  # 'system'
+# ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+# ↑ до 2026-10-31 (М8): декоратор прежнего _make_deletion_handler остался здесь после ТД-9 —
+#   через комментарии и пустые строки он оборачивал следующую функцию,
+#   _discard_other_deletions; перенесён к _make_deletion_handler.
 # def _make_deletion_handler(deletion_type: DeletionType):
 #     """Создаёт обработчик для указанного типа отложенного удаления."""
 #     logger = AppLogger.get_instance(
@@ -186,6 +205,13 @@ def _discard_other_deletions(
     items[:] = [item for item in items if item.get('retry')]
 
 
+@AppLogger.get_instance(
+    name                 = 'api.Database',  # журнал вызовов
+    enable_file_logging  = 'system',        # системный файл
+    use_name_in_filename = False,           # имя не в имени файла
+).log_execution_time(
+    level = AppLogger._parse_log_level('DEBUG'),
+)
 def _make_deletion_handler(
     deletion_type : DeletionType,  # событие обработчика (COMMIT — after_commit, ROLLBACK — after_rollback)
 ) -> Callable[..., None]: # обработчик события сессии
@@ -269,96 +295,229 @@ def _make_deletion_handler(
     return handler
 
 
-def _unicode_lower(value):
+def _unicode_lower(
+    value : Any,   # значение столбца
+) -> Any: # строка в нижнем регистре или значение как есть
     """
-    ``lower()`` для SQLite, понимающий все буквы (встроенный — только латиницу).
+    Возвращает ``lower()`` для SQLite, понимающий все буквы (встроенный — только латиницу).
 
     Args:
-        value: Значение столбца (не строка — как есть, ``NULL`` — ``NULL``).
+        value : (Any) Значение столбца (не строка — как есть, ``NULL`` — ``NULL``).
 
     Returns:
-        Строка в нижнем регистре или исходное значение.
+        (Any) Строка в нижнем регистре или исходное значение.
 
-    Пример:
-        >>> _unicode_lower('ИВАНОВ')
+    Example:
+        >>> _unicode_lower(
+        ...     'ИВАНОВ',   # кириллица
+        ... )
         'иванов'
     """
     return value.lower() if isinstance(value, str) else value
 
 
-def _unicode_upper(value):
+def _unicode_upper(
+    value : Any,   # значение столбца
+) -> Any: # строка в верхнем регистре или значение как есть
     """
-    ``upper()`` для SQLite, понимающий все буквы.
+    Возвращает ``upper()`` для SQLite, понимающий все буквы.
 
     Args:
-        value: Значение столбца.
+        value : (Any) Значение столбца (не строка — как есть).
 
     Returns:
-        Строка в верхнем регистре или исходное значение.
+        (Any) Строка в верхнем регистре или исходное значение.
 
-    Пример:
-        >>> _unicode_upper('иванов')
+    Example:
+        >>> _unicode_upper(
+        ...     'иванов',   # кириллица
+        ... )
         'ИВАНОВ'
     """
     return value.upper() if isinstance(value, str) else value
 
 
-def _register_unicode_functions(dbapi_connection, connection_record) -> None:
+def _register_unicode_functions(
+    dbapi_connection  : sqlite3.Connection,   # соединение sqlite3
+    connection_record : Any,                  # запись пула (не используется)
+) -> None: # подменяет lower / upper соединения на понимающие Юникод
     """
-    Подменяет ``lower``/``upper`` соединения SQLite на понимающие Юникод (APP1).
+    Подменяет ``lower`` / ``upper`` соединения SQLite на понимающие Юникод (APP1).
 
     Args:
-        dbapi_connection: Соединение sqlite3.
-        connection_record: Запись пула (не используется).
+        dbapi_connection  : (sqlite3.Connection) Соединение.
+        connection_record : (Any) Запись пула (не используется).
+
+    Example:
+        >>> event.listen(
+        ...     engine,                        # движок
+        ...     'connect',                     # новое соединение
+        ...     _register_unicode_functions,   # обработчик
+        ... )
+    """
+    dbapi_connection.create_function(
+        'lower',               # имя функции SQL
+        1,                     # число аргументов
+        _unicode_lower,        # реализация
+        deterministic = True,  # один результат на одно значение
+    )
+    dbapi_connection.create_function(
+        'upper',               # имя функции SQL
+        1,                     # число аргументов
+        _unicode_upper,        # реализация
+        deterministic = True,  # один результат на одно значение
+    )
+
+
+# Сообщения SQLite о нарушении целостности → текст пользователю (DbIntegrityError.detail)
+_INTEGRITY_TEXTS : Tuple[Tuple[str, str], ...] = (
+    ('UNIQUE constraint failed',      'повтор значения, которое должно быть уникальным'),
+    ('NOT NULL constraint failed',    'не заполнено обязательное поле'),
+    ('FOREIGN KEY constraint failed', 'нет связанной записи или на запись ссылаются другие'),
+    ('CHECK constraint failed',       'значение не прошло проверку'),
+)
+
+# Операция и таблица запроса: INSERT [OR …] INTO t / UPDATE [OR …] t / DELETE FROM t
+_STATEMENT_TARGET = re.compile(
+    r'\s*(INSERT|UPDATE|DELETE)\b(?:\s+OR\s+\w+)?\s+(?:INTO\s+|FROM\s+)?"?(\w+)"?',
+    re.IGNORECASE,
+)
+
+
+def _statement_target(
+    statement : Optional[str],   # текст SQL (None — неизвестен)
+) -> Tuple[Optional[str], Optional[str]]: # (операция, таблица) запроса изменения данных
+    """
+    Возвращает операцию (``INSERT`` / ``UPDATE`` / ``DELETE``) и таблицу из текста запроса
+    изменения данных; другой запрос или нет текста — ``(None, None)``.
+
+    Args:
+        statement : (str/None) Текст SQL; None — неизвестен.
 
     Returns:
-        None
+        (Tuple[Optional[str], Optional[str]]) Операция заглавными и имя таблицы.
 
-    Пример:
-        >>> event.listen(engine, 'connect', _register_unicode_functions)
+    Example:
+        >>> _statement_target(
+        ...     'INSERT INTO patients (last_name) VALUES (?)',   # добавление
+        ... )
+        ('INSERT', 'patients')
+        >>> _statement_target(
+        ...     'SELECT 1',   # не изменение данных
+        ... )
+        (None, None)
     """
-    dbapi_connection.create_function('lower', 1, _unicode_lower, deterministic=True)
-    dbapi_connection.create_function('upper', 1, _unicode_upper, deterministic=True)
+    match = _STATEMENT_TARGET.match(statement or '')
+    if match is None:
+        return None, None
+    return match.group(1).upper(), match.group(2)
+
+
+def _integrity_detail(
+    message : str,   # сообщение SQLite (``UNIQUE constraint failed: patients.phone``)
+) -> str: # что нарушено — понятным текстом
+    """
+    Возвращает понятный текст нарушения целостности по сообщению SQLite: вид нарушения и,
+    если SQLite его назвал, поле (``таблица.поле``); незнакомое сообщение — как есть.
+
+    Args:
+        message : (str) Сообщение драйвера.
+
+    Returns:
+        (str) Текст для ``DbIntegrityError.detail`` (часть сообщения пользователю).
+
+    Example:
+        >>> _integrity_detail(
+        ...     'UNIQUE constraint failed: patients.phone',   # повтор телефона
+        ... )
+        'повтор значения, которое должно быть уникальным (patients.phone)'
+        >>> _integrity_detail(
+        ...     'FOREIGN KEY constraint failed',   # без поля
+        ... )
+        'нет связанной записи или на запись ссылаются другие'
+    """
+    for prefix, text in _INTEGRITY_TEXTS:
+        if message.startswith(prefix):
+            target = message[len(prefix):].lstrip(':').strip()
+            return f"{text} ({target})" if target else text
+    return message
+
+
+def _integrity_error(
+    exc            : sa_exc.IntegrityError,   # ошибка драйвера
+    log_sql_params : bool,                    # значения запроса — в подробности
+) -> DbIntegrityError: # исключение приложения для ошибки целостности
+    """
+    Строит ``DbIntegrityError`` по ``sqlalchemy.exc.IntegrityError``: текст пользователю —
+    что нарушено (``_integrity_detail``); ``details`` — таблица, операция, текст SQL и,
+    только при ``log_sql_params``, значения запроса (личные данные — по умолчанию не
+    пишутся); исходная ошибка — ``original`` явно (``exc.orig``, ``sqlite3.IntegrityError``):
+    ``session_scope`` пишет журнал до ``raise … from exc``, когда цепочки ещё нет.
+
+    Args:
+        exc            : (sqlalchemy.exc.IntegrityError) Ошибка драйвера.
+        log_sql_params : (bool) Добавить значения запроса в ``details``.
+
+    Returns:
+        (DbIntegrityError) Исключение для ``raise … from exc``.
+
+    Example:
+        >>> error = _integrity_error(
+        ...     exc,            # повтор телефона
+        ...     False,          # значения не писать
+        ... )
+        >>> str(error)
+        '[6001] Нарушение целостности данных: повтор значения, которое должно быть уникальным (patients.phone)'
+        >>> error.details['таблица']
+        'patients'
+    """
+    operation, table = _statement_target(
+        exc.statement,   # текст SQL
+    )
+    details : Dict[str, Any] = {
+        'таблица'  : table,           # куда писали
+        'операция' : operation,       # INSERT / UPDATE / DELETE
+        'SQL'      : exc.statement,   # текст запроса без значений
+    }
+    if log_sql_params: # отладка: значения запроса (личные данные)
+        details['параметры'] = exc.params
+    driver_error = exc.orig if exc.orig is not None else exc
+    return DbIntegrityError(
+        _integrity_detail(
+            str(driver_error),   # сообщение драйвера
+        ),
+        details  = {key: value for key, value in details.items() if value is not None},
+        original = driver_error,   # явно: журнал пишется до raise … from (цепочки ещё нет)
+    )
 
 
 class Database:
     """
-    Центральный класс для управления подключением к SQLite базе данных.
+    Подключение к базе SQLite: движок, сессии потока и ``session_scope``.
 
-    Создаёт движок SQLAlchemy, фабрику сессий и предоставляет контекстный менеджер
-    для безопасной работы с сессиями. При инициализации автоматически создаёт все
-    таблицы, определённые в `Base.metadata`.
+    При создании доводит базу до последней версии схемы миграциями (``upgrade_database``;
+    до 2026-10-16 — ``Base.metadata.create_all``). На фабрику сессий (свою у каждого
+    объекта — ``sessionmaker``) один раз регистрируются обработчики ``after_commit`` /
+    ``after_rollback``: отложенные удаления файлов (``session._deletions``) и действия
+    (``session._actions``) своего события выполняются, противоположного — отбрасываются
+    (ТД-9; неудавшееся удаление повторяется следующим событием своего вида).
 
-    Атрибуты:
-        engine (sqlalchemy.engine.Engine): Движок SQLAlchemy для выполнения SQL-запросов.
-        Session (scoped_session): Фабрика сессий, привязанная к текущему потоку.
-        logger (AppLogger): Логгер для записи событий БД.
-
-    **Примечание о регистрации обработчиков `after_commit` и `after_rollback`:**
-        Для поддержки отложенного удаления файлов при инициализации класса сессии
-        регистрируются два обработчика: один для `after_commit` (удаляет файлы из
-        `session._deletions[COMMIT]`), другой для `after_rollback` (удаляет файлы из
-        `session._deletions[ROLLBACK]`). Регистрация происходит один раз на класс сессии.
+    Attributes:
+        engine         : (sqlalchemy.engine.Engine) Движок.
+        Session        : (scoped_session) Фабрика сессий, одна сессия на поток.
+        log_sql_params : (bool) Значения запросов видны в ошибках и журнале.
+        logger         : (AppLogger) Журнал базы (создаётся при первом обращении).
 
     Example:
-        >>> db = Database("sqlite:///clinic.db")
+        >>> db = Database(
+        ...     'sqlite:///clinic.db',   # файл базы
+        ... )
         >>> with db.session_scope() as session:
         ...     patients = session.query(Patient).all()
         >>> db.close()
-
-    **Примечание о регистрации обработчика `after_commit`**:
-        Обработчик `delete_pending_files` регистрируется при инициализации класса
-        сессии (создаваемого через `sessionmaker`) и автоматически вызывается после
-        каждого успешного коммита. Для предотвращения повторной регистрации
-        используется флаг `Session._after_commit_registered`.
-
-        При откате транзакции (rollback) список отложенных удалений
-        (`session._pending_deletions`) очищается, файлы не удаляются.
-
-        Обработчик использует захваченный в замыкании логгер (`self.logger`), что
-        безопасно, поскольку время жизни экземпляра `Database` совпадает с жизнью
-        класса сессии.
     """
+    # ↑ до 2026-10-31 (М8): описание называло create_all, прежние _pending_deletions,
+    #   delete_pending_files, _after_commit_registered (их нет с 31.05 / 16.10).
 
 
     # ------------------------------------------------------------------
@@ -366,20 +525,42 @@ class Database:
     # ------------------------------------------------------------------
 
     @property
-    def logger(self) -> AppLogger:
+    def logger(self) -> AppLogger: # журнал базы (создаётся при первом обращении)
+        """
+        Возвращает журнал базы; создаётся при первом обращении (``api.Database``, файл
+        пользователя) — так он есть и у объекта, созданного без ``__init__``.
+
+        Returns:
+            (AppLogger) Журнал.
+
+        Example:
+            >>> db.logger.debug('сообщение')
+        """
         try:
             return self._logger
-        except AttributeError as e:
+        except AttributeError:
             self._logger = AppLogger.get_instance(
-                name='api.Database',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system'
+                name                 = 'api.Database',   # журнал базы
+                enable_file_logging  = 'user',           # файл пользователя
+                use_name_in_filename = False,            # имя не в имени файла
             )
 
         return self._logger
 
     @logger.setter
-    def logger(self, value):
+    def logger(
+        self,
+        value : AppLogger,   # свой журнал (например, заглушка в тестах)
+    ) -> None: # подменяет журнал базы
+        """
+        Подменяет журнал базы.
+
+        Args:
+            value : (AppLogger) Журнал.
+
+        Example:
+            >>> db.logger = AppLogger.get_instance('test')
+        """
         self._logger = value
 
     @AppLogger.get_instance(
@@ -390,25 +571,66 @@ class Database:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, db_url: str):
+    # def __init__(self, db_url: str):
+    # ↑ до 2026-10-31 (М8): без флага значений запросов; описание называло create_all.
+    def __init__(
+        self,
+        db_url         : str,            # URL базы ('sqlite:///clinic.db')
+        *,
+        log_sql_params : bool = False,   # значения запросов — в журнал (отладка)
+    ) -> None:
         """
-        Инициализирует подключение к БД и создаёт таблицы (если их нет).
+        Открывает базу: движок, фабрика сессий, обработчики отложенных удалений и действий;
+        доводит базу до последней версии схемы (``upgrade_database``: новая — создаётся,
+        старая — приводится и обновляется, перед изменением — резервная копия).
 
-        Параметры:
-            db_url (str): URL подключения к БД (например, 'sqlite:///database.db').
+        Значения запросов (ФИО, телефоны, тексты — личные данные) в ошибках SQLAlchemy по
+        умолчанию скрыты (``hide_parameters``): их пишут в журнал трассировки и
+        ``DbIntegrityError``. ``log_sql_params=True`` (настройка ``LOG_SQL_PARAMS``) — для
+        отладки: значения видны, при открытии — предупреждение в журнал.
 
-        Особенности:
-            - Для SQLite автоматически устанавливается `check_same_thread=False`,
-              чтобы разрешить использование сессий из разных потоков.
-            - Таблицы создаются вызовом `Base.metadata.create_all(self.engine)`.
+        Для SQLite — ``check_same_thread=False`` (сессии из разных потоков) и свои
+        ``lower`` / ``upper`` для всех букв (APP1).
+
+        Args:
+            db_url         : (str) URL подключения (``sqlite:///database.db``).
+            log_sql_params : (bool) Писать значения запросов в журнал.
+
+        Raises:
+            DatabaseConnectionError: Ошибка драйвера при открытии или обновлении базы
+                (занята, нет доступа, файл не открывается); исходная — в цепочке
+                (``original``), текст — ``migrate.database_error_text``.
+            MigrationError: Базу нельзя безопасно обновить (как раньше).
+
+        Example:
+            >>> db = Database(
+            ...     'sqlite:///clinic.db',   # файл базы
+            ... )
+            >>> db.log_sql_params
+            False
         """
+        self.log_sql_params = log_sql_params
 
+        # self.engine = create_engine(
+        #     db_url,
+        #     echo=False,
+        #     future=True,
+        #     connect_args={"check_same_thread": False},
+        # )
+        # ↑ до 2026-10-31 (М8): значения запросов всегда попадали в текст ошибок SQLAlchemy
+        #   (и в журнал — трассировкой).
         self.engine = create_engine(
             db_url,
-            echo=False,
-            future=True,
-            connect_args={"check_same_thread": False},
+            echo            = False,                            # без журнала SQL
+            future          = True,                             # стиль SQLAlchemy 2.0
+            hide_parameters = not log_sql_params,               # значения запросов в ошибках
+            connect_args    = {"check_same_thread": False},     # сессии из разных потоков
         )
+        if log_sql_params: # отладка — личные данные в журнале
+            self.logger.warning(
+                "В журнал пишутся значения запросов к базе (личные данные) — "
+                "настройка LOG_SQL_PARAMS"
+            )
         # APP1 (2026-10-18): поиск «без учёта регистра» (ilike → lower(...) LIKE lower(...))
         # по кириллице на деле УЧИТЫВАЛ регистр: встроенный lower() SQLite понимает только
         # латиницу («иван» не находил «Иванов»). Свой lower — для всех букв (Юникод).
@@ -416,14 +638,22 @@ class Database:
             event.listen(self.engine, 'connect', _register_unicode_functions)
 
         Session = sessionmaker(
-            bind=self.engine,
-            future=True
+            bind   = self.engine,   # движок
+            future = True,          # стиль SQLAlchemy 2.0
         )
 
         # Регистрация обработчиков
         if not hasattr(Session, '_deletion_handlers_registered'):  # Флаг для однократной регистрации
-            event.listen(Session, "after_commit", _make_deletion_handler(DeletionType.COMMIT))
-            event.listen(Session, "after_rollback", _make_deletion_handler(DeletionType.ROLLBACK))
+            event.listen(
+                Session,                                        # фабрика сессий
+                "after_commit",                                 # после коммита
+                _make_deletion_handler(DeletionType.COMMIT),    # удаления «после коммита»
+            )
+            event.listen(
+                Session,                                        # фабрика сессий
+                "after_rollback",                               # после отката
+                _make_deletion_handler(DeletionType.ROLLBACK),  # удаления «при откате»
+            )
             Session._deletion_handlers_registered = True
 
         # Регистрация обработчиков для отложенных действий (обновлений UI)
@@ -433,11 +663,11 @@ class Database:
             #     ActionType
             # )
 
-            logger=AppLogger.get_instance(
-                name = 'api.Database',
+            logger = AppLogger.get_instance(
+                name                 = 'api.Database',   # журнал базы
                 # share_file_with = 'system',
-                enable_file_logging = 'user',
-                use_name_in_filename = False, # 'system',
+                enable_file_logging  = 'user',           # файл пользователя
+                use_name_in_filename = False,            # 'system',
             )
 
             # @event.listens_for(Session, "after_commit")
@@ -576,7 +806,7 @@ class Database:
         #     Session._after_commit_registered = True
 
         self.Session = scoped_session(
-            Session
+            Session,   # одна сессия на поток
         )
 
         # # Автоматическое создание таблиц (если их нет)
@@ -587,8 +817,23 @@ class Database:
         #   версии схемы миграциями Alembic (app/database/migrate.py): новая — создаётся,
         #   старая без отметки — приводится к исходной схеме, остальные — обновляются;
         #   перед изменением существующей базы — резервная копия файла.
-        from app.database.migrate import upgrade_database
-        upgrade_database(self.engine)
+        from app.database.migrate import database_error_text, upgrade_database
+        # upgrade_database(self.engine)
+        # ↑ до 2026-10-31 (М8, Ф1.6.7в): ошибка драйвера уходила наружу как есть — текст
+        #   пользователю строил только startup_error_text окна запуска.
+        try:
+            upgrade_database(self.engine)
+        except (sa_exc.DatabaseError, sqlite3.Error) as exc: # драйвер: занята, нет доступа
+            self.engine.dispose()  # соединения пула не держат файл
+            raise DatabaseConnectionError(
+                database_error_text(
+                    exc,   # ошибка драйвера
+                ),
+                details = {
+                    'база'     : self.engine.url.database,                # файл
+                    'операция' : 'открытие базы и обновление схемы',      # что делали
+                },
+            ) from exc
 
     @AppLogger.get_instance(
         name = 'Database',
@@ -598,18 +843,23 @@ class Database:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def get_session(self):
+    def get_session(self) -> Any: # сессия текущего потока
         """
-        Возвращает новую сессию, привязанную к текущему потоку.
+        Возвращает сессию текущего потока (``scoped_session``: в одном потоке — та же
+        сессия, не новая).
 
-        Возвращает:
-            Session: Объект сессии SQLAlchemy.
+        Note:
+            Лучше ``session_scope()``: он сам коммитит / откатывает и закрывает сессию, а
+            откат блока без запросов проводит через обработчики (ТД-9) — сессия,
+            откаченная вручную без транзакции, этой защиты не получает.
 
-        Примечание:
-            Рекомендуется использовать `session_scope()` вместо прямого вызова
-            `get_session()`, так как контекстный менеджер автоматически управляет
-            коммитом/откатом и закрытием.
+        Returns:
+            (Session) Сессия SQLAlchemy.
+
+        Example:
+            >>> session = db.get_session()
         """
+        # ↑ до 2026-10-31 (М8): описание — «новую сессию» (у scoped_session — та же на поток).
 
         return self.Session()
 
@@ -622,10 +872,20 @@ class Database:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @contextmanager
-    def session_scope(self):
+    # def session_scope(self):
+    # ↑ до 2026-10-31 (М8): без аннотации возврата.
+    def session_scope(self) -> Iterator[Any]: # сессия на блок with: коммит или откат
         """
         Даёт сессию на блок ``with``: без ошибки — коммит, с ошибкой — откат и повторный
         выброс исключения; в конце сессия закрывается.
+
+        Ошибки (2026-10-31, М8, Ф1.6.7в): ``sqlalchemy.exc.IntegrityError`` (повтор
+        уникального, пустое обязательное поле, внешний ключ — в блоке или при коммите)
+        выбрасывается как ``DbIntegrityError`` (``raise … from exc``: текст пользователю —
+        что нарушено, ``details`` — таблица, операция, SQL, значения — только при
+        ``log_sql_params``; исходная ``sqlite3.IntegrityError`` — ``original``); остальные —
+        как есть. Журнал пишет этот метод — ``log_text()`` исключения приложения (иначе
+        ``Ошибка: <текст>``) с трассировкой; кто ловит выше, второй раз не пишет.
 
         Порядок: 1) сессия потока (``scoped_session`` — одна на поток, ``close()`` её не
         заменяет); 2) словарь отложенных удалений ``session._deletions`` (COMMIT / ROLLBACK);
@@ -636,8 +896,12 @@ class Database:
         вызывает ``after_rollback``, и списки блока достались бы следующей транзакции (ТД-9).
         ``session.remove()`` не вызывается — привязка к потоку остаётся.
 
+        Returns:
+            (Iterator[Any]) Сессия SQLAlchemy на время блока.
+
         Raises:
-            Exception: Любое исключение блока или коммита — после отката.
+            DbIntegrityError: Нарушение целостности — после отката.
+            Exception: Любое другое исключение блока или коммита — после отката, как есть.
 
         Example:
             >>> with db.session_scope() as session:
@@ -661,7 +925,20 @@ class Database:
             self.logger.debug(f"Коммит сессии: {session}")
 
         except Exception as e:
-            self.logger.exception(f"Ошибка: {e}")
+            # self.logger.exception(f"Ошибка: {e}")
+            # ↑ до 2026-10-31 (М8, Ф1.6.7в): ошибка драйвера — в журнал и наружу как есть
+            #   (вместе со значениями запроса); у исключений приложения — без подробностей.
+            error : Optional[AppException] = None
+            if isinstance(e, sa_exc.IntegrityError): # нарушение целостности — исключение приложения
+                error = _integrity_error(
+                    e,                     # ошибка драйвера
+                    self.log_sql_params,   # значения запроса — по настройке
+                )
+            elif isinstance(e, AppException):
+                error = e
+            self.logger.exception(
+                error.log_text() if error is not None else f"Ошибка: {e}",
+            )
 
             # При откате просто очищаем список, файлы не удаляем
             # if hasattr(session, '_pending_deletions'):
@@ -677,6 +954,8 @@ class Database:
             # Если была ошибка, откатывает сессию
             session.rollback()
 
+            if error is not None and error is not e:
+                raise error from e
             raise
         finally:
             # Закрывает сессию и удаляет привязку к потоку
@@ -691,12 +970,16 @@ class Database:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def close(self):
+    def close(self) -> None: # закрывает сессии потоков и освобождает движок
         """
-        Закрывает все активные сессии и освобождает ресурсы движка (удаляет привязку к потокам).
+        Закрывает сессии потоков (``Session.remove()`` — привязка к потокам снимается) и
+        освобождает соединения движка (``engine.dispose()``).
 
         Вызывается при завершении работы приложения или при перезагрузке конфигурации.
-        После вызова `close()` объект Database больше не должен использоваться.
+        После ``close()`` объект больше не используется.
+
+        Example:
+            >>> db.close()
         """
 
         self.Session.remove()
@@ -712,22 +995,31 @@ class Database:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def create_tables(self, recreate: bool = False):
+    def create_tables(
+        self,
+        recreate : bool = False,   # удалить все таблицы и создать заново (данные пропадут)
+    ) -> None: # доводит базу до последней схемы (или пересоздаёт)
         """
-        Создаёт таблицы в БД.
-        
-        Если параметр recreate=True, то сначала удаляет все существующие таблицы в БД,
-        а затем создает новые.
-        Если параметр recreate=False, то просто создает новые таблицы,
-        если они не существуют.
+        Доводит базу до последней версии схемы миграциями (``upgrade_database``; до
+        2026-10-16 — ``create_all``).
 
-        Параметры:
-            recreate (bool): Если True, все существующие таблицы удаляются перед созданием.
-                             По умолчанию False.
+        ``recreate=True`` — сначала удаляет все таблицы моделей и отметку версии
+        (``alembic_version``: иначе миграции сочли бы пустую базу свежей), затем создаёт
+        всё с первой миграции, без резервной копии. ``recreate=False`` — недостающие
+        миграции, перед изменением — копия файла.
 
-        Предупреждение:
-            Использование `recreate=True` приведёт к полной потере данных!
+        Note:
+            ``recreate=True`` удаляет все данные.
+
+        Args:
+            recreate : (bool) Пересоздать базу.
+
+        Example:
+            >>> db.create_tables(
+            ...     recreate   =   True,   # тестовая база с нуля
+            ... )
         """
+        # ↑ до 2026-10-31 (М8): описание — «создаёт таблицы» (с 16.10 — миграции).
         if recreate:
             # Удаляет все существующие таблицы в БД
             Base.metadata.drop_all(self.engine)
@@ -740,7 +1032,10 @@ class Database:
         # Base.metadata.create_all(self.engine)
         # ↑ до 2026-10-16: см. __init__ — теперь миграции
         from app.database.migrate import upgrade_database
-        upgrade_database(self.engine, backup=not recreate)
+        upgrade_database(
+            self.engine,
+            backup   =   not recreate,   # пересоздаваемую не копировать
+        )
 
     @AppLogger.get_instance(
         name = 'Database',
@@ -750,16 +1045,17 @@ class Database:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def fill_test_data(self):
+    def fill_test_data(self) -> None: # заполняет пустую базу тестовыми данными
         """
-        Заполняет БД тестовыми данными.
+        Заполняет базу тестовыми данными (``populate_test_data``) в своей транзакции —
+        для отладки и демонстрации.
 
-        Используется для отладки и демонстрации. Вызывает `populate_test_data(session)`
-        внутри собственной транзакции.
+        Note:
+            Есть хотя бы один пациент — ничего не добавляется
+            (``session.query(Patient).count() > 0``).
 
-        Примечание:
-            Если в таблицах уже есть данные, новые не добавляются (проверка
-            `session.query(Patient).count() > 0`).
+        Example:
+            >>> db.fill_test_data()
         """
 
         with self.session_scope() as session:

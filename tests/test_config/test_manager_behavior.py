@@ -8,6 +8,7 @@
 
 import logging
 import os
+from pathlib import Path
 
 import msgpack
 import pytest
@@ -379,6 +380,40 @@ def test_apply_database_reloads_cached_services_without_clearing(applier, monkey
     assert make({}).apply_database({'database_local_path': 'b.db'}, {'database_local_path': 'a.db'})
     assert reloads == [id(service), id(service)]
     assert cleared == []
+
+
+def test_apply_database_reopens_on_log_sql_params(
+    applier,   # фабрика применителя и счётчик перезагрузок
+) -> None:
+    """М8: смена только LOG_SQL_PARAMS (флаг движка) — база переоткрывается у сервисов."""
+    from app.config.config_applier import ConfigApplier
+    make, _, _, reloads = applier
+    old = {'database_local_path': 'a.db', 'LOG_SQL_PARAMS': False}
+    new = {'database_local_path': 'a.db', 'LOG_SQL_PARAMS': True}
+    assert ConfigApplier.get_changed_blocks(old, new) == {'database'}
+    assert make({}).apply_database(new, old) is True
+    assert reloads == [1]
+    assert make({}).apply_database(dict(new), dict(new)) is False
+    assert reloads == [1]
+
+
+def test_get_db_passes_log_sql_params(
+    tmp_path    : Path,                 # папка временной базы
+    monkeypatch : pytest.MonkeyPatch,   # подмена настроек
+) -> None:
+    """М8: get_db берёт LOG_SQL_PARAMS из настроек (нет ключа — значения скрыты)."""
+    import app.dependencies as deps
+    for flag, expected in ((True, True), (None, False)):
+        config = {'database_local_path': str(tmp_path / f'{flag}.db')}
+        if flag is not None:
+            config['LOG_SQL_PARAMS'] = flag
+        monkeypatch.setattr(deps, 'get_config_env', lambda config=config: config)
+        db = deps.get_db()
+        try:
+            assert db.log_sql_params is expected
+            assert db.engine.hide_parameters is (not expected)
+        finally:
+            db.close()
 
 
 def test_apply_sync_sets_values(applier):

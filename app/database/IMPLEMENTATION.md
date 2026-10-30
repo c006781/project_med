@@ -1,13 +1,14 @@
 # База данных и миграции — заметки о реализации
 
-> Последнее обновление: 2026-10-16 (ветка `rework-migrations`).
+> Последнее обновление: 2026-10-31 — М8: FD10, исключения базы (§9), ТД-2, сверка (ветка
+> `rework_work/database`); до этого — 2026-10-16 (ветка `rework-migrations`).
 > Слой данных над базой (DTO, сервисы, репозитории) — [`app/services/IMPLEMENTATION.md`](../services/IMPLEMENTATION.md).
 
 | Файл | Назначение |
 |---|---|
-| [database.py](database.py) | `Database`: движок, сессии, `session_scope`, удаление файлов после коммита/отката; при открытии — миграции |
+| [database.py](database.py) | `Database`: движок, сессии, `session_scope`, удаление файлов после коммита/отката; при открытии — миграции; исключения базы (§9) |
 | [database_shema/clinic.py](database_shema/clinic.py) | Модели SQLAlchemy |
-| [migrate.py](migrate.py) | `upgrade_database` — довести базу до последней версии схемы |
+| [migrate.py](migrate.py) | `upgrade_database` — довести базу до последней версии схемы; `database_error_text`, `startup_error_text` — тексты ошибок открытия |
 | [migrations/](migrations/) | Alembic: `env.py`, шаблон `script.py.mako`, `alembic.ini` (только для консоли), `versions/` — миграции |
 | [`tests/test_database_shema/test_migrations.py`](../../tests/test_database_shema/test_migrations.py) | Тесты миграций |
 
@@ -124,8 +125,41 @@
   повторит следующее событие того же вида. `rollback()` без начатой транзакции (в блоке не
   было запросов) SQLAlchemy событий не шлёт — `session_scope` перед откатом начинает пустую
   транзакцию (соединение не открывается). Сессия, полученная `get_session()` и откаченная
-  без транзакции вручную, этой защиты не получает. Не сделано (Ф1.6.7а, FD10): удаление
-  «после коммита» при неактивной сессии `schedule_deletion` выполняет сразу.
+  без транзакции вручную, этой защиты не получает. FD10 (2026-10-31): удаление «после
+  коммита», запланированное при неактивной сессии (flush упал, коммита не будет), файл не
+  трогает — предупреждение в журнал (`app/utils/IMPLEMENTATION.md`, FD10); раньше
+  `schedule_deletion` удалял сразу.
+
+## 9. Исключения базы и значения запросов в журнале (2026-10-31, М8, Ф1.6.7в)
+
+| Где | Ошибка драйвера | Что выбрасывается |
+|---|---|---|
+| `Database.__init__` (открытие и `upgrade_database`) | `sqlalchemy.exc.DatabaseError`, `sqlite3.Error` (резервная копия — backup-API мимо SQLAlchemy) | `DatabaseConnectionError(database_error_text(exc), details={база, операция}) from exc`; движок освобождается. `MigrationError` — как раньше |
+| `session_scope` (блок и коммит) | `sqlalchemy.exc.IntegrityError` | `DbIntegrityError(что нарушено, details={таблица, операция, SQL}, original=exc.orig) from exc` — после отката; остальные — как есть |
+
+* **Текст пользователю.** «Занята другой копией» / «нет доступа» / общий — одна функция
+  `migrate.database_error_text` для `Database.__init__` и `startup_error_text` (раньше разбор
+  жил только в окне запуска). `startup_error_text` на `DatabaseConnectionError` отдаёт её
+  `detail` (без кода `[6002]`). Нарушение целостности — по сообщению SQLite
+  (`_integrity_detail`: повтор уникального, пустое обязательное, внешний ключ, CHECK; поле —
+  если SQLite его назвал); таблица и операция — из текста SQL (`_statement_target`).
+* **Журнал** пишет `session_scope` — `log_text()` (подробности, исходная ошибка) с
+  трассировкой; у исключения приложения из блока — тоже `log_text()`, у прочих — прежнее
+  `Ошибка: <текст>`. Журнал пишется до `raise … from`, поэтому `original` у
+  `DbIntegrityError` задаётся явно (`exc.orig`): цепочки в этот момент ещё нет (найдено
+  тестом). Окно запуска (`interfaces/gui/gui_window/main.py`) пишет `log_text()` ошибки
+  открытия.
+* **Значения запросов** (ФИО, телефоны, тексты — личные данные) SQLAlchemy кладёт в текст
+  своих ошибок (`[parameters: …]`), а с ним — в трассировку цепочки: убрать их только из
+  `details` было бы мало. Поэтому движок создаётся с `hide_parameters=True`; для отладки —
+  настройка `LOG_SQL_PARAMS` (`Database(log_sql_params=True)`, решение владельца
+  2026-10-31): значения видны в ошибках и в `details['параметры']`, при открытии базы —
+  предупреждение в журнал. Флаг задаётся движку при создании — его смена переоткрывает
+  базу (`ConfigApplier.apply_database`, блок `database`); переключатель на экране — Ф2.2.7.
+* Внешние ключи в основном движке не включены (`PRAGMA foreign_keys` — только в движке
+  миграций, выключен): «нет связанной записи» сейчас не возникает, текст — на будущее.
+* Тесты: `tests/test_database_shema/test_database_errors.py` (на коде до правки 22 из 24
+  падают), `tests/test_config/test_manager_behavior.py` (флаг: `apply_database`, `get_db`).
 
 ## 8. Автомиграции (2026-10-18)
 
@@ -183,3 +217,7 @@
 | итог | Итоговый проход: вычитка `migrate.py` целиком, статический анализ (pyflakes) изменённых файлов — в моём коде только два лишних импорта в тестах (убраны); найденное в коде проекта не тронуто (по правилу): `text_val` в `clinic.py` — в недостижимых строках после `raise`, лишние `import os` в `database.py` и `gui_window/main.py`. Тесты миграций — 3 прогона подряд по 50; весь набор — без новых падений; настоящая `clinic.db` после набора побайтно та же, в `versions/` лишних файлов нет. **Чисто** |
 | ТД-9 (2026-10-30, ветка `rework_work/database`) | Списки отложенных удалений и действий сессии чистились только своим событием (с 31.05.2026, разбиение списка на COMMIT / ROLLBACK; найдено в М5 — FD9, DA5). Обработчики `after_commit` / `after_rollback` отбрасывают список противоположного события (`_discard_other_deletions`; неудавшиеся удаления — `retry`, повтор сохранён); `session_scope` — откат без начатой транзакции через пустую транзакцию (иначе `after_rollback` не вызывается — найдено тестом). Обработчики и описание `session_scope` — формат skill, прежнее — комментарием. Тесты: `tests/test_database_shema/test_session_lists.py` (3; на старом коде 2 падают, третий — повтор — проходил и должен проходить); 3 xfail FD9 / DA5 сняты. Весь набор: 2003 / 0 / 8 / 5 xfail (было 1997 / 0 / 8 / 8) |
 | М7, Ф1.3.2 (2026-10-30, ветка `rework_work/schema`) | `database_shema/clinic.py`: `AppointmentNote` — из описания `NOTES` (`app/schema/clinic.py`), `__repr__` — `_note_repr` (прежний вывод `<Note(id=…, text_preview=…)>`, ошибка — в журнал и дальше); прежний класс — комментарием. Схема та же: снимок, «модели = миграции» без новой миграции, копия рабочей базы — 0 различий после миграции. Импорты, нужные только прежнему классу (`Column`, `Integer`, `Text`, `DateTime`, `Index`, `relationship`, `datetime`), — оставлены (`app/schema/IMPLEMENTATION.md`, журнал) |
+| М8, FD10 (2026-10-31, ветка `rework_work/database`) | `schedule_deletion` (`app/utils/file_deletions.py`): удаление «после коммита» при неактивной сессии (flush упал) файл не трогает — предупреждение в журнал (решение владельца, В-4); раньше удаляло сразу. Тест на настоящей сессии — `test_session_lists.py` |
+| М8, ТД-2 (2026-10-31) | Тесты миграций готовили расхождение через `ALTER TABLE … DROP COLUMN` (нет в SQLite 3.34, venv Linux — 3 падения). Теперь `drop_column` в `test_migrations.py` — пересборка таблицы (Alembic `batch_alter_table(recreate='always')`). На Windows проверено с запретом `DROP COLUMN` (разовый модуль pytest `_dev/tmp/ban_drop_column.py`): старые тесты — ровно 3 падения ТД-2, новые — 0. **На Linux не проверено** |
+| М8, сверка Ф1.6.7 (2026-10-31) | Опись пакета: 0 без докстринга, 0 без аннотации возврата (было `database.py` 2/9, `migrate.py` 0/6, `clinic.py` 0/2, `temp_data_bd.py` 0/2); описания модулей `__init__.py`, `clinic.py`, `temp_data_bd.py` (К7); pyflakes — только намеренные импорты `clinic.py` (`temp_data_bd.py` — 8 замечаний убраны, `database.py` — `os`, `e`). **Находка:** декоратор `log_execution_time` прежнего `_make_deletion_handler` после ТД-9 остался над закомментированным кодом и через него оборачивал следующую функцию — `_discard_other_deletions` (лишняя запись в журнал на каждом коммите и откате); возвращён к `_make_deletion_handler`. Описания `Database`, `get_session`, `create_tables` не совпадали с кодом (`create_all`, «новая сессия», `_pending_deletions`) — исправлены. Замечено, оставлено: `create_db` / `init_db` (`clinic.py`) создают базу `create_all` без отметки версии — `Database` потом приводит её как старую (§3); для тестовых баз безопасно |
+| М8, Ф1.6.7в (2026-10-31) | Исключения базы (§9): `DatabaseConnectionError` в `Database.__init__`, `DbIntegrityError` в `session_scope`, общий текст `database_error_text`; значения запросов скрыты (`hide_parameters`), флаг `LOG_SQL_PARAMS`. Находка тестом: журнал пишется до `raise … from` — `original` у `DbIntegrityError` явно |

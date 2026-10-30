@@ -8,7 +8,7 @@
 |---|---|
 | [dto_all.py](dto_all.py) | `PatientDTO`, `AppointmentDTO`, `PhotoDTO`, `AppointmentNoteDTO` — из описаний таблиц (`app/schema/clinic.py`, `build_dto`; заметки — `NOTES`, с 2026-10-30) |
 | [field_configs.py](field_configs.py) | Конфигурации полей для форм/таблиц: `PATIENT_CONFIG`, `APPOINTMENT_CONFIG`, `PHOTO_CONFIG`, `NOTE_CONFIG` — из описаний (`build_config`; заметки — с 2026-10-30); `get_note_fields`; `MODEL_CONFIG_MAP` — убран 2026-10-30 (комментарием) |
-| [compute_fields.py](compute_fields.py) | `get_patient_full_name`, `join_name_parts` (не используется приложением) |
+| [compute_fields.py](compute_fields.py) | `get_patient_full_name` (сервис — параметр, с 2026-10-30), `join_name_parts` (не используется приложением; ТД-13) |
 | Тесты | `tests/test_dto.py`, `tests/test_dto_review_pass1.py`, `tests/test_dto_layers.py` (слои), `tests/test_schema/` (совпадение с прежними DTO) |
 
 ---
@@ -52,3 +52,4 @@
 |---|---|---|
 | Ф1.3.2 | `dto_all.py`, `field_configs.py` | `AppointmentNoteDTO`, `NOTE_CONFIG` — из описания `NOTES` (`app/schema/clinic.py`); совпадают со снимком написанных вручную (`tests/test_schema/test_notes_def.py`); прежние — комментарием. `BaseModel`, `ConfigDict`, `Field`, `Optional` в `dto_all.py` больше не используются — оставлены (старый код — комментарием, правило проекта), как `datetime`, `List` в проходе 1 |
 | Ф1.3.3, Ф1.7.3 | `field_configs.py` | `MODEL_CONFIG_MAP` и импорт `Patient`, `Appointment` — комментарием (карту никто не читал; импорт моделей — связь «снизу вверх»). Тесты `tests/test_dto_layers.py` (4; на старом коде 2 падают). Весь набор: 2016 / 0 / 8 / 5 xfail |
+| Ф1.7.2 | `compute_fields.py` | `get_patient_full_name(patient_id, patient_service)` — сервис параметром (решение владельца 2026-10-30, вариант А), импорт `app.dependencies` — комментарием; функцию никто не вызывает, скрытый импорт сборки оставлен; пересмотреть, если по итогу окажется костылём, — `_dev/ТЕХДОЛГ.md` ТД-13. Тест DT1/DT2 (`test_dto_review_pass1.py`) — подменённый сервис параметром вместо подмены фабрики (проверки ФИО и текстов — прежние). `tests/test_dto_layers.py`: `compute_fields.py` в проверке слоёв; `import app.dto` в отдельном процессе не загружает модели, сборку, сервисы, репозитории. Весь набор: 2019 / 0 / 8 / 5 xfail |

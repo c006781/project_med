@@ -4,13 +4,17 @@
 
 Сейчас нигде не вызывается (ФИО пациента считает описание таблицы —
 ``app.schema.clinic.patient_full_name``); оставлено как публичная функция и скрытый
-импорт сборки (``scripts/build_win.py``).
+импорт сборки (``scripts/build_win.py``). Сервис пациентов передаётся параметром: слой DTO
+не импортирует сборку приложения (``app.dependencies``) — с 2026-10-30; нужна ли функция
+вообще — пересмотреть по итогу переработки (``_dev/ТЕХДОЛГ.md`` ТД-13).
 """
 
 from typing import Any, Iterable, Optional
 
 from app.utils.logger.logger import AppLogger
-from app.dependencies import get_patient_service
+# from app.dependencies import get_patient_service
+# ↑ до 2026-10-30 (Ф1.7.2): сервис брался из сборки приложения — связь слоёв «снизу вверх»
+#   (app.dto → app.dependencies); теперь сервис — параметр get_patient_full_name
 from app.exceptions import EntityNotFoundError
 
 # Тексты вместо ФИО
@@ -49,20 +53,32 @@ def join_name_parts(
     level=AppLogger._parse_log_level('DEBUG')
 )
 def get_patient_full_name(
-    patient_id: Optional[int], # ID пациента (None — пустая строка)
-) -> str:
+    patient_id      : Optional[int],    # ID пациента (None — пустая строка)
+    patient_service : Any,              # сервис пациентов (get_patient_by_id)
+) -> str: # ФИО пациента по ID
     """
-    ФИО пациента по его ID: «Фамилия Имя Отчество» (пустые части пропускаются).
+    Возвращает ФИО пациента по его ID: «Фамилия Имя Отчество» (пустые части пропускаются).
+
+    Сервис передаёт вызывающий (``app.dependencies.get_patient_service()``): слой DTO сборку
+    приложения не импортирует. При ``patient_id=None`` сервис не вызывается. Ошибки чтения
+    не пробрасываются — вместо ФИО возвращается текст (``PATIENT_NOT_FOUND_TEXT``,
+    ``PATIENT_LOAD_ERROR_TEXT``).
 
     Args:
-        patient_id (Optional[int]): ID пациента.
+        patient_id      : (int/None) ID пациента; None — пустая строка.
+        patient_service : (Any) Сервис пациентов: ``get_patient_by_id(id)`` возвращает
+            объект с ``last_name``, ``first_name`` (``middle_name`` — может не быть) или
+            бросает ``EntityNotFoundError``.
 
     Returns:
-        str: ФИО; ``''`` — ID не задан; ``'Пациент не найден'`` — нет такой записи;
-        ``'Ошибка загрузки'`` — сбой чтения.
+        (str) ФИО; ``''`` — ID не задан; ``'Пациент не найден'`` — нет такой записи;
+            ``'Ошибка загрузки'`` — сбой чтения.
 
     Example:
-        >>> get_patient_full_name(None)
+        >>> get_patient_full_name(
+        ...     None,                   # ID не задан
+        ...     patient_service =   None,  # не нужен: сервис не вызывается
+        ... )
         ''
     """
     logger = AppLogger.get_instance(
@@ -76,7 +92,9 @@ def get_patient_full_name(
         return ""
 
     try:
-        patient = get_patient_service().get_patient_by_id(patient_id)
+        patient = patient_service.get_patient_by_id(patient_id)
+        # patient = get_patient_service().get_patient_by_id(patient_id)
+        # ↑ до 2026-10-30 (Ф1.7.2): сервис — из app.dependencies (связь «снизу вверх»)
     except EntityNotFoundError: # PatientNotFoundError — наследник
         logger.debug(f"Пациент {patient_id} не найден")
         return PATIENT_NOT_FOUND_TEXT

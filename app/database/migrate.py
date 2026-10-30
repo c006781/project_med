@@ -246,15 +246,15 @@ def schema_differences(engine: Engine, metadata=None) -> List:
     return [d for d in diffs if not _is_alembic_table(d)]
 
 
-def _default_metadata():
+def _default_metadata() -> sa.MetaData: # модели приложения по умолчанию
     """
-    Модели по умолчанию — ``Base.metadata`` приложения (одно место: тесты подменяют его,
-    чтобы модели других тестов на общей ``Base`` не попадали в сравнение).
+    Возвращает модели по умолчанию — ``Base.metadata`` приложения (одно место: тесты
+    подменяют его, чтобы модели других тестов на общей ``Base`` не попадали в сравнение).
 
     Returns:
-        ``MetaData`` моделей приложения.
+        (MetaData) Модели приложения.
 
-    Пример:
+    Example:
         >>> 'patients' in _default_metadata().tables
         True
     """
@@ -365,26 +365,49 @@ def _migration_engine(engine: Engine) -> Engine:
     migration = create_engine(engine.url)
 
     @event.listens_for(migration, 'connect')
-    def _no_driver_transactions(dbapi_connection, connection_record):
+    def _no_driver_transactions(
+        dbapi_connection  : sqlite3.Connection,   # новое соединение
+        connection_record : object,               # запись пула (не используется)
+    ) -> None: # драйвер не управляет транзакциями; внешние ключи выключены
         """
-        Драйвер не начинает и не фиксирует транзакции сам.
+        Отключает у драйвера собственное управление транзакциями: он не начинает и не
+        фиксирует их сам.
 
         Внешние ключи — явно ВЫКЛ (M10, 2026-10-18): SQLite пересобирает таблицу при
         ALTER (создать новую → скопировать → удалить старую). С включёнными ключами
         удаление старой таблицы каскадом стёрло бы дочерние строки (или упало бы).
         Включать/выключать ключи можно только вне транзакции — поэтому здесь, при
         подключении. Целостность после миграции проверяет ``_check_foreign_keys``.
+
+        Args:
+            dbapi_connection  : (sqlite3.Connection) Соединение.
+            connection_record : (object) Запись пула.
+
+        Example:
+            >>> _no_driver_transactions(
+            ...     sqlite3.connect(':memory:'),   # соединение
+            ...     None,                          # запись пула
+            ... )
         """
         dbapi_connection.isolation_level = None
         dbapi_connection.execute('PRAGMA foreign_keys=OFF')
 
     @event.listens_for(migration, 'begin')
-    def _explicit_begin(connection):
+    def _explicit_begin(
+        connection : sa.engine.Connection,   # соединение, начинающее транзакцию
+    ) -> None: # начинает транзакцию явно (BEGIN IMMEDIATE)
         """
-        Транзакция начинается явно — DDL откатывается вместе с остальным.
+        Начинает транзакцию явно — DDL откатывается вместе с остальным.
 
         IMMEDIATE (M3, 2026-10-16): блокировка записи берётся СРАЗУ — вторая копия
         программы, открывающая ту же базу одновременно, ждёт, а не меняет её параллельно.
+
+        Args:
+            connection : (Connection) Соединение SQLAlchemy.
+
+        Example:
+            >>> with migration.begin() as conn:   # вызывается событием begin
+            ...     pass
         """
         connection.exec_driver_sql('BEGIN IMMEDIATE')
 
@@ -589,55 +612,66 @@ def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[st
     return BASELINE, legacy_backup
 
 
-def _baseline_metadata():
+def _baseline_metadata() -> sa.MetaData: # схема исходной миграции
     """
-    Схема, которую строит исходная миграция (``BASELINE``).
+    Возвращает схему, которую строит исходная миграция (``BASELINE``).
 
     Returns:
-        ``MetaData`` исходной схемы (без служебной ``alembic_version``).
+        (MetaData) Исходная схема (без служебной ``alembic_version``).
 
-    Пример:
+    Example:
         >>> sorted(_baseline_metadata().tables)
         ['appointments', 'appointments_notes', 'patients', 'photos']
     """
     return schema_at(BASELINE)
 
 
-def schema_at(revision: str):
+def schema_at(
+    revision : str,   # ревизия (BASELINE, head_revision() …)
+) -> sa.MetaData: # схема, которую строят миграции до ревизии
     """
-    Схема, которую строят миграции до ``revision``, — собранная во временной базе в памяти
-    (а не текущие модели: модели меняются, миграции — нет).
+    Возвращает схему, которую строят миграции до ``revision``, — собранную во временной
+    базе в памяти (а не текущие модели: модели меняются, миграции — нет).
 
     Запоминается (по ревизии и папке миграций): строится один раз за процесс.
     Возвращаемый ``MetaData`` — общий, менять его нельзя.
 
     Args:
-        revision: Ревизия (``BASELINE``, ``head_revision()`` …).
+        revision : (str) Ревизия (``BASELINE``, ``head_revision()`` …).
 
     Returns:
-        ``MetaData`` схемы (без служебной ``alembic_version``).
+        (MetaData) Схема (без служебной ``alembic_version``).
 
-    Пример:
-        >>> 'patients' in schema_at(head_revision()).tables
+    Example:
+        >>> 'patients' in schema_at(
+        ...     head_revision(),   # последняя ревизия
+        ... ).tables
         True
     """
     return _schema_at(revision, MIGRATIONS_DIR)
 
 
 @functools.lru_cache(maxsize=8)
-def _schema_at(revision: str, migrations_dir: str):
+def _schema_at(
+    revision       : str,   # ревизия
+    migrations_dir : str,   # папка миграций (только для ключа кеша)
+) -> sa.MetaData: # схема ревизии (тело schema_at)
     """
-    Тело ``schema_at`` (ключ кеша включает папку миграций — тесты подменяют её).
+    Возвращает схему ревизии — тело ``schema_at`` (ключ кеша включает папку миграций —
+    тесты подменяют её).
 
     Args:
-        revision: Ревизия.
-        migrations_dir: Папка миграций (только для ключа кеша).
+        revision       : (str) Ревизия.
+        migrations_dir : (str) Папка миграций (только для ключа кеша).
 
     Returns:
-        ``MetaData``.
+        (MetaData) Схема.
 
-    Пример:
-        >>> _schema_at('0001_baseline', MIGRATIONS_DIR)
+    Example:
+        >>> _schema_at(
+        ...     '0001_baseline',   # исходная
+        ...     MIGRATIONS_DIR,    # папка миграций
+        ... )
         MetaData()
     """
     from sqlalchemy import MetaData

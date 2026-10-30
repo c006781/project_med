@@ -1,4 +1,17 @@
 # app/database/database_shema/temp_data_bd.py
+"""
+Тестовые данные базы клиники: заметки, пациенты, приёмы, фото.
+
+``populate_test_data(session)`` — в переданной сессии (так зовёт ``Database.fill_test_data``),
+``generate_test_data(db_path)`` — своей сессией к файлу (``init_db``). Непустую базу (есть
+пациенты) не трогают. Пути фото — вымышленные (``photos/app1/…``), файлов нет.
+
+Example:
+    >>> generate_test_data(
+    ...     'test.db',   # тестовая база
+    ... )
+"""
+# ↑ до 2026-10-31 (М8): описания модуля не было (К7).
 # Стандартные библиотеки Python
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
@@ -89,15 +102,17 @@ from .clinic import Patient, Appointment, AppointmentNote, Photo
 # 
 
 from datetime import (
-    date, 
-    # datetime, 
-    time
+    date,
+    # datetime,
+    # time
+    # ↑ до 2026-10-31 (М8): не используется (pyflakes)
 )
 
 # Сторонние библиотеки
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session as OrmSession   # тип сессии (Session — имя фабрики ниже)
 
 @AppLogger.get_instance(
     name = 'temp_data_bd.py',
@@ -107,10 +122,21 @@ from sqlalchemy.orm import sessionmaker
     # description="Заполняем БД тестовыми данными",
     level=AppLogger._parse_log_level('DEBUG')
 )
-def populate_test_data(session):
+def populate_test_data(
+    session : OrmSession,   # сессия SQLAlchemy (коммит — внутри)
+) -> None: # заполняет пустую базу тестовыми данными
     """
-    Заполняет БД тестовыми данными.
-    Предполагается, что БД уже создана и таблицы существуют.
+    Заполняет базу тестовыми данными: заметки, пациенты, приёмы, фото — и коммитит.
+
+    Таблицы должны уже существовать. Есть хотя бы один пациент — ничего не добавляется
+    (повторный вызов не дублирует данные).
+
+    Args:
+        session : (Session) Сессия SQLAlchemy.
+
+    Example:
+        >>> with db.session_scope() as session:
+        ...     populate_test_data(session)
     """
     logger = AppLogger.get_instance(
         name = 'temp_data_bd.py',
@@ -122,13 +148,13 @@ def populate_test_data(session):
     # Проверяем, есть ли уже данные (чтобы не дублировать)
     if session.query(Patient).count() > 0:
         logger.debug(
-            f"База данных уже содержит данные. Пропускаем заполнение."
+            "База данных уже содержит данные. Пропускаем заполнение."
         )
         # print("База данных уже содержит данные. Пропускаем заполнение.")
         return
 
     logger.debug(
-        f"Заполнение базы тестовыми данными..."
+        "Заполнение базы тестовыми данными..."
     )   
 
     # --- Создаём заметки, которые будут использоваться многократно ---
@@ -146,7 +172,7 @@ def populate_test_data(session):
     )
 
     logger.debug(
-        f"Заполнение ТБ 'Пациенты' тестовыми данными..."
+        "Заполнение ТБ 'Пациенты' тестовыми данными..."
     ) 
     # Пациенты
     patient1 = Patient(
@@ -186,7 +212,7 @@ def populate_test_data(session):
 
 
     logger.debug(
-        f"Заполнение ТБ 'Заметки' тестовыми данными..."
+        "Заполнение ТБ 'Заметки' тестовыми данными..."
     ) 
 
     # --- Заметки для приёмов (каждое поле – отдельная заметка) ---
@@ -227,7 +253,7 @@ def populate_test_data(session):
     session.flush()
 
     logger.debug(
-        f"Заполнение ТБ 'Приёмы' тестовыми данными..."
+        "Заполнение ТБ 'Приёмы' тестовыми данными..."
     ) 
 
     # --- Приёмы ---
@@ -279,7 +305,7 @@ def populate_test_data(session):
 
 
     logger.debug(
-        f"Заполнение ТБ 'Фотографии' тестовыми данными..."
+        "Заполнение ТБ 'Фотографии' тестовыми данными..."
     ) 
     # Фотографии
     photo1 = Photo(
@@ -302,7 +328,7 @@ def populate_test_data(session):
     session.commit()
 
     logger.debug(
-        f"Тестовые данные добавлены и сохранены."
+        "Тестовые данные добавлены и сохранены."
     ) 
     # print("Тестовые данные добавлены.")
 
@@ -315,9 +341,20 @@ def populate_test_data(session):
     # description="Заполнение БД",
     level=AppLogger._parse_log_level('DEBUG')
 )
-def generate_test_data(db_path:str="clinic.db"):
+def generate_test_data(
+    db_path : str = "clinic.db",   # файл базы (таблицы уже есть)
+) -> None: # заполняет базу-файл тестовыми данными
     """
-    Создаёт сессию и вызывает populate_test_data.
+    Открывает свою сессию к файлу базы и вызывает ``populate_test_data`` (сессия
+    закрывается и при ошибке).
+
+    Args:
+        db_path : (str) Путь к файлу базы.
+
+    Example:
+        >>> generate_test_data(
+        ...     'test.db',   # тестовая база
+        ... )
     """
 
     logger = AppLogger.get_instance(

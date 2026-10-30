@@ -44,7 +44,121 @@
     ('Фотография', 'file_path', 'пустой путь', True)
 """
 
-from typing import Any, Callable, Dict, Optional, Tuple, Type
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type, Union
+
+# Подробности для журнала: текст или словарь «что — значение» (файл, таблица, параметры, SQL)
+Details = Union[str, Mapping[str, Any]]
+
+# Значения подробностей, которые pickle/copy переносят как есть (остальные — их repr)
+_PLAIN_TYPES = (str, int, float, bool, type(None))
+
+
+def _exception_text(
+    exc : BaseException,   # ошибка
+) -> str: # тип и текст ошибки одной строкой
+    """
+    Возвращает тип и текст ошибки: ``'<тип>: <текст>'`` или только тип, если текста нет.
+
+    Тип встроенной ошибки — без модуля (``ValueError``), остальных — с модулем
+    (``sqlite3.IntegrityError``, ``sqlalchemy.exc.IntegrityError``): в журнале видно, откуда
+    ошибка пришла.
+
+    Args:
+        exc : (BaseException) Ошибка.
+
+    Returns:
+        (str) Тип и текст.
+
+    Example:
+        >>> _exception_text(ValueError('плохое число'))
+        'ValueError: плохое число'
+        >>> import sqlite3
+        >>> _exception_text(sqlite3.IntegrityError('UNIQUE constraint failed'))
+        'sqlite3.IntegrityError: UNIQUE constraint failed'
+        >>> _exception_text(KeyError())
+        'KeyError'
+    """
+    cls = type(exc)
+    name = cls.__qualname__
+    if cls.__module__ != 'builtins': # не встроенная — с модулем
+        name = f"{cls.__module__}.{name}"
+    text = str(exc)
+    return f"{name}: {text}" if text else name
+
+
+def _details_text(
+    details : Optional[Details],   # подробности
+) -> str: # подробности одной строкой для журнала
+    """
+    Возвращает подробности одной строкой: текст — как есть, словарь — ``ключ=значение``
+    через ``'; '`` в порядке ключей; пустые (``None``, ``''``, ``{}``) — ``''``.
+
+    Args:
+        details : (str/Mapping/None) Подробности; None — нет.
+
+    Returns:
+        (str) Строка для журнала (``''`` — подробностей нет).
+
+    Example:
+        >>> _details_text({'таблица': 'patients', 'id': 5})
+        'таблица=patients; id=5'
+        >>> _details_text('путь a.png'), _details_text(None)
+        ('путь a.png', '')
+    """
+    if not details:
+        return ''
+    if isinstance(details, Mapping):
+        return '; '.join(f"{key}={value}" for key, value in details.items())
+    return str(details)
+
+
+def _root_cause(
+    exc : BaseException,   # ошибка, с которой начинается спуск
+) -> Optional[BaseException]: # первопричина цепочки
+    """
+    Возвращает первопричину цепочки ошибок — самую глубокую.
+
+    Спуск — по ``__cause__`` (``raise … from exc``), а без него — по ``__context__``
+    (ошибка поднята при обработке другой), как в ``app/database/migrate.py``
+    ``startup_error_text``. ``raise … from None`` (``__suppress_context__``) обрывает спуск:
+    исходную ошибку скрыли намеренно. Зацикленная цепочка (собранная вручную) не зависает —
+    каждая ошибка проходится один раз.
+
+    Args:
+        exc : (BaseException) Ошибка, с которой начинается спуск.
+
+    Returns:
+        (BaseException/None) Первопричина; None — цепочки нет.
+
+    Example:
+        >>> try:
+        ...     try:
+        ...         raise KeyError('id')
+        ...     except KeyError as key_exc:
+        ...         raise OSError('нет файла') from key_exc
+        ... except OSError as os_exc:
+        ...     root = _root_cause(os_exc)
+        >>> root
+        KeyError('id')
+        >>> _root_cause(ValueError('без цепочки')) is None
+        True
+    """
+    seen = {id(exc)}
+    current = exc
+    while True:
+        if current.__cause__ is not None:
+            deeper = current.__cause__
+        elif not current.__suppress_context__: # без from — неявная цепочка
+            deeper = current.__context__
+        else:
+            deeper = None
+        if deeper is None or id(deeper) in seen:
+            break
+        seen.add(
+            id(deeper),   # пройдена
+        )
+        current = deeper
+    return None if current is exc else current
 
 
 def _restore_exception(
@@ -85,41 +199,151 @@ class AppException(Exception):
     """
     Базовое исключение для всех ошибок приложения.
 
-    Все исключения приложения наследуют этот класс.
+    Все исключения приложения наследуют этот класс. Три уровня текста:
+
+    * ``message`` — понятный текст пользователю (``str(exc)`` — ``[код] текст``);
+    * ``details`` — что делали (файл, таблица, параметры, SQL) — только для журнала;
+    * ``original`` — исходная ошибка «из глубины» как есть: явная (``original=exc``) или
+      первопричина цепочки ``raise … from``; ``original_text`` — её тип и текст.
+
+    ``log_text()`` собирает всё для журнала. Само исключение в журнал не пишет — пишет тот,
+    кто его ловит и показывает (окно, командная строка, ``session_scope``), трассировку — через
+    ``exc_info``: так записи не дублируются.
 
     Attributes:
-        message (str): Текст ошибки.
-        code (Optional[int]): Код ошибки для программной обработки.
+        message : (str) Текст ошибки для пользователя.
+        code    : (int/None) Код ошибки для программной обработки; None — без кода.
+        details : (str/Mapping/None) Подробности для журнала; None — нет.
 
-    Пример:
+    Example:
         >>> str(AppException('сбой', code=7))
         '[7] сбой'
         >>> str(AppException('сбой'))
         'сбой'
+        >>> print(AppException(
+        ...     'Не удалось сохранить',                 # текст пользователю
+        ...     code     =   7,                         # код
+        ...     details  =   {'таблица': 'patients'},   # что делали
+        ...     original =   OSError('диск занят'),     # исходная ошибка
+        ... ).log_text())
+        [7] Не удалось сохранить
+          Подробности: таблица=patients
+          Исходная ошибка: OSError: диск занят
     """
+
+    # Умолчания на уровне класса: экземпляр, восстановленный из старого pickle или
+    # через _restore_exception без этих ключей, читает их отсюда
+    details        : Optional[Details]       = None   # подробности для журнала
+    _original      : Optional[BaseException] = None   # явная исходная ошибка
+    _original_text : Optional[str]           = None   # её текст после pickle/copy
 
     def __init__(
         self,
-        message : str,                    # текст ошибки
-        code    : Optional[int] = None,   # код ошибки (None — без кода)
+        message  : str,                               # текст ошибки для пользователя
+        code     : Optional[int] = None,              # код ошибки (None — без кода)
+        *,
+        details  : Optional[Details] = None,          # что делали (для журнала)
+        original : Optional[BaseException] = None,    # исходная ошибка (None — из цепочки)
     ) -> None:
         """
-        Создание исключения с текстом и кодом.
+        Создаёт исключение с текстом, кодом и (по желанию) подробностями и исходной ошибкой.
+
+        ``details`` и ``original`` — только именованные и необязательные: прежние вызовы
+        ``AppException(message, code)`` работают как раньше. ``args`` — ``(message,)``, как
+        у ``Exception(message)``.
 
         Args:
-            message (str): Текст ошибки.
-            code (Optional[int]): Код ошибки.
+            message  : (str) Текст ошибки для пользователя.
+            code     : (int/None) Код ошибки; None — без кода.
+            details  : (str/Mapping/None) Что делали: файл, таблица, параметры, SQL; None — нет.
+            original : (BaseException/None) Исходная ошибка; None — первопричина цепочки
+                ``raise … from`` (если её нет — исходной ошибки нет).
 
-        Пример:
+        Example:
             >>> exc = AppException('сбой', code=7)
-            >>> (exc.message, exc.code, exc.args)
-            ('сбой', 7, ('сбой',))
+            >>> (exc.message, exc.code, exc.args, exc.details, exc.original)
+            ('сбой', 7, ('сбой',), None, None)
         """
         # Вызываем конструктор родителя с сообщением
         super().__init__(message)
         # Сохраняем сообщение и код как атрибуты экземпляра
         self.message = message
         self.code = code
+        self.details = details
+        self._original = original
+
+    @property
+    def original(self) -> Optional[BaseException]: # исходная ошибка
+        """
+        Исходная ошибка: явная (``original=exc``) как есть, иначе — первопричина цепочки.
+
+        Цепочка читается в момент обращения (``__cause__`` появляется после ``raise … from``),
+        поэтому свойство, а не атрибут. После ``pickle``/``copy`` — ``None`` (сама ошибка не
+        переносится), текст остаётся в ``original_text``.
+
+        Returns:
+            (BaseException/None) Исходная ошибка; None — её нет.
+
+        Example:
+            >>> try:
+            ...     try:
+            ...         raise KeyError('id')
+            ...     except KeyError as key_exc:
+            ...         raise AppException('Нет записи') from key_exc
+            ... except AppException as exc:
+            ...     found = exc.original
+            >>> found
+            KeyError('id')
+        """
+        if self._original is not None:
+            return self._original
+        return _root_cause(self)
+
+    @property
+    def original_text(self) -> Optional[str]: # тип и текст исходной ошибки
+        """
+        Тип и текст исходной ошибки (``'sqlite3.IntegrityError: UNIQUE …'``).
+
+        Returns:
+            (str/None) Текст; None — исходной ошибки нет.
+
+        Example:
+            >>> AppException('сбой', original=ValueError('плохо')).original_text
+            'ValueError: плохо'
+            >>> AppException('сбой').original_text is None
+            True
+        """
+        original = self.original
+        if original is not None:
+            return _exception_text(original)
+        return self._original_text   # после pickle/copy
+
+    def log_text(self) -> str: # полный текст для журнала
+        """
+        Возвращает полный текст для журнала: ``str(exc)``, затем подробности и исходная
+        ошибка — по строке с отступом; пустые части не выводятся.
+
+        Трассировку не добавляет — её даёт ``logger.error(…, exc_info=exc)`` у того, кто
+        пишет в журнал. Без подробностей и исходной ошибки — то же, что ``str(exc)``.
+
+        Returns:
+            (str) Текст для журнала.
+
+        Example:
+            >>> print(AppException('сбой', details='путь a.png').log_text())
+            сбой
+              Подробности: путь a.png
+            >>> AppException('сбой', code=7).log_text()
+            '[7] сбой'
+        """
+        lines = [str(self)]
+        details_text = _details_text(self.details)
+        if details_text:
+            lines.append(f"  Подробности: {details_text}")
+        original_text = self.original_text
+        if original_text:
+            lines.append(f"  Исходная ошибка: {original_text}")
+        return '\n'.join(lines)
 
     def __str__(self) -> str:
         """
@@ -156,20 +380,51 @@ class AppException(Exception):
         """
         Поддержка ``pickle``/``copy`` для наследников с любой сигнатурой ``__init__``.
 
-        Returns:
-            Tuple[Callable, tuple]: Функция восстановления (``_restore_exception``) и её
-            аргументы — класс и копия ``__dict__``.
+        Переносится копия ``__dict__``, кроме того, что может не сериализоваться:
 
-        Пример:
+        * исходная ошибка (явная или из цепочки — цепочку ``pickle`` не переносит) — только
+          текстом (``original_text``); у копии ``original`` — ``None``;
+        * значения словаря ``details`` сложнее ``str``/``int``/``float``/``bool``/``None`` —
+          их ``repr``.
+
+        Без исходной ошибки и словаря подробностей ``__dict__`` копии равен исходному.
+
+        Returns:
+            (Tuple[Callable, tuple]) Функция восстановления (``_restore_exception``) и её
+                аргументы — класс и атрибуты.
+
+        Example:
             >>> import pickle
             >>> str(pickle.loads(pickle.dumps(PhotoFileError('a.png', 'чтения', 'нет файла'))))
             "[4003] Ошибка чтения файла 'a.png': нет файла"
+            >>> copied = pickle.loads(pickle.dumps(AppException('сбой', original=OSError('занят'))))
+            >>> (copied.original, copied.original_text)
+            (None, 'OSError: занят')
         """
+        # return (
+        #     _restore_exception,         # функция восстановления
+        #     (
+        #         type(self),             # класс
+        #         dict(self.__dict__),    # атрибуты (копия)
+        #     ),
+        # )
+        # ↑ до 2026-10-31 (Ф1.6.8а): __dict__ целиком — исходная ошибка (часто не
+        #   сериализуется, например с соединением внутри) и значения подробностей ломали бы pickle.
+        state = dict(self.__dict__)
+        original_text = self.original_text
+        if original_text is not None: # исходная ошибка — только текстом
+            state['_original'] = None
+            state['_original_text'] = original_text
+        if isinstance(self.details, Mapping): # значения подробностей — простые или repr
+            state['details'] = {
+                key: value if isinstance(value, _PLAIN_TYPES) else repr(value)
+                for key, value in self.details.items()
+            }
         return (
-            _restore_exception,         # функция восстановления
+            _restore_exception,     # функция восстановления
             (
-                type(self),             # класс
-                dict(self.__dict__),    # атрибуты (копия)
+                type(self),         # класс
+                state,              # атрибуты (копия без несериализуемого)
             ),
         )
 

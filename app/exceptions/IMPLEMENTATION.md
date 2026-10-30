@@ -2,20 +2,21 @@
 
 > Файл для разработчиков: что делает модуль, как устроен, почему так и журнал проверок.
 > Обновляется вместе с кодом.
-> Последнее обновление: 2026-10-25, проход 3 — сверка М9 (ветка `rework-w1-exceptions`).
+> Последнее обновление: 2026-10-31, проход 4 — три уровня текста (Ф1.6.8а, ветка
+> `rework_work/w1-exceptions`).
 
 | Файл | Назначение |
 |---|---|
 | [exceptions_all.py](exceptions_all.py) | Все исключения приложения (иерархия — в описании модуля) |
 | [\_\_init\_\_.py](__init__.py) | Экспорт; `__all__` без `ConnectionError` (прежнее имя — присваиванием) |
-| [tests/test_exceptions.py](../../tests/test_exceptions.py), [tests/test_exceptions_review_pass1.py](../../tests/test_exceptions_review_pass1.py), [tests/test_exceptions_review_pass3.py](../../tests/test_exceptions_review_pass3.py) | Тесты |
+| [tests/test_exceptions.py](../../tests/test_exceptions.py), [tests/test_exceptions_review_pass1.py](../../tests/test_exceptions_review_pass1.py), [tests/test_exceptions_review_pass3.py](../../tests/test_exceptions_review_pass3.py), [tests/test_exceptions_details.py](../../tests/test_exceptions_details.py) | Тесты |
 
 ---
 
 ## 1. Как устроено
 
 ```
-AppException (message, code; __str__ → "[code] message" / message при code=None; __reduce__ → pickle/copy)
+AppException (message, code; details, original, original_text, log_text(); __str__ → "[code] message" / message при code=None; __reduce__ → pickle/copy)
 ├── EntityNotFoundError (+LookupError): entity, entity_id      9001 / по таблицам 1001…4001
 ├── EntityValidationError (+ValueError): entity, field, reason 9002 / по таблицам 1002…4002
 ├── PhotoFileError: path, operation, reason, errno             4003 (+ Permission/NoSpace)
@@ -31,6 +32,15 @@ AppException (message, code; __str__ → "[code] message" / message при code=
   (у таблицы без своего класса — `EntityValidationError`).
 * Тексты и коды исключений конкретных таблиц не менялись (на них опираются тесты и
   командная строка).
+* **Три уровня текста** (Ф1.6.8а, 2026-10-31; решение владельца В-1): `message` — текст
+  пользователю (`str(exc)` — как раньше); `details` — что делали (строка или словарь:
+  файл, таблица, параметры, SQL) — только для журнала; `original` — исходная ошибка: явная
+  (`original=exc`, как есть) или первопричина цепочки (`__cause__`, без него — `__context__`;
+  `raise … from None` — нет; как `startup_error_text` в `app/database/migrate.py`);
+  `original_text` — `'<тип>: <текст>'` (тип не встроенной ошибки — с модулем:
+  `sqlalchemy.exc.IntegrityError`); `log_text()` — `str(exc)`, затем `  Подробности: …`,
+  `  Исходная ошибка: …` (пустое не выводится). Пишет в журнал тот, кто ловит и показывает
+  (трассировка — `exc_info`), не само исключение.
 
 ### 1.1 Решения
 
@@ -40,6 +50,11 @@ AppException (message, code; __str__ → "[code] message" / message при code=
 | `ConnectionError` → `DatabaseConnectionError`, старое имя — псевдоним вне `__all__` | `from app.exceptions import *` перекрывал встроенный `ConnectionError` — `except ConnectionError` переставал ловить сетевые ошибки (их бросает, например, `app.network`) |
 | `__reduce__` в `AppException` | `__init__` наследников принимает данные, а не текст: `pickle` падал (`PhotoFileError`) |
 | Неиспользуемые исключения синхронизации и БД оставлены | Публичный API; кандидаты на удаление — `_dev/ИДЕИ.md` И-9 |
+| `details`, `original` — только именованные и необязательные | Прежние вызовы `AppException(message, code)` и наследников не меняются; позиционные параметры наследников разные — именованные не путаются |
+| `original` — свойство, а не атрибут | `__cause__` появляется только после `raise … from`, то есть после `__init__`: цепочку читаем при обращении |
+| Явная `original` — как есть, без спуска по её цепочке | Явно передали — значит, нужна именно она |
+| `pickle`/`copy`: исходная ошибка — текстом, значения словаря `details` — простые или `repr` | Ошибки драйверов часто не сериализуются (соединение, блокировка внутри), цепочку `pickle` не переносит вовсе; без исходной ошибки и словаря `__dict__` копии — как раньше (тест E8) |
+| Умолчания `details`, `_original`, `_original_text` — на уровне класса | Экземпляр из старого `pickle` (без этих ключей) не падает при чтении |
 
 ---
 
@@ -56,6 +71,11 @@ AppException (message, code; __str__ → "[code] message" / message при code=
 таблица, коды по умолчанию `SyncError`/`DatabaseError`, ловля по базовым классам групп,
 `reason` скачивания/загрузки, `TokenError`, `args`, `errno=0`, лишние атрибуты при
 `pickle`, примеры описания пакета. Всего по модулю — 108.
+
+`tests/test_exceptions_details.py` (проход 4, 2026-10-31, Ф1.6.8а): старые вызовы как
+раньше, `details` (строка, словарь, пустые), `original` явно / из цепочки до первопричины /
+из `__context__` / `from None` / зацикленная цепочка, `log_text`, `pickle`/`copy` с
+несериализуемой исходной ошибкой и значениями подробностей. До правки — 20 из 21 падали.
 
 ---
 
@@ -100,6 +120,13 @@ AppException (message, code; __str__ → "[code] message" / message при code=
   владельца (атрибут — публичный, тесты прохода 1 его проверяют).
 * **N3.** `errno=0` в `PhotoFileError` в текст не попадает (`if errno:`) — оставлено: 0 не
   код ошибки ОС; закреплено тестом.
+
+### Проход 4 (2026-10-31) — три уровня текста (Ф1.6.8а)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| F1 | У исключения — только текст пользователю | Для разбора нет «что делали» и исходной ошибки (И-9, В-1); текст пользователю нельзя загромождать подробностями | `AppException`: `details`, `original` (явно / из цепочки), `original_text`, `log_text()`; помощники `_exception_text`, `_details_text`, `_root_cause` |
+| F2 | `__reduce__` переносил `__dict__` целиком | С исходной ошибкой (часто несериализуемой) `pickle` падал бы | Исходная — текстом, значения словаря подробностей — простые или `repr` (старый код — комментарием) |
 
 ---
 

@@ -121,8 +121,10 @@ from sqlalchemy import exc as sa_exc   # ошибки драйвера — им�
 from sqlalchemy.orm import sessionmaker, scoped_session
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
+import os     # резервная копия базы (backup_sqlite_database)
 import re
 import sqlite3
+import time   # метка времени в имени резервной копии
 
 from app.exceptions import AppException, DatabaseConnectionError, DbIntegrityError
 
@@ -489,6 +491,57 @@ def _integrity_error(
         details  = {key: value for key, value in details.items() if value is not None},
         original = driver_error,   # явно: журнал пишется до raise … from (цепочки ещё нет)
     )
+
+
+def backup_sqlite_database(
+    engine : Any,   # движок SQLAlchemy базы (Engine)
+    label  : str,   # метка в имени копии (ревизия миграции, 'merge' …)
+) -> Optional[str]: # резервная копия файла SQLite рядом с базой
+    """
+    Делает резервную копию файла базы SQLite рядом с ним: ``<файл>.bak-<ГГГГММДД_ЧЧММСС>-<метка>``.
+
+    Копия — через backup-API SQLite (M8, 2026-10-18), а не копированием файла: в режиме
+    WAL свежие изменения лежат в отдельном файле ``-wal`` и, пока базу держит открытой
+    другая программа, в основной файл не сливаются — копия файла их теряла. Backup-API
+    даёт согласованный снимок в любом режиме журнала. Существующая копия с тем же именем
+    не перезаписывается (к имени добавляется ``-N``). Перед копией закрываются свободные
+    соединения движка (``dispose``).
+
+    Вынесено 2026-10-31 из ``migrate._backup`` (тот теперь вызывает эту функцию): копия
+    нужна и перед объединением пациентов (Ф1.6.10а).
+
+    Args:
+        engine : (Engine) Движок базы.
+        label  : (str) Метка в имени копии.
+
+    Returns:
+        (str/None) Путь к копии; None — не SQLite-файл, база в памяти или файла нет.
+
+    Example:
+        >>> backup_sqlite_database(
+        ...     db.engine,   # движок базы
+        ...     'merge',     # метка
+        ... )
+        'clinic.db.bak-20261031_211500-merge'
+    """
+    path = engine.url.database
+    if engine.url.get_backend_name() != 'sqlite' or not path or path == ':memory:' or not os.path.exists(path):
+        return None
+    stamp = time.strftime('%Y%m%d_%H%M%S')
+    backup = f"{path}.bak-{stamp}-{label}"
+    n = 1
+    while os.path.exists(backup): # копию с тем же именем не затирать
+        backup = f"{path}.bak-{stamp}-{label}-{n}"
+        n += 1
+    engine.dispose()            # закрыть свободные соединения приложения
+    source = sqlite3.connect(path)
+    target = sqlite3.connect(backup)
+    try:
+        source.backup(target)
+    finally:
+        target.close()
+        source.close()
+    return backup
 
 
 class Database:

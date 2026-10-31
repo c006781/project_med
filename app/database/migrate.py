@@ -320,25 +320,33 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
         >>> _backup(engine, '0001_baseline')
         'clinic.db.bak-20261016_211500-0001_baseline'
     """
-    path = engine.url.database
-    if engine.url.get_backend_name() != 'sqlite' or not path or path == ':memory:' or not os.path.exists(path):
-        return None
-    backup = f"{path}.bak-{time.strftime('%Y%m%d_%H%M%S')}-{revision or 'none'}"
-    n = 1
-    while os.path.exists(backup):
-        backup = f"{path}.bak-{time.strftime('%Y%m%d_%H%M%S')}-{revision or 'none'}-{n}"
-        n += 1
-    engine.dispose()            # закрыть соединения приложения
-    # shutil.copy2(path, backup)
-    # ↑ до M8 (2026-10-18): копия файла теряла изменения из -wal (режим WAL, база открыта другой программой)
-    source = sqlite3.connect(path)
-    target = sqlite3.connect(backup)
-    try:
-        source.backup(target)
-    finally:
-        target.close()
-        source.close()
-    return backup
+    # Код копии вынесен 2026-10-31 в app.database.database.backup_sqlite_database (нужна и
+    # перед объединением пациентов, Ф1.6.10а); импорт внутри — migrate грузит Database лениво.
+    from app.database.database import backup_sqlite_database
+    return backup_sqlite_database(
+        engine,                  # движок базы
+        revision or 'none',      # метка — текущая ревизия
+    )
+    # path = engine.url.database
+    # if engine.url.get_backend_name() != 'sqlite' or not path or path == ':memory:' or not os.path.exists(path):
+    #     return None
+    # backup = f"{path}.bak-{time.strftime('%Y%m%d_%H%M%S')}-{revision or 'none'}"
+    # n = 1
+    # while os.path.exists(backup):
+    #     backup = f"{path}.bak-{time.strftime('%Y%m%d_%H%M%S')}-{revision or 'none'}-{n}"
+    #     n += 1
+    # engine.dispose()            # закрыть соединения приложения
+    # # shutil.copy2(path, backup)
+    # # ↑ до M8 (2026-10-18): копия файла теряла изменения из -wal (режим WAL, база открыта другой программой)
+    # source = sqlite3.connect(path)
+    # target = sqlite3.connect(backup)
+    # try:
+    #     source.backup(target)
+    # finally:
+    #     target.close()
+    #     source.close()
+    # return backup
+    # ↑ до 2026-10-31 (Ф1.6.10а): копия делалась здесь; теперь — общая функция.
 
 
 def _migration_engine(engine: Engine) -> Engine:

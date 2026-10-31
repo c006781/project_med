@@ -59,6 +59,14 @@ from app.services.services_all import (
 )
 from app.repositories.repositories_all import PatientRepository
 from app.schema.clinic import patient_full_name
+# Функции сравнения — общие с объединением пациентов (Ф1.6.10а): перенесены 2026-10-31
+# в app.utils.record_keys без изменения поведения (app не зависит от parsers).
+from app.utils.record_keys import (
+    APPOINTMENT_KEY_FIELDS,
+    appointment_key,
+    normalize_match,
+    normalize_text,
+)
 # from app.utils.logger.logger import AppLogger
 
 
@@ -177,61 +185,6 @@ def get_all_docx_files(
 # ----------------------------------------------------------------------
 # Нормализация и очистка текста (с сохранением переносов строк)
 # ----------------------------------------------------------------------
-
-def normalize_text(
-    text : Optional[str],  # исходный текст (None — как пустой)
-) -> str:
-    """
-    Очищает текст, но сохраняет переносы строк.
-
-    - Заменяет ``\\r\\n`` и ``\\r`` на ``\\n``.
-    - В каждой строке убирает пробелы по краям и сворачивает повторные пробельные
-      символы (пробелы, табуляции, неразрывные пробелы) в один пробел; ``\\n`` не трогает.
-    - Убирает пустые строки в начале и конце; внутренние пустые строки сохраняет
-      (строка из одних пробелов становится пустой).
-
-    Args:
-        text (Optional[str]): Исходный текст.
-
-    Returns:
-        str: Очищенная строка с сохранёнными внутренними переносами.
-
-    Пример:
-        >>> normalize_text('  Тест  1 1\\r\\n причина ')
-        'Тест 1 1\\nпричина'
-        >>> normalize_text(None)
-        ''
-    """
-
-    if not text:
-        return ""
-
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-
-    # W1: пробелы по краям строки и повторные внутри — убрать (split() без аргумента
-    # режет по любым пробельным символам, включая табуляции и неразрывный пробел)
-    lines = [
-        ' '.join(line.split())
-        for line in text.split('\n')
-    ]
-    # text = text.replace('\r', '\n')
-    # text = re.sub(r'[\t\x0b\x0c]', ' ', text)   # табуляции -> пробел
-    # lines = text.splitlines()
-    # ↑ до 2026-10-25 (W1): описание обещало убирать лишние пробелы, но пробелы по краям
-    #   и повторные оставались («  Иван  » попадал в ФИО); \r\n давал пустую строку.
-
-    # Убираем только пустые строки в начале и конце, внутренние сохраняем
-    if lines:
-
-        # убираем начальные пустые
-        while lines and not lines[0].strip():
-            lines.pop(0)
-
-        # убираем конечные пустые
-        while lines and not lines[-1].strip():
-            lines.pop()
-
-    return '\n'.join(lines)
 
 # Первая цифра 10-значного номера РФ без кода страны: 3, 4, 8 — коды городов, 9 — мобильные
 # (W3, 2026-10-25; было только 8 и 9 — городские 495…, 3842… без «8» терялись)
@@ -490,37 +443,6 @@ def normalize_appointment_row(
             normalized[key] = normalize_text(value) if value else None
 
     return normalized
-
-def normalize_match(
-    s : Optional[str],  # исходная строка (заголовок столбца, синоним, title поля)
-) -> str:
-    """
-    Приводит строку к единому формату для сравнения:
-    - нижний регистр
-    - замена 'ё' на 'е'
-    - удаление знаков препинания
-    - нормализация пробелов
-
-    Args:
-        s (str): Исходная строка.
-
-    Returns:
-        str: Нормализованная строка, пригодная для сопоставления заголовков таблиц.
-
-    Пример:
-        >>> normalize_match('Рекомендации и дата сл. приёма')
-        'рекомендации и дата сл приема'
-    """
-
-    if not s:
-        return ""
-    
-    s = s.lower()
-    s = s.replace('ё', 'е')
-    s = re.sub(r'[^\w\s]', '', s)      # удаляем всё, кроме букв, цифр, пробелов
-    s = re.sub(r'\s+', ' ', s).strip() # сворачиваем множественные пробелы
-    
-    return s
 
 # ----------------------------------------------------------------------
 # Извлечение данных пациента из текста (исправленный класс)
@@ -1183,17 +1105,6 @@ class WordFileParser:
 # Вспомогательные функции для работы с пациентом
 # ----------------------------------------------------------------------
 
-# Поля приёма, по которым приём считается повторным (ТД-8: дата и все тексты)
-APPOINTMENT_KEY_FIELDS = (
-    'date',
-    'reason_text',
-    'procedure_text',
-    'recommendations_text',
-    'cost_procedure_text',
-    'note_text',
-)
-
-
 def patient_key(
     last_name   : Optional[str],    # фамилия
     first_name  : Optional[str],    # имя
@@ -1263,37 +1174,6 @@ def find_patients_by_key(
         for patient in PatientRepository(session).get_all()
         if patient_key(patient.last_name, patient.first_name, patient.middle_name, patient.birth_date) == key
     ]
-
-
-def appointment_key(
-    appointment : Any,  # строка документа (словарь) или приём из базы (DTO — атрибуты)
-) -> Tuple[Any, ...]:
-    """
-    Ключ повторного приёма — дата и все тексты (``APPOINTMENT_KEY_FIELDS``), ТД-8.
-
-    Тексты сравниваются после ``normalize_text`` (пустой текст — None): приём, введённый
-    в окне с лишними пробелами, совпадает с приёмом из документа.
-
-    Args:
-        appointment (Any): Словарь строки документа или объект с атрибутами (``AppointmentDTO``).
-
-    Returns:
-        Tuple[Any, ...]: Ключ для сравнения.
-
-    Пример:
-        >>> appointment_key({'date': date(2026, 3, 14), 'reason_text': 'боль  '})
-        (datetime.date(2026, 3, 14), 'боль', None, None, None, None)
-    """
-
-    if isinstance(appointment, dict):
-        values = [appointment.get(name) for name in APPOINTMENT_KEY_FIELDS]
-    else:
-        values = [getattr(appointment, name, None) for name in APPOINTMENT_KEY_FIELDS]
-
-    return (values[0],) + tuple(
-        normalize_text(value) or None
-        for value in values[1:]
-    )
 
 
 def _add_warning(

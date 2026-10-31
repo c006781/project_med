@@ -31,5 +31,6 @@
 | # | Что было | Почему плохо | Исправление |
 |---|---|---|---|
 | DP4 | `get_sync_service()` без кэша — новый `SyncService` на каждый вызов | Окно хранит свой объект (`MainWindow.sync_service`), а `ConfigApplier.apply_sync` менял временный: смена токена Яндекс.Диска и путей в настройках до окна не доходила (ОСТ п. 1.8) | `@lru_cache(maxsize=1)` — один объект на приложение; в реестр `_SERVICE_PROVIDERS` не включён: реестр перезагружается при смене базы (`apply_database`), токен и пути передаёт `apply_sync`, а `clear_services_cache` по реестру сбросил бы общий объект (окно осталось бы со старым) |
+| DP5 | (новое, 2026-10-31, Ф1.6.10а) `get_patient_merge_service()` | — | Собирается при каждом вызове из текущих `get_db()`, `get_patient_service()`, `get_appointment_service()`; без кэша и вне реестра `_SERVICE_PROVIDERS`: реестр при смене настроек зовёт `reload_config()`, которого у сервиса нет (состояния нет — перезагружать нечего). Тест — `test_patient_merge::test_dependencies_provider_builds_service` |
 
 Тест: `tests/test_services/test_services_check.py::test_f16_10v_*` (на старом коде падает).

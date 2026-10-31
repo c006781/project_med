@@ -136,3 +136,7 @@ FD7 — 1, FD8 — 2), FD9 (2; были xfail strict, с 2026-10-30 — прох
 `pyflakes` по пяти модулям: только 4 ожидаемых замечания DA4 (неиспользуемые импорты,
 оставлены по правилу проекта). Тесты пяти модулей: 75 прошли, 3 xfail (FD9 — 2, DA5 — 1); с 2026-10-30
 (ТД-9 исправлен) — 78 прошли, 0 xfail.
+
+## record_keys.py (2026-10-31, Ф1.6.10а)
+
+Ключи сравнения записей: `normalize_text`, `normalize_match`, `APPOINTMENT_KEY_FIELDS`, `appointment_key` — перенесены из `parsers/word_importer.py` без изменения поведения (нужны объединению пациентов в `app/services`, а `app` не зависит от `parsers`); новое — `record_key` (ключ по списку полей: строки через `normalize_match`, даты — целиком). Тесты — `tests/test_utils/test_record_keys.py`.

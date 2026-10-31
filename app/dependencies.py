@@ -279,7 +279,9 @@ def get_photo_service() -> PhotoService:
     )
 
 # Кэш — один объект на приложение (Ф1.6.10в, 2026-10-31); в реестр _SERVICE_PROVIDERS не
-# включён: у SyncService нет reload_config — настройки ему передаёт ConfigApplier.apply_sync
+# включён: реестр перезагружается при смене базы (apply_database), а токен и пути
+# SyncService получает от ConfigApplier.apply_sync; clear_services_cache по реестру сбросил
+# бы общий объект — окно осталось бы со старым
 @lru_cache(maxsize=1)
 @AppLogger.get_instance(
     name = 'dependencies.py',

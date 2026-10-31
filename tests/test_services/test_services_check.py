@@ -321,3 +321,66 @@ def test_s8_photo_create_without_appointment(photo_service, tmp_path):
         assert isinstance(exc, ValueError) and 'приём' in str(exc)
     else:
         raise AssertionError('ожидалась PhotoValidationError')
+
+
+# ---------------------------------------------------------------------------
+# S9: sql_compute — MAX / MIN считаются; неизвестная функция и столбец фильтра — предупреждение
+# ---------------------------------------------------------------------------
+
+def _appointment_with_photos(db_session, photos):
+    """Пациент, два приёма; у первого — фото с указанными описаниями. Возвращает приёмы."""
+    from app.database.database_shema.clinic import Photo
+
+    patient = Patient(first_name='И', last_name='Акулов')
+    db_session.add(patient)
+    db_session.commit()
+    first = Appointment(patient_id=patient.id, date=date(2026, 1, 1))
+    second = Appointment(patient_id=patient.id, date=date(2026, 1, 2))
+    db_session.add_all([first, second])
+    db_session.commit()
+    db_session.add_all([Photo(appointment_id=first.id, file_path=f'p{i}.jpg', description=d)
+                        for i, d in enumerate(photos)])
+    db_session.commit()
+    return first, second
+
+
+def test_s9_sql_compute_max_and_min(appointment_service, db_session):
+    from app.database.database_shema.clinic import Photo
+
+    first, second = _appointment_with_photos(db_session, ['а', 'б', 'в'])
+    photo_ids = [p.id for p in db_session.query(Photo).filter(Photo.appointment_id == first.id)]
+    for func_name, expected in (('MAX', max(photo_ids)), ('MIN', min(photo_ids))):
+        sub = appointment_service._build_sql_compute_subquery(
+            'x',                                                        # поле
+            {'relation': 'photos', 'func': func_name, 'column': 'id'},  # описание
+        )
+        assert sub is not None
+        rows = dict(db_session.query(Appointment.id, sub.label('x')).all())
+        assert rows[first.id] == expected and rows[second.id] is None
+
+
+def test_s9_sql_compute_unknown_function_and_filter_column(appointment_service, db_session):
+    first, _ = _appointment_with_photos(db_session, ['а', 'б'])
+    got = _log_lines(
+        appointment_service,
+        lambda: appointment_service._build_sql_compute_subquery(
+            'x', {'relation': 'photos', 'func': 'MEDIAN', 'column': 'id'},
+        ),
+    )
+    assert appointment_service._build_sql_compute_subquery(
+        'x', {'relation': 'photos', 'func': 'MEDIAN', 'column': 'id'},
+    ) is None
+    assert any(line.startswith('WARNING|') and 'MEDIAN' in line for line in got)
+
+    sub = None
+
+    def build():
+        nonlocal sub
+        sub = appointment_service._build_sql_compute_subquery(
+            'x', {'relation': 'photos', 'func': 'COUNT', 'filter': {'нет_столбца': 1}},
+        )
+
+    got = _log_lines(appointment_service, build)
+    assert any(line.startswith('WARNING|') and 'нет_столбца' in line for line in got)
+    rows = dict(db_session.query(Appointment.id, sub.label('x')).all())
+    assert rows[first.id] == 2

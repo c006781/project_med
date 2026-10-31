@@ -14,7 +14,9 @@ from typing import (
     Union
 )
 from typing import Any, Callable, List # реестр поставщиков сервисов
+from typing import Optional, Tuple      # общий Database приложения (ТД-6)
 import datetime
+import threading                        # общий Database: get_db из разных потоков (ТД-6)
 # import inspect
 
 from app.utils.logger import AppLogger
@@ -105,6 +107,108 @@ def register_service_provider(
 
 
 
+class _SharedDatabase:
+    """
+    Хранит общий ``Database`` приложения и настройки, с которыми он открыт (ТД-6).
+
+    Один объект на приложение: все сервисы работают через один движок и одну
+    ``scoped_session`` потока. Сам ничего не открывает — это делают :func:`get_db`,
+    :func:`reopen_db`, :func:`close_db` (под ``lock``: базу могут запросить из разных
+    потоков — окно, синхронизация, импорт).
+
+    Attributes:
+        db   : (Database/None) Открытая общая база; None — ещё не открывалась или закрыта
+            :func:`close_db`.
+        key  : (tuple/None) ``(URL, LOG_SQL_PARAMS)``, с которыми открыта ``db``.
+        lock : (threading.RLock) Блокировка открытия и замены базы.
+
+    Example:
+        >>> holder = _SharedDatabase()
+        >>> holder.db is None
+        True
+    """
+
+    def __init__(self) -> None:
+        """
+        Создаёт пустое хранилище: база ещё не открыта.
+
+        Example:
+            >>> _SharedDatabase().key is None
+            True
+        """
+        self.db   : Optional[Database]         = None               # общая база
+        self.key  : Optional[Tuple[str, bool]] = None               # (URL, LOG_SQL_PARAMS) базы
+        self.lock : threading.RLock            = threading.RLock()  # открытие и замена
+
+
+# Общий Database приложения (ТД-6, 2026-10-31). Тесты подменяют объект целиком
+# (monkeypatch.setattr(deps, '_shared_db', _SharedDatabase())).
+_shared_db = _SharedDatabase()
+
+
+def _db_settings() -> Tuple[str, str, bool]: # путь, URL и флаг значений запросов из настроек
+    """
+    Читает из настроек путь к базе (``database_local_path``) и флаг ``LOG_SQL_PARAMS``.
+
+    Returns:
+        (tuple) ``(путь, URL sqlite:///путь, log_sql_params)``; нет флага — значения
+            запросов скрыты (``False``).
+
+    Example:
+        >>> _db_settings()
+        ('clinic.db', 'sqlite:///clinic.db', False)
+    """
+    config = get_config_env()
+    db_path = config['database_local_path']
+    log_sql_params = bool(
+        config.get(
+            'LOG_SQL_PARAMS',   # значения запросов в журнал
+            False,              # нет ключа — скрыты
+        ),
+    )
+    return db_path, f"sqlite:///{db_path}", log_sql_params
+
+
+def _open_db(
+    db_path        : str,    # путь к файлу (для журнала)
+    db_url         : str,    # URL подключения
+    log_sql_params : bool,   # значения запросов в журнал
+) -> Database: # открывает новую базу и пишет в журнал, какой файл
+    """
+    Открывает новый ``Database`` и пишет в журнал пользователя, какой файл открыт.
+
+    Args:
+        db_path        : (str) Путь к файлу базы.
+        db_url         : (str) URL подключения (``sqlite:///…``).
+        log_sql_params : (bool) Значения запросов в журнал.
+
+    Returns:
+        (Database) Открытая база.
+
+    Raises:
+        DatabaseConnectionError: Базу не удалось открыть (занята, нет доступа).
+        MigrationError: Базу нельзя безопасно обновить.
+
+    Example:
+        >>> db = _open_db(
+        ...     'clinic.db',              # путь
+        ...     'sqlite:///clinic.db',    # URL
+        ...     False,                    # значения запросов скрыты
+        ... )
+    """
+    AppLogger.get_instance(
+        name                 = 'dependencies.py',   # журнал сборки
+        enable_file_logging  = 'user',              # файл пользователя
+        use_name_in_filename = False,               # имя не в имени файла
+    ).debug(
+        f"Открывается база: {db_path} ({os.path.abspath(db_path)})"
+    )
+    return Database(
+        db_url,
+        log_sql_params   =   log_sql_params,   # значения запросов в журнал
+    )
+
+
 @AppLogger.get_instance(
     name = 'dependencies.py',
     enable_file_logging = 'system',
@@ -112,13 +216,17 @@ def register_service_provider(
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
-def get_db() -> Database:
+def get_db() -> Database: # общий Database приложения (открывается при первом вызове)
     """
-    Возвращает новый ``Database`` по настройкам: путь — ``database_local_path``, значения
-    запросов в журнал — ``LOG_SQL_PARAMS`` (по умолчанию скрыты).
+    Возвращает общий для приложения ``Database`` (ТД-6): путь — ``database_local_path``,
+    значения запросов в журнал — ``LOG_SQL_PARAMS`` (по умолчанию скрыты).
 
-    ``Database`` инкапсулирует работу с базой; принимает строку подключения вида
-    ``sqlite:///path/to/db.db``. Каждый вызов — новый объект (ТД-6).
+    Первый вызов открывает базу, следующие отдают тот же объект — все сервисы работают
+    через один движок и одну сессию потока (``scoped_session``). Новая база открывается,
+    если общая закрыта (``Database.closed``: сервис закрыл её в ``reload_config``) или
+    настройки (путь, флаг) сменились без :func:`reopen_db`; прежнюю в этом случае
+    закрывает тот, кто её держит (сервис — в ``reload_config``). При смене настроек на
+    экране базу переоткрывает ``ConfigApplier.apply_database`` (:func:`reopen_db`).
 
     Returns:
         (Database) База, готовая к работе.
@@ -129,36 +237,120 @@ def get_db() -> Database:
 
     Example:
         >>> db = get_db()
+        >>> db is get_db()
+        True
         >>> db.log_sql_params
         False
     """
     # ↑ до 2026-10-31 (М8): описание — «из .env» (настройки — из менеджера), без флага.
-    config = get_config_env()
-    db_path = config['database_local_path']
-    db_url = f"sqlite:///{db_path}"
-    log_sql_params = bool(
-        config.get(
-            'LOG_SQL_PARAMS',   # значения запросов в журнал
-            False,              # нет ключа — скрыты
-        ),
-    )
-    
-    # Логгирование: информируем о том, какой файл используется для базы данных
-    AppLogger.get_instance(
-        name = 'dependencies.py',
-        # share_file_with = 'user',
-        enable_file_logging = 'user',
-        use_name_in_filename = False,  # 'user',
-    ).debug(
-        f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
-    )
+    # config = get_config_env()
+    # db_path = config['database_local_path']
+    # db_url = f"sqlite:///{db_path}"
+    # log_sql_params = bool(
+    #     config.get(
+    #         'LOG_SQL_PARAMS',   # значения запросов в журнал
+    #         False,              # нет ключа — скрыты
+    #     ),
+    # )
+    #
+    # # Логгирование: информируем о том, какой файл используется для базы данных
+    # AppLogger.get_instance(
+    #     name = 'dependencies.py',
+    #     # share_file_with = 'user',
+    #     enable_file_logging = 'user',
+    #     use_name_in_filename = False,  # 'user',
+    # ).debug(
+    #     f"Возвращает экземпляр Database, сконфигурированный из .env.: {db_path} ({os.path.abspath(db_path)})"
+    # )
+    #
+    # # return Database(db_url)
+    # # ↑ до 2026-10-31 (М8): без флага LOG_SQL_PARAMS.
+    # return Database(
+    #     db_url,
+    #     log_sql_params   =   log_sql_params,   # значения запросов в журнал
+    # )
+    # ↑ до 2026-10-31 (ТД-6): новый Database на каждый вызов — у каждого сервиса своё
+    #   подключение к одному файлу SQLite (транзакция одного не видела незафиксированного
+    #   другого, блокировки файла делились между ними).
+    db_path, db_url, log_sql_params = _db_settings()
+    key = (db_url, log_sql_params)
+    with _shared_db.lock:
+        db = _shared_db.db
+        if db is not None and not db.closed and _shared_db.key == key:
+            return db
+        # Базы нет, она закрыта или настройки сменились — открыть по текущим
+        db = _open_db(
+            db_path,          # путь (журнал)
+            db_url,           # URL
+            log_sql_params,   # значения запросов в журнал
+        )
+        _shared_db.db, _shared_db.key = db, key
+        return db
 
-    # return Database(db_url)
-    # ↑ до 2026-10-31 (М8): без флага LOG_SQL_PARAMS.
-    return Database(
-        db_url,
-        log_sql_params   =   log_sql_params,   # значения запросов в журнал
-    )
+
+@AppLogger.get_instance(
+    name = 'dependencies.py',
+    enable_file_logging = 'system',
+    use_name_in_filename = False,
+).log_execution_time(
+    level = AppLogger._parse_log_level('DEBUG')
+)
+def reopen_db() -> Database: # открывает общую базу по текущим настройкам, прежнюю закрывает
+    """
+    Переоткрывает общий ``Database`` по текущим настройкам (ТД-6): сначала открывает новый,
+    потом закрывает прежний (``engine.dispose()``, ``scoped_session.remove()``).
+
+    Вызывает ``ConfigApplier.apply_database`` (обработчик ``ServiceHooks.reopen_database``)
+    до перезагрузки сервисов: сервис в ``reload_config`` закрывает свою (уже закрытую)
+    базу и получает из :func:`get_db` новую. Новая не открылась — исключение, общей
+    остаётся прежняя, открытая: сервисы продолжают работать со старой базой.
+
+    Returns:
+        (Database) Новая общая база.
+
+    Raises:
+        DatabaseConnectionError: Новую базу не удалось открыть (прежняя не тронута).
+        MigrationError: Новую базу нельзя безопасно обновить (прежняя не тронута).
+
+    Example:
+        >>> old = get_db()
+        >>> new = reopen_db()
+        >>> (new is get_db(), old.closed)
+        (True, True)
+    """
+    db_path, db_url, log_sql_params = _db_settings()
+    with _shared_db.lock:
+        new_db = _open_db(
+            db_path,          # путь (журнал)
+            db_url,           # URL
+            log_sql_params,   # значения запросов в журнал
+        )
+        old_db = _shared_db.db
+        _shared_db.db, _shared_db.key = new_db, (db_url, log_sql_params)
+    if old_db is not None and not old_db.closed: # прежняя общая база больше не нужна
+        old_db.close()
+    return new_db
+
+
+def close_db() -> None: # закрывает общую базу; следующий get_db откроет новую
+    """
+    Закрывает общий ``Database`` (если открыт) и забывает его: следующий :func:`get_db`
+    откроет базу заново (ТД-6).
+
+    Для завершения работы, замены файла базы и тестов. Сервисы, которые держат закрытую
+    базу, получат новую при ``reload_config``.
+
+    Example:
+        >>> db = get_db()
+        >>> close_db()
+        >>> (db.closed, get_db() is db)
+        (True, False)
+    """
+    with _shared_db.lock:
+        db = _shared_db.db
+        _shared_db.db, _shared_db.key = None, None
+    if db is not None and not db.closed: # базу открывали — закрыть
+        db.close()
 
 @register_service_provider
 @lru_cache(maxsize=1)
@@ -339,23 +531,34 @@ def create_config_applier() -> ConfigApplier:
     ``app.config`` больше не импортирует этот модуль: сервисы передаются применителю
     отсюда. Поставщики берутся из реестра в момент применения (``_SERVICE_PROVIDERS`` —
     те же объекты из кэша, что у страниц GUI). Новый применитель на каждый вызов: у него
-    свои ``errors`` последнего применения.
+    свои ``errors`` последнего применения. При смене пути базы или ``LOG_SQL_PARAMS``
+    применитель сначала переоткрывает общую базу (:func:`reopen_db`, ТД-6), потом
+    перезагружает сервисы.
 
     Returns:
-        ``ConfigApplier`` с ``ServiceHooks``.
+        (ConfigApplier) Применитель с ``ServiceHooks``.
 
-    Пример:
+    Example:
         >>> applier = create_config_applier()
         >>> applier.apply_changes(old_config, new_config)
         {'database', 'sync'}
         >>> applier.errors
         {}
     """
+    # return ConfigApplier(
+    #     services = ServiceHooks(
+    #         service_providers = lambda: list(_SERVICE_PROVIDERS),  # реестр на момент применения
+    #         photo_service     = get_photo_service,                 # сервис фото (кэш)
+    #         sync_service      = get_sync_service,                  # сервис синхронизации
+    #     ),
+    # )
+    # ↑ до 2026-10-31 (ТД-6): без переоткрытия общей базы — у каждого сервиса была своя.
     return ConfigApplier(
         services = ServiceHooks(
             service_providers = lambda: list(_SERVICE_PROVIDERS),  # реестр на момент применения
             photo_service     = get_photo_service,                 # сервис фото (кэш)
             sync_service      = get_sync_service,                  # сервис синхронизации
+            reopen_database   = reopen_db,                         # общая база (ТД-6)
         ),
     )
 

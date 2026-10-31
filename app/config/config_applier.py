@@ -84,27 +84,33 @@ class ServiceHooks:
     применитель (``app.dependencies.create_config_applier``). Обработчики вызываются в
     момент применения блока — берутся текущие объекты из кэша сборки.
 
-    Атрибуты:
-        service_providers: Возвращает поставщиков сервисов с ``reload_config()``
+    Attributes:
+        service_providers : (Callable) Возвращает поставщиков сервисов с ``reload_config()``
             (блок ``database``: все перезагружаются на новую БД).
-        photo_service: Возвращает сервис фото (блок ``photos``: ``_storage_path``,
-            ``_ensure_storage_exists()``).
-        sync_service: Возвращает сервис синхронизации (блок ``sync``: ``token``,
-            ``remote_path``, ``local_path``).
+        photo_service     : (Callable) Возвращает сервис фото (блок ``photos``:
+            ``_storage_path``, ``_ensure_storage_exists()``).
+        sync_service      : (Callable) Возвращает сервис синхронизации (блок ``sync``:
+            ``token``, ``remote_path``, ``local_path``).
+        reopen_database   : (Callable/None) Переоткрывает общую базу приложения по новым
+            настройкам — блок ``database``, до перезагрузки сервисов (ТД-6, 2026-10-31);
+            None — базу переоткрывают сами сервисы в ``reload_config()``, как до ТД-6.
 
-    Пример:
+    Example:
         >>> hooks = ServiceHooks(
-        ...     service_providers = lambda: list(_SERVICE_PROVIDERS),
-        ...     photo_service     = get_photo_service,
-        ...     sync_service      = get_sync_service,
+        ...     service_providers   =   lambda: list(_SERVICE_PROVIDERS),   # поставщики
+        ...     photo_service       =   get_photo_service,                  # сервис фото
+        ...     sync_service        =   get_sync_service,                   # синхронизация
+        ...     reopen_database     =   reopen_db,                          # общая база
         ... )
         >>> ConfigApplier(services=hooks).apply_changes(old_config, new_config)
         {'database', 'sync'}
     """
+    # ↑ до 2026-10-31 (ТД-6): без reopen_database; разделы «Атрибуты», «Пример».
 
     service_providers : Callable[[], Iterable[Callable[[], Any]]]  # поставщики сервисов (reload_config)
     photo_service     : Callable[[], Any]                          # сервис фото
     sync_service      : Callable[[], Any]                          # сервис синхронизации
+    reopen_database   : Optional[Callable[[], Any]] = None         # общая база (ТД-6); None — не переоткрывать
 
 
 # Блоки настроек и их ключи — единый источник для get_changed_blocks и apply_logging.
@@ -397,6 +403,12 @@ class ConfigApplier:
         иначе страницы остались бы со старой БД. Сервис в ``reload_config()`` закрывает
         старую ``Database`` и открывает новую по пути из менеджера.
 
+        Общая база приложения (ТД-6, 2026-10-31): до перезагрузки сервисов вызывается
+        ``ServiceHooks.reopen_database`` — новая база открывается, прежняя закрывается, и
+        сервисы в ``reload_config()`` получают уже открытую новую. Новая не открылась —
+        исключение уходит наружу (``apply_changes`` — в ``errors['database']``), сервисы не
+        перезагружаются и остаются на прежней, открытой базе.
+
         Args:
             new_config : (Dict[str, Any]) Конфиг после сохранения.
             old_config : (Dict[str, Any]/None) Конфиг до сохранения; None — применить без
@@ -407,6 +419,8 @@ class ConfigApplier:
 
         Raises:
             RuntimeError: Часть сервисов не перезагружена (``не перезагружены сервисы — …``).
+            Exception: Ошибка ``reopen_database`` (новую базу не открыть:
+                ``DatabaseConnectionError``, ``MigrationError``) — как есть.
 
         Example:
             >>> applier.apply_database(
@@ -451,6 +465,13 @@ class ConfigApplier:
         #   возвращал True — блок database не попадал в errors (AP4), экран настроек
         #   писал «сохранены», хотя часть сервисов осталась на старой БД. Теперь после
         #   попытки перезагрузить ВСЕ сервисы сбой сообщается исключением.
+
+        # Общая база (ТД-6): сначала открыть новую, потом перезагружать сервисы; не
+        # открылась — исключение до перезагрузки, сервисы остаются на прежней базе
+        reopen_database = self._hooks().reopen_database
+        if reopen_database is not None: # обработчик есть — база общая на приложение
+            reopen_database()
+
         failed = []
         # for provider in _SERVICE_PROVIDERS:
         # ↑ до 2026-10-25 (К6): реестр поставщиков импортировался из app.dependencies.

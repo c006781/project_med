@@ -173,3 +173,40 @@ def test_r5_unique_values_sorted(db_session):
     sql = _select_sql(db_session, lambda: repo.get_unique_values('last_name'))
     assert 'ORDER BY' in sql[-1].upper()
     assert repo.get_unique_values('last_name') == ['Акулов', 'Белов', 'Волков']
+
+
+# ---------------------------------------------------------------------------
+# R6: личные данные (ФИО, текст заметки) не попадают в отладочный журнал
+# ---------------------------------------------------------------------------
+
+def _debug_lines(repo, call):
+    """Выполняет ``call()`` при уровне DEBUG и возвращает строки журнала репозитория."""
+    import logging
+    inner = repo.logger.logger
+    old_level = inner.level
+    inner.setLevel(logging.DEBUG)
+    got, handler = _capture(repo)
+    try:
+        call()
+    finally:
+        repo.logger.remove_output(handler)
+        inner.setLevel(old_level)
+    return got
+
+
+def test_r6_add_and_delete_log_without_personal_data(db_session):
+    repo = PatientRepository(db_session)
+    patient = Patient(first_name='Секретина', last_name='Тайнова')
+    got = _debug_lines(repo, lambda: (repo.add(patient), db_session.flush(), repo.delete(patient)))
+    assert any(line.startswith('DEBUG|') and 'add' in line for line in got)
+    assert not [line for line in got if 'Тайнова' in line or 'Секретина' in line]
+
+
+def test_r6_note_text_not_logged(db_session, sample_note):
+    from app.repositories.repositories_all import AppointmentNoteRepository
+    repo = AppointmentNoteRepository(db_session)
+    found = []
+    got = _debug_lines(repo, lambda: found.append(repo.get_by_text_exact('Тестовая заметка')))
+    assert found[0].id == sample_note.id
+    assert any(line.startswith('DEBUG|') and 'get_by_text_exact' in line for line in got)
+    assert not [line for line in got if 'Тестовая заметка' in line]

@@ -265,6 +265,70 @@ ModelType = TypeVar('ModelType')
 DTOType = TypeVar('DTOType')
 RepoType = TypeVar('RepoType', bound=BaseRepository)
 
+
+def _filters_outline(
+    filters : Any, # фильтры apply_filters: список листьев, дерево или None
+) -> str: # «столбец оператор» по каждому листу, без значений
+    """
+    Возвращает схему фильтров для журнала — столбцы и операторы без значений (S5).
+
+    Значения фильтров — то, что ищет пользователь (фамилия, телефон, текст заметки), то есть
+    личные данные; в журнал их не пишем, как значения запросов в ошибках базы
+    (``LOG_SQL_PARAMS``) и строки моделей в репозиториях (R6). Дерево ``{'and'/'or': […]}``
+    показывается скобками.
+
+    Args:
+        filters : (list/dict/None) Фильтры в формате ``app.utils.filtering.apply_filters``.
+
+    Returns:
+        (str) Схема; ``'—'`` — фильтров нет.
+
+    Example:
+        >>> _filters_outline(
+        ...     [{'column': 'last_name', 'operator': 'like', 'value': 'Иванов'},       # лист
+        ...      {'or': [{'column': 'date', 'operator': 'is_null'},
+        ...              {'column': 'date', 'operator': 'ge', 'value': '2026-01-01'}]}], # дерево
+        ... )
+        'last_name like, or(date is_null, date ge)'
+    """
+    if not filters:
+        return '—'
+    if isinstance(filters, dict):
+        for joint in ('and', 'or'):
+            if joint in filters:
+                inner = _filters_outline(
+                    filters[joint],   # узлы ветки
+                )
+                return f"{joint}({inner})"
+        return f"{filters.get('column', '?')} {filters.get('operator', '?')}"
+    return ', '.join(
+        _filters_outline(node) for node in filters
+    )
+
+
+def _log_ref(
+    entity : Any, # объект модели (или DTO)
+) -> str: # «Класс id=N» — ссылка на запись без значений полей
+    """
+    Возвращает ссылку на запись для журнала: ``'Класс id=N'`` — без значений полей (S5).
+
+    Строка модели (``repr``) и DTO содержат ФИО, телефоны, тексты заметок; в журнал — только
+    класс и ``id`` (так же ``BaseRepository._log_ref``, R6).
+
+    Args:
+        entity : (Any) Объект модели или DTO; ``id`` может быть ``None`` (не сохранён).
+
+    Returns:
+        (str) Ссылка на запись.
+
+    Example:
+        >>> _log_ref(
+        ...     PatientDTO(id=3, first_name='Иван', last_name='Иванов'),   # пациент
+        ... )
+        'PatientDTO id=3'
+    """
+    return f"{type(entity).__name__} id={getattr(entity, 'id', None)}"
+
 class BaseService(
     Generic[
         ModelType,
@@ -362,39 +426,42 @@ class BaseService(
             # _get_note_service и _get_child_service не переопределяются (базовые)
     """
 
-    @staticmethod
-    def _update_note_field(
-        sess: Session,
-        note_repo, 
-        old_note_id: Optional[int],
-        new_text: Optional[str],
-        create_if_missing: bool = True
-    ):
-        """
-        Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
-        old_note_id – переданный старый ID (может быть None).
-        Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
-        """
-
-        # Если текст не передан и не требуется создавать – ничего не меняем
-        if new_text is None and not create_if_missing:
-            return old_note_id, None
-        
-        # Если есть старая заметка и текст передан – обновляем её
-        if old_note_id is not None:
-            note = note_repo.get_by_id(old_note_id)
-            if note:
-                if new_text is not None:
-                    note.text = new_text
-
-                return old_note_id, None  # ID не изменился, старый не нужно удалять
-            
-        # Создаём новую заметку        
-        new_note = AppointmentNote(text=new_text or "")
-        note_repo.add(new_note)
-        sess.flush()
-
-        return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+    # @staticmethod
+    # def _update_note_field(
+    #     sess: Session,
+    #     note_repo, 
+    #     old_note_id: Optional[int],
+    #     new_text: Optional[str],
+    #     create_if_missing: bool = True
+    # ):
+    #     """
+    #     Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
+    #     old_note_id – переданный старый ID (может быть None).
+    #     Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
+    #     """
+    #
+    #     # Если текст не передан и не требуется создавать – ничего не меняем
+    #     if new_text is None and not create_if_missing:
+    #         return old_note_id, None
+    #
+    #     # Если есть старая заметка и текст передан – обновляем её
+    #     if old_note_id is not None:
+    #         note = note_repo.get_by_id(old_note_id)
+    #         if note:
+    #             if new_text is not None:
+    #                 note.text = new_text
+    #
+    #             return old_note_id, None  # ID не изменился, старый не нужно удалять
+    #
+    #     # Создаём новую заметку        
+    #     new_note = AppointmentNote(text=new_text or "")
+    #     note_repo.add(new_note)
+    #     sess.flush()
+    #
+    #     return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+    # ↑ до 2026-10-31 (S6): не вызывается с DATA1 (2026-10-16; заметки меняет
+    #   _note_id_for_text), а сам пишет новый текст В СУЩЕСТВУЮЩУЮ заметку — заметки общие,
+    #   и правка у одной записи поменяла бы текст у всех (та самая порча данных DATA1).
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -1200,7 +1267,11 @@ class BaseService(
             #   (has_photos у приёмов), по которому ничего не нашлось, падал.
             if extra_columns and results:
                 self.logger.debug(f"[DEBUG] First result type: {type(results[0])}, len: {len(results[0]) if hasattr(results[0], '__len__') else 'N/A'}")
-                self.logger.debug(f"[DEBUG] First result: {results[0]}")
+                # self.logger.debug(f"[DEBUG] First result: {results[0]}")
+                # ↑ до 2026-10-31 (S5): строка модели в журнале — личные данные (ФИО и т. п.).
+                self.logger.debug(
+                    f"[DEBUG] First result: {_log_ref(results[0][0] if hasattr(results[0], '__len__') else results[0])}"
+                )
 
             # Извлекаем модели и сохраняем вычисленные значения как временные атрибуты
             items = []
@@ -2148,10 +2219,14 @@ class BaseService(
             if new_value is not None:
                 # setattr(model_obj, field_name, new_value)
                 if old_value != new_value:
-                    self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    # self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    # ↑ до 2026-10-31 (S5): значения полей в журнале — личные данные.
+                    self.logger.debug(f"Обновление поля {field_name}")
                     setattr(model_obj, field_name, new_value)
                 else:
-                    self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+                    # self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+                    # ↑ до 2026-10-31 (S5): значение поля в журнале — личные данные.
+                    self.logger.debug(f"Поле {field_name} не изменилось")
 
             else:
                 # Проверяем, является ли поле обязательным
@@ -3214,7 +3289,10 @@ class BaseService(
         :return: список DTO или один DTO
         :rtype: Union[List, Any]
         """
-        self.logger.debug(f"item_s: {item_s}")
+        # self.logger.debug(f"item_s: {item_s}")
+        # ↑ до 2026-10-31 (S5): строки моделей в журнале — личные данные (ФИО, тексты).
+        if not isinstance(item_s, list):
+            self.logger.debug(f"item_s: {_log_ref(item_s)}")
 
         if isinstance(item_s, list):
             # данные из ТБ
@@ -3232,14 +3310,18 @@ class BaseService(
             #   читаются (поле остаётся по умолчанию); нужные загружаются заранее по конфигу.
             dto = self._dto_class.model_validate(self._loaded_attributes(item_s), from_attributes=True)
         except Exception as e:
-            self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
+            # self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
+            # ↑ до 2026-10-31 (S5): строка модели в журнале — личные данные.
+            self.logger.error(f"Ошибка валидации для объекта: {_log_ref(item_s)}: {type(e).__name__}")
             raise e  # выбрасываем исключение
         
         # Обогащаем, если есть конфигурация
         if self._field_configs:
 
             extra_data = self._prepare_extra_data(item_s)
-            self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
+            # self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
+            # ↑ до 2026-10-31 (S5): значения вычисляемых полей (имя пациента и т. п.) — личные данные.
+            self.logger.debug(f"[DEBUG] extra_data before enrich: {sorted(extra_data)}")
 
             dto = enrich_dto_with_computed_fields(
                 dto, 
@@ -3409,9 +3491,14 @@ class BaseService(
         # filters: список словарей с ключами column, operator, value.
         # fuzzy_threshold: порог схожести для нечеткого поиска.
         # """
+        # self.logger.debug(
+        #     f"Запрос отфильтрованных записей {self._model_class.__name__} "
+        #     f"с фильтрами {filters}"
+        # )
+        # ↑ до 2026-10-31 (S5): значения фильтров (что ищут) — личные данные.
         self.logger.debug(
             f"Запрос отфильтрованных записей {self._model_class.__name__} "
-            f"с фильтрами {filters}"
+            f"с фильтрами {_filters_outline(filters)}"
         )
 
         with self._session_scope(session) as sess:
@@ -3770,12 +3857,14 @@ class PatientService(
             >>> print(created.id)
         """
 
-        self.logger.debug(
-            f"patient_dto "
-            f"{patient_dto} "
-            f"session {session} "
-            f"result {session}"
-        )
+        # self.logger.debug(
+        #     f"patient_dto "
+        #     f"{patient_dto} "
+        #     f"session {session} "
+        #     f"result {session}"
+        # )
+        # ↑ до 2026-10-31 (S5): DTO пациента целиком (ФИО, телефон, дата рождения) — в журнал.
+        self.logger.debug("Создание пациента")
 
         # if not patient_dto.first_name or not patient_dto.last_name:
         #     self.logger.warning("Попытка создания пациента без имени/фамилии")
@@ -3876,21 +3965,24 @@ class PatientService(
             PatientNotFoundError: если пациент с указанным id не найден.
         """
 
-        self.logger.debug(
-            f"patient_dto {patient_dto} "
-            f"session {session} "
-            f"result {session}"
-        )
+        # self.logger.debug(
+        #     f"patient_dto {patient_dto} "
+        #     f"session {session} "
+        #     f"result {session}"
+        # )
+        # ↑ до 2026-10-31 (S5): DTO пациента целиком — в журнал (личные данные).
 
         if patient_dto.id is None:
             self.logger.warning("Попытка обновления пациента без id")
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
 
-        self.logger.debug(
-            f"Обновление пациента id={patient_dto.id} "
-            f"данные: last_name={patient_dto.last_name} "
-
-        )
+        # self.logger.debug(
+        #     f"Обновление пациента id={patient_dto.id} "
+        #     f"данные: last_name={patient_dto.last_name} "
+        #
+        # )
+        # ↑ до 2026-10-31 (S5): фамилия в журнале — личные данные.
+        self.logger.debug(f"Обновление пациента id={patient_dto.id}")
         return self._update_entity(patient_dto, patient_dto.id, session)
 
         # with self._session_scope(session) as sess:
@@ -4271,9 +4363,15 @@ class PatientService(
         4. Выводим список пациентов, если он не пустой
         """
 
+        # self.logger.debug(
+        #     f"Запрос пациентов с фильтрацией: "
+        #     f"filters={filters}, "
+        #     f"fuzzy_threshold={fuzzy_threshold}"
+        # )
+        # ↑ до 2026-10-31 (S5): значения фильтров (что ищут) — личные данные.
         self.logger.debug(
             f"Запрос пациентов с фильтрацией: "
-            f"filters={filters}, "
+            f"filters={_filters_outline(filters)}, "
             f"fuzzy_threshold={fuzzy_threshold}"
         )
 
@@ -4554,7 +4652,10 @@ class NoteService(
         """
         # return self.update_note(dto.id, dto.text)
         if dto.id is None:
-            raise ValueError("ID заметки не указан")
+            # raise ValueError("ID заметки не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
         
         return self._update_entity(
             dto,
@@ -4739,7 +4840,9 @@ class NoteService(
         if not text:
             return None
 
-        self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+        # self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+        # ↑ до 2026-10-31 (S5): текст заметки (жалобы, диагноз) — личные данные.
+        self.logger.debug(f"Поиск или создание заметки: длина текста {len(text)}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             note = repo.get_by_text_exact(text)
@@ -6004,7 +6107,10 @@ class AppointmentService(
         
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
-            raise ValueError("ID приёма не указан")
+            # raise ValueError("ID приёма не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
 
         self.logger.debug(f"Обновление приёма id={dto.id}")
 
@@ -6284,25 +6390,47 @@ class AppointmentService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_appointments_by_patient_page(
-        self, 
-        patient_id: int,  # ID пациента, для которого хотим получить страницу приёмов
-        offset: int,  # смещение страницы (количество записей, которые нужно пропустить)
-        limit: int,  # размер страницы (количество записей, которые нужно вернуть)
-        filters: Optional[List[Dict[str, Any]]] = None,  # фильтры SQL (например: [{'column': 'date', 'operator': '>=', 'value': datetime.date(2022, 1, 1)}])
-        order_by: Optional[List] = None,  # сортировка SQL (например: ['date', 'time'])
-        session: Optional[Session] = None  # сессия для работы в одной транзакции
-    ) -> Tuple[List[AppointmentDTO], int]:
+        self,
+        patient_id : int,                                               # пациент
+        offset     : int,                                               # сколько записей пропустить
+        limit      : int,                                               # размер страницы
+        filters    : Optional[Union[List[Any], Dict[str, Any]]] = None, # фильтры: список или дерево
+        order_by   : Optional[List] = None,                             # сортировка: ['-date']
+        session    : Optional[Session] = None,                          # внешняя транзакция
+    ) -> Tuple[List[AppointmentDTO], int]: # страница приёмов пациента и их общее число
         """
-        Возвращает страницу приёмов пациента с подгруженными связями.
+        Возвращает страницу приёмов пациента и общее число его приёмов с учётом фильтров.
 
-        Шаги:
+        К фильтрам вызывающего через «И» добавляется ``patient_id == patient_id``
+        (``AppointmentRepository._with_patient_filter``: плоский список дополняется листом,
+        дерево ``{'and'/'or': …}`` становится одним узлом списка). Страницу собирает
+        :meth:`get_page` (заметки, ``sql_compute``, ``fuzzy``, ``id`` последним ключом
+        сортировки); связи для виртуальных полей подгружаются жадно.
 
-        1. Создаем сессию для работы в одной транзакции (если не указана)
-        2. Получаем репозиторий (Repository) для работы с приёмами
-        3. Вызываем метод get_page_by_patient у репозитория, передавая ID пациента, смещение, размер страницы, фильтры и сортировку
-        4. Вызываем метод count_by_patient у репозитория, передавая ID пациента и фильтры, чтобы получить общее количество приёмов
-        5. Создаем список DTO из полученных записей
-        6. Возвращаем список DTO и общее количество приёмов
+        Args:
+            patient_id : (int) ID пациента.
+            offset     : (int) Смещение (с 0).
+            limit      : (int) Размер страницы.
+            filters    : (list/dict/None) Фильтры ``apply_filters``; None или пусто — все
+                приёмы пациента.
+            order_by   : (List[str]/None) Поля сортировки, ``'-поле'`` — по убыванию; None —
+                по ``id``.
+            session    : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (Tuple[List[AppointmentDTO], int]) Приёмы страницы и общее число.
+
+        Raises:
+            ValueError: Неизвестный столбец или оператор фильтра (из ``apply_filters``).
+
+        Example:
+            >>> page, total = appointment_service.get_appointments_by_patient_page(
+            ...     patient_id   =   7,                                               # пациент
+            ...     offset       =   0,                                               # первая страница
+            ...     limit        =   20,                                              # 20 приёмов
+            ...     filters      =   {'or': [{'column': 'date', 'operator': 'is_null'}]},  # дерево
+            ...     order_by     =   ['-date'],                                       # новые сверху
+            ... )
         """
         self.logger.debug(
             f"Запрос страницы приёмов пациента {patient_id}: "
@@ -6310,16 +6438,22 @@ class AppointmentService(
             f"limit={limit}"
         )
 
-        ## Формируем фильтр по patient_id
-        base_filter = {
-            'column': 'patient_id', 
-            'operator': 'eq', 
-            'value': patient_id
-        }
-        if filters:
-            all_filters = [base_filter] + filters
-        else:
-            all_filters = [base_filter]
+        # ## Формируем фильтр по patient_id
+        # base_filter = {
+        #     'column': 'patient_id',
+        #     'operator': 'eq',
+        #     'value': patient_id
+        # }
+        # if filters:
+        #     all_filters = [base_filter] + filters
+        # else:
+        #     all_filters = [base_filter]
+        # ↑ до 2026-10-31 (S4): дерево фильтров ({'and'/'or': …}) давало list + dict →
+        #   TypeError — страница приёмов пациента с таким фильтром падала (как R1 в М10).
+        all_filters = AppointmentRepository._with_patient_filter(
+            patient_id,   # пациент
+            filters,      # фильтры вызывающего: список или дерево
+        )
 
         # Подгружаем все необходимые связи
         # relations = self._get_eager_loading_options()
@@ -6517,7 +6651,10 @@ class PhotoService(
             # Определяем целевую директорию: self._storage_path/app_{appointment_id}
             app_id = dto.appointment_id
             if not app_id:
-                raise ValueError("Для фото необходимо указать appointment_id")
+                # raise ValueError("Для фото необходимо указать appointment_id")
+                # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+                #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+                raise self._validation_error('appointment_id', 'для фото необходимо указать приём')
             
             dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
 
@@ -6541,7 +6678,10 @@ class PhotoService(
     def update(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
 
         if dto.id is None:
-            raise ValueError("ID фото не указан")
+            # raise ValueError("ID фото не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
 
         # DATA6: без сессии — своя транзакция (иначе репозиторий и файлы без сессии)
         if session is None:
@@ -6673,7 +6813,10 @@ class PhotoService(
 
             if photo is None:
                 err_ = PhotoNotFoundError(photo_id)
-                self.logger.exception(err_.message)
+                # self.logger.exception(err_.message)
+                # ↑ до 2026-10-31 (S7): exception вне except — в журнал шла ложная трассировка
+                #   «NoneType: None».
+                self.logger.error(err_.message)
 
                 raise err_
             
@@ -6721,7 +6864,10 @@ class PhotoService(
         """
         err_ = PhotoNotFoundError(entity_id)
 
-        self.logger.exception(err_.message)
+        # self.logger.exception(err_.message)
+        # ↑ до 2026-10-31 (S7): exception вне except — в журнал шла ложная трассировка
+        #   «NoneType: None».
+        self.logger.error(err_.message)
 
         # raise err_
         return err_
@@ -6812,11 +6958,18 @@ class PhotoService(
             >>> photo.appointment_id
             1
         """
+        # self.logger.debug(
+        #     f"Добавление фото к приёму "
+        #     f"id={appointment_id}, "
+        #     f"файл={source_file_path}, "
+        #     f"описание='{description}'"
+        # )
+        # ↑ до 2026-10-31 (S5): описание фото в журнале — личные данные (путь нужен для разбора
+        #   ошибок файла и есть в тексте PhotoFileError).
         self.logger.debug(
             f"Добавление фото к приёму "
             f"id={appointment_id}, "
-            f"файл={source_file_path}, "
-            f"описание='{description}'"
+            f"файл={source_file_path}"
         )
         
         # 1. Проверка существования и типа файла

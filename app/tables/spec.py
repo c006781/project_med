@@ -710,6 +710,8 @@ class TableRegistry:
             extra: Свой столбец.
             datasets: Уже собранные наборы (подчинённые — для итогов).
             service: Поставщик сервиса таблицы (для ``calc`` с двумя аргументами).
+            services: Свои поставщики сервисов по типам записей (для ``total(by='sql')``).
+            cache: Объекты SQL-итогов этой сборки (``None`` — новый словарь).
 
         Returns:
             ``FieldDef``.
@@ -743,23 +745,45 @@ class TableRegistry:
                         visible=extra.visible, display=extra.display,
                         extra={'widget': extra.widget} if extra.widget else {})
 
-    def _link_field(self, definition: FieldDef, spec: TableSpec, drafts: Any,
-                    services: Mapping[str, Callable[[], Any]]) -> FieldDef:
+    # def _link_field(self, definition: FieldDef, spec: TableSpec, drafts: Any,
+    #                 services: Mapping[str, Callable[[], Any]]) -> FieldDef:
+    # ↑ до 2026-10-31 (TS1): тексты ссылок сборки копились в self._text_caches — на реестре,
+    #   а реестр общий (CLINIC): он держал кеши последней сборки, вторая сборка подменяла
+    #   список первой (как и SQL-итоги — см. _sql_totals, cache). Теперь список — сборки.
+    def _link_field(
+        self,
+        definition  : FieldDef,                             # поле из field_configs
+        spec        : TableSpec,                            # описание таблицы поля
+        drafts      : Any,                                  # черновики; None — без них
+        services    : Mapping[str, Callable[[], Any]],      # свои поставщики сервисов
+        text_caches : List[Tuple[str, Dict[Any, str]]],     # кеши текстов ссылок этой сборки
+    ) -> FieldDef: # поле-ссылка с показом текста цели и списком выбора
         """
-        Поле-ссылка: показ цели вместо id и список выбора (записи цели из БД + новые
-        несохранённые из черновиков). Остальные поля — как есть.
+        Делает поле-ссылку: показ цели вместо id и список выбора (записи цели из БД + новые
+        несохранённые из черновиков). Остальные поля возвращает как есть.
+
+        Кеш текстов поля добавляется в ``text_caches`` (``(таблица цели, кеш)``): сборка
+        сбрасывает его на событиях набора-цели.
 
         Args:
-            definition: Поле из ``field_configs``.
-            spec: Описание таблицы.
-            drafts: Черновики (``None`` — без них).
-            services: Свои поставщики сервисов.
+            definition  : (FieldDef) Поле из ``field_configs``.
+            spec        : (TableSpec) Описание таблицы.
+            drafts      : (AppDrafts/None) Черновики; None — без них.
+            services    : (dict) Свои поставщики сервисов по типам записей.
+            text_caches : (list) Кеши текстов ссылок сборки — сюда добавляется кеш поля.
 
         Returns:
-            ``FieldDef`` (новое — для ссылки, то же — для остальных).
+            (FieldDef) Новое — для ссылки, то же — для остальных полей.
 
-        Пример:
-            >>> registry._link_field(FieldDef('doctor_id'), orders_spec, None, {}).extra['choices']()
+        Example:
+            >>> caches = []
+            >>> registry._link_field(
+            ...     FieldDef('doctor_id'),      # поле-ссылка
+            ...     orders_spec,                # описание таблицы
+            ...     None,                       # без черновиков
+            ...     {},                         # сервисы — из описаний
+            ...     caches,                     # кеши сборки
+            ... ).extra['choices']()
             [(5, 'Иванов')]
         """
         link = next((l for l in self.links(spec.name) if l.field == definition.name), None)
@@ -823,7 +847,8 @@ class TableRegistry:
             return texts[key]
 
         texts: Dict[Any, str] = {}
-        self._text_caches.append((link.table, texts))
+        # self._text_caches.append((link.table, texts))
+        text_caches.append((link.table, texts))
 
         def choices() -> List[Tuple[Any, str]]:
             """
@@ -883,12 +908,24 @@ class TableRegistry:
         datasets: Dict[str, DataSet] = {}
         writers: Dict[str, Any] = {}
         sql_cache: Dict[Any, Any] = {}                     # объекты SQL-итогов этой сборки
-        self._text_caches: List[Tuple[str, Dict[Any, str]]] = []   # тексты ссылок этой сборки
+        # self._text_caches: List[Tuple[str, Dict[Any, str]]] = []   # тексты ссылок этой сборки
+        # ↑ до 2026-10-31 (TS1): на общем реестре — см. _link_field
+        text_caches: List[Tuple[str, Dict[Any, str]]] = []         # тексты ссылок этой сборки
         for name in reversed(wanted):                     # подчинённые раньше: итоги ссылаются на них
             spec = self._specs[name]
             provider = services.get(spec.entity, spec.service)
             fields = fields_from_config(spec.config, spec.dto, spec.model, skip=spec.skip)
-            fields = [self._link_field(f, spec, drafts, services) for f in fields]
+            # fields = [self._link_field(f, spec, drafts, services) for f in fields]
+            fields = [
+                self._link_field(
+                    f,              # поле
+                    spec,           # таблица
+                    drafts,         # черновики
+                    services,       # сервисы
+                    text_caches,    # кеши текстов этой сборки
+                )
+                for f in fields
+            ]
             for extra in spec.extras:
                 if extra.kind == 'total' and extra.child not in datasets:
                     continue                              # подчинённая таблица не собрана
@@ -907,7 +944,7 @@ class TableRegistry:
             datasets[name] = dataset
         ordered = {name: datasets[name] for name in wanted}
         # тексты ссылок — заново при любом событии набора-цели (правка, перечитывание)
-        for table, texts in self._text_caches:
+        for table, texts in text_caches:
             if table in ordered:
                 ordered[table].subscribe(lambda event, cache=texts: cache.clear())
         sources = {name: DataSource(ds) for name, ds in ordered.items()}

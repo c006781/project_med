@@ -28,8 +28,8 @@
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
 from typing import (
-    List, Optional, Any, 
-    Dict, TypeVar, Generic
+    List, Optional, Any,
+    Dict, TypeVar, Generic, Union,
 )
 
 from abc import ABC, abstractmethod
@@ -126,6 +126,7 @@ from app.utils.filtering.filtering import apply_filters
 # Сторонние библиотеки
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query
 from sqlalchemy.orm import joinedload
 from sqlalchemy import select
 
@@ -211,30 +212,50 @@ class BaseRepository(Generic[ModelType], ABC):
     )
     def get_with_relations(
         self,
-        entity_id: int, 
-        relations: List[str]
-    ):
+        entity_id : int,                        # id записи
+        relations : Optional[List[str]] = None, # имена связей модели; None — без подгрузки
+    ) -> Optional[ModelType]: # запись по id со связями, подгруженными по именам
         """
-        Возвращает объект по ID с подгруженными связями.
+        Возвращает запись по ID, подгружая связи по их именам (``joinedload``).
 
-        :param entity_id: ID объекта
-        :type entity_id: int
-        :param relations: список связей, которые нужно подгрузить
-        :type relations: List[str]
-        :return: объект с подгруженными связями
-        :rtype: self.model_class
+        В отличие от :meth:`get_by_id_with_relations` принимает имена связей (строки), а не
+        готовые опции загрузки. Неизвестное имя (опечатка в ``source_attr`` описания поля)
+        не роняет запрос: пропускается с предупреждением в журнал.
+
+        Args:
+            entity_id : (int) ID записи.
+            relations : (List[str]/None) Имена связей модели, например ``['appointments']``;
+                None или пустой список — запись без подгрузки связей.
+
+        Returns:
+            (ModelType/None) Запись со связями; None — записи с таким ID нет.
+
+        Example:
+            >>> repo = PatientRepository(session)
+            >>> patient = repo.get_with_relations(
+            ...     entity_id   =   1,                  # id пациента
+            ...     relations   =   ['appointments'],   # подгрузить приёмы
+            ... )
+            >>> len(patient.appointments)
+            2
         """
         query = self._session.query(self.model_class)
 
-        for rel in relations:
-            self.logger.debug(
-                f"get_with_relations: "
-                f"self.model_class {self.model_class}"
-                f"self.model_class.id {self.model_class.id} "
-                f"rel {rel} "
-                f"entity_id {entity_id}"
-                f"query {query} "
-            )
+        # for rel in relations:
+        #     self.logger.debug(
+        #         f"get_with_relations: "
+        #         f"self.model_class {self.model_class}"
+        #         f"self.model_class.id {self.model_class.id} "
+        #         f"rel {rel} "
+        #         f"entity_id {entity_id}"
+        #         f"query {query} "
+        #     )
+        # ↑ до 2026-10-31 (R4): relations=None давал TypeError; строка журнала склеивала
+        #   части без пробелов и на каждую связь собирала текст SQL (str(query)).
+        self.logger.debug(
+            f"get_with_relations: {self.model_class.__name__} id={entity_id}, связи={relations}"
+        )
+        for rel in relations or []:
             if hasattr(self.model_class, rel):
                 query = query.options(
                     joinedload(
@@ -379,7 +400,9 @@ class BaseRepository(Generic[ModelType], ABC):
             if column is None:
                 self.logger.warning(f"Столбец '{column_name}' не найден в модели {self.model_class.__name__}")
                 return []
-            stmt = select(column).distinct()
+            # stmt = select(column).distinct()
+            # ↑ до 2026-10-31 (R5): порядок значений не задан — список подсказок мог идти вразнобой
+            stmt = select(column).distinct().order_by(column)
             return self._session.execute(stmt).scalars().all()
         except Exception as e:
             self.logger.exception(f"Ошибка в get_unique_values (столбец '{column_name}'): {e}")
@@ -422,18 +445,100 @@ class BaseRepository(Generic[ModelType], ABC):
         query = self._session.query(self.model_class)
         if relations:
             query = query.options(*relations)
-            
-        if filters:
-            # Отфильтровываем fuzzy-операторы, они не поддерживаются на уровне SQL
-            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
-            if sql_filters:
-                query, _ = apply_filters(query, self.model_class, sql_filters)
-        if order_by:
-            # query = query.order_by(*order_by)
-            # ↑ до REPO3 (2026-10-16): строки передавались как есть — '-date' (по убыванию,
-            #   как в BaseService) давал ошибку SQL. Теперь — как в BaseService.
-            query = query.order_by(*self._order_clauses(order_by))
+
+        # if filters:
+        #     # Отфильтровываем fuzzy-операторы, они не поддерживаются на уровне SQL
+        #     sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+        #     if sql_filters:
+        #         query, _ = apply_filters(query, self.model_class, sql_filters)
+        # ↑ до 2026-10-31 (R1, R2): дерево фильтров ({'and'/'or': …}) роняло запрос
+        #   (AttributeError), а отброшенный 'fuzzy' молча расширял страницу.
+        query = self._apply_sql_filters(
+            query,          # запрос модели
+            filters,        # фильтры (список или дерево)
+            'get_page',     # кто вызвал — для журнала
+        )
+        # if order_by:
+        #     # query = query.order_by(*order_by)
+        #     # ↑ до REPO3 (2026-10-16): строки передавались как есть — '-date' (по убыванию,
+        #     #   как в BaseService) давал ошибку SQL. Теперь — как в BaseService.
+        #     query = query.order_by(*self._order_clauses(order_by))
+        # ↑ до 2026-10-31 (R3): без order_by порядок строк не задан, при равных ключах —
+        #   тоже: соседние страницы могли повторять и терять записи. Теперь id — последний ключ.
+        query = query.order_by(
+            *self._order_clauses(order_by or []),
+            *self._id_tiebreaker(),
+        )
         return query.offset(offset).limit(limit).all()
+
+    def _apply_sql_filters(
+        self,
+        query   : Query,                                    # запрос модели
+        filters : Optional[Union[List[Any], Dict[str, Any]]],  # список или дерево фильтров
+        caller  : str,                                      # имя метода — для журнала
+    ) -> Query: # запрос с SQL-частью фильтров
+        """
+        Применяет SQL-часть фильтров; нечёткий отбор (``'fuzzy'``) пропускает с предупреждением.
+
+        Фильтры — в любом формате ``apply_filters``: плоский список листьев
+        ``{'column', 'operator', 'value'}`` (через «И») или дерево узлов ``{'and': […]}`` /
+        ``{'or': […]}``. Узлы ``'fuzzy'`` в SQL дают «истину», а сам нечёткий отбор
+        (``apply_post_filters`` по готовому списку) здесь НЕ делается: он сломал бы
+        ``offset`` / ``limit`` и ``count``. Нужен нечёткий поиск — ``BaseService.get_page``.
+
+        Args:
+            query   : (Query) Запрос по ``model_class``.
+            filters : (list/dict/None) Фильтры; None или пусто — запрос без изменений.
+            caller  : (str) Имя вызывающего метода — в текст предупреждения.
+
+        Returns:
+            (Query) Запрос с условиями SQL.
+
+        Raises:
+            ValueError: Неизвестный столбец или оператор, ``'fuzzy'`` внутри ``'or'``
+                (из ``apply_filters``).
+
+        Example:
+            >>> query = repo._apply_sql_filters(
+            ...     session.query(Patient),                                         # запрос
+            ...     {'or': [{'column': 'last_name', 'operator': 'eq', 'value': 'А'},
+            ...             {'column': 'last_name', 'operator': 'eq', 'value': 'Б'}]}, # дерево
+            ...     'count',                                                        # для журнала
+            ... )
+            >>> query.count()
+            2
+        """
+        if not filters:
+            return query
+        query, post_filters = apply_filters(
+            query,              # запрос
+            self.model_class,   # модель
+            filters,            # фильтры как есть
+        )
+        if post_filters: # 'fuzzy' в репозитории не применяется
+            self.logger.warning(
+                f"{caller}: нечёткий отбор (fuzzy) в репозитории не выполняется — пропущен: "
+                f"{[column for column, _value, _threshold in post_filters]}"
+            )
+        return query
+
+    def _id_tiebreaker(self) -> List[Any]: # последний ключ сортировки страниц
+        """
+        Возвращает ``[model_class.id.asc()]`` — последний ключ сортировки страниц.
+
+        Без него порядок строк в SQL не задан (нет ``order_by`` или ключи равны), и соседние
+        страницы ``offset`` / ``limit`` могут повторять одни записи и терять другие. У модели
+        без столбца ``id`` — пустой список (сортировка как задана).
+
+        Returns:
+            (List[Any]) Выражения для ``order_by``: одно или ни одного.
+
+        Example:
+            >>> PatientRepository(session)._id_tiebreaker()
+            [<sqlalchemy.sql.elements.UnaryExpression object at 0x...>]
+        """
+        column = getattr(self.model_class, 'id', None)
+        return [column.asc()] if column is not None else []
 
     def _order_clauses(self, order_by: List[Any]) -> List[Any]:
         """
@@ -481,10 +586,17 @@ class BaseRepository(Generic[ModelType], ABC):
         :rtype: int
         """
         query = self._session.query(self.model_class)
-        if filters:
-            sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
-            if sql_filters:
-                query, _ = apply_filters(query, self.model_class, sql_filters)
+        # if filters:
+        #     sql_filters = [f for f in filters if f.get('operator') != 'fuzzy']
+        #     if sql_filters:
+        #         query, _ = apply_filters(query, self.model_class, sql_filters)
+        # ↑ до 2026-10-31 (R1, R2): как в get_page — дерево фильтров роняло запрос,
+        #   'fuzzy' молча пропускался.
+        query = self._apply_sql_filters(
+            query,      # запрос модели
+            filters,    # фильтры (список или дерево)
+            'count',    # кто вызвал — для журнала
+        )
         return query.count()
 
 
@@ -754,18 +866,23 @@ class AppointmentRepository(BaseRepository):
         :return: список записей на странице
         :rtype: List[Appointment]
         """
-        base_filters = [
-            {
-                'column': 'patient_id', 
-                'operator': 'eq', 
-                'value': patient_id
-            }
-        ]
-        
-        if filters:
-            all_filters = base_filters + filters
-        else:
-            all_filters = base_filters
+        # base_filters = [
+        #     {
+        #         'column': 'patient_id',
+        #         'operator': 'eq',
+        #         'value': patient_id
+        #     }
+        # ]
+        #
+        # if filters:
+        #     all_filters = base_filters + filters
+        # else:
+        #     all_filters = base_filters
+        # ↑ до 2026-10-31 (R1): дерево фильтров ({'and'/'or': …}) давало TypeError (list + dict)
+        all_filters = self._with_patient_filter(
+            patient_id,     # пациент
+            filters,        # фильтры вызывающего
+        )
 
         return self.get_page(
             offset, 
@@ -798,20 +915,63 @@ class AppointmentRepository(BaseRepository):
         :return: количество приёмов
         :rtype: int
         """
-        base_filters = [
-            {
-                'column': 'patient_id', 
-                'operator': 'eq', 
-                'value': patient_id
-            }
-        ]
-
-        if filters:
-            all_filters = base_filters + filters
-        else:
-            all_filters = base_filters
+        # base_filters = [
+        #     {
+        #         'column': 'patient_id',
+        #         'operator': 'eq',
+        #         'value': patient_id
+        #     }
+        # ]
+        #
+        # if filters:
+        #     all_filters = base_filters + filters
+        # else:
+        #     all_filters = base_filters
+        # ↑ до 2026-10-31 (R1): дерево фильтров ({'and'/'or': …}) давало TypeError (list + dict)
+        all_filters = self._with_patient_filter(
+            patient_id,     # пациент
+            filters,        # фильтры вызывающего
+        )
 
         return self.count(filters=all_filters)
+
+    @staticmethod
+    def _with_patient_filter(
+        patient_id : int,                                       # id пациента
+        filters    : Optional[Union[List[Any], Dict[str, Any]]],   # фильтры вызывающего
+    ) -> List[Any]: # фильтры «приёмы пациента» + фильтры вызывающего (через «И»)
+        """
+        Добавляет к фильтрам условие ``patient_id == patient_id`` (через «И»).
+
+        Плоский список дополняется листом; дерево (``{'and'/'or': …}``) становится одним
+        узлом списка — ``apply_filters`` объединит его с условием по пациенту через «И».
+
+        Args:
+            patient_id : (int) ID пациента.
+            filters    : (list/dict/None) Фильтры вызывающего; None или пусто — только пациент.
+
+        Returns:
+            (List[Any]) Фильтры для ``get_page`` / ``count``.
+
+        Example:
+            >>> AppointmentRepository._with_patient_filter(
+            ...     7,                                          # пациент
+            ...     {'or': [{'column': 'date', 'operator': 'is_null'}]},  # дерево
+            ... )
+            [{'column': 'patient_id', 'operator': 'eq', 'value': 7}, {'or': [{'column': 'date', 'operator': 'is_null'}]}]
+        """
+        base_filters = [
+            {
+                'column'    : 'patient_id',  # столбец
+                'operator'  : 'eq',          # равно
+                'value'     : patient_id,    # пациент
+            }
+        ]
+        if not filters:
+            return base_filters
+        if isinstance(filters, dict): # дерево — одним узлом
+            return base_filters + [filters]
+        return base_filters + list(filters)
 
 class PhotoRepository(BaseRepository):
     model_class =  Photo

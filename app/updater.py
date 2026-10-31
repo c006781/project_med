@@ -9,11 +9,13 @@
            └─ is_newer_version(текущая, из тега) → update_available(tag, url) | no_update()
     AppUpdater.apply_update_from_release(release)
       └─ UpdateApplier.start(): ОС поддерживается? exe собран? → select_release_asset
-           └─ UpdateDownloader (поток): скачивание в файл рядом с exe (с проверкой размера)
+           → release_asset_sha256 (хеш из описания релиза; нет — warning, без сверки)
+           └─ UpdateDownloader (поток): скачивание в файл рядом с exe (с проверкой размера
+              и SHA-256 до переименования .part)
                 └─ UpdateApplier._apply_update(): скрипт замены (Windows) → выход
 
-Логика без Qt вынесена в функции (версии, выбор файла релиза, заголовки, скрипт замены) —
-их легко проверять и дополнять. Подробности и журнал проверок — ``app/UPDATER.md``.
+Логика без Qt вынесена в функции (версии, выбор файла релиза, хеши, заголовки, скрипт
+замены) — их легко проверять и дополнять. Подробности и журнал проверок — ``app/UPDATER.md``.
 
 Как добавить ОС (например, macOS):
 
@@ -31,6 +33,7 @@ Example:
     'u'
 """
 
+import hashlib
 import json
 import os
 import re
@@ -84,6 +87,9 @@ DOWNLOAD_CHUNK_SIZE = 262144
 
 # Части номера версии: '1.2.3' → (1, 2, 3)
 _VERSION_RE = re.compile(r'^\d+(\.\d+)*$')
+
+# Строка хеша в описании релиза — как вывод sha256sum: '<64 hex>  <имя>' или '<64 hex> *<имя>'
+_SHA256_LINE_RE = re.compile(r'^\s*([0-9a-fA-F]{64})\s+\*?(\S.*?)\s*$')
 
 
 # ----------------------------------------------------------------------------------------
@@ -286,6 +292,10 @@ def current_system() -> str:
 
     Returns:
         str: ``'windows'``, ``'linux'``, ``'darwin'`` …
+
+    Example:
+        >>> current_system() == platform.system().lower()
+        True
     """
     return platform.system().lower()
 
@@ -321,7 +331,10 @@ def select_release_asset(
     keywords, suffixes = rule
     assets = list(assets or []) # 'assets': null в ответе GitHub — как пустой список
 
-    def _name(asset: Mapping[str, Any]) -> str:
+    def _name(
+        asset : Mapping[str, Any],  # файл релиза
+    ) -> str: # имя файла в нижнем регистре
+        """Возвращает имя файла релиза в нижнем регистре (``''`` — имени нет)."""
         return str(asset.get('name', '')).lower()
 
     for asset in assets:
@@ -355,6 +368,121 @@ def update_file_name(
         'MedicalApp_new_1.tar.gz'
     """
     return f'MedicalApp_new_{timestamp}{UPDATE_FILE_EXTENSIONS.get(system, "")}'
+
+
+def parse_release_hashes(
+    body : Optional[str],   # описание релиза GitHub (release['body']); None — описания нет
+) -> Dict[str, str]: # хеши SHA-256 файлов релиза по именам
+    """
+    Находит в описании релиза строки хешей SHA-256 в формате вывода ``sha256sum``.
+
+    Строка — ``<64 hex>  <имя файла>`` (``*<имя>`` — двоичный режим ``sha256sum -b``);
+    остальной текст описания (заметки, ограды кода Markdown) пропускается. Путь перед
+    именем (``artifacts/…/MedicalApp.exe``, ``dist\\…``) отбрасывается — ключ только имя
+    файла. Хеш приводится к нижнему регистру. Имя встречается дважды — действует первая
+    строка (строки ниже не могут подменить хеш, опубликованный сборкой).
+
+    Функция только разбирает текст: не проверяет файлы и не ходит в сеть.
+
+    Args:
+        body : (str/None) Описание релиза; None или пустое — хешей нет.
+
+    Returns:
+        (Dict[str, str]) Имя файла → хеш (64 знака, нижний регистр); пустой — строк нет.
+
+    Example:
+        >>> parse_release_hashes(
+        ...     body    =   '```\\n' + 'A' * 64 + '  MedicalApp.exe\\n```',  # описание релиза
+        ... ) == {'MedicalApp.exe': 'a' * 64}
+        True
+        >>> parse_release_hashes(None)
+        {}
+    """
+    hashes: Dict[str, str] = {}
+    for line in (body or '').splitlines():
+        match = _SHA256_LINE_RE.match(line)
+        if not match:
+            continue
+        digest, path = match.groups()
+        name = path.replace('\\', '/').rsplit('/', 1)[-1]
+        if name and name not in hashes: # первая строка для имени — главная
+            hashes[name] = digest.lower()
+    return hashes
+
+
+def release_asset_sha256(
+    release_data : Optional[Mapping[str, Any]],     # данные релиза GitHub; None — нет данных
+    asset_name   : str,                             # имя файла релиза (asset['name'])
+) -> Optional[str]: # опубликованный хеш файла релиза
+    """
+    Возвращает опубликованный в описании релиза хеш SHA-256 файла ``asset_name``.
+
+    Хеши берутся из ``release_data['body']`` (:func:`parse_release_hashes`); имя
+    сравнивается без учёта регистра — как при выборе файла (:func:`select_release_asset`).
+
+    Args:
+        release_data : (Mapping/None) Данные релиза (поле ``body``); None — хеша нет.
+        asset_name   : (str) Имя выбранного файла релиза.
+
+    Returns:
+        (str/None) Хеш (64 знака, нижний регистр); None — в описании нет строки для файла.
+
+    Example:
+        >>> release_asset_sha256(
+        ...     release_data    =   {'body': 'b' * 64 + '  MedicalApp-linux.tar.gz'},  # релиз
+        ...     asset_name      =   'MedicalApp-linux.tar.gz',                         # файл
+        ... ) == 'b' * 64
+        True
+        >>> release_asset_sha256({'body': None}, 'MedicalApp.exe') is None
+        True
+    """
+    hashes = parse_release_hashes(
+        (release_data or {}).get('body'),  # описание релиза
+    )
+    wanted = (asset_name or '').lower()
+    for name, digest in hashes.items():
+        if name.lower() == wanted:
+            return digest
+    return None
+
+
+def file_sha256(
+    path       : str,                           # файл
+    chunk_size : int = DOWNLOAD_CHUNK_SIZE,     # размер порции чтения, байт
+) -> str: # хеш SHA-256 файла
+    """
+    Считает SHA-256 файла порциями (файл обновления целиком в память не читается).
+
+    Args:
+        path       : (str) Путь к файлу.
+        chunk_size : (int) Размер порции чтения, байт.
+
+    Returns:
+        (str) Хеш — 64 знака, нижний регистр.
+
+    Raises:
+        OSError: Файла нет или он не читается.
+
+    Example:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as folder:
+        ...     path = os.path.join(folder, 'f.bin')
+        ...     with open(path, 'wb') as f:
+        ...         _ = f.write(b'abc')
+        ...     file_sha256(
+        ...         path        =   path,   # файл
+        ...         chunk_size  =   2,      # порция меньше файла
+        ...     )
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    """
+    digest = hashlib.sha256()
+    with open(path, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def build_windows_update_script(
@@ -480,7 +608,7 @@ class UpdateChecker(QThread):
         self,
         current_version: str, # текущая версия программы
         repo_slug: str, # репозиторий 'владелец/имя'
-    ):
+    ) -> None:
         """
         Args:
             current_version (str): Текущая версия.
@@ -567,6 +695,10 @@ class UpdateChecker(QThread):
 
         Returns:
             bool: ``True`` — релиз новее.
+
+        Example:
+            >>> UpdateChecker._parse_version('2.0', 'v1.5')
+            False
         """
         return is_newer_version(v_now, v_new)
 
@@ -639,8 +771,9 @@ class UpdateDownloader(QThread):
     Поток скачивания файла обновления.
 
     Пишет во временный файл ``<target_path>.part``; только целиком скачанный файл
-    (размер совпал с ``Content-Length``) переименовывается в ``target_path``. При ошибке
-    временный файл удаляется — недокачанный exe не запустится.
+    (размер совпал с ``Content-Length``, а при заданном ``expected_sha256`` — и хеш SHA-256)
+    переименовывается в ``target_path``. При ошибке временный файл удаляется —
+    недокачанный или подменённый файл не запустится.
 
     Attributes:
         progress (Signal): ``(int, int)`` — скачано / всего байт.
@@ -661,15 +794,29 @@ class UpdateDownloader(QThread):
     )
     def __init__(
         self,
-        download_url: str, # адрес файла (API-адрес файла релиза)
-        target_path: str, # путь, куда сохранить (полный путь файла)
-        token: Optional[str] = None, # токен GitHub (приватный репозиторий)
-    ):
+        download_url    : str,                      # адрес файла (API-адрес файла релиза)
+        target_path     : str,                      # путь, куда сохранить (полный путь файла)
+        token           : Optional[str] = None,     # токен GitHub (приватный репозиторий)
+        expected_sha256 : Optional[str] = None,     # опубликованный хеш файла; None — без сверки
+    ) -> None: # поток скачивания файла обновления
         """
+        Создаёт поток скачивания; само скачивание — :meth:`run` (``start()``).
+
         Args:
-            download_url (str): Адрес файла.
-            target_path (str): Куда сохранить.
-            token (Optional[str]): Токен GitHub.
+            download_url    : (str) Адрес файла.
+            target_path     : (str) Куда сохранить.
+            token           : (str/None) Токен GitHub; None или пустой — без авторизации.
+            expected_sha256 : (str/None) Хеш SHA-256 из описания релиза (регистр не важен);
+                None — хеш не сверяется (релиз без хеша, :meth:`AppUpdater.download_update`).
+
+        Example:
+            >>> downloader = UpdateDownloader(
+            ...     'https://api.github.com/repos/o/r/releases/assets/1',  # адрес
+            ...     '/tmp/MedicalApp_new_1.exe',                           # куда
+            ...     expected_sha256 =   'a' * 64,                          # хеш из релиза
+            ... )
+            >>> downloader.expected_sha256 == 'a' * 64
+            True
         """
         super().__init__()
 
@@ -683,6 +830,7 @@ class UpdateDownloader(QThread):
         self.download_url = download_url
         self.target_path = target_path
         self.token = token
+        self.expected_sha256 = (expected_sha256 or '').strip().lower() or None
 
 
     @AppLogger.get_instance(
@@ -748,7 +896,13 @@ class UpdateDownloader(QThread):
     def _remove_quietly(
         path: str, # файл для удаления
     ) -> None:
-        """Удаляет файл, если он есть; ошибки удаления не мешают сообщить исходную ошибку."""
+        """
+        Удаляет файл, если он есть; ошибки удаления не мешают сообщить исходную ошибку.
+
+        Example:
+            >>> UpdateDownloader._remove_quietly('/нет/такого/файла.part') is None
+            True
+        """
         try:
             if os.path.exists(path):
                 os.remove(path)
@@ -764,7 +918,12 @@ class UpdateDownloader(QThread):
         level=AppLogger._parse_log_level('DEBUG')
     )
     def run(self) -> None:
-        """Скачивание → ``finished(путь)`` или ``error(текст)`` (временный файл удаляется)."""
+        """
+        Скачивает файл → ``finished(путь)`` или ``error(текст)`` (временный файл удаляется).
+
+        Порядок: ``.part`` → проверка размера (``Content-Length``) → сверка SHA-256 с
+        ``expected_sha256`` (если задан) → ``os.replace`` в ``target_path``.
+        """
         if_private = bool(self.token and self.token.strip())
         part_path = f'{self.target_path}.part'
 
@@ -785,7 +944,12 @@ class UpdateDownloader(QThread):
             if if_private:
                 # Для приватного репозитория отключаем проверку SSL (иначе SSLEOFError в сборке PyInstaller)
                 # Техдолг ТД-4 (_dev/ТЕХДОЛГ.md): без проверки сертификата токен и exe можно подменить.
+                # Токен — только для тестирования; рабочие программы качают из открытого репозитория.
                 param['verify'] = False
+                self.logger.warning(
+                    "Задан GITHUB_TOKEN: проверка сертификата HTTPS при скачивании обновления "
+                    "отключена (режим тестирования); защита от подмены — только сверка SHA-256"
+                )
             else:
                 # Для публичного используем сертификаты certifi
                 param['verify'] = certifi.where()   # явно указываем путь к сертификатам
@@ -803,6 +967,18 @@ class UpdateDownloader(QThread):
                 raise IOError(
                     f"Файл обновления скачан не полностью: {downloaded} из {total_size} байт"
                 )
+
+            # Сверка с хешем из описания релиза — ДО os.replace: подменённый или испорченный
+            # файл остаётся .part и удаляется в except, установка не начинается
+            if self.expected_sha256: # хеш опубликован в релизе
+                actual_sha256 = file_sha256(part_path)
+                if actual_sha256 != self.expected_sha256:
+                    raise ValueError(
+                        "Файл обновления повреждён или подменён: контрольная сумма SHA-256 "
+                        f"не совпала (ожидалась {self.expected_sha256}, получена "
+                        f"{actual_sha256}). Установка отменена."
+                    )
+                self.logger.debug(f"SHA-256 совпал: {actual_sha256}")
 
             os.replace(part_path, self.target_path)
             self.logger.debug(f"Download finished, saved to {self.target_path}")
@@ -835,6 +1011,8 @@ class AppUpdater(QObject):
             :meth:`download_update`; при :meth:`apply_update_from_release` программа
             заменяется и закрывается сама).
         download_error (Signal): ``(str)`` — ошибка скачивания/установки.
+        download_warning (Signal): ``(str)`` — предупреждение установки (например, в
+            описании релиза нет хеша SHA-256 файла — установка продолжается без сверки).
     """
     # Сигналы для UI
     update_available = Signal(str, str)   # (new_version, release_url)
@@ -843,6 +1021,7 @@ class AppUpdater(QObject):
     download_progress = Signal(int, int)
     download_finished = Signal(str)       # путь к скачанному файлу
     download_error = Signal(str)
+    download_warning = Signal(str)        # предупреждение (установка продолжается)
 
     @AppLogger.get_instance(
         name='AppUpdater',
@@ -855,7 +1034,7 @@ class AppUpdater(QObject):
     def __init__(
         self,
         parent: Optional[QObject] = None, # родитель Qt (окно)
-    ):
+    ) -> None:
         """
         Args:
             parent (Optional[QObject]): Родитель Qt.
@@ -878,6 +1057,10 @@ class AppUpdater(QObject):
 
         Returns:
             Optional[dict]: Данные релиза GitHub.
+
+        Example:
+            >>> AppUpdater().pending_release_data is None
+            True
         """
         return self._pending_release_data
 
@@ -923,6 +1106,7 @@ class AppUpdater(QObject):
         self._applier = UpdateApplier(release_data, self)
         self._applier.progress.connect(self.download_progress.emit)
         self._applier.error.connect(self.download_error.emit)
+        self._applier.warning.connect(self.download_warning.emit)
         self._applier.start()
         # self._applier.finished.connect(self.download_finished.emit)  # или свой сигнал
         # ↑ до rework-updater (2026-10-21): UpdateApplier.finished() без аргументов, а
@@ -1031,10 +1215,13 @@ class UpdateApplier(QObject):
         finished (Signal): Не испускается (программа закрывается сама); оставлен для
             совместимости.
         error (Signal): ``(str)`` — текст ошибки.
+        warning (Signal): ``(str)`` — предупреждение; установка продолжается (в описании
+            релиза нет хеша SHA-256 выбранного файла).
     """
     progress = Signal(int, int)
     finished = Signal()
     error = Signal(str)
+    warning = Signal(str)
 
     @AppLogger.get_instance(
         name='UpdateApplier',
@@ -1048,7 +1235,7 @@ class UpdateApplier(QObject):
         self,
         release_data: Optional[dict], # данные релиза GitHub (None — нет данных)
         parent: Optional[QObject] = None, # родитель Qt
-    ):
+    ) -> None:
         """
         Args:
             release_data (Optional[dict]): Данные релиза; ``None`` — ошибка «нет файла
@@ -1067,6 +1254,10 @@ class UpdateApplier(QObject):
 
         Returns:
             bool: ``True`` — поток скачивания работает.
+
+        Example:
+            >>> UpdateApplier(None).is_running()
+            False
         """
         return bool(self._downloader is not None and self._downloader.isRunning())
 
@@ -1083,7 +1274,9 @@ class UpdateApplier(QObject):
         Проверяет, возможна ли установка, выбирает файл релиза и запускает скачивание.
 
         Ошибки (не та ОС, не собранная программа, нет файла для ОС) — в ``error`` ДО
-        скачивания.
+        скачивания. Хеш SHA-256 выбранного файла берётся из описания релиза
+        (:func:`release_asset_sha256`) и сверяется после скачивания; хеша нет — ``warning``
+        и журнал, установка продолжается без сверки.
         """
         logger = AppLogger.get_instance(
             name='api.UpdateApplier',
@@ -1120,8 +1313,30 @@ class UpdateApplier(QObject):
         new_exe_name = update_file_name(system, int(time.time()))
         new_exe_path = os.path.join(exe_dir, new_exe_name)
 
+        # Хеш выбранного файла из описания релиза (release.yml); нет — предупредить и продолжить
+        asset_name = str(asset.get('name', ''))
+        expected_sha256 = release_asset_sha256(
+            release_data    =   self.release_data,  # описание релиза (body)
+            asset_name      =   asset_name,         # выбранный файл
+        )
+        if expected_sha256 is None: # релиз без хеша — установка без сверки
+            warning = (
+                f"В описании релиза нет контрольной суммы SHA-256 файла {asset_name}: "
+                "целостность обновления не проверяется"
+            )
+            logger.warning(warning)
+            self.warning.emit(warning)
+
         self._new_exe_name = new_exe_name   # сохраняем для использования в _apply_update
-        self._downloader = UpdateDownloader(asset_url, new_exe_path, token)
+        self._downloader = UpdateDownloader(
+            asset_url,                              # адрес файла релиза
+            new_exe_path,                           # куда сохранить
+            token,                                  # токен GitHub
+            expected_sha256 =   expected_sha256,    # хеш из описания релиза; None — без сверки
+        )
+        # self._downloader = UpdateDownloader(asset_url, new_exe_path, token)
+        # ↑ до 2026-10-31 (U14): файл не сверялся с хешем — подменённый или испорченный
+        #   файл релиза устанавливался
 
         self._downloader.progress.connect(self.progress.emit)
         self._downloader.finished.connect(self._on_downloaded)

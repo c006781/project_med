@@ -16,7 +16,8 @@
 
 1. Создайте в `app/dto/field_configs.py` конфигурацию полей.
 2. Создайте DTO (в `app/dto/`) и SQLAlchemy модель (в `app/database/database_shema/`).
-3. Создайте репозиторий (в `app/repositories/`), унаследовав `BaseRepository`.
+3. Репозиторий (в `app/repositories/`, наследник `BaseRepository`) — по желанию: без него
+   (`repo_class=None`) сервис берёт общий репозиторий по модели (DYN9).
 4. В этом файле создайте класс, наследующий `BaseService`:
 
    class NewService(BaseService[Model, DTO, Repository]):
@@ -51,16 +52,19 @@
 import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
 # import sys  # Импорт модуля sys для работы с системными параметрами, такими как sys.path (список путей для импорта модулей).
 
-import shutil
+# import shutil
+# ↑ до 2026-10-31 (pyflakes): копирует файлы app.utils.file_deletions.copy_file_to_temp_dir;
+#   shutil.copy2 остался только в закомментированном коде.
 import uuid
 
 from typing import (
-    Callable, Type, TypeVar, Generic, Iterable,
+    Callable, Type, TypeVar, Generic, Iterable, Iterator,
     List, Optional, Dict, 
     Any, Tuple, Union
 )
 
-import time as time_module
+# import time as time_module
+# ↑ до 2026-10-31 (pyflakes): не используется.
 # from datetime import time
 # import datetime
 
@@ -247,8 +251,9 @@ from app.utils.virtual_fields import enrich_dto_with_computed_fields
 
 from sqlalchemy import func as sa_func, select
 from sqlalchemy import (
-    func, or_, #inspect
+    func, # or_, #inspect
 )
+# ↑ or_ — до 2026-10-31 (pyflakes): только в закомментированном коде cleanup_unused_note.
 
 from sqlalchemy.orm import (
     Query, Session,
@@ -264,6 +269,72 @@ from sqlalchemy.orm import (
 ModelType = TypeVar('ModelType')
 DTOType = TypeVar('DTOType')
 RepoType = TypeVar('RepoType', bound=BaseRepository)
+
+
+def _filters_outline(
+    filters : Any, # фильтры apply_filters: список листьев, дерево или None
+) -> str: # «столбец оператор» по каждому листу, без значений
+    """
+    Возвращает схему фильтров для журнала — столбцы и операторы без значений (S5).
+
+    Значения фильтров — то, что ищет пользователь (фамилия, телефон, текст заметки), то есть
+    личные данные; в журнал их не пишем, как значения запросов в ошибках базы
+    (``LOG_SQL_PARAMS``) и строки моделей в репозиториях (R6). Дерево ``{'and'/'or': […]}``
+    показывается скобками.
+
+    Args:
+        filters : (list/dict/None) Фильтры в формате ``app.utils.filtering.apply_filters``.
+
+    Returns:
+        (str) Схема; ``'—'`` — фильтров нет.
+
+    Example:
+        >>> _filters_outline(
+        ...     [{'column': 'last_name', 'operator': 'like', 'value': 'Иванов'},       # лист
+        ...      {'or': [{'column': 'date', 'operator': 'is_null'},
+        ...              {'column': 'date', 'operator': 'ge', 'value': '2026-01-01'}]}], # дерево
+        ... )
+        'last_name like, or(date is_null, date ge)'
+    """
+    if not filters:
+        return '—'
+    if isinstance(filters, dict):
+        for joint in ('and', 'or'):
+            if joint in filters:
+                inner = _filters_outline(
+                    filters[joint],   # узлы ветки
+                )
+                return f"{joint}({inner})"
+        return f"{filters.get('column', '?')} {filters.get('operator', '?')}"
+    if not isinstance(filters, (list, tuple)): # не тот вид — только тип (строку не перебирать)
+        return f"<{type(filters).__name__}>"
+    return ', '.join(
+        _filters_outline(node) for node in filters
+    )
+
+
+def _log_ref(
+    entity : Any, # объект модели (или DTO)
+) -> str: # «Класс id=N» — ссылка на запись без значений полей
+    """
+    Возвращает ссылку на запись для журнала: ``'Класс id=N'`` — без значений полей (S5).
+
+    Строка модели (``repr``) и DTO содержат ФИО, телефоны, тексты заметок; в журнал — только
+    класс и ``id`` (так же ``BaseRepository._log_ref``, R6).
+
+    Args:
+        entity : (Any) Объект модели или DTO; ``id`` может быть ``None`` (не сохранён).
+
+    Returns:
+        (str) Ссылка на запись.
+
+    Example:
+        >>> _log_ref(
+        ...     PatientDTO(id=3, first_name='Иван', last_name='Иванов'),   # пациент
+        ... )
+        'PatientDTO id=3'
+    """
+    return f"{type(entity).__name__} id={getattr(entity, 'id', None)}"
 
 class BaseService(
     Generic[
@@ -290,26 +361,33 @@ class BaseService(
         logger (AppLogger): Логгер для записи событий.
 
     Примечания:
-        - Подписывается на изменения конфигурации через AppConfigManager.add_change_listener.
-        - При изменении настроек (например, пути к БД) вызывается `reload_config()`.
+        - Настройки сервис не слушает (подписка убрана 2026-10-14): после смены настроек
+          `reload_config()` вызывает `ConfigApplier` через реестр поставщиков `app/dependencies.py`.
         - Все методы, работающие с БД, используют контекстный менеджер `_session_scope`.
+        - Страницы (`get_page_filtered`) сортируются с `id` последним ключом (S1); в журнал не
+          пишутся значения полей и фильтров (S5, `_log_ref`, `_filters_outline`).
 
     ## Как создать новый сервис
-    1. Определите модель, DTO, репозиторий и конфигурацию полей.
-    2. Создайте класс, наследующий `BaseService`.
-    3. Реализуйте `_get_note_service()` (если есть поля `is_note`).
+    1. Определите модель, DTO и конфигурацию полей (репозиторий — по желанию: `repo_class=None`
+       даёт общий по модели, DYN9).
+    2. Создайте класс, наследующий `BaseService` (или экземпляр `BaseService` без подкласса —
+       см. `tests/test_services/test_new_table_by_config.py`).
+    3. Есть поля `is_note` — передайте `note_service` или верните его из `_get_note_service()`.
     4. Реализуйте `_get_child_service()` (если есть дочерние сервисы, например, фото).
-    5. Переопределите `create` и `update`, если нужна дополнительная валидация (обычно достаточно делегировать `_create_entity` / `_update_entity`).
+    5. `create` / `update` / `delete` переопределять не нужно (общие `_create_entity` /
+       `_update_entity` / `_delete_entity`, DYN9); переопределите — ради своей проверки.
     6. Зарегистрируйте сервис в `dependencies.py` с помощью `register_service_provider` и `lru_cache`.
 
-    В наследниках `BaseService` вы **должны** переопределить следующие методы:
-        Переопределяемые методы (обязательные для наследников, если нужна логика):
-            1. `_not_found_exception(entity_id: int) -> Exception`  
-            Возвращает исключение, соответствующее сущности (например, `PatientNotFoundError`).
+    В наследниках `BaseService` можно переопределить (базовые реализации работают, DYN9):
+        Переопределяемые методы:
+            1. `_not_found_exception(entity_id: int) -> Exception`
+            Своё исключение сущности (например, `PatientNotFoundError`); базовое —
+            `EntityNotFoundError(<модель>, id)`.
 
-            2. `_get_note_service(self) -> Optional['NoteService']`  
-            Если модель имеет поля-заметки (`is_note` в конфигурации), верните экземпляр `NoteService`.  
-            Если заметок нет, верните `None` (иначе методы `_apply_note_updates` и `_delete_entity` вызовут ошибку).
+            2. `_get_note_service(self) -> Optional['NoteService']`
+            Если модель имеет поля-заметки (`is_note` в конфигурации), верните экземпляр `NoteService`.
+            Базовый возвращает `self._note_service` (параметр `note_service`) или `None` —
+            тогда заметки при правке и удалении не чистятся.
 
             3. `_get_child_service(self, relation_name: str) -> Optional[BaseService]`  
             Для дочерних связей (например, фотографии приёма) верните соответствующий сервис.  
@@ -362,39 +440,42 @@ class BaseService(
             # _get_note_service и _get_child_service не переопределяются (базовые)
     """
 
-    @staticmethod
-    def _update_note_field(
-        sess: Session,
-        note_repo, 
-        old_note_id: Optional[int],
-        new_text: Optional[str],
-        create_if_missing: bool = True
-    ):
-        """
-        Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
-        old_note_id – переданный старый ID (может быть None).
-        Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
-        """
-
-        # Если текст не передан и не требуется создавать – ничего не меняем
-        if new_text is None and not create_if_missing:
-            return old_note_id, None
-        
-        # Если есть старая заметка и текст передан – обновляем её
-        if old_note_id is not None:
-            note = note_repo.get_by_id(old_note_id)
-            if note:
-                if new_text is not None:
-                    note.text = new_text
-
-                return old_note_id, None  # ID не изменился, старый не нужно удалять
-            
-        # Создаём новую заметку        
-        new_note = AppointmentNote(text=new_text or "")
-        note_repo.add(new_note)
-        sess.flush()
-
-        return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+    # @staticmethod
+    # def _update_note_field(
+    #     sess: Session,
+    #     note_repo, 
+    #     old_note_id: Optional[int],
+    #     new_text: Optional[str],
+    #     create_if_missing: bool = True
+    # ):
+    #     """
+    #     Обновляет или создаёт заметку, возвращает (new_note_id, old_note_id).
+    #     old_note_id – переданный старый ID (может быть None).
+    #     Возвращает (новый ID, старый ID), чтобы вызывающий код мог потом удалить старую заметку.
+    #     """
+    #
+    #     # Если текст не передан и не требуется создавать – ничего не меняем
+    #     if new_text is None and not create_if_missing:
+    #         return old_note_id, None
+    #
+    #     # Если есть старая заметка и текст передан – обновляем её
+    #     if old_note_id is not None:
+    #         note = note_repo.get_by_id(old_note_id)
+    #         if note:
+    #             if new_text is not None:
+    #                 note.text = new_text
+    #
+    #             return old_note_id, None  # ID не изменился, старый не нужно удалять
+    #
+    #     # Создаём новую заметку        
+    #     new_note = AppointmentNote(text=new_text or "")
+    #     note_repo.add(new_note)
+    #     sess.flush()
+    #
+    #     return new_note.id, old_note_id   # возвращаем новый ID и старый ID (который может быть None)
+    # ↑ до 2026-10-31 (S6): не вызывается с DATA1 (2026-10-16; заметки меняет
+    #   _note_id_for_text), а сам пишет новый текст В СУЩЕСТВУЮЩУЮ заметку — заметки общие,
+    #   и правка у одной записи поменяла бы текст у всех (та самая порча данных DATA1).
 
     @AppLogger.get_instance(
         name = 'BaseService',
@@ -406,30 +487,43 @@ class BaseService(
     )
     def __init__(
         self,
-        db: Database,
-        repo_class: Type[RepoType],
-        model_class: Type[ModelType],
-        dto_class: Type[DTOType],
-        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        logger_name: Optional[str] = None,
-        note_service: Optional['NoteService'] = None,
-    ):
+        db            : Database,                                   # база: сессии
+        repo_class    : Optional[Type[RepoType]],                   # репозиторий; None — общий по модели
+        model_class   : Type[ModelType],                            # ORM-модель
+        dto_class     : Type[DTOType],                              # DTO
+        field_configs : Optional[Dict[str, Dict[str, Any]]] = None, # описание полей; None — пустое
+        logger_name   : Optional[str] = None,                       # имя журнала; None — имя класса
+        note_service  : Optional['NoteService'] = None,             # сервис заметок (DYN9)
+    ) -> None:
         """
-        Инициализирует экземпляр сервиса.
+        Создаёт сервис таблицы: база, репозиторий, модель, DTO и описание полей.
 
-        Параметры:
-            db (Database): Экземпляр Database для получения сессий.
-            repo_class (Type[RepoType]): Класс репозитория, с которым работает сервис.
-            model_class (Type[ModelType]): Класс ORM-модели (нужен для создания экземпляров).
-            dto_class (Type[DTOType]): Класс DTO (нужен для преобразования).
-            field_configs (Optional[Dict[str, Dict[str, Any]]]): Конфигурация полей (используется для виртуальных полей).
+        ``repo_class=None`` — общий репозиторий по модели (``BaseRepository`` с
+        ``model_class``, DYN9): новой таблице свой класс репозитория не нужен.
+        ``note_service`` — сервис заметок для полей ``is_note`` без своего подкласса
+        (наследники задают его сами). Настройки сервис не слушает: перезагрузку
+        (:meth:`reload_config`) вызывает ``ConfigApplier`` (с 2026-10-14).
 
-            logger_name (Optional[str]): Имя логгера. По умолчанию – имя класса сервиса.
+        Args:
+            db            : (Database) База — источник сессий (``session_scope``).
+            repo_class    : (type/None) Класс репозитория; None — общий по модели.
+            model_class   : (type) ORM-модель таблицы.
+            dto_class     : (type) DTO (Pydantic) таблицы.
+            field_configs : (dict/None) Описание полей (``app/dto/field_configs.py``); None —
+                пустое: ``create`` / ``update`` не переносят в модель ни одного поля
+                (поля берутся из описания — :meth:`_get_creation_kwargs`).
+            logger_name   : (str/None) Имя журнала; None — имя класса сервиса.
+            note_service  : (NoteService/None) Сервис заметок; None — не задавать.
 
-        Особенности:
-            - Подписывается на изменения конфигурации через
-              `AppConfigManager.add_change_listener(self._on_config_changed)`.
-              При изменении настроек автоматически вызывается `self.reload_config()`.
+        Example:
+            >>> service = BaseService(
+            ...     db              =   get_db(),               # база
+            ...     repo_class      =   None,                   # общий репозиторий
+            ...     model_class     =   Prescription,           # новая таблица
+            ...     dto_class       =   PrescriptionDTO,        # её DTO
+            ...     field_configs   =   PRESCRIPTION_CONFIG,    # описание полей
+            ...     note_service    =   get_note_service(),     # заметки
+            ... )
         """
 
         self._db            = db 
@@ -636,62 +730,39 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _del_file(
         self,
-        file_path: str,
-        session: Optional[Session] = None,
-        if_delete_parent_dir: bool = False
-    ):
+        file_path            : str,                         # абсолютный путь к файлу
+        session              : Optional[Session] = None,    # сессия: удалить после её коммита
+        if_delete_parent_dir : bool = False,                # удалить опустевшую папку
+    ) -> Optional[str]: # отложенное (после коммита) или немедленное удаление файла
         """
-        Удаляет физический файл, предпочтительно отложенно (после коммита сессии).
+        Удаляет файл хранилища после коммита сессии (без сессии — сразу); ошибки не бросает.
 
-        **Алгоритм:**
-            1. Если передан `session` и у него есть атрибут `_pending_deletions` (устанавливается в `Database.session_scope`),
-            то файл **не удаляется сразу**, а добавляется в список отложенных удалений сессии.
-            Фактическое удаление произойдёт после успешного коммита (обработчик `after_commit`).
-            2. Если сессия не поддерживает отложенное удаление (или `session is None`), файл удаляется **немедленно**.
-            3. Если `if_delete_parent_dir = True`, после удаления файла проверяется родительская папка:
-            если она стала пустой, она также удаляется.
+        Контекст удаления — «после коммита» (``DeletionContext.create(session, COMMIT)``):
+        с сессией ``Database.session_scope`` файл ставится в её список отложенных удалений и
+        удаляется обработчиком ``after_commit`` (при откате — остаётся); без сессии — сразу
+        (``app.utils.file_deletions.schedule_deletion``, DATA6). Ошибка удаления только
+        пишется в журнал — удаление файла не должно прерывать транзакцию БД.
 
-        **Важные замечания:**
-            - Метод **не выбрасывает исключение** при ошибках удаления – только логирует их.
-            Это сделано потому, что удаление файла не должно прерывать транзакцию БД.
-            - При отложенном удалении ошибки логируются в обработчике `after_commit` (см. `Database.__init__`).
-            - **НЕ вызывайте этот метод повторно** для одного и того же файла в рамках одной транзакции.
-            Два вызова приведут к добавлению файла в `_pending_deletions` дважды, но `after_commit` удалит его один раз
-            (без ошибки). Однако это нерационально и может маскировать логические ошибки.
-            - **НЕ используйте этот метод для файлов, которые ещё не были скопированы в основное хранилище** (например,
-            для абсолютных путей во временной папке черновика). Такие файлы удаляются автоматически при очистке
-            временной папки (см. `PaginatedListPage._cleanup_temp_dir`).
+        Note:
+            Не вызывать дважды для одного файла в одной транзакции (удалится один раз, но это
+            маскирует ошибки логики). Не для файлов вне хранилища (абсолютные пути черновика
+            во временной папке — их убирает очистка временной папки окна).
 
-        **Параметры:**
-            file_path (str): Полный абсолютный путь к файлу.
-            session (Optional[Session]): Сессия SQLAlchemy, в контексте которой выполняется удаление.
-                Если передана и поддерживает отложенное удаление, файл будет удалён после коммита.
-                Если `None` или не поддерживает, удаление происходит немедленно.
-            if_delete_parent_dir (bool): Если `True`, после удаления файла (успешного) пытается удалить
-                родительскую папку, если она стала пустой. Ошибки при удалении папки логируются, но не прерывают выполнение.
+        Args:
+            file_path            : (str) Абсолютный путь к файлу.
+            session              : (Session/None) Сессия ``session_scope``; None — удалить сразу.
+            if_delete_parent_dir : (bool) После удаления убрать папку файла, если она опустела.
 
-        **Возвращает:**
-            None
+        Returns:
+            (str/None) Текст ошибки немедленного удаления; None — успех или удаление отложено.
 
-        **Исключения:**
-            Никаких исключений не выбрасывает. При ошибках немедленного удаления логирует предупреждение.
-
-        **Примеры использования:**
-            >>> # Отложенное удаление в рамках транзакции
+        Example:
             >>> with db.session_scope() as session:
-            ...     self._del_file("/path/to/file.jpg", session=session)
-            ...     # файл будет удалён после session.commit()
-
-            >>> # Немедленное удаление без сессии
-            >>> self._del_file("/path/to/file.jpg")
-
-            >>> # Удалить файл и, если папка опустела, удалить её
-            >>> self._del_file("/path/to/file.jpg", session=session, if_delete_parent_dir=True)
-
-        **Примечания:**
-            - Для поддержки отложенного удаления сессия должна иметь атрибут `_pending_deletions`, который создаётся
-            в `Database.session_scope`. Не используйте этот метод с сессиями, созданными вручную без этого атрибута.
-            - Если файл не существует, метод ничего не делает (только логирует отладочное сообщение).
+            ...     service._del_file(
+            ...         'C:/photos/app_1/a.jpg',                # файл хранилища
+            ...         session                 =   session,    # после коммита
+            ...         if_delete_parent_dir    =   True,       # и пустую папку приёма
+            ...     )
         """
         ctx = DeletionContext.create(session, DeletionType.COMMIT)
         # err = schedule_deletion(
@@ -771,20 +842,44 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _build_sql_compute_subquery(self, field_name: str, config: Dict[str, Any]):
+    def _build_sql_compute_subquery(
+        self,
+        field_name : str,               # поле с ключом sql_compute (для журнала)
+        config     : Dict[str, Any],    # значение ключа sql_compute из описания поля
+    ) -> Optional[Any]: # скалярный подзапрос-агрегат по детям записи или None
         """
-        Строит подзапрос для SQL-вычисления.
+        Строит скалярный подзапрос ``sql_compute``: агрегат по дочерним записям связи.
 
-        Параметры config:
-            - func (str): агрегатная функция ('COUNT', 'SUM', 'AVG', 'MAX', 'MIN')
-            - relation (str): имя отношения в модели (например, 'photos')
-            - column (str, optional): столбец для SUM/AVG (если не указан, для SUM/AVG ошибка)
-            - filter (dict, optional): дополнительные фильтры для дочерних записей
-            - result_type (str): 'int', 'float', 'str' (для приведения)
-            - formatter (callable, optional): функция форматирования результата
+        Подзапрос ``SELECT <агрегат> FROM <дети> WHERE <условие связи> [AND <filter>]``
+        добавляется к выборке колонкой (:meth:`_add_sql_compute_columns_to_query`,
+        :meth:`get_page_filtered`) — так считается, например, число фото приёма
+        (``has_photos``) одним запросом на страницу. Ошибка описания — предупреждение в
+        журнал и ``None`` (поле не считается, выборка работает).
+
+        Ключи ``config``:
+            * ``relation`` (str) — связь «один-ко-многим» модели, например ``'photos'``;
+            * ``func`` (str) — ``'COUNT'`` (по умолчанию), ``'SUM'``, ``'AVG'``, ``'MAX'``,
+              ``'MIN'``; кроме ``COUNT`` нужен ``column``;
+            * ``column`` (str) — столбец дочерней модели для агрегата;
+            * ``filter`` (dict) — ``{столбец: значение}`` — условия «равно» для детей;
+              неизвестный столбец — предупреждение и пропуск условия;
+            * ``formatter`` (callable) — обработка значения при сборке DTO
+              (:meth:`_prepare_extra_data`); ``result_type`` нигде не читается.
+
+        Args:
+            field_name : (str) Имя поля — в тексты предупреждений.
+            config     : (dict) Описание вычисления (ключи выше).
 
         Returns:
-            SQLAlchemy scalar subquery или None при ошибке.
+            (Any/None) Скалярный подзапрос SQLAlchemy; None — описание неверно.
+
+        Example:
+            >>> sub = appointment_service._build_sql_compute_subquery(
+            ...     'last_photo_id',                                            # поле
+            ...     {'relation': 'photos', 'func': 'MAX', 'column': 'id'},      # описание
+            ... )
+            >>> session.query(Appointment.id, sub.label('last_photo_id')).all()
+            [(1, 7), (2, None)]
         """
         # from sqlalchemy import func as sa_func
 
@@ -807,9 +902,29 @@ class BaseService(
         child_model = relation_attr.property.mapper.class_
         func_name = config.get('func', 'COUNT').upper()
 
+        # if func_name == 'COUNT':
+        #     agg = sa_func.count()
+        # elif func_name in ('SUM', 'AVG'):
+        #     column_name = config.get('column')
+        #     if not column_name:
+        #         self.logger.warning(f"sql_compute для {field_name}: для {func_name} требуется 'column'")
+        #         return None
+        #     col = getattr(child_model, column_name, None)
+        #     if col is None:
+        #         self.logger.warning(f"sql_compute для {field_name}: столбец '{column_name}' не найден")
+        #         return None
+        #     agg = sa_func.sum(col) if func_name == 'SUM' else sa_func.avg(col)
+        # else:
+        #     agg = getattr(sa_func, func_name.lower(), None)
+        #     if agg is None:
+        #         self.logger.warning(f"sql_compute для {field_name}: неизвестная функция '{func_name}'")
+        #         return None
+        # ↑ до 2026-10-31 (S9): MAX / MIN (и любые другие имена) брали саму функцию SQL без
+        #   вызова и без столбца — select(sa_func.max) падал ArgumentError на каждом запросе
+        #   страницы; проверка «неизвестная функция» не срабатывала (sa_func.<любое имя> есть).
         if func_name == 'COUNT':
             agg = sa_func.count()
-        elif func_name in ('SUM', 'AVG'):
+        elif func_name in ('SUM', 'AVG', 'MAX', 'MIN'):
             column_name = config.get('column')
             if not column_name:
                 self.logger.warning(f"sql_compute для {field_name}: для {func_name} требуется 'column'")
@@ -818,12 +933,10 @@ class BaseService(
             if col is None:
                 self.logger.warning(f"sql_compute для {field_name}: столбец '{column_name}' не найден")
                 return None
-            agg = sa_func.sum(col) if func_name == 'SUM' else sa_func.avg(col)
+            agg = getattr(sa_func, func_name.lower())(col)
         else:
-            agg = getattr(sa_func, func_name.lower(), None)
-            if agg is None:
-                self.logger.warning(f"sql_compute для {field_name}: неизвестная функция '{func_name}'")
-                return None
+            self.logger.warning(f"sql_compute для {field_name}: неизвестная функция '{func_name}'")
+            return None
 
         query = select(agg).select_from(child_model).where(primaryjoin)
 
@@ -831,8 +944,16 @@ class BaseService(
         if extra_filter:
             for col_name, val in extra_filter.items():
                 col = getattr(child_model, col_name, None)
-                if col is not None:
-                    query = query.where(col == val)
+                # if col is not None:
+                #     query = query.where(col == val)
+                # ↑ до 2026-10-31 (S9): неизвестный столбец фильтра молча пропускался —
+                #   опечатка в описании давала агрегат по всем детям без предупреждения.
+                if col is None:
+                    self.logger.warning(
+                        f"sql_compute для {field_name}: столбец фильтра '{col_name}' не найден — условие пропущено"
+                    )
+                    continue
+                query = query.where(col == val)
 
         return query.scalar_subquery()
 
@@ -842,10 +963,30 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _add_sql_compute_columns_to_query(self, query):
+    def _add_sql_compute_columns_to_query(
+        self,
+        query : Query,  # запрос по модели сервиса
+    ) -> Tuple[Query, List[Any]]: # запрос с колонками sql_compute и список этих колонок
         """
-        Добавляет в запрос подзапросы для полей sql_compute.
-        Возвращает кортеж (query, extra_columns), где extra_columns – список добавленных колонок.
+        Добавляет к запросу колонки всех полей ``sql_compute`` (подзапросы-агрегаты).
+
+        Колонка поля называется ``__sql_compute_<поле>``; строки результата становятся
+        кортежами ``(объект, значение1, …)`` в порядке :meth:`_get_sql_compute_fields`.
+        Поле с неверным описанием пропускается (:meth:`_build_sql_compute_subquery`).
+
+        Args:
+            query : (Query) Запрос ``session.query(<модель>)``.
+
+        Returns:
+            (Tuple[Query, List[Any]]) Запрос и добавленные колонки; колонок нет — запрос как
+                есть и пустой список.
+
+        Example:
+            >>> query, columns = appointment_service._add_sql_compute_columns_to_query(
+            ...     session.query(Appointment),   # все приёмы
+            ... )
+            >>> [c.name for c in columns]
+            ['__sql_compute_has_photos']
         """
         compute_fields = self._get_sql_compute_fields()
         extra_columns = []
@@ -946,22 +1087,40 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _apply_order_by(
         self,
-        query: Query,
-        order_by: Optional[List] = None,
-    ) -> Query:
+        query    : Query,                   # запрос по модели сервиса
+        order_by : Optional[List] = None,   # поля сортировки: 'поле' / '-поле'
+    ) -> Query: # запрос с ORDER BY, id — последним ключом
         """
-        Применяет сортировку к запросу.
+        Применяет сортировку к запросу; последним ключом всегда ``id`` (ОСТ п. 1.11).
+
+        Поле — столбец таблицы, текст заметки или вычисляемое ``sql_compute``
+        (:meth:`_order_expression`); ``'-поле'`` — по убыванию; неизвестное поле —
+        предупреждение в журнал и пропуск. Затем добавляется ``id`` по возрастанию
+        (:meth:`_id_tiebreaker`): без него порядок строк в SQL не задан (сортировки нет или
+        ключи равны), и соседние страницы ``offset`` / ``limit`` могли повторять одни записи
+        и терять другие. Так же устроены страницы репозиториев (R3, М10).
 
         Args:
-            query (Query): Исходный запрос SQLAlchemy.
-            order_by (Optional[List]): Список имён полей для сортировки.
-                Поле может начинаться с '-' для убывания.
+            query    : (Query) Исходный запрос SQLAlchemy по ``self._model_class``.
+            order_by : (List[str]/None) Имена полей; ``'-'`` в начале — по убыванию.
+                None или пусто — только по ``id``.
 
         Returns:
-            Query: Модифицированный запрос.
+            (Query) Запрос с ``ORDER BY``.
+
+        Example:
+            >>> query = service._apply_order_by(
+            ...     session.query(Appointment),   # все приёмы
+            ...     ['-date'],                     # новые сверху
+            ... )
+            >>> str(query).split('ORDER BY')[1].split()
+            ['appointments.date', 'DESC,', 'appointments.id', 'ASC']
         """
-        if not order_by:
-            return query
+        # if not order_by:
+        #     return query
+        # ↑ до 2026-10-31 (ОСТ п. 1.11): без сортировки — запрос без ORDER BY, при равных
+        #   ключах — без второго ключа; порядок страниц не задан (повторы и потери записей).
+        order_by = order_by or []
 
         # order_clauses = []
         # for field_spec in order_by:
@@ -990,10 +1149,36 @@ class BaseService(
                 )
                 continue
             order_clauses.append(expression.desc() if descending else expression.asc())
+        # if order_clauses:
+        #     query = query.order_by(*order_clauses)
+        # ↑ до 2026-10-31 (ОСТ п. 1.11): id последним ключом — ниже.
+        order_clauses.extend(
+            self._id_tiebreaker(),  # id по возрастанию
+        )
         if order_clauses:
             query = query.order_by(*order_clauses)
 
         return query
+
+    def _id_tiebreaker(self) -> List[Any]: # последний ключ сортировки страниц
+        """
+        Возвращает ``[<модель>.id.asc()]`` — последний ключ сортировки страниц.
+
+        У модели без столбца ``id`` — пустой список (сортировка как задана). То же, что
+        ``BaseRepository._id_tiebreaker`` (R3, М10): сервис собирает страницы сам, не через
+        репозиторий.
+
+        Returns:
+            (List[Any]) Выражения для ``order_by``: одно или ни одного.
+
+        Example:
+            >>> [str(c) for c in patient_service._id_tiebreaker()]
+            ['patients.id ASC']
+        """
+        column = getattr(self._model_class, 'id', None)
+        if column is None:
+            return []
+        return [column.asc()]
 
     def _order_expression(self, field_name: str) -> Any:
         """
@@ -1156,7 +1341,11 @@ class BaseService(
             #   (has_photos у приёмов), по которому ничего не нашлось, падал.
             if extra_columns and results:
                 self.logger.debug(f"[DEBUG] First result type: {type(results[0])}, len: {len(results[0]) if hasattr(results[0], '__len__') else 'N/A'}")
-                self.logger.debug(f"[DEBUG] First result: {results[0]}")
+                # self.logger.debug(f"[DEBUG] First result: {results[0]}")
+                # ↑ до 2026-10-31 (S5): строка модели в журнале — личные данные (ФИО и т. п.).
+                self.logger.debug(
+                    f"[DEBUG] First result: {_log_ref(results[0][0] if hasattr(results[0], '__len__') else results[0])}"
+                )
 
             # Извлекаем модели и сохраняем вычисленные значения как временные атрибуты
             items = []
@@ -1444,17 +1633,35 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def _get_item(
-        self, 
-        item_id: int,
-        class_err: Type[Exception] , 
-        session: Optional[Session] = None,
-    ):
+        self,
+        item_id   : int,                        # id записи
+        class_err : Type[Exception],            # исключение «не найдено»: class_err(item_id)
+        session   : Optional[Session] = None,   # сессия (обязательна по смыслу: репозиторий на ней)
+    ) -> Tuple[RepoType, ModelType]: # репозиторий на сессии и запись со связями
         """
-        Возвращает экземпляр репозитория и запись по ID.
+        Возвращает репозиторий на сессии и запись по ``id`` с жадно загруженными связями.
 
-        Параметры:
-            item_id (int): ID записи.
-            class_err (Type[Exception]): Класс исключения, который будет выброшен в случае отсутствия записи.
+        Связи — из описания полей (:meth:`_get_eager_loading_options`). Своей транзакции не
+        открывает: репозиторий строится на переданной сессии.
+
+        Args:
+            item_id   : (int) ID записи.
+            class_err : (type) Класс исключения; вызывается как ``class_err(item_id)``.
+            session   : (Session/None) Сессия; None — репозиторий без сессии (запрос упадёт).
+
+        Returns:
+            (Tuple[RepoType, ModelType]) Репозиторий и найденная запись.
+
+        Raises:
+            Exception: ``class_err(item_id)`` — записи нет.
+
+        Example:
+            >>> with db.session_scope() as session:
+            ...     repo, appointment = appointment_service._get_item(
+            ...         5,                          # приём
+            ...         AppointmentNotFoundError,   # если нет
+            ...         session,                    # сессия
+            ...     )
         """
 
         repo = self._get_repo(session)
@@ -1606,9 +1813,42 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def get_by_relation(self, relation_column: str, value: Any, session=None, relations=None):
+    def get_by_relation(
+        self,
+        relation_column : str,                          # столбец модели, например внешний ключ
+        value           : Any,                          # значение «равно»
+        session         : Optional[Session] = None,     # внешняя транзакция
+        relations       : Optional[List[Any]] = None,   # опции загрузки; None — из описания полей
+    ) -> List[DTOType]: # записи, у которых столбец равен значению
+        """
+        Возвращает записи, у которых ``relation_column == value``, в виде DTO.
+
+        Приложением не используется (DYN8 — для страниц и выборок есть
+        :meth:`get_filtered`, :meth:`get_page`); без сортировки — порядок не задан.
+
+        Args:
+            relation_column : (str) Имя столбца модели; неизвестное — ``AttributeError``.
+            value           : (Any) Значение для сравнения «равно».
+            session         : (Session/None) Сессия внешней транзакции; None — своя.
+            relations       : (List[Any]/None) Готовые опции загрузки (``selectinload(...)``);
+                None — по описанию полей (:meth:`_get_eager_loading_options`), пусто — без них.
+
+        Returns:
+            (List[DTOType]) Найденные записи; пустой список — нет таких.
+
+        Raises:
+            AttributeError: Нет столбца ``relation_column`` у модели.
+
+        Example:
+            >>> photo_service.get_by_relation(
+            ...     'appointment_id',   # столбец
+            ...     5,                  # приём
+            ... )
+            [PhotoDTO(id=1, appointment_id=5, ...)]
+        """
         with self._session_scope(session) as sess:
-            repo = self._get_repo(sess)
+            # repo = self._get_repo(sess)
+            # ↑ до 2026-10-31 (pyflakes): не используется — запрос строится сессией.
             query = sess.query(self._model_class).filter(getattr(self._model_class, relation_column) == value)
 
             if relations is None:
@@ -1865,9 +2105,10 @@ class BaseService(
             session (Optional[Session]): Опциональная сессия.
 
         Примечание:
-            Дочерние сущности (например, приёмы пациента) не удаляются автоматически.
-            Для каскадного удаления нужно вручную удалить их в переопределённом методе `delete` сервиса.
-            Пример: в `PatientService.delete_patient` удаляются все приёмы через `AppointmentService`.
+            Дети с сервисом (``_get_child_service``) удаляются через их сервисы —
+            :meth:`_delete_children` (DYN7, 2026-10-16): у приёмов пациента так удаляются и
+            фото с файлами. Связи с каскадом без сервиса удаляет каскад ORM (без файлов и
+            заметок детей). Было записано «дочерние не удаляются автоматически» — устарело.
         """
 
         with self._session_scope(session) as sess:
@@ -2104,10 +2345,14 @@ class BaseService(
             if new_value is not None:
                 # setattr(model_obj, field_name, new_value)
                 if old_value != new_value:
-                    self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    # self.logger.debug(f"Обновление поля {field_name}: {old_value} -> {new_value}")
+                    # ↑ до 2026-10-31 (S5): значения полей в журнале — личные данные.
+                    self.logger.debug(f"Обновление поля {field_name}")
                     setattr(model_obj, field_name, new_value)
                 else:
-                    self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+                    # self.logger.debug(f"Поле {field_name} не изменилось: {old_value}")
+                    # ↑ до 2026-10-31 (S5): значение поля в журнале — личные данные.
+                    self.logger.debug(f"Поле {field_name} не изменилось")
 
             else:
                 # Проверяем, является ли поле обязательным
@@ -2379,24 +2624,20 @@ class BaseService(
     )
     def _get_note_service(self) -> Optional['NoteService']:
         """
-        Возвращает экземпляр NoteService, используемый для работы с полями-заметками.
+        Возвращает сервис заметок для полей ``is_note``: атрибут ``_note_service`` или ``None``.
 
-        **Должен быть переопределён в наследниках, если у сущности есть поля `is_note`.**
-
-        Базовый метод выбрасывает `NotImplementedError`. В наследнике нужно вернуть
-        свой экземпляр NoteService (обычно создаётся в `__init__` и сохраняется в
-        `self._note_service`). Если у сущности нет полей-заметок, этот метод не
-        используется (но для единообразия можно вернуть None).
-
-        Пример (NoteService) если не используются, то просто делаем та:
-            def _get_note_service(self) -> Optional[NoteService]:
-                return self._note_service
+        Атрибут задают параметр ``note_service`` конструктора или наследник в своём
+        ``__init__`` (DYN9; раньше базовый метод бросал ``NotImplementedError``). ``None`` —
+        заметки при правке и удалении записи не чистятся (:meth:`_cleanup_replaced_notes`,
+        :meth:`_delete_entity`).
 
         Returns:
-            NoteService: экземпляр сервиса заметок.
+            (NoteService/None) Сервис заметок; None — не задан.
 
-        Raises:
-            NotImplementedError: если метод не переопределён.
+        Example:
+            >>> BaseService(db, None, Prescription, PrescriptionDTO, CONFIG,
+            ...             note_service=note_service)._get_note_service() is note_service
+            True
         """
 
         # """Должен быть переопределён в наследниках, возвращая экземпляр NoteService."""
@@ -2623,16 +2864,16 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_config_changed(self):
+    def _on_config_changed(self) -> None:
         """
-        Вызывается при изменении конфигурации приложения  – перезагружает сервис.
+        Перезагружает сервис после смены настроек — вызывает :meth:`reload_config`.
 
-        Просто перенаправляет вызов на `self.reload_config()`, который должен быть
-        переопределён в наследниках или реализован в базовом классе.
-        Этот метод автоматически вызывается `AppConfigManager` при сохранении новых настроек.
+        Сейчас никем не вызывается: подписка на ``AppConfigManager`` убрана 2026-10-14 (M4),
+        перезагрузку сервисов делает ``ConfigApplier`` через реестр поставщиков
+        ``app/dependencies.py``. Оставлен как точка подписки.
 
-        Returns:
-            None
+        Example:
+            >>> patient_service._on_config_changed()   # то же, что reload_config()
         """
 
         self.reload_config()
@@ -2736,10 +2977,27 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _modify_query(self, query):
+    def _modify_query(
+        self,
+        query : Query,  # запрос get_all со связями
+    ) -> Query: # запрос, изменённый наследником (в базе — как есть)
         """
-        Хук для модификации запроса перед выполнением.
-        Наследники могут переопределить для добавления фильтров, сортировки и т.д.
+        Возвращает запрос :meth:`get_all` без изменений — место для правки в наследнике.
+
+        Наследник может добавить условие или сортировку ко всем записям :meth:`get_all`;
+        страниц и выборок с фильтрами (:meth:`get_page_filtered`, :meth:`get_filtered`) хук
+        не касается.
+
+        Args:
+            query : (Query) Запрос ``session.query(<модель>)`` с опциями загрузки.
+
+        Returns:
+            (Query) Тот же запрос.
+
+        Example:
+            >>> class WithPhoneOnly(PatientService):
+            ...     def _modify_query(self, query):
+            ...         return query.filter(Patient.phone.isnot(None))
         """
         return query
     
@@ -2930,17 +3188,32 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def create(
-        self, 
-        dto: DTOType, 
-        session: Optional[Session] = None,
-    ) -> DTOType:
+        self,
+        dto     : DTOType,                  # данные новой записи (без id)
+        session : Optional[Session] = None, # внешняя транзакция; None — своя
+    ) -> DTOType: # созданная запись с id
         """
-        Создаёт новую запись из DTO.
+        Создаёт запись из DTO общим механизмом :meth:`_create_entity` (DYN9).
 
-        Должен быть переопределён в наследнике, так как логика создания специфична.
-        :param dto: DTO, из которого будет создана новая запись
-        :return: созданная запись в виде DTO
-        :raises: NotImplementedError, если метод не переопределён в наследнике
+        Обязательные поля и ссылки на родителей проверяются, заметки находятся или
+        создаются по тексту, вычисляемые поля заполняются в ответе. Наследник
+        переопределяет — только ради особой логики (файлы фото).
+
+        Args:
+            dto     : (DTOType) Данные записи.
+            session : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (DTOType) Созданная запись.
+
+        Raises:
+            ValueError: Исключение проверки таблицы (``*ValidationError`` /
+                ``EntityValidationError``) — пустое обязательное поле или ссылка на
+                несуществующую запись.
+
+        Example:
+            >>> service.create(PrescriptionDTO(appointment_id=1, dose='1 мг')).id
+            7
         """
 
         # raise NotImplementedError("Метод create должен быть переопределён в наследнике")
@@ -2958,17 +3231,33 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def update(
-        self, 
-        dto: DTOType,
-        session: Optional[Session] = None
-    ) -> DTOType:
+        self,
+        dto     : DTOType,                  # новые значения; id обязателен
+        session : Optional[Session] = None, # внешняя транзакция; None — своя
+    ) -> DTOType: # запись после изменения
         """
-        Обновляет существующую запись.
+        Изменяет запись ``dto.id`` общим механизмом :meth:`_update_entity` (DYN9).
 
-        Должен быть переопределён в наследнике, так как обновление специфично.
-        :param dto: DTO, из которого будет обновлена запись
-        :return: обновленная запись в виде DTO
-        :raises: NotImplementedError, если метод не переопределён в наследнике
+        Заметки неизменяемы: новый текст — существующая заметка с тем же текстом или новая,
+        прежняя удаляется, если больше никому не нужна (DATA1); поля ``updatable: False`` не
+        меняются (предупреждение в журнал); при смене ссылок проверяются родители.
+
+        Args:
+            dto     : (DTOType) Новые значения; ``id`` обязателен.
+            session : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (DTOType) Запись после изменения.
+
+        Raises:
+            ValueError: Нет ``id`` или ошибка проверки поля — исключение проверки таблицы.
+            LookupError: Записи нет — :meth:`_not_found_exception`.
+
+        Example:
+            >>> dto = service.get_by_id(7)
+            >>> dto.dose = '2 мг'
+            >>> service.update(dto).dose
+            '2 мг'
         """
 
         # raise NotImplementedError("Метод update должен быть переопределён в наследнике")
@@ -3106,11 +3395,20 @@ class BaseService(
     )
     def _not_found_exception(self, entity_id: int) -> Exception:
         """
-        Возвращает исключение, которое будет выброшено при отсутствии записи.
-        Должно быть переопределено в наследнике.
-        :param entity_id: ID записи, которая не была найдена
-        :raises: Exception
-        :return: Exception
+        Возвращает исключение «записи нет» — общее ``EntityNotFoundError`` (DYN9).
+
+        Наследник переопределяет ради своего класса (``PatientNotFoundError`` …). Исключение
+        возвращается, бросает его вызывающий.
+
+        Args:
+            entity_id : (int) ID записи, которой нет.
+
+        Returns:
+            (Exception) ``EntityNotFoundError(<модель>, entity_id)`` — оно же ``LookupError``.
+
+        Example:
+            >>> str(service._not_found_exception(5))
+            '[9001] Prescription с идентификатором 5 не найден(а).'
         """
         # raise NotImplementedError(
         # f"Метод _not_found_exception не реализован для {self.__class__.__name__}"
@@ -3170,7 +3468,10 @@ class BaseService(
         :return: список DTO или один DTO
         :rtype: Union[List, Any]
         """
-        self.logger.debug(f"item_s: {item_s}")
+        # self.logger.debug(f"item_s: {item_s}")
+        # ↑ до 2026-10-31 (S5): строки моделей в журнале — личные данные (ФИО, тексты).
+        if not isinstance(item_s, list):
+            self.logger.debug(f"item_s: {_log_ref(item_s)}")
 
         if isinstance(item_s, list):
             # данные из ТБ
@@ -3188,14 +3489,18 @@ class BaseService(
             #   читаются (поле остаётся по умолчанию); нужные загружаются заранее по конфигу.
             dto = self._dto_class.model_validate(self._loaded_attributes(item_s), from_attributes=True)
         except Exception as e:
-            self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
+            # self.logger.error(f"Ошибка валидации для объекта: {item_s}")  # логгируем ошибку
+            # ↑ до 2026-10-31 (S5): строка модели в журнале — личные данные.
+            self.logger.error(f"Ошибка валидации для объекта: {_log_ref(item_s)}: {type(e).__name__}")
             raise e  # выбрасываем исключение
         
         # Обогащаем, если есть конфигурация
         if self._field_configs:
 
             extra_data = self._prepare_extra_data(item_s)
-            self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
+            # self.logger.debug(f"[DEBUG] extra_data before enrich: {extra_data}")
+            # ↑ до 2026-10-31 (S5): значения вычисляемых полей (имя пациента и т. п.) — личные данные.
+            self.logger.debug(f"[DEBUG] extra_data before enrich: {sorted(extra_data)}")
 
             dto = enrich_dto_with_computed_fields(
                 dto, 
@@ -3216,16 +3521,24 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def get_dto_out(
-        self, 
-        item,
-    ): 
+        self,
+        item : Any, # объект модели
+    ) -> DTOType: # DTO записи с вычисляемыми полями
         """
-        Возвращает DTO из объекта.
+        Возвращает DTO одной записи — то же, что :meth:`get_dtos` для одного объекта.
 
-        :param item: объект, из которого будет создан DTO
-        :type item: Any
-        :return: DTO, созданный из объекта
-        :rtype: DTOType
+        Args:
+            item : (Any) Объект модели (загруженный в сессии).
+
+        Returns:
+            (DTOType) DTO с виртуальными и вычисляемыми полями.
+
+        Raises:
+            pydantic.ValidationError: Данные записи не проходят проверку DTO.
+
+        Example:
+            >>> patient_service.get_dto_out(patient).last_name
+            'Иванов'
         """
         dto = self.get_dtos(item)
 
@@ -3293,22 +3606,30 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _apply_eager_loading(
-        self, 
-        query, 
-        relations: List[str] = None
-    ):
+        self,
+        query     : Query,                      # запрос по модели сервиса
+        relations : Optional[List[str]] = None, # имена связей; None или пусто — из описания полей
+    ) -> Query: # запрос с опциями жадной загрузки связей
         """
-        Применяет eager loading к запросу.
+        Добавляет к запросу жадную загрузку связей (``selectinload`` / ``joinedload``).
 
-        Параметры:
-            query (Query): Запрос SQLAlchemy.
-            relations (List[str], optional): Список имён отношений (если None – берёт из конфигурации).
+        Связи — переданные имена или, если их нет (None или пустой список), связи из описания
+        полей (:meth:`_get_relations_for_eager_loading`): отключить загрузку пустым списком
+        нельзя. Коллекции — ``selectinload``, одиночные — ``joinedload``
+        (:meth:`_get_eager_loading_options`).
 
-        Возвращает:
-            Query: Модифицированный запрос с добавленными `options`.
+        Args:
+            query     : (Query) Запрос SQLAlchemy.
+            relations : (List[str]/None) Имена связей модели; None или пусто — из описания.
 
-        Пример:
-            query = self._apply_eager_loading(query)
+        Returns:
+            (Query) Запрос с ``options``; связей нет — тот же запрос.
+
+        Example:
+            >>> query = appointment_service._apply_eager_loading(
+            ...     session.query(Appointment),   # все приёмы
+            ...     ['patient'],                  # с пациентом
+            ... )
         """
         if not relations:
             relations = self._get_relations_for_eager_loading()
@@ -3365,9 +3686,14 @@ class BaseService(
         # filters: список словарей с ключами column, operator, value.
         # fuzzy_threshold: порог схожести для нечеткого поиска.
         # """
+        # self.logger.debug(
+        #     f"Запрос отфильтрованных записей {self._model_class.__name__} "
+        #     f"с фильтрами {filters}"
+        # )
+        # ↑ до 2026-10-31 (S5): значения фильтров (что ищут) — личные данные.
         self.logger.debug(
             f"Запрос отфильтрованных записей {self._model_class.__name__} "
-            f"с фильтрами {filters}"
+            f"с фильтрами {_filters_outline(filters)}"
         )
 
         with self._session_scope(session) as sess:
@@ -3416,11 +3742,27 @@ class BaseService(
         level=AppLogger._parse_log_level('DEBUG')
     )
     @contextmanager
-    def _session_scope(self, session: Optional[Session] = None):
+    def _session_scope(
+        self,
+        session : Optional[Session] = None, # внешняя сессия; None — своя транзакция
+    ) -> Iterator[Session]: # сессия для работы внутри with
         """
-        Контекстный менеджер для работы с сессией.
-        Если передана внешняя сессия, используем её (без commit/rollback).
-        Иначе создаём новую через self._db.session_scope().
+        Отдаёт сессию для ``with``: внешнюю как есть или новую транзакцию ``session_scope``.
+
+        С внешней сессией коммит и откат — у того, кто её открыл (вызовы сервисов
+        объединяются в одну транзакцию). Без неё — ``self._db.session_scope()``: коммит при
+        выходе, откат при исключении, отложенные удаления файлов.
+
+        Args:
+            session : (Session/None) Сессия внешней транзакции; None — открыть свою.
+
+        Returns:
+            (Iterator[Session]) Генератор контекстного менеджера: ``with`` получает сессию.
+
+        Example:
+            >>> with patient_service._session_scope() as session:
+            ...     session.query(Patient).count()
+            3
         """
         if session is not None:
             yield session
@@ -3598,32 +3940,42 @@ class PatientService(
     )
     def __init__(
         self,
-        db: Database,
-        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        logger_name: Optional[str] = None,
-        appointment_service: Optional['AppointmentService'] = None, 
-    ):
+        db                  : Database,                                     # база: сессии
+        field_configs       : Optional[Dict[str, Dict[str, Any]]] = None,   # описание полей пациента
+        logger_name         : Optional[str] = None,                         # имя журнала; None — имя класса
+        appointment_service : Optional['AppointmentService'] = None,        # сервис приёмов (удаление)
+    ) -> None:
         """
-        Инициализирует экземпляр сервиса.
+        Создаёт сервис пациентов со своим сервисом заметок.
 
-        Parameters:
-            db (Database): экземпляр Database для получения сессий.
-            logger_name (str, optional): имя логгера. По умолчанию будет использовано имя класса сервиса.
-            
+        Сервис заметок (``description_text``, ``comment_text``) создаётся здесь на той же
+        базе. Сервис приёмов нужен для удаления пациента с приёмами и их фото
+        (:meth:`delete_patient`, DYN7); без него удаление — ``RuntimeError``.
 
-        Attributes:
-            logger (AppLogger): логгер для записи событий.
+        Args:
+            db                  : (Database) База — источник сессий.
+            field_configs       : (dict/None) Описание полей (``PATIENT_CONFIG``); None — пустое.
+            logger_name         : (str/None) Имя журнала; None — ``'PatientService'``.
+            appointment_service : (AppointmentService/None) Сервис приёмов; None — удалять
+                пациентов нельзя.
+
+        Example:
+            >>> service = PatientService(
+            ...     db                    =   get_db(),                    # база
+            ...     field_configs         =   PATIENT_CONFIG,              # описание полей
+            ...     appointment_service   =   get_appointment_service(),   # для удаления
+            ... )
         """
         if logger_name is None:
             logger_name = self.__class__.__name__
 
         # Вызов конструктора базового класса с указанием классов модели, DTO и репозитория
         super().__init__(
-            db          = db,
-            repo_class  = PatientRepository,
-            model_class = Patient,
-            dto_class   = PatientDTO,
-            field_configs=field_configs,
+            db            = db,                   # база
+            repo_class    = PatientRepository,    # репозиторий
+            model_class   = Patient,              # модель
+            dto_class     = PatientDTO,           # DTO
+            field_configs = field_configs,        # описание полей
             logger_name = logger_name,
         )
 
@@ -3682,13 +4034,17 @@ class PatientService(
     ) 
     def _get_note_service(self) -> 'NoteService':
         """
-        Должен быть переопределён в наследниках, возвращает экземпляр NoteService.
+        Возвращает сервис заметок пациента (созданный в ``__init__``).
 
-        Используется в `_delete_entity` и `_apply_note_updates` для очистки неиспользуемых заметок.
-        Если у сервиса нет полей-заметок, можно вернуть None (но тогда очистка не будет выполняться).
+        Им пользуются :meth:`_cleanup_replaced_notes` и :meth:`_delete_entity` — удаляют
+        заметки, на которые больше никто не ссылается.
 
-        Raises:
-            NotImplementedError: Базовый метод по умолчанию выбрасывает исключение.
+        Returns:
+            (NoteService) Сервис заметок.
+
+        Example:
+            >>> isinstance(patient_service._get_note_service(), NoteService)
+            True
         """
 
         return self._note_service
@@ -3726,12 +4082,14 @@ class PatientService(
             >>> print(created.id)
         """
 
-        self.logger.debug(
-            f"patient_dto "
-            f"{patient_dto} "
-            f"session {session} "
-            f"result {session}"
-        )
+        # self.logger.debug(
+        #     f"patient_dto "
+        #     f"{patient_dto} "
+        #     f"session {session} "
+        #     f"result {session}"
+        # )
+        # ↑ до 2026-10-31 (S5): DTO пациента целиком (ФИО, телефон, дата рождения) — в журнал.
+        self.logger.debug("Создание пациента")
 
         # if not patient_dto.first_name or not patient_dto.last_name:
         #     self.logger.warning("Попытка создания пациента без имени/фамилии")
@@ -3832,21 +4190,24 @@ class PatientService(
             PatientNotFoundError: если пациент с указанным id не найден.
         """
 
-        self.logger.debug(
-            f"patient_dto {patient_dto} "
-            f"session {session} "
-            f"result {session}"
-        )
+        # self.logger.debug(
+        #     f"patient_dto {patient_dto} "
+        #     f"session {session} "
+        #     f"result {session}"
+        # )
+        # ↑ до 2026-10-31 (S5): DTO пациента целиком — в журнал (личные данные).
 
         if patient_dto.id is None:
             self.logger.warning("Попытка обновления пациента без id")
             raise PatientValidationError("id", "ID пациента обязателен для обновления")
 
-        self.logger.debug(
-            f"Обновление пациента id={patient_dto.id} "
-            f"данные: last_name={patient_dto.last_name} "
-
-        )
+        # self.logger.debug(
+        #     f"Обновление пациента id={patient_dto.id} "
+        #     f"данные: last_name={patient_dto.last_name} "
+        #
+        # )
+        # ↑ до 2026-10-31 (S5): фамилия в журнале — личные данные.
+        self.logger.debug(f"Обновление пациента id={patient_dto.id}")
         return self._update_entity(patient_dto, patient_dto.id, session)
 
         # with self._session_scope(session) as sess:
@@ -3974,7 +4335,9 @@ class PatientService(
         :return: исключение PatientNotFoundError
         :rtype: PatientNotFoundError
         """
-        self.logger.error(f"Пациент с идентификатором {entity_id} не найден.'")
+        # self.logger.error(f"Пациент с идентификатором {entity_id} не найден.'")
+        # ↑ до 2026-10-31: лишняя кавычка в конце текста.
+        self.logger.error(f"Пациент с идентификатором {entity_id} не найден.")
 
         return PatientNotFoundError(entity_id) # Выбрасывается, когда пациент с указанным идентификатором не найден в базе данных.
 
@@ -4227,9 +4590,15 @@ class PatientService(
         4. Выводим список пациентов, если он не пустой
         """
 
+        # self.logger.debug(
+        #     f"Запрос пациентов с фильтрацией: "
+        #     f"filters={filters}, "
+        #     f"fuzzy_threshold={fuzzy_threshold}"
+        # )
+        # ↑ до 2026-10-31 (S5): значения фильтров (что ищут) — личные данные.
         self.logger.debug(
             f"Запрос пациентов с фильтрацией: "
-            f"filters={filters}, "
+            f"filters={_filters_outline(filters)}, "
             f"fuzzy_threshold={fuzzy_threshold}"
         )
 
@@ -4286,6 +4655,17 @@ class PatientService(
         )
 
     def reload_config(self) -> None:
+        """
+        Перезагружает сервис после смены настроек: новая база и сервис приёмов из кэша.
+
+        Базовый :meth:`BaseService.reload_config` закрывает старый ``Database`` и берёт новый
+        (``get_db()``); сервис приёмов — ``get_appointment_service()`` (импорт внутри — из-за
+        цикла импортов с ``app.dependencies``). Вызывает ``ConfigApplier`` через реестр
+        поставщиков.
+
+        Example:
+            >>> patient_service.reload_config()
+        """
         super().reload_config()
 
         # from app.dependencies import clear_services_cache # оставить тут, так как циклы
@@ -4339,29 +4719,39 @@ class NoteService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def __init__(
-        self, 
-        db: Database, 
-        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        logger_name: Optional[str] = None,
-    ):
+        self,
+        db            : Database,                                   # база: сессии
+        field_configs : Optional[Dict[str, Dict[str, Any]]] = None, # описание полей заметки
+        logger_name   : Optional[str] = None,                       # имя журнала; None — имя класса
+    ) -> None:
         """
-        Инициализирует сервис для работы с заметками приёмов.
-        
-        :param db: База данных
-        :type db: Database
-        :param logger_name: Имя для логгера (необязательный)
-        :type logger_name: Optional[str]
+        Создаёт сервис заметок (общая таблица ``appointments_notes``).
+
+        Заметки общие для всех таблиц: одну заметку могут использовать многие записи
+        (пациенты, приёмы), поэтому удаление — только неиспользуемых (:meth:`delete`,
+        :meth:`cleanup_unused_note`).
+
+        Args:
+            db            : (Database) База — источник сессий.
+            field_configs : (dict/None) Описание полей (``NOTE_CONFIG``); None — пустое.
+            logger_name   : (str/None) Имя журнала; None — ``'NoteService'``.
+
+        Example:
+            >>> note_service = NoteService(
+            ...     get_db(),                                       # база
+            ...     logger_name   =   'PatientService.NoteService', # журнал владельца
+            ... )
         """
         if logger_name is None:
             logger_name = self.__class__.__name__
 
         super().__init__(
-            db=db,
-            repo_class=AppointmentNoteRepository,
-            model_class=AppointmentNote,
-            dto_class=AppointmentNoteDTO,
-            field_configs=field_configs,
-            logger_name=logger_name
+            db            = db,                         # база
+            repo_class    = AppointmentNoteRepository,  # репозиторий
+            model_class   = AppointmentNote,            # модель
+            dto_class     = AppointmentNoteDTO,         # DTO
+            field_configs = field_configs,              # описание полей
+            logger_name   = logger_name,                # журнал
         )
 
     @AppLogger.get_instance(
@@ -4510,7 +4900,10 @@ class NoteService(
         """
         # return self.update_note(dto.id, dto.text)
         if dto.id is None:
-            raise ValueError("ID заметки не указан")
+            # raise ValueError("ID заметки не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
         
         return self._update_entity(
             dto,
@@ -4695,7 +5088,9 @@ class NoteService(
         if not text:
             return None
 
-        self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+        # self.logger.debug(f"Поиск или создание заметки: {text[:50]}...")
+        # ↑ до 2026-10-31 (S5): текст заметки (жалобы, диагноз) — личные данные.
+        self.logger.debug(f"Поиск или создание заметки: длина текста {len(text)}")
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
             note = repo.get_by_text_exact(text)
@@ -4812,7 +5207,29 @@ class NoteService(
                 usage[table.name] = usage.get(table.name, 0) + count
         return usage
 
-    def cleanup_unused_note(self, note_id: int, session: Optional[Session] = None) -> None:
+    def cleanup_unused_note(
+        self,
+        note_id : Optional[int],            # заметка; None — ничего не делать
+        session : Optional[Session] = None, # внешняя транзакция
+    ) -> None:
+        """
+        Удаляет заметку, если на неё больше не ссылается ни одна запись; иначе — ничего.
+
+        Ссылки — все внешние ключи на таблицу заметок по схеме БД (:meth:`_note_references`,
+        DYN2), а не по описанию полей: ссылка, о которой описание не знает, тоже защищает
+        заметку. Вызывать ПОСЛЕ записи новых ссылок (``flush``) — иначе запись ещё «держит»
+        старую заметку (DATA1b). Удаление — в той же транзакции.
+
+        Args:
+            note_id : (int/None) ID заметки; None — выход без запросов.
+            session : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Example:
+            >>> note_service.cleanup_unused_note(
+            ...     12,                 # прежняя заметка записи
+            ...     session,            # та же транзакция
+            ... )
+        """
         if note_id is None:
             return
         # from app.dependencies import _NOTE_USAGE_MODELS # так как циклы
@@ -4923,6 +5340,16 @@ class NoteService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def _get_note_service(self) -> Optional['NoteService']:
+        """
+        Возвращает ``None`` — у заметок нет своих заметок.
+
+        Returns:
+            (None) Сервиса заметок нет: очистка заметок при правке и удалении не делается.
+
+        Example:
+            >>> note_service._get_note_service() is None
+            True
+        """
         return None
 
     @AppLogger.get_instance(
@@ -4975,10 +5402,11 @@ class AppointmentService(
 
     Особенности:
         - Имеет несколько полей-заметок (reason_text, procedure_text, ...).
-        - Для отображения количества фото используется виртуальное поле `has_photos`,
-          которое вычисляется через отдельный запрос (`_add_photo_counts`).
-        - Переопределяет `_post_process_items` для добавления атрибута `_photo_count`.
-        - Переопределяет `_get_child_service`, чтобы предоставить доступ к `PhotoService`.
+        - Число фото (`has_photos`) считается подзапросом `sql_compute` в той же выборке
+          (DATA12: страница — 2 запроса при любом числе строк); прежние `_add_photo_counts`,
+          `_post_process_items` / `_photo_count` — в истории.
+        - Переопределяет `_get_child_service`, чтобы предоставить доступ к `PhotoService`
+          (каскадное удаление фото с файлами — DYN7).
         - Заметки обрабатываются автоматически через `BaseService`.
 
     Дополнительные атрибуты:
@@ -5009,23 +5437,33 @@ class AppointmentService(
     )  
     def __init__(
         self,
-        db: Database,
-        note_service: Optional['NoteService'] = None,  
-        photo_service: Optional['PhotoService'] = None,  
-        field_configs: Optional[Dict[str, Dict[str, Any]]] = None, 
-        logger_name: Optional[str] = None,
-    ):
+        db            : Database,                                   # база: сессии
+        note_service  : Optional['NoteService'] = None,             # сервис заметок; None — свой
+        photo_service : Optional['PhotoService'] = None,            # сервис фото (дети приёма)
+        field_configs : Optional[Dict[str, Dict[str, Any]]] = None, # описание полей приёма
+        logger_name   : Optional[str] = None,                       # имя журнала; None — имя класса
+    ) -> None:
         """
-        Инициализирует сервис для работы с приёмами.
-        
-        :param db: База данных
-        :type db: Database
-        :param note_service: сервис для работы с заметками приёмов (необязательный)
-        :type note_service: Optional['NoteService']
-        :param photo_service: сервис для работы с фотографиями приёмов (необязательный)
-        :type photo_service: Optional['PhotoService']
-        :param logger_name: имя для логгера (необязательный)
-        :type logger_name: Optional[str]
+        Создаёт сервис приёмов: заметки (свои или переданные) и фото как дети приёма.
+
+        Без ``note_service`` создаётся свой ``NoteService`` на той же базе. Без
+        ``photo_service`` у приёма нет сервиса детей ``'photos'``: при удалении приёма фото
+        удаляет каскад ORM — без файлов (:meth:`BaseService._delete_children`, DYN7).
+
+        Args:
+            db            : (Database) База — источник сессий.
+            note_service  : (NoteService/None) Сервис заметок; None — создать свой.
+            photo_service : (PhotoService/None) Сервис фото; None — без него.
+            field_configs : (dict/None) Описание полей (``APPOINTMENT_CONFIG``); None — пустое.
+            logger_name   : (str/None) Имя журнала; None — ``'AppointmentService'``.
+
+        Example:
+            >>> service = AppointmentService(
+            ...     get_db(),                                       # база
+            ...     note_service    =   get_note_service(),         # общие заметки
+            ...     photo_service   =   get_photo_service(),        # фото приёмов
+            ...     field_configs   =   APPOINTMENT_CONFIG,         # описание полей
+            ... )
         """
 
         if logger_name is None:
@@ -5060,7 +5498,35 @@ class AppointmentService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     ) 
-    def _validate_parents(self, dto: AppointmentDTO, session: Session) -> None:
+    def _validate_parents(
+        self,
+        dto     : AppointmentDTO,   # приём: patient_id и ссылки на заметки
+        session : Session,          # сессия транзакции
+    ) -> None:
+        """
+        Проверяет, что пациент приёма существует, затем остальные ссылки (заметки).
+
+        Пациент — своей проверкой ради ``PatientNotFoundError`` (окно и командная строка
+        ловят его); остальные внешние ключи — общей проверкой базового класса (DYN3).
+        SQLite в проекте внешние ключи не проверяет — без этого приём мог бы ссылаться на
+        несуществующего пациента. При обновлении вызывается, только если ссылки меняются.
+
+        Args:
+            dto     : (AppointmentDTO) Данные приёма.
+            session : (Session) Сессия.
+
+        Raises:
+            PatientNotFoundError: Нет пациента ``dto.patient_id`` (в т. ч. ``None``).
+            AppointmentValidationError: Ссылка на несуществующую заметку.
+
+        Example:
+            >>> appointment_service._validate_parents(
+            ...     AppointmentDTO(patient_id=999, date=date(2026, 1, 1)),   # нет пациента
+            ...     session,
+            ... )
+            Traceback (most recent call last):
+            PatientNotFoundError: ...
+        """
         patient_repo = PatientRepository(session)
         if not patient_repo.get_by_id(dto.patient_id):
             raise PatientNotFoundError(dto.patient_id)
@@ -5109,8 +5575,18 @@ class AppointmentService(
         level=AppLogger._parse_log_level('DEBUG')
     ) 
     def _get_note_service(self) -> 'NoteService':
+        """
+        Возвращает сервис заметок приёма (переданный или созданный в ``__init__``).
+
+        Returns:
+            (NoteService) Сервис заметок.
+
+        Example:
+            >>> isinstance(appointment_service._get_note_service(), NoteService)
+            True
+        """
         return self._note_service
-    
+
     # ------------------------------------------------------------
     # Вспомогательный метод для работы с заметками через репозиторий
     # ------------------------------------------------------------
@@ -5960,7 +6436,10 @@ class AppointmentService(
         
         if dto.id is None:
             self.logger.warning("Попытка обновления приёма без id")
-            raise ValueError("ID приёма не указан")
+            # raise ValueError("ID приёма не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
 
         self.logger.debug(f"Обновление приёма id={dto.id}")
 
@@ -6240,25 +6719,47 @@ class AppointmentService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def get_appointments_by_patient_page(
-        self, 
-        patient_id: int,  # ID пациента, для которого хотим получить страницу приёмов
-        offset: int,  # смещение страницы (количество записей, которые нужно пропустить)
-        limit: int,  # размер страницы (количество записей, которые нужно вернуть)
-        filters: Optional[List[Dict[str, Any]]] = None,  # фильтры SQL (например: [{'column': 'date', 'operator': '>=', 'value': datetime.date(2022, 1, 1)}])
-        order_by: Optional[List] = None,  # сортировка SQL (например: ['date', 'time'])
-        session: Optional[Session] = None  # сессия для работы в одной транзакции
-    ) -> Tuple[List[AppointmentDTO], int]:
+        self,
+        patient_id : int,                                               # пациент
+        offset     : int,                                               # сколько записей пропустить
+        limit      : int,                                               # размер страницы
+        filters    : Optional[Union[List[Any], Dict[str, Any]]] = None, # фильтры: список или дерево
+        order_by   : Optional[List] = None,                             # сортировка: ['-date']
+        session    : Optional[Session] = None,                          # внешняя транзакция
+    ) -> Tuple[List[AppointmentDTO], int]: # страница приёмов пациента и их общее число
         """
-        Возвращает страницу приёмов пациента с подгруженными связями.
+        Возвращает страницу приёмов пациента и общее число его приёмов с учётом фильтров.
 
-        Шаги:
+        К фильтрам вызывающего через «И» добавляется ``patient_id == patient_id``
+        (``AppointmentRepository._with_patient_filter``: плоский список дополняется листом,
+        дерево ``{'and'/'or': …}`` становится одним узлом списка). Страницу собирает
+        :meth:`get_page` (заметки, ``sql_compute``, ``fuzzy``, ``id`` последним ключом
+        сортировки); связи для виртуальных полей подгружаются жадно.
 
-        1. Создаем сессию для работы в одной транзакции (если не указана)
-        2. Получаем репозиторий (Repository) для работы с приёмами
-        3. Вызываем метод get_page_by_patient у репозитория, передавая ID пациента, смещение, размер страницы, фильтры и сортировку
-        4. Вызываем метод count_by_patient у репозитория, передавая ID пациента и фильтры, чтобы получить общее количество приёмов
-        5. Создаем список DTO из полученных записей
-        6. Возвращаем список DTO и общее количество приёмов
+        Args:
+            patient_id : (int) ID пациента.
+            offset     : (int) Смещение (с 0).
+            limit      : (int) Размер страницы.
+            filters    : (list/dict/None) Фильтры ``apply_filters``; None или пусто — все
+                приёмы пациента.
+            order_by   : (List[str]/None) Поля сортировки, ``'-поле'`` — по убыванию; None —
+                по ``id``.
+            session    : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (Tuple[List[AppointmentDTO], int]) Приёмы страницы и общее число.
+
+        Raises:
+            ValueError: Неизвестный столбец или оператор фильтра (из ``apply_filters``).
+
+        Example:
+            >>> page, total = appointment_service.get_appointments_by_patient_page(
+            ...     patient_id   =   7,                                               # пациент
+            ...     offset       =   0,                                               # первая страница
+            ...     limit        =   20,                                              # 20 приёмов
+            ...     filters      =   {'or': [{'column': 'date', 'operator': 'is_null'}]},  # дерево
+            ...     order_by     =   ['-date'],                                       # новые сверху
+            ... )
         """
         self.logger.debug(
             f"Запрос страницы приёмов пациента {patient_id}: "
@@ -6266,16 +6767,22 @@ class AppointmentService(
             f"limit={limit}"
         )
 
-        ## Формируем фильтр по patient_id
-        base_filter = {
-            'column': 'patient_id', 
-            'operator': 'eq', 
-            'value': patient_id
-        }
-        if filters:
-            all_filters = [base_filter] + filters
-        else:
-            all_filters = [base_filter]
+        # ## Формируем фильтр по patient_id
+        # base_filter = {
+        #     'column': 'patient_id',
+        #     'operator': 'eq',
+        #     'value': patient_id
+        # }
+        # if filters:
+        #     all_filters = [base_filter] + filters
+        # else:
+        #     all_filters = [base_filter]
+        # ↑ до 2026-10-31 (S4): дерево фильтров ({'and'/'or': …}) давало list + dict →
+        #   TypeError — страница приёмов пациента с таким фильтром падала (как R1 в М10).
+        all_filters = AppointmentRepository._with_patient_filter(
+            patient_id,   # пациент
+            filters,      # фильтры вызывающего: список или дерево
+        )
 
         # Подгружаем все необходимые связи
         # relations = self._get_eager_loading_options()
@@ -6406,22 +6913,35 @@ class PhotoService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def __init__(
-        self, 
-        db: Database, 
-        photos_storage_path: str,  
-        field_configs: Optional[Dict[str, Dict[str, Any]]] = None,
-        logger_name: 
-        Optional[str] = None
-    ):
+        self,
+        db                  : Database,                                     # база: сессии
+        photos_storage_path : str,                                          # папка хранилища фото
+        field_configs       : Optional[Dict[str, Dict[str, Any]]] = None,   # описание полей фото
+        logger_name         : Optional[str] = None,                         # имя журнала базового класса
+    ) -> None:
         """
-        Инициализирует сервис для работы с фотографиями приёмов.
-        
-        :param db: объект Database для работы с БД
-        :type db: Database
-        :param photos_storage_path: путь к директории для хранения фотографий
-        :type photos_storage_path: str
-        :param logger_name: имя лога для сервиса
-        :type logger_name: Optional[str]
+        Создаёт сервис фото и папку хранилища (если её нет).
+
+        Путь хранилища — общий для ВСЕХ экземпляров ``PhotoService`` (атрибут класса
+        ``_class_storage_path``, свойство :attr:`_storage_path`): новый сервис с другой папкой
+        меняет её и у прежних. Журнал сервиса — ``gui.PhotoService`` (файл ``user``);
+        ``logger_name`` задаёт только журнал, созданный базовым классом, и затем заменяется.
+
+        Args:
+            db                  : (Database) База — источник сессий.
+            photos_storage_path : (str) Папка хранилища фото (``PHOTOS_STORAGE_PATH``).
+            field_configs       : (dict/None) Описание полей (``PHOTO_CONFIG``); None — пустое.
+            logger_name         : (str/None) Имя журнала базового класса; None — имя класса.
+
+        Raises:
+            OSError: Не удалось создать папку хранилища.
+
+        Example:
+            >>> photo_service = PhotoService(
+            ...     get_db(),                                   # база
+            ...     'C:/clinic/photos',                         # хранилище
+            ...     field_configs   =   PHOTO_CONFIG,           # описание полей
+            ... )
         """
 
         # Если имя лога не указано, то используем имя класса
@@ -6473,7 +6993,10 @@ class PhotoService(
             # Определяем целевую директорию: self._storage_path/app_{appointment_id}
             app_id = dto.appointment_id
             if not app_id:
-                raise ValueError("Для фото необходимо указать appointment_id")
+                # raise ValueError("Для фото необходимо указать appointment_id")
+                # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+                #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+                raise self._validation_error('appointment_id', 'для фото необходимо указать приём')
             
             dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
 
@@ -6494,10 +7017,47 @@ class PhotoService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def update(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+    def update(
+        self,
+        dto     : PhotoDTO,                 # фото с id: новое описание, путь, приём
+        session : Optional[Session] = None, # внешняя транзакция; None — своя
+    ) -> PhotoDTO: # изменённое фото
+        """
+        Изменяет фото; новый файл копирует в хранилище, старый удаляет после коммита.
+
+        Путь в DTO:
+            * абсолютный (новый файл, например из черновика) — копия в
+              ``<хранилище>/app_<приём>/<uuid>.<расш>`` (при откате копия удаляется), прежний
+              файл — «удалить после коммита»;
+            * ``None`` при прежнем файле — прежний «удалить после коммита», путь очищается;
+            * относительный (прежний) — файл не трогается, в том числе при переносе фото в
+              другой приём (DATA11: файл остаётся в папке прежнего приёма).
+        Остальное — общий :meth:`BaseService._update_entity` (проверка приёма при переносе).
+
+        Args:
+            dto     : (PhotoDTO) Новые значения; ``id`` обязателен.
+            session : (Session/None) Сессия внешней транзакции; None — своя (DATA6).
+
+        Returns:
+            (PhotoDTO) Фото после изменения.
+
+        Raises:
+            PhotoValidationError: Не указан ``id`` (S8; это и ``ValueError``).
+            PhotoNotFoundError: Фото с таким ``id`` нет.
+            AppointmentNotFoundError: Перенос в несуществующий приём.
+
+        Example:
+            >>> photo = photo_service.get_by_id(3)
+            >>> photo.description = 'после лечения'
+            >>> photo_service.update(photo).description
+            'после лечения'
+        """
 
         if dto.id is None:
-            raise ValueError("ID фото не указан")
+            # raise ValueError("ID фото не указан")
+            # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
+            #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
+            raise self._validation_error('id', 'не указан id записи для обновления')
 
         # DATA6: без сессии — своя транзакция (иначе репозиторий и файлы без сессии)
         if session is None:
@@ -6551,7 +7111,29 @@ class PhotoService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def delete(self, photo_id: int, session: Optional[Session] = None) -> None:
+    def delete(
+        self,
+        photo_id : int,                         # фото
+        session  : Optional[Session] = None,    # внешняя транзакция; None — своя
+    ) -> None:
+        """
+        Удаляет фото: запись сразу, файл — после коммита (при откате файл остаётся).
+
+        Файл ставится в «удалить после коммита» (вместе с опустевшей папкой приёма), затем
+        запись удаляется общим :meth:`BaseService._delete_entity` (с заметками, если бы
+        они были). Сюда же приходят удаление приёма и пациента (дети — DYN7) и
+        :meth:`delete_photo`.
+
+        Args:
+            photo_id : (int) ID фото.
+            session  : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Raises:
+            PhotoNotFoundError: Фото с таким ``id`` нет.
+
+        Example:
+            >>> photo_service.delete(3)
+        """
 
         self.logger.debug(f"Удаление фото id={photo_id}")
         
@@ -6589,8 +7171,27 @@ class PhotoService(
     ).log_execution_time(  
         level=AppLogger._parse_log_level('DEBUG')
     ) 
-    def get_by_parent(self, parent_id: int, session=None):
-        """Алиас для get_photos_for_appointment."""
+    def get_by_parent(
+        self,
+        parent_id : int,                        # приём
+        session   : Optional[Session] = None,   # внешняя транзакция
+    ) -> List[PhotoDTO]: # фото приёма
+        """
+        Возвращает фото приёма — то же, что :meth:`get_photos_for_appointment`.
+
+        Имя для общего интерфейса «сервис детей» (``BaseService.get_children``).
+
+        Args:
+            parent_id : (int) ID приёма.
+            session   : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (List[PhotoDTO]) Фото приёма; пустой список — фото нет.
+
+        Example:
+            >>> [p.id for p in photo_service.get_by_parent(5)]
+            [11, 12]
+        """
         return self.get_photos_for_appointment(parent_id, session)
 
     @AppLogger.get_instance(
@@ -6601,8 +7202,37 @@ class PhotoService(
     ).log_execution_time(  
         level=AppLogger._parse_log_level('DEBUG')
     ) 
-    def add_to_parent(self, parent_id: int, child_dto: PhotoDTO, session=None):
-        """Алиас для add_photo_to_appointment, принимает DTO."""
+    def add_to_parent(
+        self,
+        parent_id : int,                        # приём
+        child_dto : PhotoDTO,                   # фото: file_path (исходный файл), description
+        session   : Optional[Session] = None,   # внешняя транзакция
+    ) -> PhotoDTO: # созданное фото
+        """
+        Добавляет фото к приёму из DTO — :meth:`add_photo_to_appointment`.
+
+        Имя для общего интерфейса «сервис детей» (``BaseService.add_child``); из DTO берутся
+        только ``file_path`` и ``description``, ``appointment_id`` — из ``parent_id``.
+
+        Args:
+            parent_id : (int) ID приёма.
+            child_dto : (PhotoDTO) ``file_path`` — путь к исходному файлу, ``description``.
+            session   : (Session/None) Сессия внешней транзакции; None — своя.
+
+        Returns:
+            (PhotoDTO) Созданное фото.
+
+        Raises:
+            PhotoFileError: Исходного файла нет.
+            AppointmentNotFoundError: Приёма нет.
+
+        Example:
+            >>> photo_service.add_to_parent(
+            ...     5,                                                                  # приём
+            ...     PhotoDTO(appointment_id=5, file_path='C:/scan/1.jpg', description=''), # фото
+            ... ).appointment_id
+            5
+        """
         # child_dto должен содержать file_path и description
         return self.add_photo_to_appointment(parent_id, child_dto.file_path, child_dto.description, session)
 
@@ -6629,7 +7259,10 @@ class PhotoService(
 
             if photo is None:
                 err_ = PhotoNotFoundError(photo_id)
-                self.logger.exception(err_.message)
+                # self.logger.exception(err_.message)
+                # ↑ до 2026-10-31 (S7): exception вне except — в журнал шла ложная трассировка
+                #   «NoneType: None».
+                self.logger.error(err_.message)
 
                 raise err_
             
@@ -6677,7 +7310,10 @@ class PhotoService(
         """
         err_ = PhotoNotFoundError(entity_id)
 
-        self.logger.exception(err_.message)
+        # self.logger.exception(err_.message)
+        # ↑ до 2026-10-31 (S7): exception вне except — в журнал шла ложная трассировка
+        #   «NoneType: None».
+        self.logger.error(err_.message)
 
         # raise err_
         return err_
@@ -6730,47 +7366,64 @@ class PhotoService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def add_photo_to_appointment(
-            self, 
-            appointment_id: int, 
-            source_file_path: str,
-            description: str = "", 
-            session: Optional[Session] = None,
-    )-> PhotoDTO:
+        self,
+        appointment_id   : int,                         # приём, к которому добавляется фото
+        source_file_path : str,                         # исходный файл изображения
+        description      : str = "",                    # описание фото
+        session          : Optional[Session] = None,    # внешняя транзакция
+    ) -> PhotoDTO: # созданное фото
         """
-        Добавляет фотографию к указанному приёму.
+        Добавляет фотографию к приёму: проверяет файл и создаёт фото общим механизмом.
 
-        Процесс:
-            1. Проверяет существование исходного файла.
-            2. Создаёт запись в БД с временным путём 'pending' (чтобы получить ID фото).
-            3. Копирует файл в хранилище, формируя имя на основе appointment_id и photo.id.
-            4. Обновляет путь в записи на реальный относительный путь.
-            5. Если на любом этапе (кроме проверки) возникает ошибка, транзакция откатывается,
-            и запись не сохраняется.
+        Порядок: нет исходного файла — ``PhotoFileError`` сразу, до транзакции; иначе —
+        :meth:`create` (DYN1): проверка приёма, копирование файла в хранилище (при откате
+        транзакции копия удаляется), запись в БД. Ошибка на любом шаге после проверки —
+        откат, запись не сохраняется. Формат файла не проверяется.
 
-        Параметры:
-            appointment_id: ID приёма, к которому добавляется фото.
-            source_file_path: путь к исходному файлу изображения на диске.
-            description: описание фотографии (необязательно).
-            session: опциональная сессия SQLAlchemy для работы в рамках внешней транзакции.
+        Args:
+            appointment_id   : (int) ID приёма.
+            source_file_path : (str) Путь к исходному файлу на диске.
+            description      : (str) Описание фото; пусто — без описания.
+            session          : (Session/None) Сессия внешней транзакции; None — своя
+                транзакция.
 
-        Возвращает:
-            PhotoDTO созданной фотографии.
+        Returns:
+            (PhotoDTO) Созданное фото (путь — относительно хранилища).
 
-        Исключения:
-            AppointmentNotFoundError: если приём с указанным ID не существует.
-            PhotoFileError: если исходный файл не найден, не удаётся его скопировать
-                            или возникает другая ошибка ввода-вывода.
+        Raises:
+            PhotoFileError: Исходного файла нет (``Ошибка проверки файла '<путь>': файл не
+                существует``).
+            AppointmentNotFoundError: Приёма с таким ID нет.
+
+        Example:
+            >>> photo = photo_service.add_photo_to_appointment(
+            ...     appointment_id     =   1,                  # приём
+            ...     source_file_path   =   'C:/scan/1.jpg',    # исходный файл
+            ...     description        =   'до лечения',       # описание
+            ... )
+            >>> photo.appointment_id
+            1
         """
+        # self.logger.debug(
+        #     f"Добавление фото к приёму "
+        #     f"id={appointment_id}, "
+        #     f"файл={source_file_path}, "
+        #     f"описание='{description}'"
+        # )
+        # ↑ до 2026-10-31 (S5): описание фото в журнале — личные данные (путь нужен для разбора
+        #   ошибок файла и есть в тексте PhotoFileError).
         self.logger.debug(
             f"Добавление фото к приёму "
             f"id={appointment_id}, "
-            f"файл={source_file_path}, "
-            f"описание='{description}'"
+            f"файл={source_file_path}"
         )
         
         # 1. Проверка существования и типа файла
         if not os.path.isfile(source_file_path):
-            raise PhotoFileError(source_file_path, "проверка", "файл не существует")
+            # raise PhotoFileError(source_file_path, "проверка", "файл не существует")
+            # ↑ до 2026-10-31 (Ф1.6.10б): операция — в родительном падеже («Ошибка <операции>
+            #   файла»), иначе текст «Ошибка проверка файла …».
+            raise PhotoFileError(source_file_path, "проверки", "файл не существует")
 
         # if not self._is_allowed_file(source_file_path):
         #     raise PhotoFileError(source_file_path, "проверка", "неподдерживаемый формат файла")
@@ -6925,58 +7578,27 @@ class PhotoService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def delete_photo(
-        self, 
-        photo_id: int, 
-        session: Optional[Session] = None
+        self,
+        photo_id : int,                         # фото
+        session  : Optional[Session] = None,    # внешняя транзакция; None — своя
     ) -> None:
         """
-        Удаляет фотографию: физический файл + запись в БД + связанные заметки (если есть).
+        Удаляет фото — то же, что :meth:`delete` (запись сразу, файл — после коммита).
 
-        **Алгоритм:**
-            1. Загружает запись `Photo` по `photo_id`.
-            2. Определяет полный путь к файлу (`storage_path + относительный путь`).
-            3. Удаляет физический файл через `self._del_file` (с поддержкой отложенного удаления).
-            4. Удаляет запись из БД и очищает заметки (через `self._delete_entity`).
+        Прежняя своя реализация (удаление файла через ``_del_file`` и запись отдельно) — в
+        комментарии ниже; предупреждение «не заменять на ``self.delete``» относилось к
+        ``BaseService.delete``, который удалял файлы полей ``image_thumbnail`` повторно. Сейчас
+        ``PhotoService.delete`` — свой (файл один раз, DATA10 / DYN10), и вызов безопасен.
 
-        **Важное предупреждение (для разработчиков!):**
-            - **НИ В КОЕМ СЛУЧАЕ НЕ ЗАМЕНЯЙТЕ ТЕКУЩУЮ РЕАЛИЗАЦИЮ НА ВЫЗОВ `self.delete(photo_id, session)`!**
-            - Причина: базовый метод `BaseService.delete` **уже содержит логику удаления файлов** для полей
-            с `widget_type='image_thumbnail'` (к которым относится `file_path`). Если вызвать `self.delete` здесь,
-            файл будет удалён **дважды**: один раз в `self._del_file` (см. код ниже) и ещё раз внутри `self.delete`.
-            Это приведёт к ошибке при попытке удалить уже несуществующий файл.
-            - Текущая реализация корректна: файл удаляется **один раз**, затем запись удаляется отдельно.
-            - **Не переносите логику удаления файлов в `_delete_entity`** – это нарушит работу всех других сервисов,
-            которые полагаются на то, что `_delete_entity` не трогает дисковые файлы.
+        Args:
+            photo_id : (int) ID фото.
+            session  : (Session/None) Сессия внешней транзакции; None — своя.
 
-        **Параметры:**
-            photo_id (int): ID фотографии в БД.
-            session (Optional[Session]): Опциональная сессия SQLAlchemy для работы в рамках внешней транзакции.
-                Если не передана, создаётся новая сессия.
+        Raises:
+            PhotoNotFoundError: Фото с таким ``id`` нет.
 
-        **Возвращает:**
-            None
-
-        **Исключения:**
-            PhotoNotFoundError: Если фото с указанным `photo_id` не существует.
-            PhotoFileError: Если не удалось удалить физический файл (при немедленном удалении).
-                При отложенном удалении ошибка не выбрасывается, а логируется в `after_commit`.
-
-        **Пример использования:**
-            >>> photo_service = get_photo_service()
-            >>> try:
-            ...     photo_service.delete_photo(123)
-            ...     print("Фото удалено")
-            ... except PhotoNotFoundError:
-            ...     print("Фото не найдено")
-            ... except PhotoFileError as e:
-            ...     print(f"Ошибка удаления файла: {e}")
-
-        **Примечания:**
-            - Физический файл удаляется **до** удаления записи из БД. Это предотвращает ситуацию,
-            когда запись удалена, а файл остался (из-за ошибки удаления файла транзакция откатится).
-            - Благодаря использованию `_del_file`, при наличии активной сессии с поддержкой отложенного удаления,
-            файл будет удалён только после успешного коммита, что сохраняет атомарность.
-            - Если файл уже отсутствует на диске, метод всё равно удалит запись из БД (файл не мешает).
+        Example:
+            >>> photo_service.delete_photo(3)
         """
 
         return self.delete(photo_id, session)
@@ -7129,8 +7751,16 @@ class PhotoService(
     ).log_execution_time(      
         level=AppLogger._parse_log_level('DEBUG')
     )  
-    def _ensure_storage_exists(self):
-        """Создаёт папку для фото, если её нет."""
+    def _ensure_storage_exists(self) -> None:
+        """
+        Создаёт папку хранилища фото (со всеми родительскими), если её нет.
+
+        Raises:
+            OSError: Нет прав или путь занят файлом.
+
+        Example:
+            >>> photo_service._ensure_storage_exists()
+        """
         os.makedirs(self._storage_path, exist_ok=True)
 
     @AppLogger.get_instance(
@@ -7202,6 +7832,16 @@ class PhotoService(
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _get_note_service(self) -> Optional['NoteService']:
+        """
+        Возвращает ``None`` — у фото нет полей-заметок.
+
+        Returns:
+            (None) Сервиса заметок нет: очистка заметок при правке и удалении не делается.
+
+        Example:
+            >>> photo_service._get_note_service() is None
+            True
+        """
         return None
     
 

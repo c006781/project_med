@@ -1,7 +1,8 @@
 # Сборка приложения (app/dependencies.py) — заметки о реализации
 
 > Файл для разработчиков: что делает модуль, почему так и журнал проверок.
-> Последнее обновление: 2026-10-21, проход 1 (ветка `rework-dependencies`).
+> Последнее обновление: 2026-10-31, DP4 — кэш `get_sync_service` (ветка `rework_work/services`);
+> раньше — 2026-10-21, проход 1 (ветка `rework-dependencies`).
 
 Модуль собирает приложение: `get_db()`, поставщики сервисов `get_*_service()` (`lru_cache`,
 реестр `_SERVICE_PROVIDERS`), `clear_services_cache()`, `init_db()`, `create_database()` и
@@ -24,3 +25,11 @@
 сервиса своё подключение к одному файлу SQLite.
 
 Тесты: `tests/test_dependencies_review_pass1.py` (4; на старом коде 2 падают).
+
+### Ф1.6.10в (2026-10-31, М11, ветка `rework_work/services`)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| DP4 | `get_sync_service()` без кэша — новый `SyncService` на каждый вызов | Окно хранит свой объект (`MainWindow.sync_service`), а `ConfigApplier.apply_sync` менял временный: смена токена Яндекс.Диска и путей в настройках до окна не доходила (ОСТ п. 1.8) | `@lru_cache(maxsize=1)` — один объект на приложение; в реестр `_SERVICE_PROVIDERS` не включён: реестр перезагружается при смене базы (`apply_database`), токен и пути передаёт `apply_sync`, а `clear_services_cache` по реестру сбросил бы общий объект (окно осталось бы со старым) |
+
+Тест: `tests/test_services/test_services_check.py::test_f16_10v_*` (на старом коде падает).

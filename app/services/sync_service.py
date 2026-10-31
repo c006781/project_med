@@ -1,4 +1,22 @@
 # app/services/sync_service.py
+"""
+Сервис синхронизации файла базы с Яндекс.Диском (``SyncService``).
+
+Скачать / выгрузить сразу (``download_sync``, ``upload_sync`` — командная строка) или
+подготовить поток Qt (``prepare_download``, ``prepare_upload`` — окно). Сеть — в
+``app.network`` (``ya_dop``: функции Диска, ``thread_network``: потоки); здесь — только
+токен и пути из настроек и путь к файлу на Диске (``remote_db_file_path``).
+
+Общий объект приложения — ``app.dependencies.get_sync_service()`` (кэш, Ф1.6.10в):
+настройки ему передаёт ``ConfigApplier.apply_sync``. ``DB_EXTENSIONS`` импортируется ради
+прежнего адреса ``app.services.sync_service.DB_EXTENSIONS`` (реэкспорт; pyflakes видит его
+неиспользуемым — намеренно).
+
+Example:
+    >>> from app.dependencies import get_sync_service
+    >>> thread = get_sync_service().prepare_download()   # поток окна
+    >>> thread.start()                                    # doctest: +SKIP — живой запрос
+"""
 
 # # Стандартные библиотеки Python
 # import os  # Импорт модуля os для работы с путями файлов и директориями (например, чтобы получить абсолютный путь к файлу).
@@ -71,6 +89,8 @@
 
 
 
+
+from typing import Any, Callable, Optional
 
 from app.utils.logger.logger import AppLogger
 
@@ -158,18 +178,43 @@ from app.config.config_manager.manager import AppConfigManager, get_config_env
 
 
 class SyncService:
+    """
+    Синхронизация файла базы с Яндекс.Диском: скачать / выгрузить сразу или потоком.
+
+    Токен и пути — атрибуты ``token``, ``remote_path`` (файл или папка на Диске),
+    ``local_path`` (файл базы); их меняет ``ConfigApplier.apply_sync`` (общий объект —
+    ``app.dependencies.get_sync_service``, кэш) или :meth:`reload_config`. Путь на Диске —
+    ``remote_db_file_path``: папка из настроек дополняется именем локального файла.
+
+    Attributes:
+        token       : (str/None) OAuth-токен Яндекс.Диска (``YANDEX_TOKEN``).
+        remote_path : (str/None) Путь на Диске из настроек (``database_remote_path``).
+        local_path  : (str/None) Локальный файл базы (``database_local_path``).
+
+    Example:
+        >>> service = get_sync_service()
+        >>> service.download_sync()     # doctest: +SKIP — живой запрос
+        <YaDiskResult.OK: 0>
+    """
 
     @AppLogger.get_instance(
         name='SyncService',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def __init__(self):
+    def __init__(self) -> None:
         """
-        Инициализация объекта SyncService:
-            - получение токена Яндекс.Диска из .env
-            - получение пути к файлу на Яндекс.Диске
-            - получение пути к локальному файлу
+        Создаёт сервис: токен и пути читает из ``.env`` (``get_config_env``) один раз.
+
+        Дальше значения обновляют ``ConfigApplier.apply_sync`` или :meth:`reload_config`.
+
+        Raises:
+            KeyError: В настройках нет ``YANDEX_TOKEN``, ``database_remote_path`` или
+                ``database_local_path``.
+
+        Example:
+            >>> SyncService().local_path
+            'clinic.db'
         """
 
         config = get_config_env()
@@ -198,15 +243,32 @@ class SyncService:
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def download_sync(self, progress_callback=None):
+    def download_sync(
+        self,
+        progress_callback : Optional[Callable[[int, int], Any]] = None, # прогресс: (передано, всего)
+    ) -> int: # YaDiskResult.OK — файл базы скачан
         """
-        Синхронное скачивание файла с Яндекс.Диска.
+        Скачивает файл базы с Яндекс.Диска в ``local_path`` (в этом потоке, с ожиданием).
 
-        :param progress_callback: Функция, вызываемая для обновления прогресса.
-                              Принимает два аргумента: (already_done, total)
+        Ошибки — исключениями (``if_err=True``): код результата при успехе всегда ``OK``.
+        Путь на Диске — ``remote_db_file_path(remote_path, local_path)``.
 
-        :return: 0 при успехе, -1 при проблеме с токеном, -2 если файл не существует на диске,
-                 -3 при другой ошибке.
+        Args:
+            progress_callback : (callable/None) Вызывается с ``(передано, всего)`` байт;
+                None — без прогресса.
+
+        Returns:
+            (int) ``YaDiskResult.OK`` (0).
+
+        Raises:
+            ConnectionError: Токен недействителен или нет связи.
+            FileNotFoundError: Файла на Диске нет.
+            IsADirectoryError: Путь на Диске ведёт к папке.
+            Exception: Прочая ошибка скачивания или записи файла.
+
+        Example:
+            >>> get_sync_service().download_sync()   # doctest: +SKIP — живой запрос
+            <YaDiskResult.OK: 0>
         """
         # вызов функции yadisk_download_file с параметрами, сохраненными в __init__
         # return yadisk_download_file(
@@ -237,15 +299,31 @@ class SyncService:
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def upload_sync(self, progress_callback=None):
+    def upload_sync(
+        self,
+        progress_callback : Optional[Callable[[int, int], Any]] = None, # прогресс: (передано, всего)
+    ) -> int: # YaDiskResult.OK — файл базы выгружен
         """
-        Синхронная загрузка файла на Яндекс.Диск.
+        Выгружает ``local_path`` на Яндекс.Диск, заменяя файл там (в этом потоке, с ожиданием).
 
-        :param progress_callback: Функция, вызываемая для обновления прогресса.
-                              Принимает два аргумента: (already_done, total)
+        Ошибки — исключениями (``if_err=True``): код результата при успехе всегда ``OK``.
+        Файл на Диске перезаписывается (``overwrite=True``, как у окна).
 
-        :return: 0 при успехе, -1 при проблеме с токеном, -2 если файл не существует на локальном диске,
-                 -3 при другой ошибке.
+        Args:
+            progress_callback : (callable/None) Вызывается с ``(передано, всего)`` байт;
+                None — без прогресса.
+
+        Returns:
+            (int) ``YaDiskResult.OK`` (0).
+
+        Raises:
+            ConnectionError: Токен недействителен или нет связи.
+            FileNotFoundError: Локального файла базы нет.
+            Exception: Прочая ошибка выгрузки.
+
+        Example:
+            >>> get_sync_service().upload_sync()     # doctest: +SKIP — живой запрос
+            <YaDiskResult.OK: 0>
         """
         # вызов функции yadisk_upload_file с параметрами, сохраненными в __init__
         # return yadisk_upload_file(

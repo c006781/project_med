@@ -306,6 +306,8 @@ def _filters_outline(
                 )
                 return f"{joint}({inner})"
         return f"{filters.get('column', '?')} {filters.get('operator', '?')}"
+    if not isinstance(filters, (list, tuple)): # не тот вид — только тип (строку не перебирать)
+        return f"<{type(filters).__name__}>"
     return ', '.join(
         _filters_outline(node) for node in filters
     )

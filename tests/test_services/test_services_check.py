@@ -249,6 +249,8 @@ def test_s5_filters_outline_without_values():
     )
     assert outline == 'last_name like, or(date is_null, phone eq)'
     assert _filters_outline(None) == '—'
+    # Не тот вид (строка, число) — только тип, без перебора символов и без значения
+    assert _filters_outline(['Тайнова', 5]) == '<str>, <int>'
 
 
 # ---------------------------------------------------------------------------

@@ -12,28 +12,13 @@ import datetime
 
 import pytest
 
-from app.database import Database
 from app.draft.integration import ServiceAdapter, build_app_schema, make_parent_resolver
-from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO
-from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
-from app.services import AppointmentService, NoteService, PatientService, PhotoService
+from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
+from app.exceptions import PatientNotFoundError
 from app.utils.drafts import DraftStore, SaveScope, build_plan, execute_plan
 
-
-@pytest.fixture
-def services(tmp_path):
-    """Сервисы на файле SQLite (настоящие commit/rollback) и папке фото — собраны
-    так же, как в app/dependencies.py (с конфигурациями полей)."""
-    db = Database(f"sqlite:///{tmp_path / 'clinic.db'}")
-    storage = tmp_path / 'photos'
-    storage.mkdir()
-    note = NoteService(db, field_configs=NOTE_CONFIG)
-    photo = PhotoService(db, str(storage), field_configs=PHOTO_CONFIG)
-    appointment = AppointmentService(db, note_service=note, photo_service=photo,
-                                     field_configs=APPOINTMENT_CONFIG)
-    patient = PatientService(db, field_configs=PATIENT_CONFIG, appointment_service=appointment)
-    yield {'patient': patient, 'appointment': appointment, 'photo': photo, 'db': db}
-    db.close()
+# Фикстура services (сервисы на временной SQLite) — в tests/test_drafts/conftest.py
+# (с 2026-10-31, М16: общая с test_app_pages.py).
 
 
 @pytest.fixture
@@ -42,6 +27,7 @@ def adapter(services):
         'patient': (lambda: services['patient'], PatientDTO),
         'appointment': (lambda: services['appointment'], AppointmentDTO),
         'photo': (lambda: services['photo'], PhotoDTO),
+        'note': (lambda: services['note'], AppointmentNoteDTO),
     })
 
 
@@ -151,6 +137,7 @@ def test_transaction_factory_used(services, image):
         'patient': (lambda: services['patient'], PatientDTO),
         'appointment': (lambda: services['appointment'], AppointmentDTO),
         'photo': (lambda: services['photo'], PhotoDTO),
+        'note': (lambda: services['note'], AppointmentNoteDTO),
     }, transaction_factory=factory)
     store = DraftStore(build_app_schema())
     store.create('patient', {'first_name': 'А', 'last_name': 'Б', 'birth_date': datetime.date(1990, 1, 1)})
@@ -181,3 +168,47 @@ def test_reparent_photo_through_drafts_saved(services, store, adapter, image):
     assert store.status('appointment', a2.id) == 'child'
     execute_plan(store, build_plan(store), adapter)
     assert services['photo'].get_by_id(photo.id).appointment_id == a2.id
+
+
+# ---------------------------------------------------------------------------
+# М16 (2026-10-31): «не найдено» — по типу исключения (DB2, DB3)
+# ---------------------------------------------------------------------------
+
+class _RaisingService:
+    """Сервис-заглушка: get_by_id выбрасывает заданное исключение."""
+
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def get_by_id(self, entity_id, session=None):
+        raise self.error
+
+
+def test_read_missing_record_is_none(adapter):
+    """DB2: записи нет в БД — read возвращает None (исключение сервиса «не найдено»)."""
+    assert adapter.read('patient', 999) is None
+
+
+def test_read_not_found_by_type_not_by_name():
+    """DB2: «не найдено» — только EntityNotFoundError и наследники; FileNotFoundError
+    (в имени тоже есть «NotFound») — ошибка, а не «записи нет»."""
+    adapter = ServiceAdapter({'patient': (lambda: _RaisingService(PatientNotFoundError(5)), PatientDTO)})
+    assert adapter.read('patient', 5) is None
+    adapter = ServiceAdapter({'patient': (lambda: _RaisingService(FileNotFoundError('a.jpg')), PatientDTO)})
+    with pytest.raises(FileNotFoundError):
+        adapter.read('patient', 5)
+
+
+def test_parent_resolver_missing_record_logs_without_traceback(caplog):
+    """DB3: записи уже нет — None и строка журнала без трассировки; прочая ошибка —
+    None и запись с трассировкой."""
+    schema = build_app_schema()
+    missing = ServiceAdapter({'appointment': (lambda: _RaisingService(PatientNotFoundError(7)), AppointmentDTO)})
+    broken = ServiceAdapter({'appointment': (lambda: _RaisingService(RuntimeError('сбой БД')), AppointmentDTO)})
+    with caplog.at_level('DEBUG', logger='app.draft.integration'):
+        assert make_parent_resolver(schema, missing)('appointment', 7) is None
+        assert make_parent_resolver(schema, broken)('appointment', 8) is None
+    records = [r for r in caplog.records if r.name == 'app.draft.integration']
+    assert [(r.levelname, r.exc_info is not None) for r in records] == [
+        ('WARNING', False), ('ERROR', True)]
+

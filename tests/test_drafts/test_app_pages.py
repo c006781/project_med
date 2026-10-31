@@ -17,14 +17,16 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 import app.dependencies as deps  # noqa: E402
 from app.draft.integration import ServiceAdapter, build_app_schema, make_parent_resolver  # noqa: E402
-from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO  # noqa: E402
+from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO  # noqa: E402
 from app.dto.field_configs import APPOINTMENT_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG  # noqa: E402
 from app.utils.drafts import MISSING, DraftStore, build_plan, execute_plan  # noqa: E402
 from interfaces.gui.gui_window.pages.draft_pages import (  # noqa: E402
     AppointmentsPhotosDraftFrame, PatientsDraftPage, ServiceRowSource, _date_from_edit,
     columns_from_config,
 )
-from tests.test_drafts.test_integration_services import services  # noqa: E402,F401 — фикстура
+# from tests.test_drafts.test_integration_services import services  # noqa: E402,F401 — фикстура
+# ↑ до 2026-10-31 (М16, Ф1.6.14а): фикстура импортом из чужого тестового файла (pyflakes —
+#   неиспользуемый импорт и переопределение); теперь — tests/test_drafts/conftest.py
 
 
 @pytest.fixture(scope='module')
@@ -33,7 +35,7 @@ def qapp():
 
 
 @pytest.fixture
-def app_env(qapp, services, monkeypatch):  # noqa: F811
+def app_env(qapp, services, monkeypatch):
     """Сервисы теста вместо app.dependencies + хранилище и адаптер как в приложении."""
     monkeypatch.setattr(deps, 'get_patient_service', lambda: services['patient'])
     monkeypatch.setattr(deps, 'get_appointment_service', lambda: services['appointment'])
@@ -42,6 +44,7 @@ def app_env(qapp, services, monkeypatch):  # noqa: F811
         'patient': (lambda: services['patient'], PatientDTO),
         'appointment': (lambda: services['appointment'], AppointmentDTO),
         'photo': (lambda: services['photo'], PhotoDTO),
+        'note': (lambda: services['note'], AppointmentNoteDTO),
     })
     schema = build_app_schema()
     store = DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter))

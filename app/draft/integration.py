@@ -33,12 +33,17 @@ from typing import (
     Tuple, Type,
 )
 
-from app.utils.drafts import EntityType, NodeKey, TreeSchema
+from app.exceptions import EntityNotFoundError
+from app.utils.drafts import NodeKey, TreeSchema
+# from app.utils.drafts import EntityType, NodeKey, TreeSchema
+# ↑ до 2026-10-31 (М16, DB1): EntityType — только в закомментированном ручном дереве
 
 if TYPE_CHECKING:
-    from app.utils.drafts import (
-        DeletePolicy, DraftStore, PersistenceAdapter, SavePlan, SaveResult, SaveScope,
-    )
+    from app.utils.drafts import DeletePolicy, DraftStore, SaveResult, SaveScope
+    # from app.utils.drafts import (
+    #     DeletePolicy, DraftStore, PersistenceAdapter, SavePlan, SaveResult, SaveScope,
+    # )
+    # ↑ до 2026-10-31 (М16, DB1): PersistenceAdapter, SavePlan не используются
 
 _log = logging.getLogger(__name__)
 
@@ -311,7 +316,8 @@ class ServiceAdapter:
             (Dict[str, Any]/None) Поля записи; None — записи нет.
 
         Raises:
-            Exception: Ошибка БД (кроме «не найдено») — вызывающему.
+            Exception: Любая ошибка, кроме «не найдено» (``EntityNotFoundError`` и его
+                наследников), — вызывающему; в том числе ``FileNotFoundError``.
 
         Example:
             >>> adapter.read('appointment', 12)['cost']
@@ -323,10 +329,15 @@ class ServiceAdapter:
             #   транзакции сохранения (видны уже записанные правки)
             dto = (self.service(entity).get_by_id(entity_id) if tx is None
                    else self.service(entity).get_by_id(entity_id, session=tx))
-        except Exception as e:
-            if 'NotFound' in type(e).__name__:
-                return None
-            raise
+        # except Exception as e:
+        #     if 'NotFound' in type(e).__name__:
+        #         return None
+        #     raise
+        # ↑ до 2026-10-31 (М16, DB2): «не найдено» — по имени класса; под него попадал и
+        #   FileNotFoundError (ошибка файла выдавалась за «записи нет»). Все «не найдено»
+        #   сервисов — наследники EntityNotFoundError.
+        except EntityNotFoundError:
+            return None
         return None if dto is None else dto.model_dump()
 
     def referrers(
@@ -401,7 +412,8 @@ def make_parent_resolver(
 
     Временные id новых записей (отрицательные) в БД не ищутся; корневой тип (нет поля
     родителя) — ``None`` без запроса. Ошибка чтения — ``None`` (хранилище в этом случае
-    просто не поднимет значок выше).
+    просто не поднимет значок выше): записи уже нет (``EntityNotFoundError`` — например,
+    удалена другим окном) — строка журнала без трассировки; прочие ошибки — с трассировкой.
 
     Args:
         schema  : (TreeSchema) Схема дерева.
@@ -440,6 +452,13 @@ def make_parent_resolver(
             return None
         try:
             dto = adapter.service(entity).get_by_id(entity_id)
+        # ↓ до 2026-10-31 (М16, DB3): «записи нет» писалось трассировкой, как настоящая ошибка
+        # except Exception:
+        #     _log.exception("Не удалось определить родителя %s:%s", entity, entity_id)
+        #     return None
+        except EntityNotFoundError:
+            _log.warning("Родитель %s:%s не определён: записи нет в БД", entity, entity_id)
+            return None
         except Exception:
             _log.exception("Не удалось определить родителя %s:%s", entity, entity_id)
             return None

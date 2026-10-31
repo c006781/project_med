@@ -2,7 +2,9 @@
 
 """
 Общие фикстуры тестов пакета черновиков: схема пациент → приём → фото и адаптер
-хранилища данных в памяти (без БД).
+хранилища данных в памяти (без БД); ``services`` — сервисы приложения на временной
+SQLite (тесты моста ``app/draft/integration.py``: ``test_integration_services``,
+``test_app_pages``).
 """
 
 import contextlib
@@ -11,6 +13,9 @@ from typing import Any, Dict, Hashable, List, Mapping, Tuple
 
 import pytest
 
+from app.database import Database
+from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
+from app.services import AppointmentService, NoteService, PatientService, PhotoService
 from app.utils.drafts import DraftStore, EntityType, TreeSchema
 
 
@@ -99,3 +104,24 @@ def events(store) -> list:
     got: list = []
     store.subscribe(got.append)
     return got
+
+
+@pytest.fixture
+def services(tmp_path):
+    """Сервисы на файле SQLite (настоящие commit/rollback) и папке фото — собраны
+    так же, как в app/dependencies.py (с конфигурациями полей).
+
+    Перенесена из test_integration_services.py 2026-10-31 (М16, Ф1.6.14а): её брал и
+    test_app_pages.py — импортом из чужого тестового файла (pyflakes: неиспользуемый
+    импорт и переопределение). ``'note'`` — сервис заметок: адаптеры тестов, как и
+    приложение (``CLINIC.service_adapter``), подключают тип ``note``."""
+    db = Database(f"sqlite:///{tmp_path / 'clinic.db'}")
+    storage = tmp_path / 'photos'
+    storage.mkdir()
+    note = NoteService(db, field_configs=NOTE_CONFIG)
+    photo = PhotoService(db, str(storage), field_configs=PHOTO_CONFIG)
+    appointment = AppointmentService(db, note_service=note, photo_service=photo,
+                                     field_configs=APPOINTMENT_CONFIG)
+    patient = PatientService(db, field_configs=PATIENT_CONFIG, appointment_service=appointment)
+    yield {'patient': patient, 'appointment': appointment, 'photo': photo, 'note': note, 'db': db}
+    db.close()

@@ -229,10 +229,10 @@ drafts.build_plan(targets=frame.selection_nodes(), scope=SaveScope.ANCESTORS | S
 
 | # | Что было | Что сделано | Статус |
 |---|---|---|---|
-| DB1 | pyflakes: не используются `EntityType` (только в закомментированном коде), `PersistenceAdapter`, `SavePlan` | убраны из импортов | ⏳ |
-| DB2 | `read` считал «записи нет» по имени исключения (`'NotFound' in type(e).__name__`) — под него попадал и `FileNotFoundError` (ошибка файла выдавалась за «записи нет») | ловится `EntityNotFoundError` (все «не найдено» сервисов — его наследники) | ⏳ |
-| DB3 | `make_parent_resolver`: запись уже удалена (`EntityNotFoundError`) — `_log.exception` с полной трассировкой, как при настоящей ошибке | «не найдено» — `None` и короткая строка журнала без трассировки; прочие ошибки — как раньше | ⏳ |
-| DB4 | `create` возвращал `getattr(created, 'id', None)` — сервис без id давал детям `None` во внешнем ключе | ⏳ разбор | ⏳ |
+| DB1 | pyflakes: не используются `EntityType` (только в закомментированном коде), `PersistenceAdapter`, `SavePlan` | убраны из импортов (старые строки — комментарием) | ✅ |
+| DB2 | `read` считал «записи нет» по имени исключения (`'NotFound' in type(e).__name__`) — под него попадал и `FileNotFoundError` (ошибка файла выдавалась за «записи нет») | ловится `EntityNotFoundError` (все «не найдено» сервисов — его наследники); тесты `test_read_missing_record_is_none`, `test_read_not_found_by_type_not_by_name` | ✅ |
+| DB3 | `make_parent_resolver`: запись уже удалена (`EntityNotFoundError`) — `_log.exception` с полной трассировкой, как при настоящей ошибке | «не найдено» — `None` и короткая строка журнала без трассировки; прочие ошибки — как раньше; тест `test_parent_resolver_missing_record_logs_without_traceback` | ✅ |
+| DB4 | `create` возвращал `getattr(created, 'id', None)` — сервис без id давал детям `None` во внешнем ключе | не меняется: исполнитель сам отклоняет `None` (`PlanError`, откат транзакции — F4 ядра, `app/utils/drafts/executor.py`); проверка в мосту повторила бы её | ✅ без правки |
 | DB5 | устаревшие описания: пример модуля (ручной перечень сервисов), `build_app_schema` («заметки — не узлы» рядом с «корневой тип `note`»), `ServiceAdapter` (транзакция по умолчанию — `_session_scope`; нет `read` / `referrers`); типы `entities() -> list`, `scope: 'SaveScope' = None` | описания по текущему коду; `List[str]`, `Optional['SaveScope']` | ✅ |
 | DB6 | формат файла не по skill п. 7 («Пример:», сигнатуры в строку) | весь файл: Google с `Example:`, параметр на строку с комментарием, выравнивание; логика не менялась (AST без докстрингов и аннотаций совпадает) | ✅ |
 
@@ -240,9 +240,20 @@ drafts.build_plan(targets=frame.selection_nodes(), scope=SaveScope.ANCESTORS | S
 (`.limit(None)` SQLAlchemy — без предела; ветка нечёткого поиска `items[offset:offset +
 limit]` с `None` упала бы) — ОСТ п. 5.14 (М11).
 
+Тесты (Ф1.6.14а, ОСТ п. 5.11): фикстура `services` перенесена из
+`test_integration_services.py` в `tests/test_drafts/conftest.py` (её импортировал
+`test_app_pages.py` — замечания pyflakes); в ней — сервис заметок `'note'`, адаптеры тестов
+подключают тип `note`, как приложение. Итог: pyflakes `integration.py` и `tests/test_drafts` —
+0; модуль — Windows 2232 / 0 / 8 / 5 xfail.
+
 ---
 
 ## 6. Журнал
 
 * 2026-10-31 — М16, шаг 1: `integration.py` — формат skill п. 7 и описания (DB5, DB6), без
   изменения логики — сверка моста перед правками.
+* 2026-10-31 — М16, шаг 2: DB1 (импорты), DB2 (`read` — «не найдено» по типу
+  `EntityNotFoundError`, а не по имени класса — `FileNotFoundError` больше не выдаётся за
+  «записи нет»), DB3 (определитель родителя: удалённая запись — без трассировки), DB4 — без
+  правки (закрыто ядром); фикстура `services` — в `conftest.py`, `'note'` в адаптерах тестов;
+  сведения о старом слое — `_dev/docs/dev/СТАРЫЙ_СЛОЙ.md`. +3 теста.

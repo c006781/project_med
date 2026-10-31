@@ -1523,14 +1523,14 @@ class ParsingThread(QThread):
     def __init__(
         self,
         folder_path   : str,            # папка с .docx
-        find_existing : bool = False,   # искать пациента по ФИО + году (ТД-8, выбор пользователя)
+        find_existing : bool = False,   # искать пациента по ФИО + дате (ТД-8, выбор пользователя)
     ) -> None:
         """
         Поток импорта из Word.
 
         Args:
             folder_path (str): Папка с документами.
-            find_existing (bool): Искать существующего пациента по ФИО + году рождения
+            find_existing (bool): Искать существующего пациента по ФИО + дате рождения
                 (``parsers.word_importer.parse_one_file``, ТД-8).
 
         Returns:
@@ -1936,11 +1936,11 @@ class MainWindow(
         box.setText(f"Импортировать документы из папки:\n{folder}")
         box.setInformativeText(
             "Без флажка каждый документ — новый пациент.\n"
-            "С флажком пациент ищется по ФИО и году рождения: приёмы добавятся к найденному, "
+            "С флажком пациент ищется по ФИО и дате рождения: приёмы добавятся к найденному, "
             "повторные приёмы пропускаются. Дубли можно объединить в программе."
         )
         # ссылка на флажок — своя: box.checkBox() в PySide6 может вернуть голый QObject
-        find_box = QCheckBox("Искать существующих пациентов (ФИО + год рождения)")
+        find_box = QCheckBox("Искать существующих пациентов (ФИО + дата рождения)")
         box.setCheckBox(find_box)
         box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         box.button(QMessageBox.Ok).setText("Импорт")

@@ -226,3 +226,13 @@ def test_dependencies_provider_builds_service(monkeypatch):
     assert (service._db, service._patients, service._appointments) == \
         (sentinel['db'], sentinel['patient'], sentinel['appointment'])
     assert deps.get_patient_merge_service not in deps._SERVICE_PROVIDERS
+
+
+def test_merge_without_birth_date(svc):
+    """ТД-14: дата рождения необязательна — пациенты без неё ищутся как дубли и объединяются."""
+    main = _patient(svc, birth=None, middle=None)
+    dup = _patient(svc, birth=None, middle=None, phone='+7 (999) 111-22-33')
+    groups = [[p.id for p in g] for g in svc['merge'].find_possible_duplicates()]
+    assert groups == [[main.id, dup.id]]
+    svc['merge'].merge_patients(main.id, [dup.id], backup=False)
+    assert svc['patient'].get_by_id(main.id).phone == '+7 (999) 111-22-33'

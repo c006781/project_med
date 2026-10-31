@@ -14,7 +14,7 @@
       предупреждения); повторный запуск пропускает успешно обработанные файлы.
     - Телефон — только номера РФ; нераспознанный не записывается, пользователю —
       предупреждение (решение владельца 2026-10-25).
-    - Поиск существующего пациента (ФИО + год рождения) — по выбору пользователя
+    - Поиск существующего пациента (ФИО + дата рождения) — по выбору пользователя
       (``find_existing_patient``); по умолчанию каждый документ — новый пациент (ТД-8).
 
 Входы: окно (``batch_parse``), командная строка (``pars_start.py`` → ``pars_start_args``).
@@ -63,9 +63,11 @@ from app.schema.clinic import patient_full_name
 # в app.utils.record_keys без изменения поведения (app не зависит от parsers).
 from app.utils.record_keys import (
     APPOINTMENT_KEY_FIELDS,
+    PATIENT_KEY_FIELDS,
     appointment_key,
     normalize_match,
     normalize_text,
+    record_key,
 )
 # from app.utils.logger.logger import AppLogger
 
@@ -1109,35 +1111,53 @@ def patient_key(
     last_name   : Optional[str],    # фамилия
     first_name  : Optional[str],    # имя
     middle_name : Optional[str],    # отчество (None и '' — одно и то же)
-    birth_date  : Optional[date],   # дата рождения (берётся только год)
-) -> Tuple[str, str, str, Optional[int]]:
+    birth_date  : Optional[date],   # дата рождения (сравнивается целиком)
+) -> Tuple[Any, ...]: # ключ «тот же пациент»
     """
-    Ключ «тот же пациент» — ФИО + год рождения (решение владельца 2026-10-25, ТД-8).
+    Ключ «тот же пациент» — ФИО + полная дата рождения (``PATIENT_KEY_FIELDS``; решения
+    владельца 2026-10-25, ТД-8, и 2026-10-31 — дата, а не год).
 
     ФИО сравнивается после ``normalize_match`` (регистр, «ё», пунктуация, пробелы не
-    важны); от даты рождения — только год: в документе есть только год, а в базе может
-    стоять полная дата, введённая вручную.
+    важны); дата — целиком. Документ с одним годом («1985г») даёт дату 01.01.1985 и
+    находит только пациента с той же датой: 14.06.1985 — другой пациент (объединить —
+    в программе, Ф1.6.10а). Тот же ключ — у поиска дублей при объединении.
 
     Args:
-        last_name (Optional[str]): Фамилия.
-        first_name (Optional[str]): Имя.
-        middle_name (Optional[str]): Отчество.
-        birth_date (Optional[date]): Дата рождения.
+        last_name   : (str/None) Фамилия.
+        first_name  : (str/None) Имя.
+        middle_name : (str/None) Отчество; None и '' — одно и то же.
+        birth_date  : (date/None) Дата рождения.
 
     Returns:
-        Tuple[str, str, str, Optional[int]]: Ключ для сравнения.
+        (Tuple[Any, ...]) Ключ для сравнения.
 
-    Пример:
-        >>> patient_key('Ёлкин', 'Иван', None, date(1990, 5, 12))
-        ('елкин', 'иван', '', 1990)
+    Example:
+        >>> patient_key(
+        ...     'Ёлкин',              # фамилия
+        ...     'Иван',               # имя
+        ...     None,                 # отчество
+        ...     date(1990, 5, 12),    # дата рождения
+        ... )
+        ('елкин', 'иван', '', datetime.date(1990, 5, 12))
     """
 
-    return (
-        normalize_match(last_name),
-        normalize_match(first_name),
-        normalize_match(middle_name),
-        birth_date.year if birth_date else None,
+    return record_key(
+        {
+            'last_name'   : last_name,     # фамилия
+            'first_name'  : first_name,    # имя
+            'middle_name' : middle_name,   # отчество
+            'birth_date'  : birth_date,    # дата рождения
+        },
+        PATIENT_KEY_FIELDS,
     )
+    # return (
+    #     normalize_match(last_name),
+    #     normalize_match(first_name),
+    #     normalize_match(middle_name),
+    #     birth_date.year if birth_date else None,
+    # )
+    # ↑ до 2026-10-31 (ОСТ п. 1.13): от даты — только год; объединение дублей сравнивает
+    #   полную дату (решение владельца) — импорт приведён к тому же ключу.
 
 
 def find_patients_by_key(
@@ -1145,7 +1165,7 @@ def find_patients_by_key(
     patient_dto : PatientDTO,   # пациент из документа (после нормализации)
 ) -> List['Patient']:
     """
-    Пациенты базы с тем же ключом ``patient_key`` (ФИО + год рождения), ТД-8.
+    Пациенты базы с тем же ключом ``patient_key`` (ФИО + дата рождения), ТД-8.
 
     Перебирает всех пациентов базы (для клиники — десятки / сотни записей).
 
@@ -1345,7 +1365,7 @@ def _report_patient_differences(
 #     return patient_dto
 # ↑ до 2026-10-25 (ТД-8): find_matching_patient сравнивал Patient.description_text (у ORM
 #   его нет — AttributeError при описании в шапке) и требовал совпадения ВСЕХ полей, поэтому
-#   update_patient_if_needed ничего не обновлял. Решение владельца: поиск по ФИО + году
+#   update_patient_if_needed ничего не обновлял. Решение владельца: поиск по ФИО + дате
 #   рождения по выбору пользователя (find_patients_by_key), данные найденного не меняются,
 #   дубли объединяются в программе (_dev/ПЛАН.md Ф1.6.10а).
 
@@ -1360,7 +1380,7 @@ def parse_one_file(
     patient_service         : PatientService,               # сервис пациентов
     appointment_service     : AppointmentService,           # сервис приёмов
     photo_service           : PhotoService,                 # сервис фото
-    find_existing_patient   : bool = False,                 # искать пациента по ФИО + году (ТД-8)
+    find_existing_patient   : bool = False,                 # искать пациента по ФИО + дате (ТД-8)
     warnings                : Optional[List[str]] = None,   # куда добавить предупреждения (W2); None — не собирать
 ) -> bool:
     """
@@ -1376,7 +1396,7 @@ def parse_one_file(
         patient_service (PatientService): Сервис для работы с пациентами.
         appointment_service (AppointmentService): Сервис для работы с приёмами.
         photo_service (PhotoService): Сервис для работы с фотографиями.
-        find_existing_patient (bool): True — искать пациента по ФИО + году рождения (ТД-8):
+        find_existing_patient (bool): True — искать пациента по ФИО + дате рождения (ТД-8):
             один найденный — приёмы добавляются к нему (повторные — та же дата и тексты —
             пропускаются, отличия телефона / описания — предупреждением, данные пациента не
             меняются); несколько — создаётся новый и предупреждение «возможный дубль».
@@ -1641,7 +1661,7 @@ def _empty_results() -> Dict[str, Any]:
 def batch_parse(
     folder_path              : str,                                             # папка с .docx
     specific_files           : Optional[List[str]] = None,                      # имена файлов; None — все необработанные (W7)
-    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + году (ТД-8)
+    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + дате (ТД-8)
     db                       : Optional[Database] = None,                       # база (None — из app.dependencies)
     patient_service          : Optional[PatientService] = None,                 # сервис пациентов (None — из app.dependencies)
     appointment_service      : Optional[AppointmentService] = None,             # сервис приёмов (None — из app.dependencies)
@@ -1662,7 +1682,7 @@ def batch_parse(
     Args:
         folder_path (str): Путь к папке с файлами.
         specific_files (Optional[List[str]]): Список имён файлов для обработки (без путей).
-        find_existing_patient (bool): Искать пациента по ФИО + году рождения (см. ``parse_one_file``).
+        find_existing_patient (bool): Искать пациента по ФИО + дате рождения (см. ``parse_one_file``).
         db (Optional[Database]): Экземпляр Database (если None – берётся из dependencies).
         patient_service (Optional[PatientService]): Сервис пациентов.
         appointment_service (Optional[AppointmentService]): Сервис приёмов.
@@ -1782,7 +1802,7 @@ def batch_parse(
                         patient_service,                                    # сервисы
                         appointment_service,
                         photo_service,
-                        find_existing_patient   = find_existing_patient,    # ТД-8: искать по ФИО + году
+                        find_existing_patient   = find_existing_patient,    # ТД-8: искать по ФИО + дате
                         warnings                = file_warnings,            # W2: предупреждения
                     )
 
@@ -1890,7 +1910,7 @@ def format_results(
 def pars_start(
     folder                   : Optional[str] = None,                            # папка с .docx (нужна)
     files                    : Optional[List[str]] = None,                      # имена файлов; None — все необработанные
-    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + году (ТД-8)
+    find_existing_patient    : bool = False,                                    # искать пациента по ФИО + дате (ТД-8)
 
     progress_callback_start  : Optional[Callable[[List[str]], None]] = None,    # до начала: имена всех файлов
     progress_callback_update : Optional[Callable[[str, str, str], None]] = None,  # по файлу: имя, статус, сообщение
@@ -1903,7 +1923,7 @@ def pars_start(
     Args:
         folder (Optional[str]): Путь к папке.
         files (Optional[List[str]]): Список имён файлов.
-        find_existing_patient (bool): Искать пациента по ФИО + году рождения (ТД-8).
+        find_existing_patient (bool): Искать пациента по ФИО + дате рождения (ТД-8).
         progress_callback_start: Как в ``batch_parse``.
         progress_callback_update: Как в ``batch_parse``.
 
@@ -1981,7 +2001,7 @@ def pars_start_args(
         --folder <path>               Путь к папке с .docx файлами (без него — папка из вызова,
                                       иначе из настройки «Папка документов Word»).
         --files file1.docx,file2.docx Опциональный список файлов (если не указан, берутся все необработанные .docx).
-        --find_existing_patient       Флаг: искать пациента по ФИО + году рождения (ТД-8);
+        --find_existing_patient       Флаг: искать пациента по ФИО + дате рождения (ТД-8);
                                       старое имя --update_existing_patient — то же самое.
         --help                        Показать справку.
 
@@ -2028,7 +2048,7 @@ def pars_start_args(
         '--update_existing_patient',                           # старое имя (до 2026-10-25, ТД-8)
         dest   = 'find_existing_patient',
         action = 'store_true',                                 # флаг без значения
-        help   = 'искать существующего пациента по ФИО + году рождения: приёмы добавятся к нему, '
+        help   = 'искать существующего пациента по ФИО + дате рождения: приёмы добавятся к нему, '
                  'повторные пропускаются (по умолчанию каждый документ — новый пациент)',
     )
     args = arg_parser.parse_args(argv)

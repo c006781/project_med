@@ -106,7 +106,10 @@ PATIENTS = TableDef(
                editable=True, order=3, autocomplete=True),
         column('birth_date', sa.Date(), 'Дата рождения', comment='Дата рождения',
                dto_desc='Дата рождения (ГГГГ-ММ-ДД)',
-               editable=True, widget_type='date', order=4, required=True),
+               editable=True, widget_type='date', order=4),
+        # ↑ до 2026-10-31 (ТД-14): required=True — создание пустую дату пропускало, изменение
+        #   нет: пациента без даты нельзя было ни поправить, ни объединить. Решение владельца
+        #   2026-10-31: дата пока необязательна (позже — маска ввода); в ключе дублей остаётся.
         column('phone', sa.String(20), 'Телефон', comment='Номер телефона', dto_desc='Номер телефона',
                editable=True, order=5, input_mask='+7 (999) 999-99-99'),
         note('description', 'Описание', comment='ID заметки с описанием пациента', id_title='ID описания',

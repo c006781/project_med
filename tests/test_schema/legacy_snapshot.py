@@ -291,8 +291,9 @@ SNAPSHOT = {'models': {'Patient': {'table': 'patients',
                                  {'title': 'Дата рождения',
                                   'editable': True,
                                   'widget_type': 'date',
-                                  'order': 4,
-                                  'required': True}),
+                                  'order': 4}),
+                                # ↑ до 2026-10-31 (ТД-14): 'required': True — дата рождения
+                                #   необязательна (решение владельца 2026-10-31)
                                 ('phone',
                                  {'title': 'Телефон',
                                   'editable': True,

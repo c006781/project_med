@@ -38,7 +38,13 @@ from app.database.database_shema.clinic import Appointment, Photo
 from app.dto.dto_all import AppointmentDTO, PatientDTO
 from app.exceptions.exceptions_all import PatientValidationError
 from app.utils.logger import AppLogger
-from app.utils.record_keys import APPOINTMENT_KEY_FIELDS, appointment_key, normalize_text, record_key
+from app.utils.record_keys import (
+    APPOINTMENT_KEY_FIELDS,
+    PATIENT_KEY_FIELDS,
+    appointment_key,
+    normalize_text,
+    record_key,
+)
 
 
 class MergePlanChangedError(PatientValidationError):
@@ -86,7 +92,7 @@ class MergeRules:
         ('last_name', 'first_name', 'middle_name', 'birth_date')
     """
 
-    duplicate_key_fields    : Tuple[str, ...] = ('last_name', 'first_name', 'middle_name', 'birth_date')
+    duplicate_key_fields    : Tuple[str, ...] = PATIENT_KEY_FIELDS
     appointment_key_fields  : Tuple[str, ...] = APPOINTMENT_KEY_FIELDS
     fill_empty_fields       : Tuple[str, ...] = ('middle_name', 'birth_date', 'phone')
     join_note_fields        : Tuple[str, ...] = ('description_text', 'comment_text')

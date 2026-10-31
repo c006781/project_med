@@ -199,6 +199,28 @@ def get_appointment_service() -> AppointmentService:
         field_configs=APPOINTMENT_CONFIG
     )
 
+def get_patient_merge_service() -> 'PatientMergeService': # объединение пациентов-дублей
+    """
+    Возвращает сервис поиска и объединения пациентов-дублей (Ф1.6.10а).
+
+    Собирается при каждом вызове из текущих (кэшированных) базы и сервисов пациентов и
+    приёмов — своего состояния нет, после смены настроек берёт уже новые. Не в реестре
+    ``_SERVICE_PROVIDERS`` и без кэша: реестр при смене настроек зовёт ``reload_config()``,
+    которого у этого сервиса нет (и не нужно).
+
+    Returns:
+        (PatientMergeService) Сервис объединения.
+
+    Example:
+        >>> plan = get_patient_merge_service().plan_merge(12, [40])
+    """
+    from app.services.patient_merge import PatientMergeService
+    return PatientMergeService(
+        db                    =   get_db(),                    # база
+        patient_service       =   get_patient_service(),       # пациенты
+        appointment_service   =   get_appointment_service(),   # приёмы
+    )
+
 # def get_appointment_service() -> AppointmentService:
 #     db = get_db()
 #     note_service = get_note_service()  # можно передать существующий, но проще создать новый

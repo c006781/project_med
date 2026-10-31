@@ -4,23 +4,24 @@
 Связка переносимого пакета черновиков (``app.utils.drafts``) с приложением.
 
 Здесь — всё, что знает о приложении (пакет черновиков не знает):
-    * ``build_app_schema()`` — дерево таблиц приложения: пациент → приём → фото;
+    * ``build_app_schema()`` — дерево таблиц приложения (пациент → приём → фото) и общие
+      данные (заметки) — из описаний таблиц ``app.tables``;
     * ``ServiceAdapter`` — сохранение через сервисы приложения в ОДНОЙ сессии SQLAlchemy
       (одна транзакция на все таблицы — D2, app/draft/IMPLEMENTATION.md);
     * ``make_parent_resolver()`` — определитель родителя записи без черновика через сервис;
     * ``save_with_confirmation()`` — сохранение с вопросами пользователю (новые родители,
-      удаляемые ветки); вопросы передаются функциями — логика тестируется без окна.
+      удаляемые ветки); живёт в ``app/utils/drafts/workflow.py``, здесь — для совместимости;
+    * ``AppDrafts``, ``create_app_drafts()`` — черновики главного окна: одно хранилище на
+      приложение, транзакция — из общей базы ``app.dependencies.get_db()`` (ТД-6).
 
-Пример:
-    >>> from app.dependencies import (get_patient_service, get_appointment_service,
-    ...                               get_photo_service)
-    >>> schema = build_app_schema()
-    >>> adapter = ServiceAdapter({
-    ...     'patient': (get_patient_service, PatientDTO),
-    ...     'appointment': (get_appointment_service, AppointmentDTO),
-    ...     'photo': (get_photo_service, PhotoDTO),
-    ... })
-    >>> store = DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter))
+Черновики данные БД сами не удаляют — только хранят правки до коммита (В-18, В-19).
+
+Example:
+    >>> drafts = create_app_drafts()
+    >>> drafts.adapter.entities()
+    ['patient', 'appointment', 'photo', 'note']
+    >>> drafts.store.is_empty
+    True
 """
 
 from __future__ import annotations
@@ -45,21 +46,28 @@ _log = logging.getLogger(__name__)
 ServiceSpec = Tuple[Callable[[], Any], Type[Any]]
 
 
-def build_app_schema() -> TreeSchema:
+def build_app_schema() -> TreeSchema: # дерево таблиц приложения для черновиков
     """
-    Дерево таблиц приложения.
+    Возвращает схему черновиков приложения — из описаний таблиц (``app.tables.CLINIC``).
 
-    Заметки (``appointments_notes``) — поля пациента/приёма (``is_note``), а не узлы
-    дерева: их сохраняют сервисы пациента и приёма вместе с записью. В схеме черновиков
-    заметки — корневой тип ``note`` (общие данные реестра таблиц, 2026-10-31): цель ссылок
-    ``*_id``, удалить используемую нельзя.
+    Дерево: пациент → приём → фото (родитель — из внешнего ключа модели). Заметки
+    (``appointments_notes``) — не узел дерева, а корневой тип ``note`` общих данных реестра
+    таблиц (2026-10-31, Ф1.3.4): цель ссылок ``*_id`` пациента и приёма, удалить
+    используемую заметку нельзя (``restrict``). Сами тексты заметок по-прежнему сохраняют
+    сервисы пациента и приёма вместе с записью (виртуальные поля ``is_note``).
+
+    Note:
+        ``app.tables`` импортируется внутри функции: он сам импортирует этот модуль.
 
     Returns:
-        Схема пациент → приём → фото (+ заметки — цель ссылок).
+        (TreeSchema) Схема: пациент → приём → фото и корневой ``note``.
 
-    Пример:
-        >>> build_app_schema().depth('photo')
+    Example:
+        >>> schema = build_app_schema()
+        >>> schema.depth('photo')
         2
+        >>> schema.parent_field('appointment')
+        'patient_id'
     """
     # return TreeSchema([
     #     EntityType('patient', label='Пациент'),
@@ -75,78 +83,101 @@ def build_app_schema() -> TreeSchema:
 
 class ServiceAdapter:
     """
-    ``PersistenceAdapter`` поверх сервисов приложения.
+    Запись черновиков через сервисы приложения (``PersistenceAdapter`` пакета черновиков).
 
-    * ``transaction()`` — сессия первого сервиса (``_session_scope``): коммит при
-      выходе без ошибки, откат при исключении; ЭТА ЖЕ сессия передаётся всем сервисам.
+    * ``transaction()`` — одна сессия SQLAlchemy на всё сохранение: из
+      ``transaction_factory`` (приложение передаёт ``get_db().session_scope``), без неё —
+      закрытый ``_session_scope`` первого сервиса (запасной путь, как до 2026-10-16).
+      Коммит при выходе без ошибки, откат при исключении; ЭТА ЖЕ сессия передаётся всем
+      сервисам.
     * ``create`` — DTO из данных черновика (без временного ``id``) → ``service.create``;
       id появляется сразу (сервис делает ``flush``) — дети ссылаются на него в той же
       транзакции.
     * ``update`` — текущий DTO из БД + изменения → ``service.update`` (сервисы
       принимают DTO целиком; виртуальные поля-заметки обрабатывает сервис).
-    * ``delete`` — ``service.delete`` (потомков в БД удаляет сервис/каскад БД).
+    * ``delete`` — ``service.delete`` (потомков в БД удаляет сервис / каскад БД).
+    * ``read``, ``referrers`` — чтение для ``find_conflicts`` и правила ``restrict``
+      (кто ссылается на удаляемую запись) — внутри транзакции сохранения.
 
     Сервисы берутся функциями при КАЖДОЙ операции: после смены пути к БД
     (``reload_config``) адаптер работает с актуальными.
 
-    Пример:
-        >>> ServiceAdapter({'patient': (get_patient_service, PatientDTO)}).entities()
+    Note:
+        Набор типов приложения собирает ``app.tables.CLINIC.service_adapter()`` (дерево и
+        общие данные — ``note``); имя, параметры и поведение класса читают тесты
+        ``tests/test_dataset_app`` и главное окно — не менять без них.
+
+    Example:
+        >>> adapter = ServiceAdapter(
+        ...     specs   =   {'patient': (get_patient_service, PatientDTO)},    # тип → (сервис, DTO)
+        ... )
+        >>> adapter.entities()
         ['patient']
     """
 
     def __init__(
         self,
-        specs: Mapping[str, ServiceSpec],
-        transaction_factory: Optional[Callable[[], ContextManager[Any]]] = None,
-    ) -> None:
+        specs               : Mapping[str, ServiceSpec],                            # тип записи → (поставщик сервиса, класс DTO)
+        transaction_factory : Optional[Callable[[], ContextManager[Any]]] = None,   # откуда брать транзакцию; None — сервис
+    ) -> None: # набор сервисов и источник транзакции
         """
+        Запоминает сервисы по типам записей и источник транзакции.
+
         Args:
-            specs: Тип записи → (функция-поставщик сервиса, класс DTO).
-            transaction_factory: Откуда брать транзакцию (контекстный менеджер, отдающий
-                сессию: коммит при выходе, откат при ошибке), например
-                ``lambda: get_db().session_scope()``. По умолчанию — ``_session_scope``
-                первого сервиса (так было до 2026-10-16; это закрытый метод сервисов, и
-                адаптер был завязан на их внутреннее устройство).
+            specs               : (Mapping[str, ServiceSpec]) Тип записи → (функция-поставщик
+                сервиса, класс DTO).
+            transaction_factory : (Callable/None) Откуда брать транзакцию (контекстный
+                менеджер, отдающий сессию: коммит при выходе, откат при ошибке), например
+                ``lambda: get_db().session_scope()``; None — ``_session_scope`` первого
+                сервиса (так было до 2026-10-16; это закрытый метод сервисов, и адаптер был
+                завязан на их внутреннее устройство).
 
         Raises:
-            ValueError: Пустой набор.
+            ValueError: Пустой набор — ``ServiceAdapter: не задано ни одного сервиса``.
 
-        Пример:
-            >>> ServiceAdapter({'photo': (get_photo_service, PhotoDTO)})
+        Example:
+            >>> ServiceAdapter(
+            ...     specs                 =   {'photo': (get_photo_service, PhotoDTO)},  # сервис фото
+            ...     transaction_factory   =   lambda: get_db().session_scope(),          # общая база
+            ... )
         """
         if not specs:
             raise ValueError("ServiceAdapter: не задано ни одного сервиса")
         self._specs: Dict[str, ServiceSpec] = dict(specs)
         self._transaction_factory = transaction_factory
 
-    def entities(self) -> list:
+    def entities(self) -> List[str]: # подключённые типы записей
         """
-        Типы записей, которые умеет сохранять адаптер.
+        Возвращает типы записей, которые умеет сохранять адаптер, — в порядке ``specs``.
 
         Returns:
-            Список имён типов.
+            (List[str]) Имена типов.
 
-        Пример:
+        Example:
             >>> adapter.entities()
-            ['patient', 'appointment', 'photo']
+            ['patient', 'appointment', 'photo', 'note']
         """
         return list(self._specs)
 
-    def service(self, entity: str) -> Any:
+    def service(
+        self,
+        entity : str,   # тип записи
+    ) -> Any: # сервис типа записи (поставщик вызывается каждый раз)
         """
-        Сервис типа записи.
+        Возвращает сервис типа записи — вызовом поставщика (актуальный после смены БД).
 
         Args:
-            entity: Тип.
+            entity : (str) Тип записи.
 
         Returns:
-            Сервис приложения.
+            (Any) Сервис приложения.
 
         Raises:
-            KeyError: Тип не подключён.
+            KeyError: Тип не подключён — ``ServiceAdapter: нет сервиса для '<тип>'``.
 
-        Пример:
+        Example:
             >>> adapter.service('photo')
+            <app.services.services_all.PhotoService object at ...>
         """
         try:
             provider, _ = self._specs[entity]
@@ -154,31 +185,42 @@ class ServiceAdapter:
             raise KeyError(f"ServiceAdapter: нет сервиса для '{entity}'") from None
         return provider()
 
-    def dto_class(self, entity: str) -> Type[Any]:
+    def dto_class(
+        self,
+        entity : str,   # тип записи
+    ) -> Type[Any]: # класс DTO типа записи
         """
-        Класс DTO типа записи.
+        Возвращает класс DTO типа записи.
 
         Args:
-            entity: Тип.
+            entity : (str) Тип записи.
 
         Returns:
-            Класс DTO.
+            (Type[Any]) Класс DTO.
 
-        Пример:
+        Raises:
+            KeyError: Тип не подключён.
+
+        Example:
             >>> adapter.dto_class('photo').__name__
             'PhotoDTO'
         """
         return self._specs[entity][1]
 
-    def transaction(self) -> ContextManager[Any]:
+    def transaction(self) -> ContextManager[Any]: # одна сессия на всё сохранение
         """
-        Одна сессия SQLAlchemy на всё сохранение.
+        Открывает одну сессию SQLAlchemy на всё сохранение.
+
+        Источник — ``transaction_factory``; без неё — ``_session_scope(None)`` первого
+        сервиса (запасной путь).
 
         Returns:
-            Контекстный менеджер, отдающий сессию.
+            (ContextManager[Any]) Контекстный менеджер, отдающий сессию: коммит при выходе,
+                откат при исключении.
 
-        Пример:
-            >>> with adapter.transaction() as session: ...
+        Example:
+            >>> with adapter.transaction() as session:
+            ...     adapter.delete('photo', 301, session)
         """
         if self._transaction_factory is not None:
             return self._transaction_factory()
@@ -186,20 +228,30 @@ class ServiceAdapter:
         first = next(iter(self._specs))
         return self.service(first)._session_scope(None)
 
-    def create(self, entity: str, data: Mapping[str, Any], tx: Any) -> Hashable:
+    def create(
+        self,
+        entity : str,               # тип записи
+        data   : Mapping[str, Any], # поля из черновика (внешний ключ уже настоящий)
+        tx     : Any,               # сессия транзакции
+    ) -> Hashable: # создание записи через сервис
         """
-        Создаёт запись через сервис.
+        Создаёт запись через сервис: DTO из полей черновика без временного ``id``.
 
         Args:
-            entity: Тип.
-            data: Поля из черновика (внешний ключ уже настоящий).
-            tx: Сессия.
+            entity : (str) Тип записи.
+            data   : (Mapping[str, Any]) Поля из черновика; внешний ключ уже настоящий
+                (исполнитель заменил временный id родителя).
+            tx     : (Any) Сессия транзакции.
 
         Returns:
-            Id созданной записи.
+            (Hashable) Id созданной записи.
 
-        Пример:
-            >>> adapter.create('photo', {'appointment_id': 55, 'file_path': '/tmp/a.jpg'}, session)
+        Example:
+            >>> adapter.create(
+            ...     'photo',                                                    # тип
+            ...     {'appointment_id': 55, 'file_path': '/tmp/a.jpg'},          # поля
+            ...     session,                                                    # транзакция
+            ... )
             301
         """
         values = {k: v for k, v in data.items() if k != 'id'}
@@ -207,44 +259,61 @@ class ServiceAdapter:
         created = self.service(entity).create(dto, session=tx)
         return getattr(created, 'id', None)
 
-    def update(self, entity: str, entity_id: Hashable, changes: Mapping[str, Any], tx: Any) -> None:
+    def update(
+        self,
+        entity    : str,                # тип записи
+        entity_id : Hashable,           # id записи
+        changes   : Mapping[str, Any],  # изменённые поля
+        tx        : Any,                # сессия транзакции
+    ) -> None: # изменение записи: текущий DTO + изменения
         """
-        Изменяет запись: текущий DTO + изменения.
+        Изменяет запись: текущий DTO из БД + изменённые поля → ``service.update``.
 
         Args:
-            entity: Тип.
-            entity_id: Id.
-            changes: Изменённые поля.
-            tx: Сессия.
+            entity    : (str) Тип записи.
+            entity_id : (Hashable) Id записи.
+            changes   : (Mapping[str, Any]) Изменённые поля (``id`` не меняется).
+            tx        : (Any) Сессия транзакции.
 
-        Returns:
-            None
+        Raises:
+            EntityNotFoundError: Записи нет (исключение сервиса, например
+                ``AppointmentNotFoundError``).
 
-        Пример:
-            >>> adapter.update('appointment', 12, {'cost': 500}, session)
+        Example:
+            >>> adapter.update(
+            ...     'appointment',      # тип
+            ...     12,                 # id
+            ...     {'cost': 500},      # изменения
+            ...     session,            # транзакция
+            ... )
         """
         service = self.service(entity)
         current = service.get_by_id(entity_id, session=tx)
         dto = current.model_copy(update={k: v for k, v in changes.items() if k != 'id'})
         service.update(dto, session=tx)
 
-    def read(self, entity: str, entity_id: Hashable, tx: Any = None) -> Optional[Dict[str, Any]]:
+    def read(
+        self,
+        entity    : str,        # тип записи
+        entity_id : Hashable,   # id записи
+        tx        : Any = None, # сессия транзакции; None — своя
+    ) -> Optional[Dict[str, Any]]: # поля записи из БД или None
         """
-        Текущая запись из БД (для ``find_conflicts``; для правил удаления ссылок — внутри
-        транзакции сохранения).
+        Читает текущую запись из БД (для ``find_conflicts``; для правил удаления ссылок —
+        внутри транзакции сохранения: видны уже записанные правки).
 
         Args:
-            entity: Тип.
-            entity_id: Id.
-            tx: Сессия транзакции (``None`` — своя).
+            entity    : (str) Тип записи.
+            entity_id : (Hashable) Id записи.
+            tx        : (Any/None) Сессия транзакции; None — своя сессия сервиса.
 
         Returns:
-            Поля записи или ``None``, если записи нет.
+            (Dict[str, Any]/None) Поля записи; None — записи нет.
 
         Raises:
             Exception: Ошибка БД (кроме «не найдено») — вызывающему.
 
-        Пример:
+        Example:
             >>> adapter.read('appointment', 12)['cost']
             400
         """
@@ -260,85 +329,109 @@ class ServiceAdapter:
             raise
         return None if dto is None else dto.model_dump()
 
-    def referrers(self, entity: str, field: str, ids: Iterable[Hashable], tx: Any) -> List[Hashable]:
+    def referrers(
+        self,
+        entity : str,                   # тип ссылающихся записей
+        field  : str,                   # поле ссылки
+        ids    : Iterable[Hashable],    # id целей
+        tx     : Any,                   # сессия транзакции
+    ) -> List[Hashable]: # кто ссылается на цели
         """
-        Кто из записей типа ``entity`` ссылается полем ``field`` на записи ``ids``
-        (правила удаления ссылок черновиков; внутри транзакции сохранения).
+        Возвращает id записей типа ``entity``, которые ссылаются полем ``field`` на записи
+        ``ids`` (правило ``restrict`` черновиков; внутри транзакции сохранения).
+
+        Пустой ``ids`` — пустой список без запроса к БД.
 
         Args:
-            entity: Тип ссылающихся записей.
-            field: Поле ссылки.
-            ids: Id целей.
-            tx: Сессия транзакции.
+            entity : (str) Тип ссылающихся записей.
+            field  : (str) Поле ссылки.
+            ids    : (Iterable[Hashable]) Id целей.
+            tx     : (Any) Сессия транзакции.
 
         Returns:
-            Id ссылающихся записей.
+            (List[Hashable]) Id ссылающихся записей.
 
-        Пример:
-            >>> adapter.referrers('appointment', 'doctor_id', [5], session)
+        Example:
+            >>> adapter.referrers(
+            ...     'appointment',  # кто ссылается
+            ...     'doctor_id',    # поле ссылки
+            ...     [5],            # цели
+            ...     session,        # транзакция
+            ... )
             [12, 14]
         """
         wanted = list(ids)
         if not wanted:
             return []
         items, _ = self.service(entity).get_page_filtered(
-            0, None, [{'column': field, 'operator': 'in', 'value': wanted}], session=tx)
+            0,                                                          # с начала
+            None,                                                       # без предела
+            [{'column': field, 'operator': 'in', 'value': wanted}],     # фильтр по ссылке
+            session   =   tx,                                           # транзакция сохранения
+        )
         return [item.id for item in items]
 
-    def delete(self, entity: str, entity_id: Hashable, tx: Any) -> None:
+    def delete(
+        self,
+        entity    : str,        # тип записи
+        entity_id : Hashable,   # id записи
+        tx        : Any,        # сессия транзакции
+    ) -> None: # удаление записи через сервис
         """
-        Удаляет запись через сервис.
+        Удаляет запись через сервис (потомков в БД удаляет сервис / каскад БД).
 
         Args:
-            entity: Тип.
-            entity_id: Id.
-            tx: Сессия.
+            entity    : (str) Тип записи.
+            entity_id : (Hashable) Id записи.
+            tx        : (Any) Сессия транзакции.
 
-        Returns:
-            None
-
-        Пример:
+        Example:
             >>> adapter.delete('photo', 301, session)
         """
         self.service(entity).delete(entity_id, session=tx)
 
 
 def make_parent_resolver(
-    schema: TreeSchema,
-    adapter: ServiceAdapter,
-) -> Callable[[str, Hashable], Optional[Hashable]]:
+    schema  : TreeSchema,       # схема дерева
+    adapter : ServiceAdapter,   # адаптер с сервисами
+) -> Callable[[str, Hashable], Optional[Hashable]]: # определитель родителя записи из БД
     """
-    Определитель родителя записи без черновика: читает запись из БД и берёт поле
-    внешнего ключа из схемы.
+    Возвращает определитель родителя записи без черновика: читает запись из БД и берёт
+    поле внешнего ключа из схемы.
 
-    Временные id новых записей (отрицательные) в БД не ищутся. Ошибка чтения — ``None``
-    (хранилище в этом случае просто не поднимет значок выше).
+    Временные id новых записей (отрицательные) в БД не ищутся; корневой тип (нет поля
+    родителя) — ``None`` без запроса. Ошибка чтения — ``None`` (хранилище в этом случае
+    просто не поднимет значок выше).
 
     Args:
-        schema: Схема дерева.
-        adapter: Адаптер с сервисами.
+        schema  : (TreeSchema) Схема дерева.
+        adapter : (ServiceAdapter) Адаптер с сервисами.
 
     Returns:
-        Функция ``(тип, id) -> id родителя | None``.
+        (Callable[[str, Hashable], Optional[Hashable]]) Функция ``(тип, id) -> id
+            родителя | None``.
 
-    Пример:
+    Example:
         >>> resolve = make_parent_resolver(schema, adapter)
         >>> resolve('appointment', 12)
         1
     """
 
-    def resolve(entity: str, entity_id: Hashable) -> Optional[Hashable]:
+    def resolve(
+        entity    : str,        # тип записи
+        entity_id : Hashable,   # id записи
+    ) -> Optional[Hashable]: # родитель записи из БД
         """
-        Родитель записи из БД.
+        Возвращает id родителя записи из БД.
 
         Args:
-            entity: Тип.
-            entity_id: Id.
+            entity    : (str) Тип записи.
+            entity_id : (Hashable) Id записи.
 
         Returns:
-            Id родителя или ``None``.
+            (Hashable/None) Id родителя; None — корневой тип, новая запись или ошибка чтения.
 
-        Пример:
+        Example:
             >>> resolve('photo', 301)
             55
         """
@@ -375,13 +468,16 @@ class AppDrafts:
     Черновики приложения: одно хранилище на главное окно (D1) + всё для сохранения.
 
     Attributes:
-        schema: Дерево таблиц.
-        adapter: Сохранение через сервисы.
-        store: Хранилище черновиков (общее для всех экранов).
+        schema  : (TreeSchema) Дерево таблиц.
+        adapter : (ServiceAdapter) Сохранение через сервисы.
+        store   : (DraftStore) Хранилище черновиков (общее для всех экранов).
 
-    Пример:
+    Example:
         >>> drafts = create_app_drafts()
-        >>> drafts.save(confirm_new_ancestors=ask, confirm_deletes=ask)
+        >>> drafts.save(
+        ...     confirm_new_ancestors   =   ask,    # вопрос про новых родителей
+        ...     confirm_deletes         =   ask,    # вопрос про удаляемые ветки
+        ... )
     """
 
     schema: TreeSchema
@@ -390,42 +486,59 @@ class AppDrafts:
 
     def save(
         self,
-        targets: Optional[Iterable[NodeKey]] = None,
-        scope: 'SaveScope' = None,
-        confirm_new_ancestors: Optional[Confirm] = None,
-        confirm_deletes: Optional[Confirm] = None,
-        delete_policy: Optional['DeletePolicy'] = None,
-    ) -> Optional['SaveResult']:
+        targets               : Optional[Iterable[NodeKey]] = None,     # узлы цели; None — всё
+        scope                 : Optional['SaveScope'] = None,           # направления; None — BRANCH
+        confirm_new_ancestors : Optional[Confirm] = None,               # вопрос про новых родителей
+        confirm_deletes       : Optional[Confirm] = None,               # вопрос про удаляемые ветки
+        delete_policy         : Optional['DeletePolicy'] = None,        # политика удаления; None — по умолчанию
+    ) -> Optional['SaveResult']: # сохранение с вопросами пользователю
         """
-        Сохранение с вопросами — см. ``save_with_confirmation``.
+        Сохраняет черновики с вопросами пользователю — ``save_with_confirmation`` над
+        своими хранилищем и адаптером.
 
         Args:
-            targets: Узлы цели; ``None`` — всё.
-            scope: Направления (по умолчанию ``BRANCH``).
-            confirm_new_ancestors: Вопрос про новых родителей.
-            confirm_deletes: Вопрос про удаляемые ветки.
-            delete_policy: Политика удаления.
+            targets               : (Iterable[NodeKey]/None) Узлы цели; None — всё.
+            scope                 : (SaveScope/None) Направления; None — ``BRANCH``.
+            confirm_new_ancestors : (Confirm/None) Вопрос про новых родителей.
+            confirm_deletes       : (Confirm/None) Вопрос про удаляемые ветки.
+            delete_policy         : (DeletePolicy/None) Политика удаления; None — по
+                умолчанию пакета черновиков.
 
         Returns:
-            Итог или ``None`` (отказ пользователя).
+            (SaveResult/None) Итог; None — отказ пользователя.
 
-        Пример:
-            >>> drafts.save([('appointment', 12)], SaveScope.SELF)
+        Example:
+            >>> drafts.save(
+            ...     [('appointment', 12)],  # цель
+            ...     SaveScope.SELF,         # только сама запись
+            ... )
         """
-        return save_with_confirmation(self.store, self.adapter, targets, scope,
-                                      confirm_new_ancestors, confirm_deletes, delete_policy)
+        return save_with_confirmation(
+            self.store,             # хранилище
+            self.adapter,           # запись через сервисы
+            targets,                # цель
+            scope,                  # направления
+            confirm_new_ancestors,  # вопрос про новых родителей
+            confirm_deletes,        # вопрос про удаляемые ветки
+            delete_policy,          # политика удаления
+        )
 
 
-def create_app_drafts() -> AppDrafts:
+def create_app_drafts() -> AppDrafts: # черновики главного окна
     """
-    Собирает черновики приложения: схема, адаптер к сервисам из ``app.dependencies``
-    (берутся при каждой операции — актуальные после смены БД), хранилище с
-    определителем родителя через БД.
+    Собирает черновики приложения: схема и адаптер — из описаний таблиц
+    (``app.tables.CLINIC``), транзакция — общая база ``app.dependencies.get_db()``
+    (одна на приложение, ТД-6; берётся при каждом сохранении — актуальная после смены БД),
+    хранилище — с определителем родителя через БД.
+
+    Note:
+        Импорты внутри функции: ``app.tables`` и ``app.dependencies`` импортируют этот
+        модуль (циклы импортов).
 
     Returns:
-        ``AppDrafts``.
+        (AppDrafts) Схема, адаптер, хранилище.
 
-    Пример:
+    Example:
         >>> drafts = create_app_drafts()
         >>> drafts.store.is_empty
         True
@@ -446,6 +559,15 @@ def create_app_drafts() -> AppDrafts:
     # }, transaction_factory=lambda: get_db().session_scope())
     # ↑ до 2026-10-18: сервисы перечислялись вручную; теперь — из описаний таблиц
     from app.tables import CLINIC
-    adapter = CLINIC.service_adapter(transaction_factory=lambda: get_db().session_scope())
-    store = DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter))
-    return AppDrafts(schema=schema, adapter=adapter, store=store)
+    adapter = CLINIC.service_adapter(
+        transaction_factory   =   lambda: get_db().session_scope(),   # общая база приложения
+    )
+    store = DraftStore(
+        schema,                                                     # дерево таблиц
+        parent_resolver   =   make_parent_resolver(schema, adapter),  # родитель из БД
+    )
+    return AppDrafts(
+        schema    =   schema,     # дерево таблиц
+        adapter   =   adapter,    # запись через сервисы
+        store     =   store,      # общее хранилище
+    )

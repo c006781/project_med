@@ -278,6 +278,9 @@ def get_photo_service() -> PhotoService:
         field_configs=PHOTO_CONFIG
     )
 
+# Кэш — один объект на приложение (Ф1.6.10в, 2026-10-31); в реестр _SERVICE_PROVIDERS не
+# включён: у SyncService нет reload_config — настройки ему передаёт ConfigApplier.apply_sync
+@lru_cache(maxsize=1)
 @AppLogger.get_instance(
     name = 'dependencies.py',
     enable_file_logging = 'system',
@@ -285,9 +288,22 @@ def get_photo_service() -> PhotoService:
 ).log_execution_time(
     level = AppLogger._parse_log_level('DEBUG')
 )
-def get_sync_service() -> SyncService:
+def get_sync_service() -> SyncService: # общий сервис синхронизации
     """
-    Возвращает экземпляр SyncService, инициализированный с помощью токена Яндекс.Диска.
+    Возвращает общий для приложения ``SyncService`` (создаётся при первом вызове).
+
+    Кэшируется (``lru_cache``): окно (``MainWindow.sync_service``), командная строка и
+    ``ConfigApplier.apply_sync`` работают с одним объектом — смена токена Яндекс.Диска и
+    путей синхронизации в настройках доходит до окна. Раньше каждый вызов создавал новый
+    объект, и ``apply_sync`` правил временный (ОСТ п. 1.8). Токен и пути объект читает из
+    ``.env`` один раз при создании; новый объект — после ``get_sync_service.cache_clear()``.
+
+    Returns:
+        (SyncService) Сервис синхронизации.
+
+    Example:
+        >>> get_sync_service() is get_sync_service()
+        True
     """
     return SyncService()
 

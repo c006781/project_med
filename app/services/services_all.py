@@ -6774,36 +6774,43 @@ class PhotoService(
         level=AppLogger._parse_log_level('DEBUG')
     )  
     def add_photo_to_appointment(
-            self, 
-            appointment_id: int, 
-            source_file_path: str,
-            description: str = "", 
-            session: Optional[Session] = None,
-    )-> PhotoDTO:
+        self,
+        appointment_id   : int,                         # приём, к которому добавляется фото
+        source_file_path : str,                         # исходный файл изображения
+        description      : str = "",                    # описание фото
+        session          : Optional[Session] = None,    # внешняя транзакция
+    ) -> PhotoDTO: # созданное фото
         """
-        Добавляет фотографию к указанному приёму.
+        Добавляет фотографию к приёму: проверяет файл и создаёт фото общим механизмом.
 
-        Процесс:
-            1. Проверяет существование исходного файла.
-            2. Создаёт запись в БД с временным путём 'pending' (чтобы получить ID фото).
-            3. Копирует файл в хранилище, формируя имя на основе appointment_id и photo.id.
-            4. Обновляет путь в записи на реальный относительный путь.
-            5. Если на любом этапе (кроме проверки) возникает ошибка, транзакция откатывается,
-            и запись не сохраняется.
+        Порядок: нет исходного файла — ``PhotoFileError`` сразу, до транзакции; иначе —
+        :meth:`create` (DYN1): проверка приёма, копирование файла в хранилище (при откате
+        транзакции копия удаляется), запись в БД. Ошибка на любом шаге после проверки —
+        откат, запись не сохраняется. Формат файла не проверяется.
 
-        Параметры:
-            appointment_id: ID приёма, к которому добавляется фото.
-            source_file_path: путь к исходному файлу изображения на диске.
-            description: описание фотографии (необязательно).
-            session: опциональная сессия SQLAlchemy для работы в рамках внешней транзакции.
+        Args:
+            appointment_id   : (int) ID приёма.
+            source_file_path : (str) Путь к исходному файлу на диске.
+            description      : (str) Описание фото; пусто — без описания.
+            session          : (Session/None) Сессия внешней транзакции; None — своя
+                транзакция.
 
-        Возвращает:
-            PhotoDTO созданной фотографии.
+        Returns:
+            (PhotoDTO) Созданное фото (путь — относительно хранилища).
 
-        Исключения:
-            AppointmentNotFoundError: если приём с указанным ID не существует.
-            PhotoFileError: если исходный файл не найден, не удаётся его скопировать
-                            или возникает другая ошибка ввода-вывода.
+        Raises:
+            PhotoFileError: Исходного файла нет (``Ошибка проверки файла '<путь>': файл не
+                существует``).
+            AppointmentNotFoundError: Приёма с таким ID нет.
+
+        Example:
+            >>> photo = photo_service.add_photo_to_appointment(
+            ...     appointment_id     =   1,                  # приём
+            ...     source_file_path   =   'C:/scan/1.jpg',    # исходный файл
+            ...     description        =   'до лечения',       # описание
+            ... )
+            >>> photo.appointment_id
+            1
         """
         self.logger.debug(
             f"Добавление фото к приёму "
@@ -6814,7 +6821,10 @@ class PhotoService(
         
         # 1. Проверка существования и типа файла
         if not os.path.isfile(source_file_path):
-            raise PhotoFileError(source_file_path, "проверка", "файл не существует")
+            # raise PhotoFileError(source_file_path, "проверка", "файл не существует")
+            # ↑ до 2026-10-31 (Ф1.6.10б): операция — в родительном падеже («Ошибка <операции>
+            #   файла»), иначе текст «Ошибка проверка файла …».
+            raise PhotoFileError(source_file_path, "проверки", "файл не существует")
 
         # if not self._is_allowed_file(source_file_path):
         #     raise PhotoFileError(source_file_path, "проверка", "неподдерживаемый формат файла")

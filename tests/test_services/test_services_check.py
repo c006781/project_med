@@ -77,3 +77,53 @@ def test_s1_unknown_order_field_still_sorted_by_id(patient_service, db_session):
     db_session.commit()
     sql = _page_sql(db_session, lambda: patient_service.get_page(0, 2, order_by=['нет_поля']))
     assert 'PATIENTS.ID' in sql.split('ORDER BY', 1)[1]
+
+
+# ---------------------------------------------------------------------------
+# Ф1.6.10б (ОСТ п. 1.6): текст ошибки — «Ошибка проверки файла»
+# ---------------------------------------------------------------------------
+
+def test_f16_10b_missing_photo_file_message(photo_service, sample_appointment, tmp_path):
+    from app.exceptions import PhotoFileError
+
+    missing = str(tmp_path / 'нет.jpg')
+    try:
+        photo_service.add_photo_to_appointment(sample_appointment.id, missing)
+    except PhotoFileError as exc:
+        assert 'Ошибка проверки файла' in str(exc)
+    else:
+        raise AssertionError('ожидалась PhotoFileError')
+
+
+def test_f16_10b_missing_appointment(photo_service, tmp_path):
+    from app.exceptions import AppointmentNotFoundError
+
+    source = tmp_path / 'a.jpg'
+    source.write_bytes(b'x')
+    try:
+        photo_service.add_photo_to_appointment(999999, str(source))
+    except AppointmentNotFoundError:
+        pass
+    else:
+        raise AssertionError('ожидалась AppointmentNotFoundError')
+
+
+# ---------------------------------------------------------------------------
+# Ф1.6.10в (ОСТ п. 1.8): один SyncService на приложение — настройки доходят до окна
+# ---------------------------------------------------------------------------
+
+def test_f16_10v_sync_service_cached_and_applier_reaches_it():
+    import app.dependencies as deps
+
+    deps.get_sync_service.cache_clear()
+    try:
+        used_by_window = deps.get_sync_service()          # как MainWindow.sync_service
+        assert deps.get_sync_service() is used_by_window
+        applier = deps.create_config_applier()
+        assert applier.apply_sync(
+            {'YANDEX_TOKEN': 'новый-токен'},    # после сохранения
+            {'YANDEX_TOKEN': 'старый-токен'},   # до сохранения
+        )
+        assert used_by_window.token == 'новый-токен'
+    finally:
+        deps.get_sync_service.cache_clear()

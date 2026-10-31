@@ -41,7 +41,7 @@ import inspect
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from app.dataset_app.fields import fields_from_config, references_of
+from app.dataset_app.fields import fields_from_config, foreign_keys_of, references_of
 from app.dataset_app.service_backend import ServiceBackend
 if TYPE_CHECKING:
     from app.draft.integration import ServiceAdapter
@@ -85,6 +85,12 @@ class TableSpec:
             ``sql_compute``, вытесненный ``total(by='sql')``: его подзапрос не утяжеляет
             запрос таблицы данных).
         fetch_size: Свой размер порции загрузки.
+        shared: Общие данные (заметки, справочник): на записи таблицы ссылаются поля
+            других таблиц, сама она в дереве не участвует — ни родителем, ни подчинённой,
+            набор экрана для неё не собирается (``names``, ``build`` — без неё). В
+            черновиках — тип записи, на который ссылаются (``drafts_schema``): удалить
+            запись, на которую ссылаются, нельзя (правило ``restrict``, если ссылка не
+            описана иначе). 2026-10-31.
 
     Пример:
         >>> spec.columns
@@ -108,6 +114,7 @@ class TableSpec:
     links: Tuple[Link, ...] = ()
     skip: Tuple[str, ...] = ()
     fetch_size: Optional[int] = None
+    shared: bool = False
 
 
 class SpecError(ValueError):
@@ -319,24 +326,38 @@ class TableRegistry:
             ``(родитель, поле)`` или ``(None, None)`` — корень дерева.
 
         Raises:
-            SpecError: Ключей на таблицы реестра несколько (укажите ``parent``) или
-                указанный родитель неизвестен.
+            SpecError: Ключей на таблицы реестра несколько (укажите ``parent``),
+                указанный родитель неизвестен, родитель у общих данных или общие данные —
+                родитель.
 
         Пример:
             >>> registry._find_parent(photos_spec)
             ('appointments', 'appointment_id')
         """
+        # общие данные (shared) — вне дерева: ни родителя у них, ни родителем они не бывают
+        if spec.shared:
+            if spec.parent is not None:
+                raise SpecError(f"у {spec.name} (общие данные) не бывает родителя")
+            return None, None
         if spec.parent is not None:
             if spec.parent not in self._specs:
                 raise SpecError(f"у {spec.name} родитель {spec.parent} не описан")
+            if self._specs[spec.parent].shared:
+                raise SpecError(f"у {spec.name} родитель {spec.parent} — общие данные, "
+                                "на них можно только ссылаться")
             field_name = spec.parent_field or next(
                 (f for f, t in references_of(spec.model).items() if t == spec.parent), None)
             if field_name is None:
                 raise SpecError(f"у {spec.name} нет поля связи с {spec.parent} (parent_field)")
             return spec.parent, field_name
         declared = {link.field for link in spec.links}
+        # candidates = [(t, f) for f, t in references_of(spec.model).items()
+        #               if t in self._specs and t != spec.name and f not in declared]
+        # ↑ до 2026-10-31 (Ф1.3.4): общих данных в реестре не было; ключ на них — ссылка,
+        #   а не родитель (иначе у заметок пациент получил бы «родителя»).
         candidates = [(t, f) for f, t in references_of(spec.model).items()
-                      if t in self._specs and t != spec.name and f not in declared]
+                      if t in self._specs and t != spec.name and f not in declared
+                      and not self._specs[t].shared]
         if len(candidates) > 1:
             raise SpecError(f"у {spec.name} несколько ссылок на таблицы реестра "
                             f"({', '.join(f for _, f in candidates)}) — укажите parent")
@@ -345,7 +366,9 @@ class TableRegistry:
     def _find_links(self, spec: TableSpec) -> Tuple[Link, ...]:
         """
         Связи-ссылки таблицы: описанные явно + остальные внешние ключи на таблицы реестра
-        (кроме связи с родителем) с правилом по умолчанию.
+        (кроме связи с родителем) с правилом по умолчанию. Ключи на общие данные
+        (``shared``, например заметки) — тоже ссылки, даже если ``references_of`` их
+        отбрасывает (2026-10-31, Ф1.3.4).
 
         Args:
             spec: Описание.
@@ -362,7 +385,10 @@ class TableRegistry:
         """
         parent_field = self._parents[spec.name][1]
         result: Dict[str, Link] = {}
-        for field_name, table in references_of(spec.model).items():
+        # for field_name, table in references_of(spec.model).items():
+        # ↑ до 2026-10-31 (Ф1.3.4): ключи на заметки отбрасывались — черновики о заметках
+        #   не знали (удаление заметки, на которую ссылаются, не проверялось).
+        for field_name, table in foreign_keys_of(spec.model).items():
             if table in self._specs and field_name != parent_field:
                 result[field_name] = Link(field_name, table)
         for link in spec.links:
@@ -451,7 +477,8 @@ class TableRegistry:
 
     def names(self) -> List[str]:
         """
-        Имена таблиц сверху вниз по дереву (родитель раньше подчинённых).
+        Имена таблиц сверху вниз по дереву (родитель раньше подчинённых); общие данные
+        (``shared``) — не в дереве, их имена — ``shared_names``.
 
         Returns:
             Список имён.
@@ -482,9 +509,29 @@ class TableRegistry:
                 visit(parent)
             ordered.append(name)
 
+        # for name in self._specs:
+        # ↑ до 2026-10-31 (Ф1.3.4): общих данных в реестре не было
         for name in self._specs:
+            if self._specs[name].shared:
+                continue                                  # не в дереве: набора экрана нет
             visit(name)
         return ordered
+
+    def shared_names(self) -> List[str]: # имена таблиц общих данных
+        """
+        Возвращает имена таблиц общих данных (``TableSpec.shared``) в порядке описания.
+
+        Общие данные — не в дереве (``names``) и наборами не собираются (``build``), но
+        участвуют в черновиках (``drafts_schema``, ``service_adapter``) как цели ссылок.
+
+        Returns:
+            (list) Имена таблиц.
+
+        Example:
+            >>> CLINIC.shared_names()
+            ['appointments_notes']
+        """
+        return [name for name, spec in self._specs.items() if spec.shared]
 
     def parent(self, name: str) -> Optional[str]:
         """
@@ -560,7 +607,8 @@ class TableRegistry:
 
     def drafts_schema(self) -> 'TreeSchema':
         """
-        Схема черновиков (дерево типов записей) — из описаний.
+        Схема черновиков (дерево типов записей) — из описаний; общие данные (``shared``) —
+        корневые типы после дерева: на них ссылаются поля записей (2026-10-31, Ф1.3.4).
 
         Returns:
             ``TreeSchema``.
@@ -571,7 +619,9 @@ class TableRegistry:
         """
         from app.utils.drafts import EntityType, Reference, TreeSchema
         types = []
-        for name in self.names():
+        # for name in self.names():
+        # ↑ до 2026-10-31 (Ф1.3.4): только дерево; общие данные — тоже типы черновиков
+        for name in self.names() + self.shared_names():
             spec, parent = self._specs[name], self.parent(name)
             references = [Reference(link.field, self._specs[link.table].entity, link.on_delete,
                                     link.collect) for link in self.links(name)]
@@ -597,12 +647,17 @@ class TableRegistry:
 
         Пример:
             >>> CLINIC.service_adapter().entities()
-            ['patient', 'appointment', 'photo']
+            ['patient', 'appointment', 'photo', 'note']
         """
         from app.draft.integration import ServiceAdapter
         services = dict(services or {})
+        # return ServiceAdapter({spec.entity: (services.get(spec.entity, spec.service), spec.dto)
+        #                        for spec in (self._specs[n] for n in self.names())},
+        #                       transaction_factory=transaction_factory)
+        # ↑ до 2026-10-31 (Ф1.3.4): только дерево; общие данные (заметки) — тоже: правило
+        #   удаления ссылок читает и удаляет их через адаптер
         return ServiceAdapter({spec.entity: (services.get(spec.entity, spec.service), spec.dto)
-                               for spec in (self._specs[n] for n in self.names())},
+                               for spec in (self._specs[n] for n in self.names() + self.shared_names())},
                               transaction_factory=transaction_factory)
 
     # ------------------------------------------------------------------ наборы
@@ -655,6 +710,8 @@ class TableRegistry:
             extra: Свой столбец.
             datasets: Уже собранные наборы (подчинённые — для итогов).
             service: Поставщик сервиса таблицы (для ``calc`` с двумя аргументами).
+            services: Свои поставщики сервисов по типам записей (для ``total(by='sql')``).
+            cache: Объекты SQL-итогов этой сборки (``None`` — новый словарь).
 
         Returns:
             ``FieldDef``.
@@ -688,23 +745,45 @@ class TableRegistry:
                         visible=extra.visible, display=extra.display,
                         extra={'widget': extra.widget} if extra.widget else {})
 
-    def _link_field(self, definition: FieldDef, spec: TableSpec, drafts: Any,
-                    services: Mapping[str, Callable[[], Any]]) -> FieldDef:
+    # def _link_field(self, definition: FieldDef, spec: TableSpec, drafts: Any,
+    #                 services: Mapping[str, Callable[[], Any]]) -> FieldDef:
+    # ↑ до 2026-10-31 (TS1): тексты ссылок сборки копились в self._text_caches — на реестре,
+    #   а реестр общий (CLINIC): он держал кеши последней сборки, вторая сборка подменяла
+    #   список первой (как и SQL-итоги — см. _sql_totals, cache). Теперь список — сборки.
+    def _link_field(
+        self,
+        definition  : FieldDef,                             # поле из field_configs
+        spec        : TableSpec,                            # описание таблицы поля
+        drafts      : Any,                                  # черновики; None — без них
+        services    : Mapping[str, Callable[[], Any]],      # свои поставщики сервисов
+        text_caches : List[Tuple[str, Dict[Any, str]]],     # кеши текстов ссылок этой сборки
+    ) -> FieldDef: # поле-ссылка с показом текста цели и списком выбора
         """
-        Поле-ссылка: показ цели вместо id и список выбора (записи цели из БД + новые
-        несохранённые из черновиков). Остальные поля — как есть.
+        Делает поле-ссылку: показ цели вместо id и список выбора (записи цели из БД + новые
+        несохранённые из черновиков). Остальные поля возвращает как есть.
+
+        Кеш текстов поля добавляется в ``text_caches`` (``(таблица цели, кеш)``): сборка
+        сбрасывает его на событиях набора-цели.
 
         Args:
-            definition: Поле из ``field_configs``.
-            spec: Описание таблицы.
-            drafts: Черновики (``None`` — без них).
-            services: Свои поставщики сервисов.
+            definition  : (FieldDef) Поле из ``field_configs``.
+            spec        : (TableSpec) Описание таблицы.
+            drafts      : (AppDrafts/None) Черновики; None — без них.
+            services    : (dict) Свои поставщики сервисов по типам записей.
+            text_caches : (list) Кеши текстов ссылок сборки — сюда добавляется кеш поля.
 
         Returns:
-            ``FieldDef`` (новое — для ссылки, то же — для остальных).
+            (FieldDef) Новое — для ссылки, то же — для остальных полей.
 
-        Пример:
-            >>> registry._link_field(FieldDef('doctor_id'), orders_spec, None, {}).extra['choices']()
+        Example:
+            >>> caches = []
+            >>> registry._link_field(
+            ...     FieldDef('doctor_id'),      # поле-ссылка
+            ...     orders_spec,                # описание таблицы
+            ...     None,                       # без черновиков
+            ...     {},                         # сервисы — из описаний
+            ...     caches,                     # кеши сборки
+            ... ).extra['choices']()
             [(5, 'Иванов')]
         """
         link = next((l for l in self.links(spec.name) if l.field == definition.name), None)
@@ -768,7 +847,8 @@ class TableRegistry:
             return texts[key]
 
         texts: Dict[Any, str] = {}
-        self._text_caches.append((link.table, texts))
+        # self._text_caches.append((link.table, texts))
+        text_caches.append((link.table, texts))
 
         def choices() -> List[Tuple[Any, str]]:
             """
@@ -828,12 +908,24 @@ class TableRegistry:
         datasets: Dict[str, DataSet] = {}
         writers: Dict[str, Any] = {}
         sql_cache: Dict[Any, Any] = {}                     # объекты SQL-итогов этой сборки
-        self._text_caches: List[Tuple[str, Dict[Any, str]]] = []   # тексты ссылок этой сборки
+        # self._text_caches: List[Tuple[str, Dict[Any, str]]] = []   # тексты ссылок этой сборки
+        # ↑ до 2026-10-31 (TS1): на общем реестре — см. _link_field
+        text_caches: List[Tuple[str, Dict[Any, str]]] = []         # тексты ссылок этой сборки
         for name in reversed(wanted):                     # подчинённые раньше: итоги ссылаются на них
             spec = self._specs[name]
             provider = services.get(spec.entity, spec.service)
             fields = fields_from_config(spec.config, spec.dto, spec.model, skip=spec.skip)
-            fields = [self._link_field(f, spec, drafts, services) for f in fields]
+            # fields = [self._link_field(f, spec, drafts, services) for f in fields]
+            fields = [
+                self._link_field(
+                    f,              # поле
+                    spec,           # таблица
+                    drafts,         # черновики
+                    services,       # сервисы
+                    text_caches,    # кеши текстов этой сборки
+                )
+                for f in fields
+            ]
             for extra in spec.extras:
                 if extra.kind == 'total' and extra.child not in datasets:
                     continue                              # подчинённая таблица не собрана
@@ -852,7 +944,7 @@ class TableRegistry:
             datasets[name] = dataset
         ordered = {name: datasets[name] for name in wanted}
         # тексты ссылок — заново при любом событии набора-цели (правка, перечитывание)
-        for table, texts in self._text_caches:
+        for table, texts in text_caches:
             if table in ordered:
                 ordered[table].subscribe(lambda event, cache=texts: cache.clear())
         sources = {name: DataSource(ds) for name, ds in ordered.items()}

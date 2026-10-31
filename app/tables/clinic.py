@@ -12,11 +12,18 @@
 (``Receipt = RECEIPTS.build_model(Base, …)`` и т. д.). Миграция БД создастся сама
 (автомиграции); черновики, наборы, связи, экран — по описанию.
 
+Общие заметки (``NOTES``, не в ``CLINIC_DEFS``) — в реестре как общие данные
+(``shared``, 2026-10-31): набора экрана у них нет, а в черновиках они — цель ссылок полей
+``*_id`` пациента и приёма: удалить заметку, на которую ссылаются, нельзя. Ставшие
+ненужными заметки удаляет сервис записи (``NoteService.cleanup_unused_note``).
+
 Пример:
     >>> CLINIC.chain()
     ['patients', 'appointments', 'photos']
     >>> CLINIC.get('appointments').columns
     ('date', 'reason_text', 'date_next', 'photo_count')
+    >>> CLINIC.shared_names()
+    ['appointments_notes']
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ from typing import Any, Callable
 
 from app.database.database_shema import clinic as models
 from app.dto import dto_all, field_configs
-from app.schema.clinic import CLINIC_DEFS, photo_count_text, photo_image  # noqa: F401
+from app.schema.clinic import CLINIC_DEFS, NOTES, photo_count_text, photo_image  # noqa: F401
 from app.schema.define import TableDef
 
 from .spec import TableRegistry, TableSpec
@@ -114,20 +121,28 @@ def provider(name: str) -> Callable[[], Any]:
 #     return f"{count} фото" if count else '❌'
 
 
-def table_spec(definition: TableDef) -> TableSpec:
+def table_spec(
+    definition : TableDef,           # описание таблицы (app/schema)
+    shared     : bool = False,       # общие данные: только цель ссылок, вне дерева наборов
+) -> TableSpec: # описание для реестра таблиц из описания таблицы
     """
-    Описание набора экрана из описания таблицы: модель, DTO и настройки полей — готовые
-    (из их модулей, по именам описания), сервис — через ``provider``.
+    Строит описание для реестра таблиц из описания таблицы: модель, DTO и настройки
+    полей — готовые (из их модулей, по именам описания), сервис — через ``provider``.
 
     Args:
-        definition: Описание таблицы.
+        definition : (TableDef) Описание таблицы.
+        shared     : (bool) Общие данные (``TableSpec.shared``): на записи ссылаются поля
+            других таблиц, набор экрана не собирается (заметки).
 
     Returns:
-        ``TableSpec``.
+        (TableSpec) Описание для ``TableRegistry``.
 
-    Пример:
-        >>> table_spec(PHOTOS).model is Photo
-        True
+    Example:
+        >>> table_spec(
+        ...     NOTES,                  # общие заметки
+        ...     shared   =   True,      # только цель ссылок
+        ... ).entity
+        'note'
     """
     return TableSpec(
         definition.name, definition.entity, definition.title, definition.label,
@@ -137,6 +152,7 @@ def table_spec(definition: TableDef) -> TableSpec:
         order=definition.order, columns=definition.columns, form=definition.form,
         extras=definition.extras, parent=definition.parent, parent_field=definition.parent_field,
         links=definition.links, skip=definition.skip, fetch_size=definition.fetch_size,
+        shared=shared,
     )
 
 
@@ -178,4 +194,17 @@ def table_spec(definition: TableDef) -> TableSpec:
 #     ),
 # ])
 
-CLINIC = TableRegistry([table_spec(definition) for definition in CLINIC_DEFS])
+# CLINIC = TableRegistry([table_spec(definition) for definition in CLINIC_DEFS])
+# ↑ до 2026-10-31 (Ф1.3.4): заметок в реестре не было — черновики не знали, что на заметку
+#   ссылаются пациенты и приёмы (удаление общей заметки не проверялось). Теперь заметки —
+#   общие данные (shared): цель ссылок в черновиках, набора экрана у них нет; CLINIC_DEFS
+#   (наборы экранов) не меняется.
+CLINIC = TableRegistry(
+    [table_spec(definition) for definition in CLINIC_DEFS]
+    + [
+        table_spec(
+            NOTES,                  # общие заметки (app/schema/clinic.py)
+            shared   =   True,      # только цель ссылок: правило удаления — restrict
+        ),
+    ]
+)

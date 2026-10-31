@@ -292,6 +292,10 @@ def current_system() -> str:
 
     Returns:
         str: ``'windows'``, ``'linux'``, ``'darwin'`` …
+
+    Example:
+        >>> current_system() == platform.system().lower()
+        True
     """
     return platform.system().lower()
 
@@ -327,7 +331,10 @@ def select_release_asset(
     keywords, suffixes = rule
     assets = list(assets or []) # 'assets': null в ответе GitHub — как пустой список
 
-    def _name(asset: Mapping[str, Any]) -> str:
+    def _name(
+        asset : Mapping[str, Any],  # файл релиза
+    ) -> str: # имя файла в нижнем регистре
+        """Возвращает имя файла релиза в нижнем регистре (``''`` — имени нет)."""
         return str(asset.get('name', '')).lower()
 
     for asset in assets:
@@ -601,7 +608,7 @@ class UpdateChecker(QThread):
         self,
         current_version: str, # текущая версия программы
         repo_slug: str, # репозиторий 'владелец/имя'
-    ):
+    ) -> None:
         """
         Args:
             current_version (str): Текущая версия.
@@ -688,6 +695,10 @@ class UpdateChecker(QThread):
 
         Returns:
             bool: ``True`` — релиз новее.
+
+        Example:
+            >>> UpdateChecker._parse_version('2.0', 'v1.5')
+            False
         """
         return is_newer_version(v_now, v_new)
 
@@ -885,7 +896,13 @@ class UpdateDownloader(QThread):
     def _remove_quietly(
         path: str, # файл для удаления
     ) -> None:
-        """Удаляет файл, если он есть; ошибки удаления не мешают сообщить исходную ошибку."""
+        """
+        Удаляет файл, если он есть; ошибки удаления не мешают сообщить исходную ошибку.
+
+        Example:
+            >>> UpdateDownloader._remove_quietly('/нет/такого/файла.part') is None
+            True
+        """
         try:
             if os.path.exists(path):
                 os.remove(path)
@@ -1017,7 +1034,7 @@ class AppUpdater(QObject):
     def __init__(
         self,
         parent: Optional[QObject] = None, # родитель Qt (окно)
-    ):
+    ) -> None:
         """
         Args:
             parent (Optional[QObject]): Родитель Qt.
@@ -1040,6 +1057,10 @@ class AppUpdater(QObject):
 
         Returns:
             Optional[dict]: Данные релиза GitHub.
+
+        Example:
+            >>> AppUpdater().pending_release_data is None
+            True
         """
         return self._pending_release_data
 
@@ -1214,7 +1235,7 @@ class UpdateApplier(QObject):
         self,
         release_data: Optional[dict], # данные релиза GitHub (None — нет данных)
         parent: Optional[QObject] = None, # родитель Qt
-    ):
+    ) -> None:
         """
         Args:
             release_data (Optional[dict]): Данные релиза; ``None`` — ошибка «нет файла
@@ -1233,6 +1254,10 @@ class UpdateApplier(QObject):
 
         Returns:
             bool: ``True`` — поток скачивания работает.
+
+        Example:
+            >>> UpdateApplier(None).is_running()
+            False
         """
         return bool(self._downloader is not None and self._downloader.isRunning())
 

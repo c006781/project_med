@@ -144,6 +144,29 @@ AppUpdater.check_for_updates()
 | U16 | `verify=False` при `GITHUB_TOKEN` — молча | В журнале не видно, что сертификат не проверялся | `logger.warning` (без токена); поведение не изменено (ТД-4) |
 | U17 | Описание релиза — только автоматические заметки | Негде взять хеш | Шаг «Compute SHA-256» в `create-release`, `body_path` + `generate_release_notes` |
 
+### Проход 5 (2026-10-31) — итоговая перепроверка модуля
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| U18 | Вложенная `_name` в `select_release_asset` без докстринга и комментария параметра; `__init__` `UpdateChecker`, `UpdateApplier` без `-> None` | Правило проекта: докстринги и типы у всего | Докстринг, параметр на строку, `-> None` |
+| U19 | Без `Example` — простые `current_system`, `UpdateChecker._parse_version`, `UpdateDownloader._remove_quietly`, `AppUpdater.pending_release_data`, `UpdateApplier.is_running` | Примеры проверяются `test_doctests` | Примеры добавлены |
+
+Проверено и оставлено:
+* `pyflakes`: 3 неиспользуемых импорта (`shutil`, `tempfile`, `AppConfigManager`) — были в
+  модуле до переработки, оставлены по правилу проекта (проход 2).
+* Без `Example` намеренно: методы потоков и сетевые (`is_github_reachable`, `_get_token`,
+  `_build_request`, `_process_response`, оба `run`, `_get_headers`, `_download_file`,
+  `check_for_updates`, `apply_update_from_release`, `download_update`, `apply_update`,
+  `start`, `_apply_update`, обработчики сигналов) — пример ушёл бы в сеть, запустил поток или
+  закрыл программу; их поведение проверяют тесты с подменой `urlopen` / `requests.get`.
+* Старые докстринги в формате `имя (тип): …` (Google) не переводились в формат образца
+  `имя : (тип)` — массово не переводить (решение владельца 2026-10-30).
+* `AppUpdater.download_update` скачивает без сверки хеша: у него нет данных релиза (только
+  адрес), окно его не вызывает — оставлено.
+
+Полный набор: 2151 прошли, 0 падают, 8 пропущено, 5 xfail (было 2121 / 0 / 8 / 5 — +30
+тестов прохода 4).
+
 ---
 
 ## 4. Дальше

@@ -365,7 +365,14 @@ def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: 
                 else:                                    # cascade
                     for i in ids:
                         remove((referrer_type, i))
-        adapter.delete(node[0], node[1], tx)
+        # adapter.delete(node[0], node[1], tx)
+        # ↑ до 2026-10-31 (Ф1.3.4): цель ссылок, которую хранилище данных уже убрало в этой
+        #   же транзакции (сервис сам удаляет ставшую ненужной общую заметку, когда запись
+        #   сменила текст), удалялась ещё раз — «не найдено» и откат ВСЕГО сохранения.
+        #   Теперь такая цель считается удалённой: удалять нечего.
+        if not (schema.referrers(node[0]) and hasattr(adapter, 'read')
+                and adapter.read(node[0], node[1], tx) is None):
+            adapter.delete(node[0], node[1], tx)
         removed.append(node)
         for ref in collected:
             target = (values or {}).get(ref.field)

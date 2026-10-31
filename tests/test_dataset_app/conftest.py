@@ -11,7 +11,7 @@ import pytest
 
 from app.database import Database
 from app.draft.integration import AppDrafts, ServiceAdapter, build_app_schema, make_parent_resolver
-from app.dto.dto_all import AppointmentDTO, PatientDTO, PhotoDTO
+from app.dto.dto_all import AppointmentDTO, AppointmentNoteDTO, PatientDTO, PhotoDTO
 from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
 from app.services import AppointmentService, NoteService, PatientService, PhotoService
 from app.utils.drafts import DraftStore
@@ -28,7 +28,9 @@ def services(tmp_path):
     appointment = AppointmentService(db, note_service=note, photo_service=photo,
                                      field_configs=APPOINTMENT_CONFIG)
     patient = PatientService(db, field_configs=PATIENT_CONFIG, appointment_service=appointment)
-    yield {'patient': patient, 'appointment': appointment, 'photo': photo, 'db': db}
+    # yield {'patient': patient, 'appointment': appointment, 'photo': photo, 'db': db}
+    # ↑ до 2026-10-31 (Ф1.3.4): заметки — тип записи черновиков (общие данные реестра таблиц)
+    yield {'patient': patient, 'appointment': appointment, 'photo': photo, 'note': note, 'db': db}
     db.close()
 
 
@@ -55,6 +57,7 @@ def app_drafts(services, providers):
         'patient': (providers['patient'], PatientDTO),
         'appointment': (providers['appointment'], AppointmentDTO),
         'photo': (providers['photo'], PhotoDTO),
+        'note': (providers['note'], AppointmentNoteDTO),
     }, transaction_factory=lambda: services['db'].session_scope())
     schema = build_app_schema()
     store = DraftStore(schema, parent_resolver=make_parent_resolver(schema, adapter))

@@ -153,30 +153,69 @@ def kind_of(annotation: Any, config: Mapping[str, Any]) -> FieldKind:
     return FieldKind.ANY
 
 
-def references_of(model: Any) -> Dict[str, str]:
+def foreign_keys_of(model: Any) -> Dict[str, str]: # все внешние ключи модели, в том числе на заметки
     """
-    Поля-ссылки модели на родительские таблицы (внешние ключи, кроме заметок).
+    Возвращает все поля модели с внешним ключом и таблицы, на которые они ссылаются.
+
+    В отличие от :func:`references_of` ссылки на общие заметки не отбрасываются: их
+    использует реестр таблиц (``app/tables``), чтобы описать заметки как ссылки на общие
+    данные (черновики не дают удалить заметку, на которую ссылаются записи).
 
     Args:
-        model: Класс модели SQLAlchemy (``None`` — ссылок нет).
+        model : (type/None) Класс модели SQLAlchemy; None — ссылок нет.
 
     Returns:
-        «столбец → таблица».
+        (dict) «столбец → таблица» в порядке столбцов модели.
 
-    Пример:
-        >>> from app.database.database_shema.clinic import Photo
-        >>> references_of(Photo)
-        {'appointment_id': 'appointments'}
+    Example:
+        >>> from app.database.database_shema.clinic import Patient
+        >>> foreign_keys_of(
+        ...     Patient,   # модель пациента
+        ... )
+        {'description_id': 'appointments_notes', 'comment_id': 'appointments_notes'}
     """
     if model is None:
         return {}
     result: Dict[str, str] = {}
     for column in model.__table__.columns:
         for fk in column.foreign_keys:
-            table = fk.column.table.name
-            if table != NOTES_TABLE:
-                result[column.name] = table
+            result[column.name] = fk.column.table.name
     return result
+
+
+def references_of(model: Any) -> Dict[str, str]: # ссылки на таблицы-родители (без заметок)
+    """
+    Возвращает поля-ссылки модели на родительские таблицы (внешние ключи, кроме заметок).
+
+    Args:
+        model : (type/None) Класс модели SQLAlchemy; None — ссылок нет.
+
+    Returns:
+        (dict) «столбец → таблица».
+
+    Example:
+        >>> from app.database.database_shema.clinic import Photo
+        >>> references_of(
+        ...     Photo,     # модель фото
+        ... )
+        {'appointment_id': 'appointments'}
+    """
+    # if model is None:
+    #     return {}
+    # result: Dict[str, str] = {}
+    # for column in model.__table__.columns:
+    #     for fk in column.foreign_keys:
+    #         table = fk.column.table.name
+    #         if table != NOTES_TABLE:
+    #             result[column.name] = table
+    # return result
+    # ↑ до 2026-10-31 (Ф1.3.4): обход внешних ключей был здесь; теперь он общий с
+    #   foreign_keys_of (реестру таблиц нужны и ключи на заметки), поведение то же.
+    return {
+        name: table
+        for name, table in foreign_keys_of(model).items()
+        if table != NOTES_TABLE                 # заметка — поле записи, а не её родитель
+    }
 
 
 def fields_from_config(config: Mapping[str, Mapping[str, Any]], dto_class: Optional[Type[Any]] = None,

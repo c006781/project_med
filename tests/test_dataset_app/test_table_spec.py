@@ -38,11 +38,18 @@ def test_clinic_tree_and_schema_same_as_before():
     assert (CLINIC.parent('photos'), CLINIC.parent_field('photos')) == ('appointments', 'appointment_id')
     assert CLINIC.parent('patients') is None and CLINIC.children('patients') == ['appointments']
     described = [(t.name, t.parent, t.parent_field, t.label) for t in CLINIC.drafts_schema()]
+    # assert described == [('patient', None, None, 'Пациент'),
+    #                      ('appointment', 'patient', 'patient_id', 'Приём'),
+    #                      ('photo', 'appointment', 'appointment_id', 'Фото')]
+    # ↑ до 2026-10-31 (Ф1.3.4): заметок в схеме черновиков не было; теперь — корневой тип
+    #   общих данных после дерева (test_notes_links.py)
     assert described == [('patient', None, None, 'Пациент'),
                          ('appointment', 'patient', 'patient_id', 'Приём'),
-                         ('photo', 'appointment', 'appointment_id', 'Фото')]
+                         ('photo', 'appointment', 'appointment_id', 'Фото'),
+                         ('note', None, None, 'Заметка')]
     assert [(t.name, t.parent) for t in build_app_schema()] == [(n, p) for n, p, _, _ in described]
-    assert CLINIC.service_adapter().entities() == ['patient', 'appointment', 'photo']
+    # assert CLINIC.service_adapter().entities() == ['patient', 'appointment', 'photo']
+    assert CLINIC.service_adapter().entities() == ['patient', 'appointment', 'photo', 'note']
 
 
 def spec(name, entity, model, dto, config, service=lambda: None, **kw):

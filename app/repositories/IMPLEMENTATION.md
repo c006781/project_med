@@ -88,7 +88,7 @@ REPO1–REPO3 (2026-10-16) описаны в `app/services/IMPLEMENTATION.md` §
   без `ORDER BY` (порядок не задан); для страниц — `get_page*`.
 * `get_unique_values` возвращает и `None` (пустые ячейки). Вызывающий, который делает строки
   (`str(v)`), получит `'None'` — например, подсказки описаний фото в
-  `appointment_list_page.py` (вопрос владельцу — файл хода M10, не в этом модуле).
+  `appointment_list_page.py` (вопрос владельцу — `_dev/ВОПРОСЫ.md` В-16, не в этом модуле).
 * `'fuzzy'` внутри `'or'` — `ValueError` из `apply_filters` (DATA4b): нечёткий отбор возможен
   только на уровне «И».
 * Сортировка — только по столбцам модели; по заметкам и `sql_compute` — `BaseService`.
@@ -99,7 +99,9 @@ REPO1–REPO3 (2026-10-16) описаны в `app/services/IMPLEMENTATION.md` §
 уникальные значения, выборки по пациенту и приёму), `test_repositories_page.py` (страницы,
 фильтры, связи, счёт), `test_repositories_review.py` (REPO1–REPO3, характеризующие),
 `test_repositories_check.py` (R1–R6). Фикстуры — `tests/conftest.py` (`db_session` с откатом
-транзакции, `sample_*`, `*_repo`).
+транзакции, `sample_*`, `*_repo`). В старых файлах `test_repositories*.py` pyflakes видит
+неиспользуемые импорты (`pytest`, `time`, репозитории) — безвредно, убрать при случае
+(2026-10-31).
 
 ## 6. Журнал
 

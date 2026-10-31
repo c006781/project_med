@@ -108,11 +108,21 @@ def test_direct_validation_and_service_errors(services, providers, filled):
     with pytest.raises(ValidationError):
         clinic.patients.post()
     clinic.patients.cancel()
-    clinic.patients.append({'last_name': 'Без', 'first_name': 'Даты'})            # дата обязательна
-    with pytest.raises(ValidationError, match='Дата рождения'):
+    # clinic.patients.append({'last_name': 'Без', 'first_name': 'Даты'})            # дата обязательна
+    # with pytest.raises(ValidationError, match='Дата рождения'):
+    #     clinic.patients.post()
+    # assert clinic.patients.state is State.INSERT
+    # clinic.patients.cancel()
+    # ↑ до 2026-10-31 (ТД-14): дата рождения была обязательной; решение владельца 2026-10-31 —
+    #   необязательна. Обязательное поле проверяем на имени.
+    clinic.patients.append({'last_name': 'Без', 'first_name': ''})                # имя обязательно
+    with pytest.raises(ValidationError, match='Имя'):
         clinic.patients.post()
     assert clinic.patients.state is State.INSERT
     clinic.patients.cancel()
+    clinic.patients.append({'last_name': 'Без', 'first_name': 'Даты'})            # дата необязательна
+    clinic.patients.post()
+    assert clinic.patients.state is not State.INSERT
     clinic.close()
 
 

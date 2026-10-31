@@ -23,6 +23,15 @@ Example:
 import re
 from typing import Any, Optional, Sequence, Tuple
 
+# Поля пациента, по которым пациент считается тем же: ФИО и ПОЛНАЯ дата рождения (решение
+# владельца 2026-10-31) — общие для поиска при импорте и для дублей при объединении
+PATIENT_KEY_FIELDS = (
+    'last_name',
+    'first_name',
+    'middle_name',
+    'birth_date',
+)
+
 # Поля приёма, по которым приём считается повторным (ТД-8: дата и все тексты)
 APPOINTMENT_KEY_FIELDS = (
     'date',

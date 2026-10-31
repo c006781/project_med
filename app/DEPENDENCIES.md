@@ -72,3 +72,22 @@
 Тесты: `tests/test_dependencies_shared_db.py` (10; на старом коде падают тесты общего
 объекта, `reopen_db`, `close_db`, `closed`), `tests/test_config/test_config_applier_db.py`
 (5); `tests/test_database_shema/test_session_lists.py` — без изменений, проходит.
+
+### Ф1.6.11, сверка модуля (2026-10-31, М12, ветка `rework_work/dependencies`)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| DP7 | `get_text_echo`: `if not if_str_limit: if_str_limit = 50`, ниже — «0 и меньше — без ограничения» | `0` (по замыслу «не ограничивать») тоже давал 50 — ветка «без ограничения» достижима только отрицательным числом. CLI сейчас лимит не передаёт — поведение команд не меняется | `None` — 50, `0` и меньше — без ограничения |
+| DP8 | Над `create_database` — `AppLogger.get_instance(…).log_execution_time(…)` без `@` | Выражение вычислялось и отбрасывалось: функция не оборачивалась, время выполнения не писалось в журнал (у остальных функций модуля пишется) | `@` добавлен |
+| DP9 | `collect_dto_from_input`: второй `if not value and not f['required']` после такого же | Недостижимый код | В комментарий |
+| D | Описания: у `get_patient_service`, `get_appointment_service` их не было; `clear_services_cache` — «вызывается в `reload_config` сервисов» (не вызывается с 2026-10-14, только тесты); `create_click_options` — «для update id обязателен» (на деле при update все опции необязательны, `id` проверяет команда); `init_db`, `get_text_echo`, `get_key_value_dto`, `get_dto_fields`, `collect_dto_from_input`, `create_database` — в формате reST, без примеров и типа результата; аннотация `'PatientMergeService'` без импорта (pyflakes: undefined name) | Описание расходилось с кодом | Google-описания с `Example` у всех функций; типы параметров и результата; импорт `PatientMergeService` под `TYPE_CHECKING`; описание модуля — что в нём |
+
+Итоговая сверка (2026-10-31): проверка AST `app/dependencies.py` (описание и `Example` у
+каждой функции и класса, типы параметров и результата) — 0 замечаний; pyflakes — 0.
+Ревью всего модуля — замечаний сверх таблицы нет. Оставлено как есть: тела старых функций
+CLI (`get_photo_service` — пометка «поправить на другой, что бы был адоптив»,
+`create_click_options` — все типы, кроме `int`, строкой) — поведение команд не трогалось
+(тесты CLI отключены, ТД-3); вызовы в телах нетронутых функций — в прежнем формате
+(переформатирование — по ходу правок, ДОГОВОРЁННОСТИ «Переформатирование»).
+
+Тесты: `tests/test_dependencies_review_f1611.py` (2; на старом коде оба падают).

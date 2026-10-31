@@ -1029,16 +1029,48 @@ class Database:
         освобождает соединения движка (``engine.dispose()``).
 
         Вызывается при завершении работы приложения или при перезагрузке конфигурации.
-        После ``close()`` объект больше не используется.
+        После ``close()`` объект больше не используется: ``closed`` — ``True``, общий
+        ``Database`` приложения (``app.dependencies.get_db``) по этому признаку открывается
+        заново (ТД-6). Повторный вызов безопасен (сервисы при перезагрузке настроек
+        закрывают свою, уже закрытую базу).
 
         Example:
             >>> db.close()
+            >>> db.closed
+            True
         """
 
         self.Session.remove()
         self.engine.dispose()
+        self._closed = True  # признак для общего Database приложения (ТД-6)
 
         self.logger.debug("Database engine disposed")
+
+    @property
+    def closed(self) -> bool: # закрыта ли база (close() уже вызван)
+        """
+        Возвращает ``True``, если у базы уже вызван :meth:`close`.
+
+        SQLAlchemy после ``dispose()`` движок не запрещает — новые соединения открылись бы
+        молча; признак нужен, чтобы общий ``Database`` приложения
+        (``app.dependencies.get_db``, ТД-6) не отдавал закрытую базу, а открывал новую.
+        Объект, созданный без ``__init__`` (тесты), — не закрыт.
+
+        Returns:
+            (bool) База закрыта.
+
+        Example:
+            >>> db = Database(
+            ...     'sqlite:///clinic.db',   # файл базы
+            ... )
+            >>> db.closed
+            False
+        """
+        return getattr(
+            self,
+            '_closed',   # ставит close()
+            False,       # не закрывалась
+        )
 
     @AppLogger.get_instance(
         name = 'Database',

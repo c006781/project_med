@@ -188,6 +188,17 @@ SettingsPage._save:
 только пути). `get_db()` передаёт его в `Database(log_sql_params=…)`. Подробно —
 `app/database/IMPLEMENTATION.md` §9; переключатель на экране — `_dev/ПЛАН.md` Ф2.2.7.
 
+### 4.y Общая база приложения (2026-10-31, М12, ТД-6)
+
+`ServiceHooks.reopen_database` (необязательный, по умолчанию `None`) — переоткрыть общий
+`Database` приложения; `create_config_applier()` передаёт `app.dependencies.reopen_db`.
+`apply_database` вызывает его ДО перезагрузки сервисов: новая база открыта, прежняя закрыта,
+сервисы в `reload_config()` берут уже открытую новую. Ошибка открытия — исключение из
+`apply_database` (`apply_changes` → `errors['database']`), сервисы не перезагружаются и
+остаются на прежней, открытой базе (раньше каждый сервис сам открывал новую базу и при
+ошибке оставался на закрытой прежней). Без обработчика (`None`) — как до ТД-6. Подробно —
+`app/DEPENDENCIES.md` DP6; тесты — `tests/test_config/test_config_applier_db.py`.
+
 ## 5. План / что дальше
 
 1. ✅ Характеризующие тесты, изоляция (`tests/test_config/conftest.py`).

@@ -77,6 +77,21 @@ jobs:
           else
             echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
+      # Хеши SHA-256 файлов релиза — в описание релиза: программа (app/updater.py) находит
+      # строку «<64 hex>  <имя файла>» (формат sha256sum) по имени выбранного файла и
+      # сверяет скачанный файл до установки. Имена — без пути (cd в папку артефакта).
+      - name: Compute SHA-256 of release files
+        run: |
+          set -euo pipefail
+          {
+            echo '### SHA-256'
+            echo
+            echo '```'
+            (cd artifacts/MedicalApp-windows && sha256sum MedicalApp.exe)
+            (cd artifacts/MedicalApp-linux && sha256sum MedicalApp-linux.tar.gz)
+            echo '```'
+          } > release_hashes.md
+          cat release_hashes.md
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -84,4 +99,6 @@ jobs:
             artifacts/MedicalApp-windows/MedicalApp.exe
             artifacts/MedicalApp-linux/MedicalApp-linux.tar.gz
           prerelease: ${{ steps.version.outputs.prerelease }}
+          # Описание = блок хешей + заметки GitHub (body ставится перед generate_release_notes)
+          body_path: release_hashes.md
           generate_release_notes: true

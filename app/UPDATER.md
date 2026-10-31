@@ -2,7 +2,8 @@
 
 > Файл для разработчиков: что делает модуль, как устроен, почему так и журнал проверок.
 > Обновляется вместе с кодом.
-> Последнее обновление: 2026-10-21, проходы 1–3 (ветка `rework-updater`).
+> Последнее обновление: 2026-10-31, проход 4 — проверка файла релиза по SHA-256
+> (ветка `rework_work/updater`); проходы 1–3 — 2026-10-21 (ветка `rework-updater`).
 
 | Что | Где |
 |---|---|
@@ -10,6 +11,7 @@
 | Окно (`UpdateMixin`, автопроверка при старте) | [main_window.py](../interfaces/gui/gui_window/main_window.py) |
 | Переименование нового exe после замены (`--rename-to`) | [main_gui_window.py](../main_gui_window.py) |
 | Версия программы / репозиторий | [VERSION](../VERSION), `app/config/__init__.py` (`APP_VERSION`, `GITHUB_REPO_SLUG`) |
+| Публикация хешей SHA-256 в описании релиза | [release.yml](../.github/workflows/release.yml) (задача `create-release`) |
 | Тесты | [tests/test_updater/](../tests/test_updater/) |
 
 ---
@@ -24,22 +26,44 @@ AppUpdater.check_for_updates()
   └─ UpdateApplier.start()
        ├─ auto_update_unavailable_reason(ОС, собран?) → error ДО скачивания
        ├─ select_release_asset(assets, ОС) → нет файла → error
+       ├─ release_asset_sha256(release, имя файла) → нет хеша → warning (журнал + сигнал), дальше
        └─ UpdateDownloader (QThread): <exe_dir>/MedicalApp_new_<t>.exe.part → проверка
-          размера → os.replace → UpdateApplier._apply_update()
+          размера → file_sha256(.part) == хеш релиза? (нет → error, .part удаляется)
+          → os.replace → UpdateApplier._apply_update()
             └─ build_windows_update_script → update.ps1 (ждёт выхода, удаляет старый exe,
                запускает новый с --rename-to <старое имя>) → выход из программы
 ```
 
 Логика без Qt — функции модуля: `normalize_version`, `parse_version`, `is_newer_version`,
 `mask_token`, `github_headers`, `current_system`, `select_release_asset`, `update_file_name`,
-`build_windows_update_script`, `auto_update_unavailable_reason`. Справочники:
+`parse_release_hashes`, `release_asset_sha256`, `file_sha256`, `build_windows_update_script`,
+`auto_update_unavailable_reason`. Справочники:
 `ASSET_RULES`, `UPDATE_FILE_EXTENSIONS`, `AUTO_UPDATE_SYSTEMS`, `DOWNLOAD_CHUNK_SIZE`.
+
+Сигналы предупреждений (2026-10-31): `UpdateApplier.warning(str)` →
+`AppUpdater.download_warning(str)` — установка продолжается (сейчас: в описании релиза нет
+хеша выбранного файла). Окно пока не подключает — предупреждение только в журнале.
+
+### Хеш файла релиза (SHA-256)
+
+* `release.yml`, задача `create-release`: после скачивания артефактов шаг «Compute SHA-256»
+  пишет `release_hashes.md` — блок с выводом `sha256sum` (`<64 hex>  <имя файла>`, имена без
+  пути); `softprops/action-gh-release@v2` берёт его в `body_path`, а с
+  `generate_release_notes: true` ставит перед автоматическими заметками (body + notes).
+* Программа: `UpdateChecker` уже получает весь JSON релиза (`body` в нём) →
+  `AppUpdater.pending_release_data` → `UpdateApplier.start` ищет строку для имени выбранного
+  файла (`release_asset_sha256`, без учёта регистра) → `UpdateDownloader(expected_sha256=…)`
+  сверяет `.part` после проверки размера, ДО `os.replace`.
+* Формат строки: как `sha256sum` — два пробела или ` *` (двоичный режим, так пишет
+  `sha256sum` Git Bash); путь перед именем отбрасывается; повтор имени — действует первая
+  строка.
 
 ### 1.1 Как добавить ОС
 
 1. `ASSET_RULES[<ос>] = ((слова в имени,), (окончания,))` — выбор файла релиза.
 2. `UPDATE_FILE_EXTENSIONS[<ос>]` — расширение скачанного файла.
-3. Замена файла — ветка в `UpdateApplier._apply_update` (по образцу
+3. Хеш — строка для имени файла новой ОС в `release.yml` (шаг «Compute SHA-256»).
+4. Замена файла — ветка в `UpdateApplier._apply_update` (по образцу
    `build_windows_update_script` — отдельная функция-генератор скрипта) и ОС в
    `AUTO_UPDATE_SYSTEMS`.
 
@@ -57,15 +81,24 @@ AppUpdater.check_for_updates()
 | Скрипт PowerShell — функция `build_windows_update_script` | Текст не изменился (тест сравнения со старым выводом при переносе); теперь проверяется тестами |
 | Имена классов, сигналов, `UpdateChecker._parse_version` сохранены | Окно и `main_gui_window.py` менять не нужно; `_parse_version` вызывает `is_newer_version` |
 | Прежний код — в комментарии внизу файла | Правило проекта |
+| Хеш — в описании релиза, а не отдельным файлом релиза | Описание приходит в том же ответе API, что и список файлов (`UpdateChecker`), — второй запрос не нужен; отдельный `.sha256`-файл мог бы попасть под правила выбора файла ОС (`ASSET_RULES`) |
+| Описание релиза получено по `urllib` с проверкой сертификата, файл — по `requests` | При токене (`verify=False`, ТД-4) хеш приходит по проверенному каналу — подмена файла при скачивании обнаружится сверкой |
+| Релиз без хеша — предупредить и установить | Решение владельца 2026-10-31: старые релизы (до публикации хешей) должны ставиться; предупреждение — журнал и `download_warning` |
+| Хеш считается по `.part` после скачивания (`file_sha256`), а не на лету | Проверяется ровно то, что лежит на диске и будет переименовано; файл читается порциями `DOWNLOAD_CHUNK_SIZE`, лишнее чтение ~100 МБ — доли секунды |
+| `verify=False` при токене не менялся, добавлено предупреждение в журнал | Решение владельца 2026-10-31 (ТД-4: токен — только для тестирования); проверка на собранном exe — Ф3.5 |
+| Ошибка сверки — `ValueError` в `UpdateDownloader.run` | Общая ветка `except` удаляет `.part` и шлёт `error(текст)` — установка не начинается |
 
 ---
 
 ## 2. Тесты
 
-`tests/test_updater/` — 93 теста (2026-10-21): функции, потоки (`run` с подменённым
+`tests/test_updater/` — 123 теста (2026-10-31; было 93 — 2026-10-21): функции, потоки (`run` с подменённым
 `urlopen`/`requests.get`), `AppUpdater`, `UpdateApplier` (подмена ОС и `sys.frozen`),
 примеры из докстрингов. Тесты прохода 1 проверены на старом модуле: 80 падают, 10
-проходят — это тесты на поведение, которое не должно было измениться.
+проходят — это тесты на поведение, которое не должно было измениться. Тесты прохода 4
+(`test_updater_review_pass4.py`, 30) на старом модуле не собираются (нет `file_sha256` и др.);
+файлы обоих ОС (`.exe`, `.tar.gz`); `release.yml` проверяется по тексту (шаг хешей,
+`body_path`, `generate_release_notes`).
 
 ---
 
@@ -102,6 +135,15 @@ AppUpdater.check_for_updates()
 
 Полный набор: 1557 прошли, 10 известных падений, новых нет.
 
+### Проход 4 (2026-10-31) — проверка файла релиза по SHA-256
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| U14 | Скачанный файл релиза проверялся только по размеру | Подменённый (MITM, особенно при `verify=False` с токеном) или испорченный файл устанавливался | `release.yml` публикует `sha256sum` файлов в описании релиза; `parse_release_hashes`, `release_asset_sha256`, `file_sha256`; `UpdateDownloader(expected_sha256=…)` — сверка до `os.replace`, не совпал — `error`, `.part` удаляется |
+| U15 | — (новое) | Релизы без хеша (старые) не должны ломать обновление | Хеша нет — `logger.warning` + `UpdateApplier.warning` → `AppUpdater.download_warning`, установка без сверки |
+| U16 | `verify=False` при `GITHUB_TOKEN` — молча | В журнале не видно, что сертификат не проверялся | `logger.warning` (без токена); поведение не изменено (ТД-4) |
+| U17 | Описание релиза — только автоматические заметки | Негде взять хеш | Шаг «Compute SHA-256» в `create-release`, `body_path` + `generate_release_notes` |
+
 ---
 
 ## 4. Дальше
@@ -109,4 +151,9 @@ AppUpdater.check_for_updates()
 * Окно (`UpdateMixin`): обработчики `_on_download_finished`/`_on_download_error`
   перекрыты одноимёнными `SyncMixin` (_dev/ОСТАЛОСЬ.md п. 1.4); `pending_release_data` вместо
   `hasattr`; `is_github_reachable()` при старте блокирует окно до 3 с.
-* ТЕХДОЛГ: ТД-4 (`verify=False`), ТД-5 (автообновление на Linux).
+* Окно: подключить `AppUpdater.download_warning` (показать предупреждение «нет контрольной
+  суммы» — не мешая установке); ошибка сверки SHA-256 приходит в `download_error`, как раньше.
+* ТЕХДОЛГ: ТД-4 (`verify=False` — проверка на собранном exe, Ф3.5), ТД-5 (автообновление на
+  Linux — варианты у владельца).
+* Первый релиз после правки — проверить описание (блок SHA-256 перед заметками) и обновление
+  с ним; релиз до правки — предупреждение и установка.

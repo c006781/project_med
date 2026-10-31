@@ -946,22 +946,40 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _apply_order_by(
         self,
-        query: Query,
-        order_by: Optional[List] = None,
-    ) -> Query:
+        query    : Query,                   # запрос по модели сервиса
+        order_by : Optional[List] = None,   # поля сортировки: 'поле' / '-поле'
+    ) -> Query: # запрос с ORDER BY, id — последним ключом
         """
-        Применяет сортировку к запросу.
+        Применяет сортировку к запросу; последним ключом всегда ``id`` (ОСТ п. 1.11).
+
+        Поле — столбец таблицы, текст заметки или вычисляемое ``sql_compute``
+        (:meth:`_order_expression`); ``'-поле'`` — по убыванию; неизвестное поле —
+        предупреждение в журнал и пропуск. Затем добавляется ``id`` по возрастанию
+        (:meth:`_id_tiebreaker`): без него порядок строк в SQL не задан (сортировки нет или
+        ключи равны), и соседние страницы ``offset`` / ``limit`` могли повторять одни записи
+        и терять другие. Так же устроены страницы репозиториев (R3, М10).
 
         Args:
-            query (Query): Исходный запрос SQLAlchemy.
-            order_by (Optional[List]): Список имён полей для сортировки.
-                Поле может начинаться с '-' для убывания.
+            query    : (Query) Исходный запрос SQLAlchemy по ``self._model_class``.
+            order_by : (List[str]/None) Имена полей; ``'-'`` в начале — по убыванию.
+                None или пусто — только по ``id``.
 
         Returns:
-            Query: Модифицированный запрос.
+            (Query) Запрос с ``ORDER BY``.
+
+        Example:
+            >>> query = service._apply_order_by(
+            ...     session.query(Appointment),   # все приёмы
+            ...     ['-date'],                     # новые сверху
+            ... )
+            >>> str(query).split('ORDER BY')[1].split()
+            ['appointments.date', 'DESC,', 'appointments.id', 'ASC']
         """
-        if not order_by:
-            return query
+        # if not order_by:
+        #     return query
+        # ↑ до 2026-10-31 (ОСТ п. 1.11): без сортировки — запрос без ORDER BY, при равных
+        #   ключах — без второго ключа; порядок страниц не задан (повторы и потери записей).
+        order_by = order_by or []
 
         # order_clauses = []
         # for field_spec in order_by:
@@ -990,10 +1008,36 @@ class BaseService(
                 )
                 continue
             order_clauses.append(expression.desc() if descending else expression.asc())
+        # if order_clauses:
+        #     query = query.order_by(*order_clauses)
+        # ↑ до 2026-10-31 (ОСТ п. 1.11): id последним ключом — ниже.
+        order_clauses.extend(
+            self._id_tiebreaker(),  # id по возрастанию
+        )
         if order_clauses:
             query = query.order_by(*order_clauses)
 
         return query
+
+    def _id_tiebreaker(self) -> List[Any]: # последний ключ сортировки страниц
+        """
+        Возвращает ``[<модель>.id.asc()]`` — последний ключ сортировки страниц.
+
+        У модели без столбца ``id`` — пустой список (сортировка как задана). То же, что
+        ``BaseRepository._id_tiebreaker`` (R3, М10): сервис собирает страницы сам, не через
+        репозиторий.
+
+        Returns:
+            (List[Any]) Выражения для ``order_by``: одно или ни одного.
+
+        Example:
+            >>> [str(c) for c in patient_service._id_tiebreaker()]
+            ['patients.id ASC']
+        """
+        column = getattr(self._model_class, 'id', None)
+        if column is None:
+            return []
+        return [column.asc()]
 
     def _order_expression(self, field_name: str) -> Any:
         """

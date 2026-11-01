@@ -335,3 +335,65 @@ def test_database_rejects_unknown_action_name_at_open(monkeypatch, tmp_path):
     with pytest.raises(TableEventError, match='patients.after_insert: no_such_action'):
         Database(f"sqlite:///{path.as_posix()}")
     assert not path.exists()            # до открытия базы
+
+
+# ---------------------------------------------------------------------- шаг 2а (Р-16, Р-18, Р-21)
+
+
+def test_close_without_rollback_does_not_leak_log(calls, tmp_path):
+    """Р-16: брошенная транзакция (close() без отката) — её строки не достаются следующей."""
+    base, owner, _ = _models(
+        owner_events = (on('after_commit', 'probe'), on('after_rollback', 'probe2')),
+    )
+    factory = _factory(base, tmp_path / 'e.db')
+    s = factory()
+    s.add(owner(text='брошенная'))
+    s.flush()
+    s.close()                           # ни коммита, ни отката — только after_transaction_end
+    assert calls == [('probe2', 'owners', 'after_rollback')]
+    calls.clear()
+    s.add(owner(text='следующая'))
+    s.commit()
+    s.close()
+    # «после коммита» получил только строку своей транзакции
+    assert [c[5] for c in calls] == [(('insert', 1),)]
+
+
+def test_savepoint_is_not_transaction_event(calls, tmp_path):
+    """Р-18: выпуск и откат точки сохранения — не коммит и не откат транзакции."""
+    base, owner, _ = _models(
+        owner_events = (
+            on('before_commit', 'probe'), on('after_commit', 'probe'), on('after_rollback', 'probe2'),
+        ),
+    )
+    factory = _factory(base, tmp_path / 'e.db')
+    with factory() as s:
+        s.add(owner(text='a'))
+        s.begin_nested().commit()       # выпуск точки сохранения
+        nested = s.begin_nested()
+        s.add(owner(text='b'))
+        s.flush()
+        nested.rollback()               # откат точки сохранения
+        assert calls == []
+        s.commit()
+    assert [c[2] for c in calls] == ['before_commit', 'after_commit']
+
+
+@pytest.mark.filterwarnings('ignore:Usage of the .Session.add\(\). operation')
+def test_row_action_changing_session_is_error(tmp_path):
+    """Р-21: действие строки добавляет строку внутри flush — TableEventError, откат."""
+    def sneaky(ctx):
+        ctx.session.add(ctx.target.__class__(text='тайком'))
+
+    te.register_action('sneaky', sneaky, replace=True)
+    try:
+        base, owner, _ = _models(owner_events=(on('after_insert', 'sneaky'),))
+        factory = _factory(base, tmp_path / 'e.db')
+        with factory() as s:
+            s.add(owner(text='a'))
+            with pytest.raises(TableEventError, match='внутри сброса'):
+                s.commit()
+            s.rollback()
+            assert s.query(owner).count() == 0
+    finally:
+        te.unregister_action('sneaky')

@@ -24,8 +24,10 @@
   нет (Р-8).
 * **Журнал транзакции** — изменённые строки таблиц, у которых есть действия транзакции
   (:class:`RowChange`): их получают действия «перед коммитом», «после коммита / отката».
-  Живёт в ``session.info`` и очищается и при коммите, и при откате (сессия —
-  ``scoped_session``, живёт дольше транзакции; как ТД-9).
+  Живёт в ``session.info``, привязан к корневой транзакции (слабой ссылкой) и забирается при
+  коммите, при откате и при конце транзакции без них (``close()`` — как откат, Р-16): сессия —
+  ``scoped_session``, живёт дольше транзакции (как ТД-9). Точки сохранения (``begin_nested``)
+  событиями транзакции не считаются (Р-18).
 
 Ошибки (Р-12): действие, отказывающее в операции, выбрасывает своё исключение приложения
 (``AppException``) — оно проходит как есть, ``flush`` / коммит падает, ``session_scope``
@@ -35,7 +37,8 @@
 
 Ограничения SQLAlchemy: действия строк выполняются ВНУТРИ flush — менять сессию (``add``,
 ``delete``) в них нельзя, можно только читать через ``ctx.connection`` и запоминать;
-изменения данных — в «перед коммитом». Изменения мимо ORM (``query().delete()``, сырой
+изменения данных — в «перед коммитом». Добавление / удаление строк сессии действием строки —
+``TableEventError`` (Р-21: SQLAlchemy такие правки молча теряет или вставляет после уборки). Изменения мимо ORM (``query().delete()``, сырой
 SQL) событий не вызывают — в коде их нет (тест ``tests/test_database_shema/test_orm_only.py``, Р-1).
 
 Example:
@@ -47,6 +50,7 @@ Example:
 
 from __future__ import annotations
 
+import weakref   # журнал транзакции — слабая ссылка на транзакцию (Р-16)
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -434,16 +438,44 @@ class _TransactionLog:
         []
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        transaction : Any = None,   # корневая транзакция сессии (None — пустой журнал)
+    ) -> None:
         """
-        Создаёт пустой журнал.
+        Создаёт пустой журнал корневой транзакции ``transaction`` (слабая ссылка: журнал
+        другой транзакции не подхватывается — Р-16).
+
+        Args:
+            transaction : (SessionTransaction/None) Корневая транзакция; None — журнал ни к
+                чему не привязан (пустой, для закончившейся транзакции без журнала).
 
         Example:
             >>> _TransactionLog().pending_old
             {}
         """
+        self.transaction = weakref.ref(transaction) if transaction is not None else None
         self.changes     : List[Tuple[Any, RowChange]] = []          # (описание, строка)
         self.pending_old : Dict[Tuple[str, Any], Dict[str, Any]] = {}  # (таблица, ключ) → значения до
+
+    def belongs_to(
+        self,
+        transaction : Any,   # корневая транзакция сессии
+    ) -> bool: # журнал этой транзакции
+        """
+        Возвращает ``True``, если журнал ведётся для транзакции ``transaction``.
+
+        Args:
+            transaction : (SessionTransaction) Корневая транзакция.
+
+        Returns:
+            (bool) Журнал этой транзакции.
+
+        Example:
+            >>> _TransactionLog(tx).belongs_to(tx)
+            True
+        """
+        return self.transaction is not None and self.transaction() is transaction
 
     def for_table(
         self,
@@ -527,8 +559,9 @@ class TableEvents:
         session_factory : Any,   # фабрика сессий (sessionmaker) с info={INFO_KEY: self}
     ) -> None: # вешает события сессии на фабрику (один раз)
         """
-        Вешает обработчики ``before_commit``, ``after_commit``, ``after_rollback`` на фабрику
-        сессий; повторный вызов для той же фабрики ничего не делает (Р-8).
+        Вешает обработчики ``before_commit``, ``after_commit``, ``after_rollback``,
+        ``after_transaction_end`` на фабрику сессий; повторный вызов для той же фабрики
+        ничего не делает (Р-8).
 
         Args:
             session_factory : (sessionmaker) Фабрика.
@@ -542,16 +575,21 @@ class TableEvents:
         event.listen(session_factory, 'before_commit', self._before_commit)
         event.listen(session_factory, 'after_commit', self._after_commit)
         event.listen(session_factory, 'after_rollback', self._after_rollback)
+        event.listen(session_factory, 'after_transaction_end', self._after_transaction_end)
         session_factory._table_events_listening = True
 
     # ------------------------------------------------------------------ журнал транзакции
 
-    @staticmethod
     def _log(
+        self,
         session : Any,   # сессия
     ) -> _TransactionLog: # журнал текущей транзакции (создаётся при первом обращении)
         """
-        Возвращает журнал текущей транзакции сессии (создаёт при первом обращении).
+        Возвращает журнал текущей корневой транзакции сессии (создаёт при первом обращении).
+
+        Журнал в ``session.info`` от другой транзакции (её закрыли так, что ни одно событие
+        журнал не забрало) — отбрасывается с предупреждением: его строки к этой транзакции
+        не относятся (Р-16).
 
         Args:
             session : (Session) Сессия.
@@ -560,12 +598,19 @@ class TableEvents:
             (_TransactionLog) Журнал.
 
         Example:
-            >>> TableEvents._log(session).changes
+            >>> events._log(session).changes
             []
         """
+        transaction = session.get_transaction()
         log = session.info.get(_TX_KEY)
+        if log is not None and not log.belongs_to(transaction):
+            self.logger.warning(
+                f"журнал событий таблиц закончившейся транзакции отброшен "
+                f"({len(log.changes)} строк)"
+            )
+            log = None
         if log is None:
-            log = session.info[_TX_KEY] = _TransactionLog()
+            log = session.info[_TX_KEY] = _TransactionLog(transaction)
         return log
 
     @staticmethod
@@ -718,6 +763,9 @@ class TableEvents:
             old = log.pending_old.get(row_key, {})
 
         if actions:
+            # внутри flush сессию менять нельзя: SQLAlchemy молча теряет правки чужих объектов,
+            # а новые вставляет уже после уборки (Р-21) — нарушение видно по числу new / deleted
+            before_change = (len(session.new), len(session.deleted))
             self._run(
                 actions,
                 EventContext(
@@ -730,6 +778,18 @@ class TableEvents:
                     old        = old,                  # прежние значения (изменение)
                 ),
             )
+            if (len(session.new), len(session.deleted)) != before_change:
+                raise TableEventError(
+                    f"действие события {event_name} таблицы {table_def.name} добавило или "
+                    f"удалило строки сессии внутри сброса в базу — так нельзя (изменения — в "
+                    f"«перед коммитом»)",
+                    details = {
+                        'таблица'  : table_def.name,              # где
+                        'место'    : event_name,                  # когда
+                        'действия' : ', '.join(actions),          # кто
+                        'id'       : row_key[1],                  # строка
+                    },
+                )
 
         if journal and event_name.startswith('after_'):
             before = log.pending_old.pop(row_key, {})
@@ -793,9 +853,13 @@ class TableEvents:
         Raises:
             AppException: Отказ действия; ``TableEventError`` — другая ошибка.
 
+        Точка сохранения (``begin_nested``) — не коммит транзакции: пропускается (Р-18).
+
         Example:
             >>> events._before_commit(session)
         """
+        if session.in_nested_transaction(): # выпуск точки сохранения — транзакция идёт дальше
+            return
         session.flush()
         log = self._log(session)
         for table_def in log.tables():
@@ -813,6 +877,7 @@ class TableEvents:
         """
         После коммита: выполняет действия «после коммита» таблиц с изменёнными строками;
         журнал транзакции забирается (следующая транзакция — с пустого). Ошибки — в журнал.
+        Выпуск точки сохранения пропускается (Р-18): данные ещё не закоммичены.
 
         Args:
             session : (Session) Сессия.
@@ -820,6 +885,8 @@ class TableEvents:
         Example:
             >>> events._after_commit(session)
         """
+        if session.in_nested_transaction():
+            return
         log = self._take_log(session)
         for table_def in log.tables():
             names = table_def.actions_for('after_commit')
@@ -837,13 +904,38 @@ class TableEvents:
         После отката: выполняет действия «после отката» таблиц с изменёнными (и теперь
         отменёнными) строками; журнал забирается. Ошибки — в журнал.
 
+        Откат точки сохранения пропускается (Р-18): транзакция идёт дальше. Её строки
+        остаются в журнале — точек сохранения ORM в программе нет, учёт по ним не ведётся.
+
         Args:
             session : (Session) Сессия.
 
         Example:
             >>> events._after_rollback(session)
         """
-        log = self._take_log(session)
+        if session.in_nested_transaction():
+            return
+        self._run_rollback_actions(
+            session,
+            self._take_log(session),
+        )
+
+    def _run_rollback_actions(
+        self,
+        session : Any,               # сессия
+        log     : _TransactionLog,   # журнал отменённой транзакции
+    ) -> None: # действия «после отката» по журналу
+        """
+        Выполняет действия «после отката» таблиц, строки которых есть в журнале отменённой
+        транзакции. Ошибки — в журнал.
+
+        Args:
+            session : (Session) Сессия.
+            log     : (_TransactionLog) Журнал.
+
+        Example:
+            >>> events._run_rollback_actions(session, log)
+        """
         for table_def in log.tables():
             names = table_def.actions_for('after_rollback')
             if names:
@@ -851,6 +943,42 @@ class TableEvents:
                     names,
                     self._transaction_context('after_rollback', table_def, session, log),
                 )
+
+    def _after_transaction_end(
+        self,
+        session     : Any,   # сессия
+        transaction : Any,   # закончившаяся транзакция
+    ) -> None: # закрывает журнал транзакции, брошенной без коммита и отката
+        """
+        Конец корневой транзакции: журнал, который не забрали ни коммит, ни откат, —
+        транзакцию закрыли без них (``close()``, ``Session.remove()``), изменения отброшены.
+        Журнал забирается и обрабатывается как откат: иначе его строки достались бы
+        следующей транзакции сессии (Р-16; ``close()`` вызывает только это событие).
+
+        Внутренние транзакции (сброс, точки сохранения) пропускаются.
+
+        Args:
+            session     : (Session) Сессия.
+            transaction : (SessionTransaction) Закончившаяся транзакция.
+
+        Example:
+            >>> events._after_transaction_end(session, session.get_transaction())
+        """
+        if transaction.parent is not None or transaction.nested:
+            return
+        log = session.info.get(_TX_KEY)
+        if log is None or not log.belongs_to(transaction):
+            return
+        session.info.pop(_TX_KEY, None)
+        if log.changes:
+            self.logger.warning(
+                f"транзакция закрыта без коммита и отката — изменения ({len(log.changes)} строк) "
+                f"отброшены, выполняются действия «после отката»"
+            )
+        self._run_rollback_actions(
+            session,
+            log,
+        )
 
 
 _ROW_LISTENERS_INSTALLED : bool = False   # обработчики событий строк стоят (один раз на процесс)

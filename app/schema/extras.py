@@ -7,11 +7,12 @@
 * ``mark`` — отметка строки (галочка для массовых действий);
 * ``calc`` — вычисляемый программой по своей строке;
 * ``total`` — итог по подчинённой таблице (считает программа или БД отдельным запросом);
-* ``ref`` — настройка связи-ссылки (правило удаления, переиспользуемые данные, показ).
+* ``ref`` — настройка связи-ссылки (показ цели; удаление цели — только запрет, пока на неё
+  ссылаются).
 
 Пример:
     >>> extras = (mark(), total('photo_count', 'Фото', 'photos', by='sql'))
-    >>> links = (ref('doctor_id', 'doctors', on_delete='set_null'),)
+    >>> links = (ref('doctor_id', 'doctors', display='name'),)
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence, Tuple
 
 from app.utils.dataset import AggFunc, Condition, FieldKind
+from app.utils.drafts import Reference
 
 
 @dataclass(frozen=True)
@@ -166,47 +168,90 @@ class Link:
     Связь-ссылка поля таблицы на другую таблицу реестра (не владение; 2026-10-18).
 
     Без описания каждый внешний ключ на таблицу реестра (кроме связи с родителем) —
-    ссылка с правилом «нельзя удалить, пока ссылаются». Описание меняет правило.
+    ссылка с правилом «нельзя удалить, пока ссылаются». Описание задаёт показ цели.
+
+    Удаление цели, на которую ещё ссылаются, — только отказ (``restrict``, 2026-11-01):
+    черновики данные БД сами не удаляют и не меняют сверх отданных изменений. Прежние
+    ``on_delete='set_null'`` / ``'cascade'`` и ``collect=True`` — ошибка ``SchemaError``
+    уже при создании (проверка черновиков ``Reference.check_rules`` — одна на оба
+    описания); поля оставлены, чтобы прежние вызовы не ломались.
 
     Attributes:
-        field: Поле ссылки (``doctor_id``).
-        table: Таблица цели (``doctors``).
-        on_delete: Цель удаляют, а на неё ссылаются записи, которые не удаляются:
-            ``'restrict'`` — отказ, ``'set_null'`` — ссылка обнуляется, ``'cascade'`` —
-            ссылающиеся удаляются тоже.
-        collect: Цель — переиспользуемые данные: удаляется, когда больше никому не нужна.
-        display: Что показывать вместо id и в списке выбора: поле цели или функция от
-            строки цели (по умолчанию — первое строковое видимое поле цели).
+        field     : (str) Поле ссылки (``doctor_id``).
+        table     : (str) Таблица цели (``doctors``).
+        on_delete : (str) Правило удаления цели — только ``'restrict'`` (по умолчанию).
+        collect   : (bool) Только ``False`` (по умолчанию): ставшие ненужными данные
+            убирает хранилище данных (сервис), а не черновики.
+        display   : (Any) Что показывать вместо id и в списке выбора: поле цели или
+            функция от строки цели (по умолчанию — первое строковое видимое поле цели).
 
-    Пример:
-        >>> ref('doctor_id', 'doctors', on_delete='set_null').on_delete
-        'set_null'
+    Example:
+        >>> ref('doctor_id', 'doctors').on_delete
+        'restrict'
     """
 
-    field: str
-    table: str
-    on_delete: str = 'restrict'
-    collect: bool = False
-    display: Any = None
+    field       : str                   # поле ссылки
+    table       : str                   # таблица цели
+    on_delete   : str   = 'restrict'    # правило удаления цели — только restrict
+    collect     : bool  = False         # только False: цель черновики сами не удаляют
+    display     : Any   = None          # показ цели: поле или функция от строки
+
+    def __post_init__(self) -> None: # проверка правил ссылки при описании таблицы
+        """
+        Проверяет правила ссылки так же, как черновики (``Reference.check_rules``).
+
+        Raises:
+            SchemaError: Правило, которого черновики не выполняют (``set_null``,
+                ``cascade``, неизвестное, ``collect=True``).
+
+        Example:
+            >>> ref('doctor_id', 'doctors', on_delete='set_null')
+            Traceback (most recent call last):
+            SchemaError: ссылка doctor_id: правило удаления 'set_null' не поддерживается — ...
+        """
+        Reference.check_rules(
+            self.field,         # поле — для сообщения
+            self.on_delete,     # правило удаления цели
+            self.collect,       # признак «переиспользуемые данные»
+        )
 
 
-def ref(field: str, table: str, on_delete: str = 'restrict', collect: bool = False,
-        display: Any = None) -> Link:
+def ref(
+    field       : str,                  # поле ссылки
+    table       : str,                  # таблица цели
+    on_delete   : str   = 'restrict',   # правило удаления цели — только restrict
+    collect     : bool  = False,        # только False
+    display     : Any   = None,         # показ цели: поле или функция от строки
+) -> Link: # настройка связи-ссылки для описания таблицы
     """
-    Настройка связи-ссылки (см. ``Link``).
+    Создаёт настройку связи-ссылки (см. ``Link``).
 
     Args:
-        field: Поле ссылки.
-        table: Таблица цели.
-        on_delete: Правило удаления цели.
-        collect: Цель — переиспользуемые данные.
-        display: Показ цели (поле или функция от строки).
+        field     : (str) Поле ссылки.
+        table     : (str) Таблица цели.
+        on_delete : (str) Правило удаления цели — только ``'restrict'``.
+        collect   : (bool) Только ``False`` (``True`` — ``SchemaError``).
+        display   : (Any) Показ цели (поле или функция от строки); None — первое
+            строковое видимое поле цели.
 
     Returns:
-        ``Link``.
+        (Link) Настройка ссылки.
 
-    Пример:
-        >>> ref('template_id', 'templates', collect=True).collect
-        True
+    Raises:
+        SchemaError: ``on_delete`` не ``'restrict'`` или ``collect=True`` (``Link``).
+
+    Example:
+        >>> ref(
+        ...     'template_id',          # поле ссылки
+        ...     'templates',            # таблица цели
+        ...     display   =   'title',  # показ цели — поле
+        ... ).display
+        'title'
     """
-    return Link(field, table, on_delete, collect, display)
+    return Link(
+        field,          # поле ссылки
+        table,          # таблица цели
+        on_delete,      # правило удаления цели
+        collect,        # признак «переиспользуемые данные»
+        display,        # показ цели
+    )

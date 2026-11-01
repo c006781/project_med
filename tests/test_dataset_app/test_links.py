@@ -5,8 +5,9 @@
 
 Тестовые таблицы: «врачи» (корень) и «назначения-заказы» (принадлежат приёму, ссылаются на
 врача). Проверяется: связи определяются из модели и настраиваются в описании; новая запись
-цели в черновиках выбирается в ссылке и при сохранении пишется раньше; правило удаления
-(запрет / обнуление) — с откатом всего; список выбора и показ текста вместо id.
+цели в черновиках выбирается в ссылке и при сохранении пишется раньше; правило удаления —
+только запрет, с откатом всего (2026-11-01: обнуления, каскада и «переиспользуемых данных»
+нет — ``ref`` с ними ошибка); список выбора и показ текста вместо id.
 """
 
 import os
@@ -20,7 +21,7 @@ from app.database.database_shema.clinic import Base
 from app.draft.integration import AppDrafts, make_parent_resolver
 from app.services.services_all import BaseService
 from app.tables import CLINIC, SpecError, TableRegistry, TableSpec, ref
-from app.utils.drafts import DeleteBlocked, DraftStore
+from app.utils.drafts import DeleteBlocked, DraftStore, SchemaError
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
@@ -105,12 +106,30 @@ def test_links_detected_and_configurable(link_services):
     assert reg.parent('test_orders') == 'appointments'
     assert [(l.field, l.table, l.on_delete) for l in reg.links('test_orders')] == [
         ('doctor_id', 'test_doctors', 'restrict')]            # ссылка по умолчанию — запрет
-    reg = registry(link_services, links=(ref('doctor_id', 'test_doctors', on_delete='set_null'),))
+    # reg = registry(link_services, links=(ref('doctor_id', 'test_doctors', on_delete='set_null'),))
+    # assert reg.parent('test_orders') == 'appointments'        # объявленная ссылка — не родитель
+    # refs = {t.name: t.references for t in reg.drafts_schema()}
+    # assert refs['order'][0].entity == 'doctor' and refs['order'][0].on_delete == 'set_null'
+    # ↑ до 2026-11-01 (Ф1.6.3а): ссылку настраивали правилом set_null; теперь правило одно,
+    #   объявленная ссылка задаёт показ цели, set_null / cascade / collect — ошибка (ниже)
+    reg = registry(link_services, links=(ref('doctor_id', 'test_doctors', display='name'),))
     assert reg.parent('test_orders') == 'appointments'        # объявленная ссылка — не родитель
     refs = {t.name: t.references for t in reg.drafts_schema()}
-    assert refs['order'][0].entity == 'doctor' and refs['order'][0].on_delete == 'set_null'
+    assert refs['order'][0].entity == 'doctor' and refs['order'][0].on_delete == 'restrict'
+    assert reg.links('test_orders')[0].display == 'name'
     with pytest.raises(SpecError, match='не описана'):
         registry(link_services, links=(ref('doctor_id', 'nowhere'),))
+
+
+@pytest.mark.parametrize('rules, text', [
+    ({'on_delete': 'set_null'}, "'set_null' не поддерживается"),
+    ({'on_delete': 'cascade'}, "'cascade' не поддерживается"),
+    ({'collect': True}, 'collect=True не поддерживается'),
+])
+def test_removed_link_rules_refused_in_description(rules, text):
+    """Обнуление, каскад, «переиспользуемые данные» в описании таблицы — ошибка уже в ``ref`` (2026-11-01)."""
+    with pytest.raises(SchemaError, match=text):
+        ref('doctor_id', 'test_doctors', **rules)
 
 
 def test_choices_and_display_include_unsaved(services, providers, filled, link_services):
@@ -142,7 +161,9 @@ def test_new_target_saved_first_and_reference_mapped(services, providers, filled
     assert orders.text('doctor_id') == 'Петрова' and drafts.store.is_empty
 
 
-def test_restrict_and_set_null_on_delete(services, providers, filled, link_services):
+# def test_restrict_and_set_null_on_delete(services, providers, filled, link_services):
+# ↑ до 2026-11-01 (Ф1.6.3а): вторая часть проверяла set_null (ссылка обнулялась) — правило убрано
+def test_restrict_on_delete(services, providers, filled, link_services):
     doctor = link_services['doctor'].create(DoctorDTO(name='Иванова'))
     appointment = services['appointment'].get_all()[0]
     link_services['order'].create(OrderDTO(appointment_id=appointment.id, doctor_id=doctor.id, title='Анализ'))
@@ -155,13 +176,15 @@ def test_restrict_and_set_null_on_delete(services, providers, filled, link_servi
         built.save()
     assert link_services['doctor'].get_page(0, 10)[1] == 1                       # врач на месте
     assert services['patient'].get_by_id(filled['ivanov']).phone is None         # откат ВСЕГО
-    reg = registry(link_services, links=(ref('doctor_id', 'test_doctors', on_delete='set_null'),))
-    drafts = drafts_for(reg, services, providers, link_services)
-    built = build(reg, providers, link_services, drafts)
-    built['test_doctors'].delete()
-    built.save()
-    assert link_services['doctor'].get_page(0, 10)[1] == 0
-    assert link_services['order'].get_page(0, 10)[0][0].doctor_id is None        # ссылка обнулена
+    # reg = registry(link_services, links=(ref('doctor_id', 'test_doctors', on_delete='set_null'),))
+    # drafts = drafts_for(reg, services, providers, link_services)
+    # built = build(reg, providers, link_services, drafts)
+    # built['test_doctors'].delete()
+    # built.save()
+    # assert link_services['doctor'].get_page(0, 10)[1] == 0
+    # assert link_services['order'].get_page(0, 10)[0][0].doctor_id is None        # ссылка обнулена
+    # ↑ до 2026-11-01 (Ф1.6.3а): черновики обнуляли ссылку (set_null); теперь её не трогают
+    assert link_services['order'].get_page(0, 10)[0][0].doctor_id == doctor.id   # ссылка не обнулена
 
 
 def test_form_combo_lists_unsaved_targets(services, providers, filled, link_services):

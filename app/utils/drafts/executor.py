@@ -265,58 +265,85 @@ def _check_unsaved_referrers(store: 'DraftStore', plan: SavePlan) -> None:
             raise DeleteBlocked(draft.key, users, _blocked_message(store, draft.key, users, True))
 
 
-def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: Any, tx: Any) -> List[NodeKey]:
+def _delete_with_references(
+    store   : 'DraftStore',     # хранилище (схема, подписи для сообщений)
+    roots   : List[NodeKey],    # удаляемые узлы из плана (снизу вверх)
+    adapter : Any,              # связь с хранилищем данных
+    tx      : Any,              # транзакция сохранения
+) -> List[NodeKey]: # удаление помеченных записей с запретом удалять используемое
     """
-    Удаление по правилам ссылок (внутри транзакции: правки уже записаны — БД отражает
-    итог, на который и смотрят правила).
+    Удаляет помеченные записи, проверяя ссылки на них (внутри транзакции: правки уже
+    записаны — БД отражает итог, на который и смотрит проверка).
 
-    Для каждой удаляемой записи: кто на неё ещё ссылается (кроме уже удаляемых) —
-    ``restrict``: отказ (откат всего), ``set_null``: ссылка обнуляется, ``cascade``:
-    ссылающиеся удаляются (раньше цели). После удаления — цели её ссылок с ``collect``,
-    на которые больше никто не ссылается, удаляются тоже (рекурсивно).
+    Для каждой удаляемой записи: если на неё ещё ссылаются записи, которые не удалены
+    раньше в этом же сохранении, — отказ ``DeleteBlocked`` (правило ``restrict``) и откат
+    всего сохранения. Удаляются ТОЛЬКО помеченные записи: черновики данные БД сами не
+    удаляют и не меняют сверх отданных изменений (2026-11-01) — ссылки не обнуляются,
+    ссылающиеся записи и ставшие никому не нужными цели не удаляются (прежние
+    ``set_null``, ``cascade``, ``collect`` убраны; описать их нельзя — ``SchemaError`` в
+    ``Reference``).
 
-    Нужен адаптер с ``referrers(тип, поле, ids, tx)`` (и ``read(тип, id, tx)`` для
-    ``collect``), если у удаляемых типов есть ссылающиеся; иначе — как раньше.
+    Цель ссылок, которую хранилище данных уже убрало в этой же транзакции (сервис удалил
+    ставшую ненужной общую заметку, когда запись сменила текст), считается удалённой и
+    повторно не удаляется (2026-10-31; проверяется, если адаптер умеет ``read``).
+
+    Нужен адаптер с ``referrers(тип, поле, ids, tx)``, если на удаляемые типы описаны
+    ссылки; иначе — как раньше (только ``delete``).
 
     Args:
-        store: Хранилище (схема).
-        roots: Удаляемые узлы (из плана).
-        adapter: Связь с БД.
-        tx: Транзакция.
+        store   : (DraftStore) Хранилище черновиков (схема, подписи для сообщений).
+        roots   : (List[NodeKey]) Удаляемые узлы из плана.
+        adapter : (Any) Связь с хранилищем данных (``delete``; ``referrers``, ``read`` — при
+            ссылках).
+        tx      : (Any) Транзакция сохранения.
 
     Returns:
-        Все удалённые узлы (в порядке удаления).
+        (List[NodeKey]) Удалённые узлы в порядке удаления (те же, что ``roots``, без повторов).
 
     Raises:
-        DeleteBlocked: Удаление запрещено правилом ``restrict``.
-        PlanError: Адаптер не умеет искать ссылки, а они описаны; описаны переиспользуемые
-            данные (``collect``), а адаптер не умеет читать запись (нет ``read``, DR7).
+        DeleteBlocked: На удаляемую запись ссылаются записи, которые не удаляются
+            (``Нельзя удалить «Врач #5»: на неё ссылаются записи: «Приём #12»``).
+        PlanError: Ссылки на удаляемые типы описаны, а адаптер не умеет их искать (нет
+            ``referrers``).
 
-    Пример:
-        >>> _delete_with_references(store, [('doctor', 5)], adapter, tx)
+    Example:
+        >>> _delete_with_references(
+        ...     store     =   store,            # схема со ссылкой приём → врач
+        ...     roots     =   [('doctor', 5)],  # на врача никто не ссылается
+        ...     adapter   =   adapter,          # связь с БД
+        ...     tx        =   tx,               # транзакция сохранения
+        ... )
         [('doctor', 5)]
     """
     schema = store.schema
-    needs = any(schema.referrers(entity) for entity, _ in roots) or any(
-        ref.collect for entity, _ in roots for ref in schema.references(entity))
+    # needs = any(schema.referrers(entity) for entity, _ in roots) or any(
+    #     ref.collect for entity, _ in roots for ref in schema.references(entity))
+    # ↑ до 2026-11-01 (Ф1.6.3а): ссылки искались и ради collect (цели ссылок удаляемых
+    #   записей); collect убран — нужны только ссылающиеся на удаляемые
+    needs = any(schema.referrers(entity) for entity, _ in roots)
     if needs and not hasattr(adapter, 'referrers'):
         raise PlanError("в схеме описаны ссылки, а адаптер не умеет их искать (нет referrers) — "
                         "правила удаления проверить нельзя")
     removed: List[NodeKey] = []
     visiting: set = set()
 
-    def users_of(node: NodeKey) -> List[Tuple[str, Any, List[Hashable]]]:
+    def users_of(
+        node : NodeKey,     # удаляемый узел
+    ) -> List[Tuple[str, Any, List[Hashable]]]: # кто ещё ссылается на запись
         """
-        Кто ещё ссылается на запись (кроме удаляемых): ``(тип, ссылка, ids)``.
+        Находит записи, которые ссылаются на запись и ещё не удалены в этом сохранении.
 
         Args:
-            node: Узел.
+            node : (NodeKey) Удаляемый узел.
 
         Returns:
-            Список групп.
+            (List[Tuple[str, Reference, List[Hashable]]]) Группы ``(тип, ссылка, ids)``;
+                пусто — никто не ссылается.
 
-        Пример:
-            >>> users_of(('doctor', 5))
+        Example:
+            >>> users_of(
+            ...     ('doctor', 5),  # врач, на которого ссылается приём 12
+            ... )
             [('appointment', Reference(...), [12])]
         """
         groups = []
@@ -327,44 +354,60 @@ def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: 
                 groups.append((referrer_type, ref, ids))
         return groups
 
-    def remove(node: NodeKey) -> None:
+    def remove(
+        node : NodeKey,     # удаляемый узел
+    ) -> None: # удаление одной помеченной записи с проверкой ссылок
         """
-        Удаляет запись по правилам ссылок (рекурсивно).
+        Удаляет одну помеченную запись; на неё ссылаются — отказ.
 
         Args:
-            node: Узел.
+            node : (NodeKey) Удаляемый узел.
 
-        Returns:
-            None
+        Raises:
+            DeleteBlocked: На запись ссылаются записи, которые не удаляются.
 
-        Пример:
-            >>> remove(('doctor', 5))
+        Example:
+            >>> remove(
+            ...     ('doctor', 5),  # на врача никто не ссылается
+            ... )
         """
         if node in visiting:
             return
         visiting.add(node)
-        collected = [ref for ref in schema.references(node[0]) if ref.collect]
-        # values = adapter.read(node[0], node[1], tx) if collected and hasattr(adapter, 'read') else None
-        # ↑ до 2026-10-25 (DR7): без read у адаптера «переиспользуемые данные» молча не
-        #   удалялись (оставались никому не нужными) — теперь отказ, как и без referrers;
-        #   проверка здесь, а не до транзакции, — так она видит и записи, удаляемые каскадом.
-        if collected and not hasattr(adapter, 'read'):
-            raise PlanError(
-                f"у типа {node[0]} описаны переиспользуемые данные (collect), а адаптер не "
-                "умеет читать запись (нет read) — что удалять следом, узнать нельзя"
-            )
-        values = adapter.read(node[0], node[1], tx) if collected else None
+        # collected = [ref for ref in schema.references(node[0]) if ref.collect]
+        # # values = adapter.read(node[0], node[1], tx) if collected and hasattr(adapter, 'read') else None
+        # # ↑ до 2026-10-25 (DR7): без read у адаптера «переиспользуемые данные» молча не
+        # #   удалялись (оставались никому не нужными) — теперь отказ, как и без referrers;
+        # #   проверка здесь, а не до транзакции, — так она видит и записи, удаляемые каскадом.
+        # if collected and not hasattr(adapter, 'read'):
+        #     raise PlanError(
+        #         f"у типа {node[0]} описаны переиспользуемые данные (collect), а адаптер не "
+        #         "умеет читать запись (нет read) — что удалять следом, узнать нельзя"
+        #     )
+        # values = adapter.read(node[0], node[1], tx) if collected else None
+        # ↑ до 2026-11-01 (Ф1.6.3а): для collect читались значения ссылок удаляемой записи
+        #   (что удалять следом) и без read был отказ (DR7); черновики сами из БД ничего не
+        #   убирают — чтение и эта проверка не нужны
         if hasattr(adapter, 'referrers'):
-            for referrer_type, ref, ids in users_of(node):
-                if ref.on_delete == 'restrict':
-                    users = [(referrer_type, i) for i in ids]
-                    raise DeleteBlocked(node, users, _blocked_message(store, node, users, False))
-                if ref.on_delete == 'set_null':
-                    for i in ids:
-                        adapter.update(referrer_type, i, {ref.field: None}, tx)
-                else:                                    # cascade
-                    for i in ids:
-                        remove((referrer_type, i))
+            # for referrer_type, ref, ids in users_of(node):
+            #     if ref.on_delete == 'restrict':
+            #         users = [(referrer_type, i) for i in ids]
+            #         raise DeleteBlocked(node, users, _blocked_message(store, node, users, False))
+            #     if ref.on_delete == 'set_null':
+            #         for i in ids:
+            #             adapter.update(referrer_type, i, {ref.field: None}, tx)
+            #     else:                                    # cascade
+            #         for i in ids:
+            #             remove((referrer_type, i))
+            # ↑ до 2026-11-01 (Ф1.6.3а): set_null обнулял ссылки, cascade удалял ссылающиеся
+            #   записи — изменения БД, которых пользователь не отдавал; осталось одно правило
+            for referrer_type, _ref, ids in users_of(node): # restrict — единственное правило
+                users = [(referrer_type, i) for i in ids]
+                raise DeleteBlocked(
+                    node,                                           # удаляемая запись
+                    users,                                          # кто на неё ссылается
+                    _blocked_message(store, node, users, False),    # текст отказа
+                )
         # adapter.delete(node[0], node[1], tx)
         # ↑ до 2026-10-31 (Ф1.3.4): цель ссылок, которую хранилище данных уже убрало в этой
         #   же транзакции (сервис сам удаляет ставшую ненужной общую заметку, когда запись
@@ -374,15 +417,18 @@ def _delete_with_references(store: 'DraftStore', roots: List[NodeKey], adapter: 
                 and adapter.read(node[0], node[1], tx) is None):
             adapter.delete(node[0], node[1], tx)
         removed.append(node)
-        for ref in collected:
-            target = (values or {}).get(ref.field)
-            if target is None or (ref.entity, target) in visiting:
-                continue
-            still_used = any(
-                any((t, i) not in visiting for i in adapter.referrers(t, r.field, [target], tx))
-                for t, r in schema.referrers(ref.entity))
-            if not still_used:
-                remove((ref.entity, target))
+        # for ref in collected:
+        #     target = (values or {}).get(ref.field)
+        #     if target is None or (ref.entity, target) in visiting:
+        #         continue
+        #     still_used = any(
+        #         any((t, i) not in visiting for i in adapter.referrers(t, r.field, [target], tx))
+        #         for t, r in schema.referrers(ref.entity))
+        #     if not still_used:
+        #         remove((ref.entity, target))
+        # ↑ до 2026-11-01 (Ф1.6.3а): collect — черновики сами удаляли из БД цель, на которую
+        #   больше никто не ссылается (рекурсивно); уборка ненужного — хранилище данных
+        #   (сервис), позже — сборщик по событиям таблиц
 
     for root in roots:
         remove(root)
@@ -450,6 +496,8 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
         #     adapter.delete(draft.entity, draft.id, tx)
         # ↑ до 2026-10-18: удалялись только помеченные; теперь — по правилам ссылок
         #   (отказ / обнуление / каскад; ставшие ненужными переиспользуемые — тоже)
+        #   С 2026-11-01 (Ф1.6.3а) снова удаляются только помеченные — с проверкой ссылок
+        #   (отказ, если на удаляемую ссылаются); обнуления, каскада и уборки ненужного нет
         removed = _delete_with_references(store, [d.key for d in plan.deletes], adapter, tx)
 
     # deleted = tuple(d.key for d in plan.deletes)

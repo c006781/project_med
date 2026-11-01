@@ -24,6 +24,12 @@
 Зависит только от SQLAlchemy, Pydantic и стандартной библиотеки — модуль моделей может его
 импортировать без циклов.
 
+Хранение и события таблицы (Ф1.6.7г, 2026-11-01): ``TableDef(keep=KEEP_USED)`` — строки
+«только используемые» (неиспользуемые убирает сборщик мусора слоя базы); ``events=(on(место,
+'действие', ...), ...)`` — действия по имени на местах «перед / после добавления, изменения,
+удаления, перед коммитом, после коммита / отката». Исполняет их слой базы
+(``app/database/table_events.py``) — модель знает своё описание (``__table_def__``).
+
 Пример:
     >>> PRESCRIPTIONS = TableDef('prescriptions', 'Prescription', 'PrescriptionDTO', fields=(
     ...     key('ID назначения'),
@@ -49,6 +55,28 @@ from sqlalchemy.orm import relationship
 # Таблица и модель общих заметок (ссылки полей-заметок)
 NOTES_TABLE = 'appointments_notes'
 NOTES_MODEL = 'AppointmentNote'
+
+# Хранение строк таблицы (TableDef.keep, Ф1.6.7г): «хранить всегда» — строки удаляет только
+# явное удаление; «только используемые» — строку, на которую в транзакции убрали последнюю
+# ссылку, удаляет сборщик мусора слоя базы (app/database/table_events.py) перед коммитом.
+# Автоматически не определяется: по устройству таблиц заметку не отличить от справочника.
+KEEP_ALWAYS : str = 'always'   # хранить всегда (по умолчанию)
+KEEP_USED   : str = 'used'     # только используемые
+KEEP_MODES  : Tuple[str, ...] = (KEEP_ALWAYS, KEEP_USED)
+
+# Места событий таблицы (как события объектов RAD Studio): строки — внутри сброса в базу
+# (flush), транзакции — вокруг коммита / отката. Действия подключаются по имени (on()).
+ROW_EVENTS : Tuple[str, ...] = (
+    'before_insert', 'after_insert',     # добавление строки
+    'before_update', 'after_update',     # изменение строки
+    'before_delete', 'after_delete',     # удаление строки
+)
+TRANSACTION_EVENTS : Tuple[str, ...] = (
+    'before_commit',                     # перед коммитом (можно менять данные)
+    'after_commit',                      # после коммита (данные уже в базе)
+    'after_rollback',                    # после отката
+)
+TABLE_EVENTS : Tuple[str, ...] = ROW_EVENTS + TRANSACTION_EVENTS
 
 
 def note_text(note: Any) -> Optional[str]:
@@ -149,6 +177,77 @@ class FieldSpec:
     text_name: Optional[str] = None
     id_config: Optional[Mapping[str, Any]] = None
     id_dto_desc: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class EventSpec:
+    """
+    Подключение действий к месту события таблицы (создаётся функцией :func:`on`).
+
+    Attributes:
+        event   : (str) Место события (одно из ``TABLE_EVENTS``).
+        actions : (Tuple[str, ...]) Имена действий из реестра слоя базы — по порядку
+            выполнения.
+
+    Example:
+        >>> on(
+        ...     'after_delete',        # после удаления строки
+        ...     'delete_photo_file',   # действие
+        ... ).actions
+        ('delete_photo_file',)
+    """
+
+    event   : str
+    actions : Tuple[str, ...]
+
+
+def on(
+    event    : str,   # место события (TABLE_EVENTS)
+    *actions : str,   # имена действий по порядку выполнения
+) -> EventSpec: # подключение действий к месту события
+    """
+    Подключает действия к месту события таблицы — для ``TableDef(events=(...))``.
+
+    Действия — по имени: описание таблиц модули с действиями не импортирует (слой описаний
+    ниже слоя базы, К6); имена сверяются с реестром действий при открытии базы
+    (``app/database/table_events.py``). К одному месту можно подключить несколько
+    действий — они выполняются в порядке перечисления (здесь и в следующих ``on`` того же
+    места).
+
+    Args:
+        event    : (str) Место события: ``before_insert``, ``after_insert``,
+            ``before_update``, ``after_update``, ``before_delete``, ``after_delete``,
+            ``before_commit``, ``after_commit``, ``after_rollback``.
+        *actions : (str) Имена действий (непустые строки, без повторов в одном ``on``).
+
+    Returns:
+        (EventSpec) Подключение.
+
+    Raises:
+        ValueError: Неизвестное место, нет действий, имя действия не строка или пустое,
+            имя повторяется.
+
+    Example:
+        >>> on(
+        ...     'before_delete',   # перед удалением строки
+        ...     'forbid_if_paid',  # первое действие
+        ...     'log_removal',     # второе действие
+        ... ).event
+        'before_delete'
+    """
+    if event not in TABLE_EVENTS:
+        raise ValueError(f"неизвестное место события {event!r}; есть: {', '.join(TABLE_EVENTS)}")
+    if not actions:
+        raise ValueError(f"событие {event!r}: не названо ни одного действия")
+    for name in actions:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"событие {event!r}: имя действия должно быть непустой строкой, а не {name!r}")
+    if len(set(actions)) != len(actions):
+        raise ValueError(f"событие {event!r}: имя действия повторяется ({', '.join(actions)})")
+    return EventSpec(
+        event,              # место
+        tuple(actions),     # действия по порядку
+    )
 
 
 def key(comment: Optional[str] = None, *, title: str = 'ID', dto_desc: Optional[str] = None,
@@ -441,6 +540,10 @@ class TableDef:
         fetch_size: Свой размер порции загрузки.
         comment: Комментарий таблицы в БД.
         sqlite_autoincrement: ``AUTOINCREMENT`` у ключа в SQLite (id не переиспользуются).
+        keep: Хранение строк (Ф1.6.7г): ``KEEP_ALWAYS`` — хранить всегда (по умолчанию),
+            ``KEEP_USED`` — только используемые (строку без ссылок, ставшую такой в
+            транзакции, удаляет сборщик мусора слоя базы перед коммитом).
+        events: Действия, подключённые к местам событий таблицы (``on(...)``), по порядку.
 
     Пример:
         >>> PATIENTS.build_config()['last_name']['title']
@@ -470,16 +573,20 @@ class TableDef:
     fetch_size: Optional[int] = None
     comment: Optional[str] = None
     sqlite_autoincrement: bool = True
+    keep                : str = KEEP_ALWAYS                 # хранение строк (Ф1.6.7г)
+    events              : Tuple[EventSpec, ...] = ()        # действия событий таблицы (Ф1.6.7г)
 
     def __post_init__(self) -> None:
         """
-        Поля — кортежем; тип записи по умолчанию; проверка повторов имён.
+        Поля и события — кортежем; тип записи по умолчанию; проверка повторов имён, режима
+        хранения и подключений событий.
 
         Returns:
             None
 
         Raises:
-            ValueError: Имя поля/столбца повторяется.
+            ValueError: Имя поля/столбца повторяется; неизвестный режим ``keep``; в
+                ``events`` не ``EventSpec`` (подключение — только через ``on``).
 
         Пример:
             >>> TableDef('t', 'T', 'TDTO', (key(), key()))
@@ -487,6 +594,24 @@ class TableDef:
             ValueError: таблица t: имя 'id' повторяется
         """
         object.__setattr__(self, 'fields', tuple(self.fields))
+        object.__setattr__(self, 'events', tuple(self.events))
+        if self.keep not in KEEP_MODES: # опечатка в режиме хранения — сразу, не при работе
+            raise ValueError(
+                f"таблица {self.name}: неизвестный режим хранения keep={self.keep!r}; "
+                f"есть: {', '.join(KEEP_MODES)}"
+            )
+        for spec in self.events:
+            if not isinstance(spec, EventSpec):
+                raise ValueError(
+                    f"таблица {self.name}: в events — {spec!r}; подключайте действия через on(...)"
+                )
+        for event in TABLE_EVENTS: # одно действие дважды на одном месте выполнилось бы дважды
+            names = self.actions_for(event)
+            if len(set(names)) != len(names):
+                raise ValueError(
+                    f"таблица {self.name}: событие {event!r} — действие подключено дважды "
+                    f"({', '.join(names)})"
+                )
         if not self.entity:
             object.__setattr__(self, 'entity', self.model_name.lower())
         if not self.service:
@@ -497,6 +622,41 @@ class TableDef:
                 if name in seen:
                     raise ValueError(f"таблица {self.name}: имя {name!r} повторяется")
                 seen.add(name)
+
+    def actions_for(
+        self,
+        event : str,   # место события (TABLE_EVENTS)
+    ) -> Tuple[str, ...]: # имена действий места по порядку выполнения
+        """
+        Возвращает имена действий, подключённых к месту события, в порядке выполнения: по
+        порядку ``on(...)`` в ``events``, внутри ``on`` — по порядку имён.
+
+        Args:
+            event : (str) Место события.
+
+        Returns:
+            (Tuple[str, ...]) Имена действий; пусто — к месту ничего не подключено.
+
+        Raises:
+            ValueError: Неизвестное место события.
+
+        Example:
+            >>> TableDef(
+            ...     't', 'T', 'TDTO', (key(),),
+            ...     events  =   (on('after_delete', 'a'), on('after_delete', 'b')),
+            ... ).actions_for(
+            ...     'after_delete',   # место
+            ... )
+            ('a', 'b')
+        """
+        if event not in TABLE_EVENTS:
+            raise ValueError(f"неизвестное место события {event!r}; есть: {', '.join(TABLE_EVENTS)}")
+        return tuple(
+            name
+            for spec in self.events
+            if spec.event == event
+            for name in spec.actions
+        )
 
     @staticmethod
     def _names(spec: FieldSpec) -> List[str]:
@@ -582,7 +742,9 @@ class TableDef:
         ``sqlite_autoincrement`` — в ``__table_args__``; связи: ``note`` — к общей таблице
         заметок по своему столбцу, ``fk`` — к цели (с ``back_populates``, если задано),
         ``children`` — к подчинённым (каскад и явный внешний ключ — если заданы). Атрибуты
-        ``namespace`` ставятся последними и перекрывают построенные (``__repr__``).
+        ``namespace`` ставятся последними и перекрывают построенные (``__repr__``). Модель
+        получает атрибут ``__table_def__`` — это описание (хранение и события таблицы для
+        слоя базы, Ф1.6.7г).
 
         Args:
             base      : (Any) Декларативная база (``Base`` приложения или своя — для проверок).
@@ -602,6 +764,9 @@ class TableDef:
         """
         attrs: Dict[str, Any] = {'__tablename__': self.name, '__doc__': self.doc or self.model_name,
                                  '__repr__': _model_repr, '__module__': module or __name__}
+        # описание у модели: по нему слой базы находит хранение и события таблицы (Ф1.6.7г);
+        # модели без описания (написанные вручную, тестовые) — «хранить всегда», без событий
+        attrs['__table_def__'] = self
         columns = self._columns()
         attrs.update(columns)
         indexes = []
@@ -780,4 +945,6 @@ def rebuild_dtos(*dtos: Type[BaseModel]) -> None:
 
 
 __all__ = ['FieldSpec', 'TableDef', 'children', 'column', 'computed', 'fk', 'key', 'note', 'note_text',
-           'rebuild_dtos', 'timestamp', 'NOTES_TABLE', 'NOTES_MODEL']
+           'rebuild_dtos', 'timestamp', 'NOTES_TABLE', 'NOTES_MODEL',
+           'EventSpec', 'on', 'KEEP_ALWAYS', 'KEEP_USED', 'KEEP_MODES',
+           'ROW_EVENTS', 'TRANSACTION_EVENTS', 'TABLE_EVENTS']

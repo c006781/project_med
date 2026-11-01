@@ -1,7 +1,7 @@
 # app/database/__init__.py
 """
 База данных клиники: ``Database`` (подключение, сессии, миграции при открытии), модели
-``Patient``, ``Appointment``, ``AppointmentNote``, ``Photo`` и ``generate_test_data``.
+``Patient``, ``Appointment``, ``AppointmentNote``, ``Photo``, ``PhotoFile`` и ``generate_test_data``.
 
 Миграции — ``app.database.migrate`` (не импортируется пакетом; ``Database`` зовёт его
 сам). Устройство — ``app/database/IMPLEMENTATION.md``.
@@ -20,6 +20,7 @@ from .database_shema import (
     Appointment, 
     AppointmentNote, 
     Photo,
+    PhotoFile,      # файлы фото (Ф1.6.7б)
 )
 
 # Также можно импортировать функцию генерации тестовых данных, если она нужна на этом уровне
@@ -37,6 +38,7 @@ __all__ = [
     'Appointment',
     'AppointmentNote',
     'Photo',
+    'PhotoFile',
     'generate_test_data',
 
     'Database',

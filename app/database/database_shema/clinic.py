@@ -740,11 +740,16 @@ def _note_repr(
         raise
 
 
-from app.schema.clinic import APPOINTMENTS, NOTES, PATIENTS, PHOTOS  # noqa: E402
+from app.schema.clinic import APPOINTMENTS, NOTES, PATIENTS, PHOTO_FILES, PHOTOS  # noqa: E402
 
 Patient = PATIENTS.build_model(Base, {'__repr__': _patient_repr}, module=__name__)
 Appointment = APPOINTMENTS.build_model(Base, {'__repr__': _appointment_repr}, module=__name__)
 Photo = PHOTOS.build_model(Base, {'__repr__': _photo_repr}, module=__name__)
+# файлы фото (Ф1.6.7б): строка — имя файла в папке фото, на неё ссылается photos.file_path
+PhotoFile = PHOTO_FILES.build_model(
+    Base,                                   # база приложения
+    module  =   __name__,                   # класс «живёт» в модуле моделей
+)
 AppointmentNote = NOTES.build_model(
     Base,                                   # база приложения
     {'__repr__': _note_repr},               # строка заметки — как у прежнего класса

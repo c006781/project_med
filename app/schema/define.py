@@ -9,7 +9,7 @@
 | Функция | Модель | DTO | ``field_configs`` |
 |---|---|---|---|
 | ``key`` | ``id`` Integer, первичный ключ | ``Optional[int] = None`` | ID: не правится, скрыт, не обновляется |
-| ``column`` | столбец заданного типа | тип; обязательность = NOT NULL | ``title`` + свои ключи |
+| ``column`` | столбец заданного типа (может быть ключом и ссылаться на столбец другой таблицы) | тип; обязательность = NOT NULL | ``title`` + свои ключи |
 | ``note`` | ``<x>_id`` → общие заметки + связь ``<x>_note`` | ``<x>_text``, ``<x>_id`` | ``<x>_id`` (скрыт) и ``<x>_text`` (заметка) |
 | ``fk`` | внешний ключ + связь к записи другой таблицы | ``int`` / ``Optional[int]`` | ``title`` + свои ключи |
 | ``children`` | связь «один ко многим» (каскад) | ``Optional[List[ДочернийDTO]]`` | свои ключи |
@@ -149,6 +149,9 @@ class FieldSpec:
         text_name: Для ``note`` — имя поля текста.
         id_config: Для ``note`` — свои ключи записи ``<x>_id``.
         id_dto_desc: Для ``note`` — описание поля DTO ``<x>_id``.
+        primary_key: Для ``column`` — столбец первичный ключ таблицы (вместо ``key``).
+        references: Для ``column`` — внешний ключ на столбец другой таблицы
+            (``'photo_files.file_path'``); связь — ``relation`` к ``target_model``.
 
     Пример:
         >>> key().name
@@ -177,6 +180,8 @@ class FieldSpec:
     text_name: Optional[str] = None
     id_config: Optional[Mapping[str, Any]] = None
     id_dto_desc: Optional[str] = None
+    primary_key : bool = False              # column: первичный ключ (Ф1.6.7б)
+    references  : Optional[str] = None      # column: внешний ключ 'таблица.столбец' (Ф1.6.7б)
 
 
 @dataclass(frozen=True)
@@ -273,11 +278,35 @@ def key(comment: Optional[str] = None, *, title: str = 'ID', dto_desc: Optional[
                      dto_type=Optional[int], dto_desc=dto_desc, config=config)
 
 
-def column(name: str, sql_type: Any, title: str, *, nullable: bool = True, index: Optional[str] = None,
-           comment: Optional[str] = None, default: Any = None, dto: bool = True, dto_type: Any = None,
-           dto_desc: Optional[str] = None, config: bool = True, **ui: Any) -> FieldSpec:
+def column(
+    name         : str,                     # имя
+    sql_type     : Any,                     # тип SQLAlchemy
+    title        : str,                     # подпись
+    *,
+    nullable     : bool = True,             # допускает пусто
+    index        : Optional[str] = None,    # имя индекса
+    comment      : Optional[str] = None,    # комментарий столбца
+    default      : Any = None,              # значение по умолчанию
+    dto          : bool = True,             # включать в DTO
+    dto_type     : Any = None,              # тип DTO; None — по типу столбца
+    dto_desc     : Optional[str] = None,    # описание поля DTO
+    config       : bool = True,             # запись в field_configs
+    primary_key  : bool = False,            # первичный ключ таблицы (вместо key)
+    references   : Optional[str] = None,    # внешний ключ 'таблица.столбец'
+    relation     : Optional[str] = None,    # связь к записи цели (с references)
+    target_model : Optional[str] = None,    # класс модели цели связи
+    **ui         : Any,                     # свои ключи field_configs
+) -> FieldSpec: # описание обычного столбца
     """
     Обычный столбец.
+
+    Ключом таблицы может быть и обычный столбец (``primary_key=True``; тогда ``key`` в
+    описании не нужен) — например, имя файла у таблицы файлов фото: строка таблицы и есть
+    файл. Внешний ключ на столбец другой таблицы, не на её ``id``, — ``references``; связь
+    ``relation`` к ``target_model`` нужна, чтобы ORM записывал строку цели раньше
+    ссылающейся (при включённых внешних ключах; без связи порядок вставки не гарантирован —
+    проверено на SQLAlchemy 2.0, Ф1.6.7б). Черновики такой столбец ссылкой не считают
+    (ссылки — ``fk`` и ``note``): его значение для них — обычное поле.
 
     Args:
         name: Имя.
@@ -291,23 +320,59 @@ def column(name: str, sql_type: Any, title: str, *, nullable: bool = True, index
         dto_type: Тип DTO (по умолчанию — по типу столбца; ``Optional``, если допускает пусто).
         dto_desc: Описание поля DTO.
         config: Делать запись в ``field_configs``.
+        primary_key: Столбец — первичный ключ таблицы (NOT NULL).
+        references: Внешний ключ ``'таблица.столбец'``; None — без внешнего ключа.
+        relation: Имя связи к записи цели (вместе с ``references`` и ``target_model``);
+            None — без связи.
+        target_model: Имя класса модели цели связи.
         **ui: Свои ключи ``field_configs`` (``editable``, ``required``, ``widget_type``,
             ``order``, ``autocomplete``, ``input_mask``…).
 
     Returns:
         ``FieldSpec``.
 
-    Пример:
+    Raises:
+        ValueError: Связь без внешнего ключа или без модели цели.
+
+    Example:
         >>> column('phone', sa.String(20), 'Телефон', input_mask='+7 (999) 999-99-99').config['input_mask']
         '+7 (999) 999-99-99'
+        >>> column(
+        ...     'file_path',                            # имя
+        ...     sa.String(500),                         # тип
+        ...     'Файл',                                 # подпись
+        ...     references      =   'photo_files.file_path',  # внешний ключ на имя файла
+        ...     relation        =   'file',             # связь к строке файла
+        ...     target_model    =   'PhotoFile',        # модель файлов
+        ... ).references
+        'photo_files.file_path'
     """
+    if relation and not (references and target_model): # связь без ключа SQLAlchemy не построит
+        raise ValueError(f"столбец {name}: связь {relation!r} — нужны references и target_model")
+    if primary_key:
+        nullable = False
     py_type = dto_type
     if py_type is None:
         base = _python_type(sql_type)
         py_type = Optional[base] if nullable else base
-    return FieldSpec(name, 'column', title, sql_type, nullable, index, comment, default,
-                     dto=dto, dto_type=py_type, dto_desc=dto_desc,
-                     config={'title': title, **ui} if config else None)
+    return FieldSpec(
+        name,                                               # имя
+        'column',                                           # вид
+        title,                                              # подпись
+        sql_type,                                           # тип
+        nullable,                                           # пусто
+        index,                                              # индекс
+        comment,                                            # комментарий
+        default,                                            # по умолчанию
+        target_model    =   target_model,                   # модель цели связи
+        relation        =   relation,                       # связь
+        dto             =   dto,                            # в DTO
+        dto_type        =   py_type,                        # тип DTO
+        dto_desc        =   dto_desc,                       # описание DTO
+        config          =   {'title': title, **ui} if config else None,  # настройки поля
+        primary_key     =   primary_key,                    # первичный ключ
+        references      =   references,                     # внешний ключ на столбец
+    )
 
 
 def note(base: str, title: str, *, comment: Optional[str] = None, id_title: Optional[str] = None,
@@ -718,6 +783,17 @@ class TableDef:
         for spec in self.fields:
             if spec.kind == 'key':
                 result['id'] = sa.Column(sa.Integer, primary_key=True, autoincrement=True, comment=spec.comment)
+            elif spec.kind == 'column' and (spec.primary_key or spec.references):
+                # ключ-столбец и внешний ключ на столбец (Ф1.6.7б, таблица файлов фото)
+                fk_args = [sa.ForeignKey(spec.references)] if spec.references else []
+                result[spec.name] = sa.Column(
+                    spec.sql_type,                          # тип
+                    *fk_args,                               # внешний ключ на столбец цели
+                    primary_key     =   spec.primary_key,   # ключ таблицы
+                    nullable        =   spec.nullable,      # NOT NULL
+                    default         =   spec.default,       # по умолчанию
+                    comment         =   spec.comment,       # комментарий
+                )
             elif spec.kind in ('column', 'timestamp'):
                 result[spec.name] = sa.Column(spec.sql_type, nullable=spec.nullable, default=spec.default,
                                               comment=spec.comment)
@@ -778,6 +854,13 @@ class TableDef:
                 attrs[spec.relation] = relationship(NOTES_MODEL, foreign_keys=[columns[spec.id_name]])
             elif spec.kind == 'fk' and spec.relation:
                 attrs[spec.relation] = relationship(spec.target_model, back_populates=spec.back)
+            elif spec.kind == 'column' and spec.relation:
+                # связь «многие к одному» по внешнему ключу на столбец: без неё ORM не знает,
+                # что строку цели вставлять раньше (Ф1.6.7б)
+                attrs[spec.relation] = relationship(
+                    spec.target_model,                          # модель цели
+                    foreign_keys    =   [columns[spec.name]],   # этот столбец
+                )
             elif spec.kind == 'children':
                 # каскад и явный внешний ключ — только если заданы: иначе умолчания SQLAlchemy
                 options_rel: Dict[str, Any] = {}

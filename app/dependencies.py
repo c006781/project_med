@@ -545,6 +545,8 @@ def get_photo_service() -> PhotoService: # общий сервис фото (к�
 
     Папка фото — ``PHOTOS_STORAGE_PATH`` (нет — ``./photos``); смену папки применяет
     ``ConfigApplier.apply_photos_storage``. Кэш и реестр — как у :func:`get_patient_service`.
+    Собрав сервис, переносит старые фото ``app_<N>/…`` в папку фото
+    (``PhotoService.relocate_legacy_files``, Ф1.6.7б; старых нет — ничего, ошибка — в журнал).
 
     Returns:
         (PhotoService) Сервис фото.
@@ -563,11 +565,19 @@ def get_photo_service() -> PhotoService: # общий сервис фото (к�
         ),
     )  # поправить на другой, что бы был адоптив
 
-    return PhotoService(
-        get_db(), 
-        photos_path, 
+    # return PhotoService(
+    #     get_db(),
+    #     photos_path,
+    #     field_configs=PHOTO_CONFIG
+    # )
+    # ↑ до 2026-11-01 (Ф1.6.7б шаг 3): без переноса старых фото.
+    service = PhotoService(
+        get_db(),
+        photos_path,
         field_configs=PHOTO_CONFIG
     )
+    service.relocate_legacy_files()   # старые фото app_<N>/… — в папку фото (один раз, при запуске)
+    return service
 
 # Кэш — один объект на приложение (Ф1.6.10в, 2026-10-31); в реестр _SERVICE_PROVIDERS не
 # включён: реестр перезагружается при смене базы (apply_database), а токен и пути

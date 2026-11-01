@@ -3,7 +3,7 @@
 Пакет app.models.bd — модели базы данных (SQLAlchemy).
 
 Содержит:
-- models.py: ORM-классы Patient, Appointment, AppointmentNote, Photo.
+- models.py: ORM-классы Patient, Appointment, AppointmentNote, Photo, PhotoFile.
 - temp_data_bd.py: функции для заполнения тестовыми данными (generate_test_data).
 """
 
@@ -13,6 +13,7 @@ from .clinic import (
     Appointment, 
     AppointmentNote, 
     Photo,
+    PhotoFile,      # файлы фото (Ф1.6.7б)
     create_db,
 )
 
@@ -27,6 +28,7 @@ __all__ = [
     'Appointment',
     'AppointmentNote',
     'Photo',
+    'PhotoFile',
     'generate_test_data',
     'create_db',
 ]

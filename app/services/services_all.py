@@ -7365,6 +7365,182 @@ class PhotoService(
             self.logger.exception("Перенос старых фото не выполнен")
         return report
 
+    # Сверка «файлы ↔ ссылки» (Ф1.6.7б шаг 4, Ф1.6.10г; кнопка — М19, Ф2.2.6): свежие файлы
+    # не трогаются — их может добавлять транзакция, ещё не записавшая строку файла (Р-28)
+    STORAGE_MIN_AGE : int = 600   # секунд: файлы моложе 10 минут сверка не трогает
+
+    def _storage_candidates(
+        self,
+        known   : set,     # имена строк файлов (разделитель '/')
+        min_age : float,   # секунд: моложе — не трогать
+    ) -> Dict[str, List[str]]: # файлы папки фото без строк + пустые папки app_*
+        """
+        Обходит папку фото: файлы нашего вида (``PHOTO_NAME_RE``) прямо в папке и все файлы в
+        папках ``app_*`` (старое хранение), у которых нет строки файла; пустые папки ``app_*``.
+        Остальное (чужие файлы, другие папки) не смотрится (Р-28).
+
+        Args:
+            known   : (set) Имена строк файлов (``\\`` заменён на ``/``).
+            min_age : (float) Файлы моложе этого (секунд) — в ``fresh``, не в кандидаты.
+
+        Returns:
+            (Dict[str, List[str]]) ``extra`` — файлы без строк (имя от папки фото, ``/``),
+            ``fresh`` — такие же, но свежие, ``empty_dirs`` — пустые папки ``app_*``.
+
+        Example:
+            >>> photo_service._storage_candidates({'20261101_153000.jpg'}, 600)
+            {'extra': ['20261101_120000.jpg'], 'fresh': [], 'empty_dirs': ['app_3']}
+        """
+        from app.database.file_actions import PHOTO_NAME_RE
+
+        root = self._storage_path
+        found : Dict[str, List[str]] = {'extra': [], 'fresh': [], 'empty_dirs': []}
+        if not os.path.isdir(root):
+            return found
+        now = _dt.now().timestamp()
+
+        def consider(
+            rel  : str,   # имя от папки фото ('/')
+            path : str,   # полный путь
+        ) -> None: # файл без строки — в кандидаты или свежие
+            """Раскладывает файл без строки: старше ``min_age`` — ``extra``, иначе ``fresh``."""
+            if rel in known:
+                return
+            age = now - os.path.getmtime(path)
+            found['extra' if age >= min_age else 'fresh'].append(rel)
+
+        for entry in sorted(os.listdir(root)):
+            path = os.path.join(root, entry)
+            if os.path.isfile(path) and PHOTO_NAME_RE.match(entry): # наш вид, прямо в папке
+                consider(
+                    entry,   # имя
+                    path,    # путь
+                )
+            elif os.path.isdir(path) and entry.startswith('app_'): # старое хранение
+                files = []
+                for folder, _dirs, names in os.walk(path):
+                    for name in names:
+                        files.append(os.path.join(folder, name))
+                if not files and not os.listdir(path):
+                    found['empty_dirs'].append(entry)
+                for file in sorted(files):
+                    consider(
+                        os.path.relpath(file, root).replace('\\', '/'),   # имя от папки фото
+                        file,                                             # путь
+                    )
+        return found
+
+    def check_storage(
+        self,
+        min_age : Optional[float] = None,   # секунд: моложе — не трогать; None — 10 минут
+    ) -> Dict[str, List[str]]: # сверка «файлы ↔ ссылки в БД» (только чтение)
+        """
+        Сверяет папку фото со строками файлов (``photo_files``) — только чтение, для показа
+        пользователю списка «будет удалено» (Р-11; кнопка — М19, Ф2.2.6).
+
+        Смотрятся только файлы нашего вида прямо в папке фото и файлы в папках ``app_*``
+        (старое хранение, Р-28); чужие файлы и папки не трогаются. Файлы моложе ``min_age``
+        не предлагаются к удалению (гонка с добавлением фото в другой транзакции).
+
+        Args:
+            min_age : (float/None) Порог «свежего» файла, секунд; None — ``STORAGE_MIN_AGE``.
+
+        Returns:
+            (Dict[str, List[str]]) ``extra`` — файлы без строк (к удалению), ``fresh`` —
+            файлы без строк моложе порога (не трогаются), ``empty_dirs`` — пустые папки
+            ``app_*`` (к удалению), ``missing`` — строки файлов, файла которых нет на диске
+            (только показать: удалить нечего). Имена — от папки фото, разделитель ``/``.
+
+        Example:
+            >>> photo_service.check_storage()
+            {'extra': ['20261001_101500.jpg'], 'fresh': [], 'empty_dirs': [], 'missing': []}
+        """
+        from app.database.file_actions import photo_file_path
+
+        min_age = self.STORAGE_MIN_AGE if min_age is None else min_age
+        with self._db.session_scope() as session:
+            rows = list(session.scalars(select(PhotoFile.file_path)))
+        root = self._storage_path
+        report = self._storage_candidates(
+            {name.replace('\\', '/') for name in rows},   # имена строк
+            min_age,                                      # порог свежести
+        )
+        report['missing'] = sorted(
+            name for name in rows
+            if not os.path.isfile(photo_file_path(root, name) or '')
+        )
+        return report
+
+    def clean_storage(
+        self,
+        expected : Dict[str, List[str]],      # подтверждённый список (check_storage)
+        min_age  : Optional[float] = None,    # секунд: моложе — не трогать; None — 10 минут
+    ) -> Dict[str, List[str]]: # что удалено
+        """
+        Удаляет подтверждённые пользователем файлы без ссылок и пустые папки ``app_*`` (из
+        :meth:`check_storage`) — только те, что и сейчас такие: без строки файла, не свежие,
+        нашего вида или в ``app_*`` (за время показа списка файл могли привязать). Каждое
+        удаление — в журнал (Р-11). Строки без файлов (``missing``) не трогаются. Не
+        удалилось — в ``kept`` (предупреждение в журнале).
+
+        Args:
+            expected : (Dict[str, List[str]]) ``extra``, ``empty_dirs`` из ``check_storage``.
+            min_age  : (float/None) Порог «свежего» файла; None — ``STORAGE_MIN_AGE``.
+
+        Returns:
+            (Dict[str, List[str]]) ``deleted`` — удалённые файлы и папки, ``kept`` — не удалены
+            (уже привязаны, свежие, не удалось).
+
+        Example:
+            >>> photo_service.clean_storage(photo_service.check_storage())
+            {'deleted': ['20261001_101500.jpg'], 'kept': []}
+        """
+        from app.database.file_actions import photo_file_path
+        from app.utils.file_deletions import delete_empty_directory, delete_file_safely
+
+        current = self.check_storage(min_age)
+        root = self._storage_path
+        result : Dict[str, List[str]] = {'deleted': [], 'kept': []}
+        allowed = set(current['extra'])
+        for name in expected.get('extra', []):
+            path = photo_file_path(root, name)
+            if name not in allowed or path is None: # привязан, свежий или не наш
+                result['kept'].append(name)
+                continue
+            deleted, error = delete_file_safely(
+                path,
+                logger = self.logger,
+            )
+            if deleted:
+                self.logger.info(f"Сверка файлов фото: удалён файл без ссылок {name}")
+                result['deleted'].append(name)
+            else:
+                self.logger.warning(f"Сверка файлов фото: файл не удалён {name}: {error}")
+                result['kept'].append(name)
+        for name in expected.get('empty_dirs', []):
+            path = photo_file_path(root, name)
+            if path is None or not os.path.basename(path).startswith('app_'):
+                result['kept'].append(name)
+                continue
+            deleted, _ = delete_empty_directory(
+                path,
+                logger = self.logger,
+            )
+            (result['deleted'] if deleted else result['kept']).append(name)
+            if deleted:
+                self.logger.info(f"Сверка файлов фото: удалена пустая папка {name}")
+        # папки app_*, опустевшие после удаления файлов этой сверкой
+        for name in sorted({n.split('/', 1)[0] for n in result['deleted'] if '/' in n}):
+            path = photo_file_path(root, name)
+            if path and os.path.isdir(path) and not os.listdir(path):
+                delete_empty_directory(
+                    path,
+                    logger = self.logger,
+                )
+                result['deleted'].append(name)
+                self.logger.info(f"Сверка файлов фото: удалена пустая папка {name}")
+        return result
+
     def _add_file_row(
         self,
         file_path : str,       # путь файла от папки фото

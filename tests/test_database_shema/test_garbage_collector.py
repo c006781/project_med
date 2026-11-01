@@ -124,10 +124,15 @@ def test_plan_depth_and_limit(world):
 
 
 def test_app_plan_notes_depth_one_limit_two():
-    """Схема клиники: «только используемые» — заметки; глубина 1, предел 2 (Ф1.6.10ж)."""
+    """
+    Схема клиники: «только используемые» — заметки (Ф1.6.10ж) и файлы фото (Ф1.6.7б);
+    обе — концы цепочек (сами ни на что не ссылаются): глубина 1, предел 2.
+    """
     from app.database.database_shema.clinic import Base
     plan = te._CollectorPlan.build(Base)
-    assert [t.name for t in plan.order] == ['appointments_notes']
+    # assert [t.name for t in plan.order] == ['appointments_notes']
+    # ↑ до 2026-11-01 (Ф1.6.7б): файлов фото ещё не было
+    assert sorted(t.name for t in plan.order) == ['appointments_notes', 'photo_files']
     assert (plan.depth, plan.limit) == (1, 2)
 
 

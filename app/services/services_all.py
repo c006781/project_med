@@ -159,8 +159,9 @@ from app.database.database import Database
 
 # try:
 from app.database.database_shema.clinic import (
-    Patient, Appointment, AppointmentNote, 
-    Photo
+    Patient, Appointment, AppointmentNote,
+    Photo,
+    PhotoFile,      # файлы фото: фото ссылается на строку файла (Ф1.6.7б)
 )
 # except ImportError as e:
 #     try:
@@ -1898,7 +1899,12 @@ class BaseService(
             ).scalar()
             if not found:
                 title = self._field_configs.get(column.name, {}).get('title', column.name)
-                raise self._validation_error(title, f"нет записи {fk.column.table.name} с id={value}")
+                # raise self._validation_error(title, f"нет записи {fk.column.table.name} с id={value}")
+                # ↑ до 2026-11-01 (Ф1.6.7б): ключ цели был всегда id; у файлов фото — имя файла
+                raise self._validation_error(
+                    title,
+                    f"нет записи {fk.column.table.name} с {fk.column.name}={value}",
+                )
 
     def _foreign_keys(self) -> List[Tuple[Any, Any]]:
         """
@@ -7023,9 +7029,35 @@ class PhotoService(
                 session=session
             )
             dto.file_path =  os.path.join(f"app_{app_id}",rel_path)
+            self._add_file_row(dto.file_path, session)
 
         # Сохраняем в БД
         return self._create_entity(dto, session=session)
+
+    def _add_file_row(
+        self,
+        file_path : str,       # путь файла от папки фото
+        session   : Session,   # сессия транзакции
+    ) -> None: # строка таблицы файлов для нового файла (Ф1.6.7б)
+        """
+        Добавляет строку файла (``photo_files``) для только что скопированного файла.
+
+        Фото ссылается на строку файла (внешний ключ ``photos.file_path``, Ф1.6.7б): без неё
+        база не даст записать фото. Строку без ссылок (фото удалили) убирает сборщик мусора
+        слоя базы. Порядок записи (файл раньше фото) — по связи ``Photo.file``.
+
+        Args:
+            file_path : (str) Путь файла от папки фото.
+            session   : (Session) Сессия транзакции.
+
+        Example:
+            >>> photo_service._add_file_row('app_5/0a1b.jpg', session)
+        """
+        session.add(
+            PhotoFile(file_path=file_path),
+        )
+        # сразу в базу: проверка ссылок фото (_validate_parents) ищет строку файла запросом
+        session.flush()
 
     @AppLogger.get_instance(
         name='PhotoService',
@@ -7111,6 +7143,7 @@ class PhotoService(
                 session=session
             )
             dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
+            self._add_file_row(dto.file_path, session)
         elif new_path is None and old_path:
             # Файл удалён – помечаем старый на удаление при коммите
             # self._delete_file_field(old_path, dest_dir, session)

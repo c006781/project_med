@@ -202,9 +202,27 @@ PHOTOS = TableDef(
            relation='appointment', back='photos', index='ix_photo_appointment',
            comment='ID приёма, к которому относится фото', dto_desc='ID приёма, к которому относится фото',
            editable=False, hidden=True, required=True, updatable=True),
-        column('file_path', sa.String(500), 'Файл', nullable=False,
-               comment='Относительный путь к файлу на диске', dto_desc='Относительный путь к файлу',
-               required=True, widget_type='image_thumbnail', description_field='description'),
+        # column('file_path', sa.String(500), 'Файл', nullable=False,
+        #        comment='Относительный путь к файлу на диске', dto_desc='Относительный путь к файлу',
+        #        required=True, widget_type='image_thumbnail', description_field='description'),
+        # ↑ до 2026-11-01 (Ф1.6.7б, решение владельца В-3): путь был просто строкой — файл
+        #   принадлежал одной строке фото. Теперь — ссылка на строку таблицы файлов
+        #   (PHOTO_FILES): на один файл — несколько фото, файл без ссылок убирает сборщик.
+        column(
+            'file_path',                                # имя (как было: окна, наборы, черновики)
+            sa.String(500),                             # тип
+            'Файл',                                     # подпись
+            nullable        =   False,                  # NOT NULL
+            index           =   'ix_photo_file_path',   # поиск ссылок на файл (сборщик, сверка)
+            comment         =   'Относительный путь к файлу на диске',  # комментарий (как был)
+            dto_desc        =   'Относительный путь к файлу',  # описание поля DTO
+            references      =   'photo_files.file_path',    # строка файла
+            relation        =   'file',                 # связь к строке файла
+            target_model    =   'PhotoFile',            # модель файлов
+            required            =   True,               # обязательное
+            widget_type         =   'image_thumbnail',  # миниатюра
+            description_field   =   'description',      # подпись миниатюры
+        ),
         column('description', sa.String(200), 'Описание', comment='Описание фотографии',
                dto_desc='Описание фотографии',
                editable=True, updatable=True, widget_type='textarea', width={'stretch': True}),
@@ -214,6 +232,38 @@ PHOTOS = TableDef(
     columns=('mark', 'file_path', 'description'),
     form=('image', 'description'),
     extras=(mark(), calc('image', 'Снимок', photo_image, visible=False, widget='image')),
+)
+
+# Файлы фото (Ф1.6.7б, решение владельца 2026-10-26, В-3; уточнено 2026-11-01): файл лежит в
+# папке фото из настроек (PHOTOS_STORAGE_PATH), строка — его имя (путь от этой папки); на
+# файл ссылаются строки фото (photos.file_path) — на один файл несколько приёмов. Файл без
+# ссылок не нужен: «только используемые» — строку убирает сборщик мусора слоя базы. Как и
+# заметки — не в CLINIC_DEFS (своего экрана и сервиса нет).
+PHOTO_FILES = TableDef(
+    'photo_files',                                      # таблица
+    'PhotoFile',                                        # модель
+    'PhotoFileDTO',                                     # DTO (не строится: экрана нет)
+    doc         =   'Файл фото в папке фото: на него ссылаются фото приёмов.',
+    comment     =   'Файлы фотографий (имя в папке фото)',  # комментарий таблицы в БД
+    entity      =   'photo_file',                       # тип записи
+    title       =   'Файлы фото',                       # заголовок
+    label       =   'Файл фото',                        # одна запись
+    keep        =   KEEP_USED,                          # файл без ссылок убирает сборщик
+    sqlite_autoincrement = False,                       # ключ — имя файла, не число
+    fields      =   (
+        column(
+            'file_path',                                # имя
+            sa.String(500),                             # тип
+            'Файл',                                     # подпись
+            primary_key     =   True,                   # строка таблицы — файл
+            comment         =   'Путь к файлу от папки фото',  # комментарий столбца
+            dto_desc        =   'Путь к файлу от папки фото',  # описание поля DTO
+        ),
+        timestamp(
+            'created_at',                               # имя
+            'Дата и время добавления файла',            # комментарий столбца
+        ),
+    ),
 )
 
 # Общие заметки: текст, на который ссылаются поля note() других таблиц (переиспользуемый).

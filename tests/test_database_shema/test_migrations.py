@@ -20,7 +20,15 @@ from app.database.migrate import (
     head_revision, schema_differences, upgrade_database,
 )
 
-APP_TABLES = ('patients', 'appointments', 'appointments_notes', 'photos')
+APP_TABLES = ('patients', 'appointments', 'appointments_notes', 'photos', 'photo_files')
+
+# Последняя НАСТОЯЩАЯ миграция (до подмены папки миграций тестами) и тестовая «следующая» за
+# ней. До 2026-11-01 настоящая была одна (0001), тестовая следующая называлась
+# 0002_test_change и шла от 0001; с 0002_photo_files (Ф1.6.7б) она идёт от последней.
+REAL_HEAD = head_revision()
+NEXT_REVISION = '9999_test_change'
+# номер автомиграции после тестовой следующей: число миграций (настоящие + тестовая) + 1
+AUTO_PREFIX = f"{int(REAL_HEAD[:4]) + 2:04d}_auto_"
 
 
 def app_metadata() -> MetaData:
@@ -31,11 +39,26 @@ def app_metadata() -> MetaData:
     return meta
 
 
+def legacy_metadata() -> MetaData:
+    """
+    Схема старых баз — та, что строил create_all до миграций (= исходная миграция 0001).
+
+    До 2026-11-01 старую базу строили по моделям приложения: их схема совпадала с исходной.
+    С 0002_photo_files (Ф1.6.7б) — не совпадает (таблица файлов фото, ссылка фото на файл),
+    поэтому — копия схемы исходной миграции (менять её можно: копия своя).
+    """
+    from app.database.migrate import schema_at
+    meta = MetaData(naming_convention=Base.metadata.naming_convention)
+    for table in schema_at(BASELINE).tables.values():
+        table.to_metadata(meta)
+    return meta
+
+
 def legacy_db(tmp_path, name='legacy.db', drop_index=True, extra_sql=()):
     """Старая база, как её строил create_all (без alembic_version), с данными."""
     path = tmp_path / name
     engine = create_engine(f"sqlite:///{path}")
-    app_metadata().create_all(engine)
+    legacy_metadata().create_all(engine)
     with engine.begin() as conn:
         if drop_index:
             conn.execute(text('DROP INDEX ix_appointment_note_text'))
@@ -86,8 +109,19 @@ def drop_column(
 
 
 def counts(engine):
+    # только таблицы, которые есть в базе: у старой базы таблицы файлов фото ещё нет (Ф1.6.7б)
+    existing = set(inspect(engine).get_table_names())
     with engine.connect() as conn:
-        return {t: conn.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in APP_TABLES}
+        return {t: conn.execute(text(f'SELECT count(*) FROM "{t}"')).scalar() for t in APP_TABLES
+                if t in existing}
+
+
+def same_data(before, after):
+    """
+    Данные таблиц, что были до обновления, на месте. Новые таблицы (у старой базы — таблица
+    файлов фото, 0002) в сравнение не входят — до 2026-11-01 сравнивалось `after == before`.
+    """
+    return {t: after[t] for t in before} == before
 
 
 def backups(tmp_path):
@@ -153,7 +187,7 @@ def test_legacy_missing_index_repaired_and_stamped(tmp_path):
     upgrade_database(engine)
     assert current_revision(engine) == head_revision()
     assert 'ix_appointment_note_text' in {i['name'] for i in inspect(engine).get_indexes('appointments_notes')}
-    assert counts(engine) == before                        # данные на месте
+    assert same_data(before, counts(engine))                        # данные на месте
     assert len(backups(tmp_path)) == 1                     # копия перед изменением
 
 
@@ -161,7 +195,11 @@ def test_legacy_identical_schema_only_stamped(tmp_path):
     path, engine = legacy_db(tmp_path, drop_index=False)
     upgrade_database(engine)
     assert current_revision(engine) == head_revision()
-    assert backups(tmp_path) == []                         # дописывать было нечего
+    # assert backups(tmp_path) == []                         # дописывать было нечего
+    # ↑ до 2026-11-01 (Ф1.6.7б): исходная миграция была последней — после отметки менять было
+    #   нечего. Теперь дальше идут миграции: копия одна — перед ними, не «-legacy».
+    copies = backups(tmp_path)
+    assert len(copies) == 1 and not copies[0].endswith('-legacy')   # приводить было нечего
 
 
 def test_legacy_extras_kept_with_warning(tmp_path):
@@ -190,7 +228,7 @@ def test_legacy_missing_nullable_column_added(tmp_path):
     """Старая база без необязательного столбца (phone) — столбец дописан, данные целы."""
     path = tmp_path / 'old.db'
     engine = create_engine(f"sqlite:///{path}")
-    meta = app_metadata()
+    meta = legacy_metadata()
     meta.tables['patients']._columns.remove(meta.tables['patients'].c.phone)
     meta.create_all(engine)
     with engine.begin() as conn:
@@ -317,8 +355,8 @@ MIGRATION_0002 = '''
 from alembic import op
 import sqlalchemy as sa
 
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 branch_labels = None
 depends_on = None
 
@@ -350,7 +388,9 @@ def with_0002(tmp_path, monkeypatch):
         shutil.copytree(migrate.MIGRATIONS_DIR, target, ignore=shutil.ignore_patterns('__pycache__'))
         if code is None:
             code = MIGRATION_0002.replace('    FAIL\n', "    raise RuntimeError('сбой в 0002')\n" if fail else '')
-        (target / 'versions' / '0002_test_change.py').write_text(code, encoding='utf-8')
+        # тестовая миграция — следующая за последней настоящей (Ф1.6.7б)
+        code = code.replace('NEXT_REVISION', NEXT_REVISION).replace('REAL_HEAD', REAL_HEAD)
+        (target / 'versions' / f'{NEXT_REVISION}.py').write_text(code, encoding='utf-8')
         monkeypatch.setattr(migrate, 'MIGRATIONS_DIR', str(target))
         migrate.head_revision.cache_clear()
         return target
@@ -365,7 +405,7 @@ def test_next_migration_on_baseline_db(tmp_path, with_0002):
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO patients (id, first_name, last_name) VALUES (1, 'И', 'П')"))
     with_0002()
-    assert upgrade_database(engine) == '0002_test_change'
+    assert upgrade_database(engine) == NEXT_REVISION
     cols = {c['name']: c for c in inspect(engine).get_columns('patients')}
     assert 'email' in cols and cols['phone']['nullable'] is False
     with engine.connect() as conn:
@@ -376,7 +416,7 @@ def test_next_migration_on_baseline_db(tmp_path, with_0002):
 def test_next_migration_on_legacy_db(tmp_path, with_0002):
     with_0002()
     path, engine = legacy_db(tmp_path)
-    assert upgrade_database(engine) == '0002_test_change'
+    assert upgrade_database(engine) == NEXT_REVISION
     assert counts(engine)['patients'] == 1
     assert 'email' in {c['name'] for c in inspect(engine).get_columns('patients')}
     # M6: одна копия (-legacy); до исправления — две одинаковые (-legacy и -0001_baseline)
@@ -386,7 +426,7 @@ def test_next_migration_on_legacy_db(tmp_path, with_0002):
 def test_next_migration_on_new_db(tmp_path, with_0002):
     with_0002()
     engine = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
-    assert upgrade_database(engine) == '0002_test_change'
+    assert upgrade_database(engine) == NEXT_REVISION
 
 
 def test_failed_next_migration_rolls_back_everything(tmp_path, with_0002):
@@ -398,7 +438,7 @@ def test_failed_next_migration_rolls_back_everything(tmp_path, with_0002):
     with_0002(fail=True)
     with pytest.raises(RuntimeError, match='сбой в 0002'):
         upgrade_database(engine)
-    assert current_revision(engine) == BASELINE
+    assert current_revision(engine) == REAL_HEAD
     cols = {c['name']: c for c in inspect(engine).get_columns('patients')}
     assert 'email' not in cols and cols['phone']['nullable'] is True
     with engine.connect() as conn:
@@ -412,8 +452,8 @@ def test_next_migration_downgrade(tmp_path, with_0002):
     engine = create_engine(f"sqlite:///{tmp_path / 'db.db'}")
     upgrade_database(engine)
     with engine.begin() as conn:
-        command.downgrade(alembic_config(conn), BASELINE)
-    assert current_revision(engine) == BASELINE
+        command.downgrade(alembic_config(conn), REAL_HEAD)
+    assert current_revision(engine) == REAL_HEAD
     assert 'email' not in {c['name'] for c in inspect(engine).get_columns('patients')}
 
 
@@ -544,8 +584,8 @@ def test_table_rebuild_with_foreign_keys_on_keeps_children(tmp_path, with_0002):
 ORPHAN_0002 = """
 from alembic import op
 
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 
 
 def upgrade():
@@ -565,7 +605,7 @@ def test_migration_leaving_broken_links_rolled_back(tmp_path, with_0002):
     with_0002(code=ORPHAN_0002)
     with pytest.raises(MigrationError, match='нарушены связи'):
         upgrade_database(engine)
-    assert current_revision(engine) == BASELINE
+    assert current_revision(engine) == REAL_HEAD
     assert counts(engine)['appointments'] == 0
 
 
@@ -576,7 +616,7 @@ def test_old_broken_links_do_not_block_migration(tmp_path, with_0002):
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO appointments (id, patient_id, date) VALUES (7, 404, '2026-10-18')"))
     with_0002()
-    assert upgrade_database(engine) == '0002_test_change'
+    assert upgrade_database(engine) == NEXT_REVISION
     assert counts(engine)['appointments'] == 1
 
 
@@ -619,7 +659,9 @@ def test_drift_missing_index_and_table_repaired(tmp_path):
     with engine.begin() as conn:
         conn.execute(text('DROP INDEX ix_appointment_note_text'))
         conn.execute(text('DROP TABLE photos'))
-    assert upgrade_database(engine) == BASELINE
+    # assert upgrade_database(engine) == BASELINE
+    # ↑ до 2026-11-01 (Ф1.6.7б): последней была исходная миграция
+    assert upgrade_database(engine) == REAL_HEAD
     assert 'photos' in inspect(engine).get_table_names()
     assert 'ix_appointment_note_text' in {i['name'] for i in inspect(engine).get_indexes('appointments_notes')}
     assert counts(engine)['patients'] == 1
@@ -673,8 +715,8 @@ INDEXED_COLUMN_0002 = """
 from alembic import op
 import sqlalchemy as sa
 
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 
 
 def upgrade():
@@ -705,8 +747,8 @@ def test_drift_adds_column_before_its_index(tmp_path, with_0002):
 
 
 NOOP_0002 = """
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 
 
 def upgrade():
@@ -760,7 +802,9 @@ def test_generate_migration_safe_changes(tmp_path, with_0002):
     path = migrate.generate_migration(models)
     assert path and os.path.dirname(path) == str(target / 'versions')
     name = os.path.basename(path)
-    assert name.startswith('0003_auto_') and name.endswith('.py')
+    # assert name.startswith('0003_auto_') and name.endswith('.py')
+    # ↑ до 2026-11-01 (Ф1.6.7б): номер — число миграций + 1, их стало больше на одну настоящую
+    assert name.startswith(AUTO_PREFIX) and name.endswith('.py')
     body = open(path, encoding='utf-8').read()
     assert 'создана автоматически' in body and 'add_table prescriptions_auto' in body
     assert 'Автомиграция: add_table prescriptions_auto' in body      # заголовок файла
@@ -791,7 +835,9 @@ def test_autogenerate_on_startup(tmp_path, with_0002, app_models, monkeypatch):
     _add_table(app_models)
     migrate.configure(autogenerate=True)
     head = upgrade_database(engine)
-    assert head.startswith('0003_auto_')
+    # assert head.startswith('0003_auto_')
+    # ↑ до 2026-11-01 (Ф1.6.7б): номер зависит от числа настоящих миграций
+    assert head.startswith(AUTO_PREFIX)
     assert 'prescriptions_auto' in inspect(engine).get_table_names()
     assert counts(engine)['patients'] == 1
     assert len(backups(tmp_path)) == 1
@@ -875,8 +921,12 @@ def test_two_heads_clear_error(tmp_path, with_0002, app_models):
     """A1: две ветки миграций от одной версии — понятный MigrationError и при генерации."""
     from app.database import migrate
     target = with_0002(code=NOOP_0002)
+    # (target / 'versions' / '0002_other.py').write_text(
+    #     NOOP_0002.replace("'0002_test_change'", "'0002_other'"), encoding='utf-8')
+    # ↑ до 2026-11-01 (Ф1.6.7б): имя тестовой ревизии стало заменяемым (NEXT_REVISION)
     (target / 'versions' / '0002_other.py').write_text(
-        NOOP_0002.replace("'0002_test_change'", "'0002_other'"), encoding='utf-8')
+        NOOP_0002.replace("'NEXT_REVISION'", "'0002_other'").replace('REAL_HEAD', REAL_HEAD),
+        encoding='utf-8')
     migrate.head_revision.cache_clear()
     with pytest.raises(migrate.MigrationError, match='голов'):
         migrate.generate_migration()
@@ -894,7 +944,7 @@ def test_generated_fk_migration_on_legacy_db(tmp_path, with_0002):
     before = counts(engine)
     assert migrate.generate_migration(_models_with(_add_fk_column))
     upgrade_database(engine)
-    assert counts(engine) == before                        # данные всех таблиц целы
+    assert same_data(before, counts(engine))                        # данные всех таблиц целы
     referred = sorted(fk['referred_table'] for fk in inspect(engine).get_foreign_keys('appointments'))
     assert 'doctors' in referred and 'patients' in referred
 
@@ -904,8 +954,8 @@ from alembic import op
 
 from app.database.database_shema.clinic import NAMING_CONVENTION
 
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 
 
 def upgrade():
@@ -926,15 +976,17 @@ def test_drop_unnamed_fk_on_legacy_db_by_convention(tmp_path, with_0002):
     path, engine = legacy_db(tmp_path)
     before = counts(engine)
     upgrade_database(engine)
-    assert inspect(engine).get_foreign_keys('photos') == []
-    assert counts(engine) == before
+    # assert inspect(engine).get_foreign_keys('photos') == []
+    # ↑ до 2026-11-01 (Ф1.6.7б): у фото была одна связь; теперь есть и связь с файлом
+    assert [fk['referred_table'] for fk in inspect(engine).get_foreign_keys('photos')] == ['photo_files']
+    assert same_data(before, counts(engine))
 
 
 UNIQUE_0002 = """
 from alembic import op
 
-revision = '0002_test_change'
-down_revision = '0001_baseline'
+revision = 'NEXT_REVISION'
+down_revision = 'REAL_HEAD'
 
 
 def upgrade():

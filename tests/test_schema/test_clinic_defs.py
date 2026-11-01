@@ -12,10 +12,34 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import declarative_base
 
-from app.schema.clinic import APPOINTMENTS, CLINIC_DEFS, PATIENTS, PHOTOS
+import copy
+
+from app.schema.clinic import APPOINTMENTS, CLINIC_DEFS, PATIENTS, PHOTO_FILES, PHOTOS
 from app.schema.define import rebuild_dtos
 
 from .legacy_snapshot import SNAPSHOT
+
+
+def _expected_model(name):
+    """
+    Ожидаемый снимок модели: прежний (написанный вручную) и намеренные изменения после него.
+
+    Фото (Ф1.6.7б, 2026-11-01): ``file_path`` — внешний ключ на файлы фото
+    (``photo_files.file_path``), индекс ``ix_photo_file_path``, связь ``file`` к строке
+    файла. Остальное — как в снимке.
+    """
+    expected = copy.deepcopy(SNAPSHOT['models'][name])
+    if name == 'Photo':
+        columns = expected['columns']
+        index = [c[0] for c in columns].index('file_path')
+        row = list(columns[index])
+        row[4] = ['photo_files.file_path']
+        columns[index] = tuple(row)
+        expected['indexes'] = sorted(expected['indexes'] + [('ix_photo_file_path', ('file_path',), False)])
+        expected['relationships'] = sorted(expected['relationships'] + [
+            ('file', 'PhotoFile', 'MANYTOONE', "['merge', 'save-update']", None, ('file_path',)),
+        ])
+    return expected
 
 
 @pytest.fixture(scope='module')
@@ -29,6 +53,7 @@ def generated():
         text = sa.Column(sa.Text, nullable=False)
 
     models = {d.model_name: d.build_model(base) for d in CLINIC_DEFS}
+    models['PhotoFile'] = PHOTO_FILES.build_model(base)   # цель ссылки фото (Ф1.6.7б)
     sa.orm.configure_mappers()
     dtos = {d.dto_name: d.build_dto() for d in CLINIC_DEFS}
     rebuild_dtos(*dtos.values())
@@ -69,7 +94,7 @@ def config_snapshot(config):
 @pytest.mark.parametrize('name', ['Patient', 'Appointment', 'Photo'])
 def test_models_same_as_handwritten(generated, name):
     models, _, _ = generated
-    assert model_snapshot(models[name]) == SNAPSHOT['models'][name]
+    assert model_snapshot(models[name]) == _expected_model(name)
 
 
 @pytest.mark.parametrize('name', ['PatientDTO', 'AppointmentDTO', 'PhotoDTO'])
@@ -139,7 +164,7 @@ def test_app_uses_generated_classes():
     for d in CLINIC_DEFS:
         model = getattr(models, d.model_name)
         assert model.__module__ == models.__name__
-        assert model_snapshot(model) == SNAPSHOT['models'][d.model_name]
+        assert model_snapshot(model) == _expected_model(d.model_name)
         name = f'{d.entity.upper()}_CONFIG'
         assert config_snapshot(getattr(field_configs, name)) == SNAPSHOT['configs'][name]
         assert [n for n, *_ in dto_snapshot(getattr(dto_all, d.dto_name))] == \

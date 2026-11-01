@@ -11,7 +11,7 @@ import os
 import pytest
 
 from app.database import Database
-from app.database.database_shema.clinic import Photo
+from app.database.database_shema.clinic import Photo, PhotoFile
 from app.dto.dto_all import AppointmentDTO, PatientDTO
 from app.dto.field_configs import APPOINTMENT_CONFIG, NOTE_CONFIG, PATIENT_CONFIG, PHOTO_CONFIG
 from app.exceptions.exceptions_all import PatientNotFoundError, PatientValidationError
@@ -58,7 +58,9 @@ def _photo(svc, appointment_id, name):
     path = svc['storage'] / name
     path.write_bytes(b'img-' + name.encode())
     with svc['db'].session_scope() as s:
-        row = Photo(appointment_id=appointment_id, file_path=name)
+        # row = Photo(appointment_id=appointment_id, file_path=name)
+        # ↑ до 2026-11-01 (Ф1.6.7б): фото ссылается на строку файла (внешний ключ)
+        row = Photo(appointment_id=appointment_id, file=PhotoFile(file_path=name))
         s.add(row)
         s.flush()
         return row.id

@@ -85,7 +85,7 @@ from app.utils.logger import AppLogger
 
 # try:
 # Относительный импорт моделей — это и разрывает цикл!
-from .clinic import Patient, Appointment, AppointmentNote, Photo
+from .clinic import Patient, Appointment, AppointmentNote, Photo, PhotoFile
 # from app.backend.bd.clinic import Patient, Appointment, AppointmentNote, Photo
     # from . import models
 # except ImportError as e:
@@ -308,16 +308,29 @@ def populate_test_data(
         "Заполнение ТБ 'Фотографии' тестовыми данными..."
     ) 
     # Фотографии
+    # photo1 = Photo(
+    #     appointment_id  = app1.id,
+    #     file_path       = "photos/app1/face.jpg",
+    #     description     = "Лицо"
+    # )
+    #
+    # photo2 = Photo(
+    #     appointment_id  =   app1.id,
+    #     file_path       =   "photos/app1/neck.jpg",
+    #     description     =   "Шея"
+    # )
+    # ↑ до 2026-11-01 (Ф1.6.7б): путь был строкой фото; теперь фото ссылается на строку файла
+    #   (photo_files) — без неё внешний ключ не даст записать фото. Связь file создаёт её.
     photo1 = Photo(
-        appointment_id  = app1.id, 
-        file_path       = "photos/app1/face.jpg", 
-        description     = "Лицо"
+        appointment_id  =   app1.id,                                    # приём
+        file            =   PhotoFile(file_path="photos/app1/face.jpg"),  # строка файла
+        description     =   "Лицо",                                     # описание
     )
 
     photo2 = Photo(
-        appointment_id  =   app1.id, 
-        file_path       =   "photos/app1/neck.jpg", 
-        description     =   "Шея"
+        appointment_id  =   app1.id,                                    # приём
+        file            =   PhotoFile(file_path="photos/app1/neck.jpg"),  # строка файла
+        description     =   "Шея",                                      # описание
     )
     session.add_all(
         [photo1, photo2]

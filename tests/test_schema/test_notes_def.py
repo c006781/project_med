@@ -9,7 +9,7 @@ legacy_snapshot_notes.py, снят до переключения).
 import pytest
 from sqlalchemy.orm import declarative_base
 
-from app.schema.clinic import CLINIC_DEFS, NOTES
+from app.schema.clinic import CLINIC_DEFS, NOTES, PHOTO_FILES
 from app.schema.define import NOTES_MODEL, NOTES_TABLE
 
 from .legacy_snapshot_notes import SNAPSHOT
@@ -23,6 +23,7 @@ def generated_note_model():
     # ссылки на классы держать: реестр классов SQLAlchemy хранит их слабо — выброшенные
     # модели удаляет сборщик мусора, и строки связей ('Photo', 'Appointment') не разрешаются
     models = [d.build_model(base) for d in CLINIC_DEFS]
+    models.append(PHOTO_FILES.build_model(base))    # фото ссылаются на файлы (Ф1.6.7б)
     note = NOTES.build_model(base)
     base.registry.configure()
     yield note

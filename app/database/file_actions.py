@@ -26,6 +26,7 @@ Example:
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from app.database.table_events import EventContext, register_action
@@ -35,6 +36,11 @@ from app.utils.logger import AppLogger
 
 PHOTOS_ROOT        : str = 'photos_root'         # ресурс базы: папка фото (абсолютный путь)
 REMOVE_PHOTO_FILE  : str = 'remove_photo_file'   # имя действия в описании PHOTO_FILES
+
+# Имя файла фото нашего вида (Ф1.6.7б): время добавления ГГГГММДД_ЧЧММСС, номер в той же
+# секунде, расширение строчными. Старые пути (app_<N>/<uuid>.jpg) — не этого вида: их переносит
+# PhotoService.relocate_legacy_files; сверка трогает только имена этого вида и папки app_*.
+PHOTO_NAME_RE      : 're.Pattern[str]' = re.compile(r'^\d{8}_\d{6}(_\d+)?(\.[a-z0-9]+)?$')
 
 
 def _logger() -> AppLogger: # журнал действий с файлами
@@ -195,6 +201,6 @@ def register_file_actions() -> None: # регистрирует действия
 
 
 __all__ = [
-    'PHOTOS_ROOT', 'REMOVE_PHOTO_FILE', 'photo_file_path', 'remove_photo_file',
+    'PHOTOS_ROOT', 'REMOVE_PHOTO_FILE', 'PHOTO_NAME_RE', 'photo_file_path', 'remove_photo_file',
     'register_file_actions',
 ]

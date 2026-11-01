@@ -7183,8 +7183,9 @@ class PhotoService(
 
     def _store_new_file(
         self,
-        source_path : str,       # исходный файл (абсолютный путь)
-        session     : Session,   # транзакция
+        source_path : str,                          # исходный файл (абсолютный путь)
+        session     : Session,                      # транзакция
+        added_at    : Optional[_dt] = None,         # время добавления; None — сейчас
     ) -> str: # имя нового файла от папки фото
         """
         Копирует новый файл прямо в папку фото и добавляет его строку (``photo_files``).
@@ -7200,6 +7201,8 @@ class PhotoService(
         Args:
             source_path : (str) Исходный файл.
             session     : (Session) Сессия транзакции.
+            added_at    : (datetime/None) Время добавления для имени (перенос старых фото —
+                время их строки файла); None — сейчас.
 
         Returns:
             (str) Имя файла от папки фото.
@@ -7216,7 +7219,7 @@ class PhotoService(
             raise FileNotFoundError(f"Исходный файл не найден: {source_path}")
         root = self._storage_path
         os.makedirs(root, exist_ok=True)
-        stamp = _dt.now().strftime('%Y%m%d_%H%M%S')
+        stamp = (added_at or _dt.now()).strftime('%Y%m%d_%H%M%S')
         ext = os.path.splitext(source_path)[1].lower()
         number = 1
         while True:
@@ -7261,6 +7264,106 @@ class PhotoService(
         )
         self.logger.debug(f"Новый файл фото: {source_path} -> {name}")
         return name
+
+    def relocate_legacy_files(
+        self,
+        batch : int = 100,   # строк файлов на транзакцию
+    ) -> Dict[str, int]: # перенос старых фото app_<N>/… в папку фото (при запуске)
+        """
+        Переносит старые файлы фото (``app_<N>/<uuid>.jpg`` — до Ф1.6.7б) прямо в папку фото
+        с именем по времени добавления (решение владельца 2026-11-01: автоматически при
+        запуске; полную копию папки фото программа не делает).
+
+        Порядок: старых строк файлов (имя не вида ``ГГГГММДД_ЧЧММСС``) нет — ничего, даже
+        копии базы; иначе — копия базы (``backup_sqlite_database``, метка ``photos``), затем
+        пачками по ``batch`` строк, каждая пачка — своя транзакция: файл копируется под новым
+        именем (время — ``created_at`` строки, нет — сейчас; строка нового файла), ссылки фото
+        переводятся на новое имя; старую строку без ссылок убирает сборщик мусора, старый файл
+        и опустевшую папку ``app_<N>`` — действие ``remove_photo_file`` после коммита. Откат
+        пачки — новые копии удаляются, старое на месте. Старого файла нет на диске — строка
+        остаётся как есть (предупреждение; повтор при следующем запуске). Ошибка пачки — в
+        журнал, перенос останавливается (остальное — при следующем запуске). Исключений не
+        бросает: запуск программы не должен падать из-за переноса.
+
+        Args:
+            batch : (int) Строк файлов на одну транзакцию.
+
+        Returns:
+            (Dict[str, int]) ``moved`` — перенесено файлов, ``missing`` — старого файла нет,
+            ``failed`` — не перенесено из-за ошибки (пачка откачена и следующие).
+
+        Example:
+            >>> get_photo_service().relocate_legacy_files()
+            {'moved': 12, 'missing': 0, 'failed': 0}
+        """
+        from app.database.database import backup_sqlite_database   # тут: копия базы только при переносе
+        from app.database.file_actions import PHOTO_NAME_RE, photo_file_path
+
+        report = {'moved': 0, 'missing': 0, 'failed': 0}
+        try:
+            with self._db.session_scope() as session:
+                legacy = sorted(
+                    name for name in session.scalars(select(PhotoFile.file_path))
+                    if not PHOTO_NAME_RE.match(name)
+                )
+            root = self._storage_path
+            present = []
+            for old_name in legacy:
+                source = photo_file_path(
+                    root,       # папка фото
+                    old_name,   # старое имя
+                )
+                if source is None or not os.path.isfile(source): # переносить нечего
+                    self.logger.warning(f"Старый файл фото не найден, не перенесён: {old_name}")
+                    report['missing'] += 1
+                else:
+                    present.append(old_name)
+            legacy = present
+            if not legacy: # копия базы — только когда есть что переносить
+                return report
+            backup = backup_sqlite_database(
+                self._db.engine,   # база
+                'photos',          # метка копии
+            )
+            self.logger.info(
+                f"Перенос старых фото в папку фото: {len(legacy)} файлов; копия базы — {backup}"
+            )
+            for start in range(0, len(legacy), batch):
+                part = legacy[start:start + batch]
+                try:
+                    with self._db.session_scope() as session:
+                        moved = missing = 0
+                        for old_name in part:
+                            source = photo_file_path(
+                                root,       # папка фото
+                                old_name,   # старое имя
+                            )
+                            if source is None or not os.path.isfile(source): # переносить нечего
+                                self.logger.warning(f"Старый файл фото не найден, не перенесён: {old_name}")
+                                missing += 1
+                                continue
+                            row = session.get(PhotoFile, old_name)
+                            new_name = self._store_new_file(
+                                source,                                     # старый файл
+                                session,                                    # транзакция пачки
+                                added_at = row.created_at if row else None, # время добавления
+                            )
+                            for photo in session.scalars(select(Photo).where(Photo.file_path == old_name)):
+                                photo.file_path = new_name
+                            moved += 1
+                    report['moved'] += moved
+                    report['missing'] += missing
+                except Exception:
+                    self.logger.exception(
+                        f"Перенос старых фото остановлен на пачке {start // batch + 1}: она откачена, "
+                        f"остальное — при следующем запуске"
+                    )
+                    report['failed'] = len(legacy) - start
+                    break
+            self.logger.info(f"Перенос старых фото: {report}")
+        except Exception:
+            self.logger.exception("Перенос старых фото не выполнен")
+        return report
 
     def _add_file_row(
         self,

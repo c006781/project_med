@@ -19,6 +19,13 @@
     │   ├── PhotoStoragePermissionError                                errno 13
     │   └── PhotoStorageNoSpaceError                                   errno 28
     ├── SyncError → DownloadError, UploadError, TokenError             5000–5003
+    │   └── YandexDiskError (reason, operation, remote_path, local_path,  5010
+    │       │                server_response)
+    │       ├── YandexDiskTokenError / YandexDiskConnectionError       5011 / 5012
+    │       ├── YandexDiskNotFoundError / YandexDiskNotAFileError      5013 / 5014
+    │       ├── YandexDiskTransferError                                5015
+    │       ├── YandexDiskVerifyError (check, expected, actual)        5016
+    │       └── YandexDiskBackupError                                  5017
     └── DatabaseError → DbIntegrityError, DatabaseConnectionError      6000–6002
 
 Три уровня текста: ``str(exc)`` — понятный текст пользователю (``[код] текст``);
@@ -30,7 +37,8 @@
 Сейчас нигде не бросаются ``PhotoStorage*Error``, исключения синхронизации и базы данных
 (``_dev/ИДЕИ.md`` И-9): база — подключить в ``app/database``, фото — в ``app/services``
 (через ``photo_error_from_os_error``), синхронизация — свои подробные исключения
-Яндекс.Диска (``app/exceptions/IMPLEMENTATION.md`` §4.1). Прежние имена ``IntegrityError``,
+Яндекс.Диска (``app/exceptions/IMPLEMENTATION.md`` §4.1) — ``YandexDisk*Error`` (с 2026-11-01,
+бросает ``app/network/db_download.py``; ``SyncError`` и др. — оставлены). Прежние имена ``IntegrityError``,
 ``ConnectionError`` — псевдонимы ``DbIntegrityError``, ``DatabaseConnectionError``.
 
 Новой таблице свой класс не нужен: ``EntityNotFoundError('Назначение', 5)`` и
@@ -1259,6 +1267,324 @@ class TokenError(SyncError):
             details  = details,     # подробности
             original = original,    # исходная ошибка
         )
+
+
+# ----------------------------------------------------------------------------------------
+# Яндекс.Диск — подробные исключения (с 2026-11-01; бросает app/network/db_download.py)
+# ----------------------------------------------------------------------------------------
+
+def _yandex_disk_details(
+    operation       : str,                  # что делали
+    remote_path     : Optional[str],        # файл на Диске
+    local_path      : Optional[str],        # локальный файл
+    server_response : Optional[str],        # ответ сервера Диска
+    details         : Optional[Details],    # прочие подробности от вызывающего
+) -> Dict[str, Any]: # подробности исключения Яндекс.Диска для журнала
+    """
+    Собирает подробности исключения Яндекс.Диска в словарь для журнала.
+
+    Порядок ключей: операция, файл на Диске, локальный файл, ответ сервера, затем
+    подробности вызывающего (словарь — его ключи, текст — ключ ``'прочее'``). Пустые
+    значения (``None``, ``''``) пропускаются; ключи вызывающего перекрывают одноимённые.
+
+    Args:
+        operation       : (str) Что делали.
+        remote_path     : (str/None) Файл на Диске; None — не задан.
+        local_path      : (str/None) Локальный файл; None — не задан.
+        server_response : (str/None) Ответ сервера; None — ответа нет.
+        details         : (str/Mapping/None) Подробности вызывающего; None — нет.
+
+    Returns:
+        (Dict[str, Any]) Подробности.
+
+    Example:
+        >>> _yandex_disk_details(
+        ...     'скачивание',           # операция
+        ...     'Папка/clinic.db',      # файл на Диске
+        ...     None,                   # локального нет
+        ...     'HTTP 503',             # ответ сервера
+        ...     'попытка 2',            # прочее
+        ... )
+        {'операция': 'скачивание', 'файл на Диске': 'Папка/clinic.db', 'ответ сервера': 'HTTP 503', 'прочее': 'попытка 2'}
+    """
+    result: Dict[str, Any] = {
+        key: value
+        for key, value in (
+            ('операция', operation),
+            ('файл на Диске', remote_path),
+            ('локальный файл', local_path),
+            ('ответ сервера', server_response),
+        )
+        if value not in (None, '')
+    }
+    if isinstance(details, Mapping): # словарь вызывающего — его ключи
+        result.update(details)
+    elif details: # текст — одним ключом
+        result['прочее'] = details
+    return result
+
+
+class YandexDiskError(SyncError):
+    """
+    Базовое исключение операций с Яндекс.Диском (код 5010; наследники — 5011–5017).
+
+    Подробное: что делали (``operation``), файл на Диске и локальный файл, ответ сервера,
+    причина. Текст пользователю — ``[код] Яндекс.Диск, <операция> «<файл>»: <причина>``
+    (файл — на Диске, без него — локальный); всё остальное — в ``details`` (словарь) и
+    ``log_text()``; исходная ошибка библиотеки ``yadisk`` или ОС — в ``original``.
+
+    Наследники отличаются кодом и операцией по умолчанию (атрибуты класса
+    ``default_code``, ``default_operation``) — ловить можно по своему классу, по
+    ``YandexDiskError`` (любая ошибка Диска) или по ``SyncError``. Встроенным
+    ``ConnectionError`` / ``FileNotFoundError`` они не являются: прежние функции
+    ``app.network.ya_dop`` бросают встроенные, новые (``app.network.db_download``) — эти.
+
+    Attributes:
+        reason          : (str) Причина (часть текста пользователю).
+        operation       : (str) Что делали.
+        remote_path     : (str/None) Файл на Диске.
+        local_path      : (str/None) Локальный файл.
+        server_response : (str/None) Ответ сервера Диска (тип ошибки API, HTTP-код, текст).
+
+    Example:
+        >>> exc = YandexDiskError(
+        ...     'сервер не ответил',                    # причина
+        ...     operation       =   'скачивание',       # что делали
+        ...     remote_path     =   'Папка/clinic.db',  # файл на Диске
+        ...     server_response =   'HTTP 504',         # ответ сервера
+        ... )
+        >>> str(exc)
+        '[5010] Яндекс.Диск, скачивание «Папка/clinic.db»: сервер не ответил'
+        >>> print(exc.log_text())
+        [5010] Яндекс.Диск, скачивание «Папка/clinic.db»: сервер не ответил
+          Подробности: операция=скачивание; файл на Диске=Папка/clinic.db; ответ сервера=HTTP 504
+        >>> isinstance(exc, SyncError)
+        True
+    """
+
+    default_code      : int = 5010                          # код по умолчанию
+    default_operation : str = 'обмен с Яндекс.Диском'       # операция по умолчанию
+
+    def __init__(
+        self,
+        reason          : str,                              # причина (в текст пользователю)
+        *,
+        operation       : Optional[str] = None,             # что делали; None — default_operation
+        remote_path     : Optional[str] = None,             # файл на Диске
+        local_path      : Optional[str] = None,             # локальный файл
+        server_response : Optional[str] = None,             # ответ сервера Диска
+        code            : Optional[int] = None,             # код; None — default_code
+        details         : Optional[Details] = None,         # прочие подробности (для журнала)
+        original        : Optional[BaseException] = None,   # исходная ошибка (None — из цепочки)
+    ) -> None:
+        """
+        Создаёт исключение Яндекс.Диска.
+
+        Args:
+            reason          : (str) Причина — подставляется в текст пользователю.
+            operation       : (str/None) Что делали; None — ``default_operation`` класса.
+            remote_path     : (str/None) Файл на Диске; None — не задан.
+            local_path      : (str/None) Локальный файл; None — не задан.
+            server_response : (str/None) Ответ сервера; None — ответа нет.
+            code            : (int/None) Код; None — ``default_code`` класса.
+            details         : (str/Mapping/None) Прочие подробности; None — нет.
+                Добавляются к подробностям, собранным из параметров выше.
+            original        : (BaseException/None) Исходная ошибка; None — из цепочки.
+
+        Example:
+            >>> exc = YandexDiskError('сбой', local_path='clinic.db')
+            >>> (str(exc), exc.operation, exc.local_path, exc.remote_path)
+            ('[5010] Яндекс.Диск, обмен с Яндекс.Диском «clinic.db»: сбой', 'обмен с Яндекс.Диском', 'clinic.db', None)
+        """
+        operation = operation or self.default_operation
+        shown_path = remote_path or local_path
+        if shown_path: # файл — в тексте пользователю
+            message = f"Яндекс.Диск, {operation} «{shown_path}»: {reason}"
+        else:
+            message = f"Яндекс.Диск, {operation}: {reason}"
+        super().__init__(
+            message,                                                    # текст
+            self.default_code if code is None else code,                # код
+            details  = _yandex_disk_details(
+                operation,          # что делали
+                remote_path,        # файл на Диске
+                local_path,         # локальный файл
+                server_response,    # ответ сервера
+                details,            # прочее
+            ),
+            original = original,                                        # исходная ошибка
+        )
+        self.reason = reason
+        self.operation = operation
+        self.remote_path = remote_path
+        self.local_path = local_path
+        self.server_response = server_response
+
+
+class YandexDiskTokenError(YandexDiskError):
+    """
+    Токен Яндекс.Диска недействителен (сервер ответил, но токен не принял; код 5011).
+
+    Example:
+        >>> str(YandexDiskTokenError('токен не принят сервером'))
+        '[5011] Яндекс.Диск, проверка токена: токен не принят сервером'
+    """
+
+    default_code      : int = 5011                # код
+    default_operation : str = 'проверка токена'   # операция по умолчанию
+
+
+class YandexDiskConnectionError(YandexDiskError):
+    """
+    Нет связи с Яндекс.Диском: нет сети, таймаут, сервер недоступен (код 5012).
+
+    Example:
+        >>> str(YandexDiskConnectionError('нет сети', remote_path='/clinic.db'))
+        '[5012] Яндекс.Диск, связь с Яндекс.Диском «/clinic.db»: нет сети'
+    """
+
+    default_code      : int = 5012                        # код
+    default_operation : str = 'связь с Яндекс.Диском'     # операция по умолчанию
+
+
+class YandexDiskNotFoundError(YandexDiskError):
+    """
+    Файла на Яндекс.Диске нет (код 5013).
+
+    Example:
+        >>> str(YandexDiskNotFoundError('файл не найден', remote_path='/clinic.db'))
+        '[5013] Яндекс.Диск, поиск файла «/clinic.db»: файл не найден'
+    """
+
+    default_code      : int = 5013            # код
+    default_operation : str = 'поиск файла'   # операция по умолчанию
+
+
+class YandexDiskNotAFileError(YandexDiskError):
+    """
+    Путь на Яндекс.Диске ведёт к папке, а не к файлу (код 5014).
+
+    Example:
+        >>> YandexDiskNotAFileError('это папка', remote_path='/База').code
+        5014
+    """
+
+    default_code      : int = 5014            # код
+    default_operation : str = 'поиск файла'   # операция по умолчанию
+
+
+class YandexDiskTransferError(YandexDiskError):
+    """
+    Передача файла не удалась или прервана: обрыв сети, ошибка сервера, нет места на
+    локальном диске (код 5015).
+
+    Example:
+        >>> str(YandexDiskTransferError('соединение прервано', remote_path='/clinic.db'))
+        '[5015] Яндекс.Диск, скачивание «/clinic.db»: соединение прервано'
+    """
+
+    default_code      : int = 5015            # код
+    default_operation : str = 'скачивание'    # операция по умолчанию
+
+
+class YandexDiskVerifyError(YandexDiskError):
+    """
+    Скачанный файл не прошёл проверку: размер, MD5 или он не база SQLite (код 5016).
+
+    Attributes:
+        check    : (str) Что проверялось: ``'size'``, ``'md5'``, ``'sqlite'`` или ``'read'``
+            (файл не читается).
+        expected : (Any) Ожидалось (размер / MD5 с Диска; у ``'sqlite'`` — None).
+        actual   : (Any) Получено (у ``'sqlite'`` — текст проблемы).
+
+    Example:
+        >>> exc = YandexDiskVerifyError(
+        ...     'size',                                 # что проверялось
+        ...     'размер не совпал с размером на Диске', # причина
+        ...     expected    =   100,                    # с Диска
+        ...     actual      =   40,                     # скачано
+        ...     remote_path =   '/clinic.db',           # файл на Диске
+        ... )
+        >>> str(exc)
+        '[5016] Яндекс.Диск, проверка скачанного файла «/clinic.db»: размер не совпал с размером на Диске'
+        >>> (exc.check, exc.expected, exc.actual, exc.details['ожидалось'])
+        ('size', 100, 40, 100)
+    """
+
+    default_code      : int = 5016                          # код
+    default_operation : str = 'проверка скачанного файла'   # операция по умолчанию
+
+    def __init__(
+        self,
+        check           : str,                              # что проверялось: size / md5 / sqlite / read
+        reason          : str,                              # причина (в текст пользователю)
+        *,
+        expected        : Any = None,                       # ожидалось
+        actual          : Any = None,                       # получено
+        operation       : Optional[str] = None,             # что делали; None — default_operation
+        remote_path     : Optional[str] = None,             # файл на Диске
+        local_path      : Optional[str] = None,             # проверяемый локальный файл
+        details         : Optional[Details] = None,         # прочие подробности (для журнала)
+        original        : Optional[BaseException] = None,   # исходная ошибка (None — из цепочки)
+    ) -> None:
+        """
+        Создаёт ошибку проверки скачанного файла.
+
+        ``check``, ``expected``, ``actual`` попадают и в атрибуты, и в подробности
+        (``'проверка'``, ``'ожидалось'``, ``'получено'``; пустые — пропускаются).
+
+        Args:
+            check       : (str) Что проверялось: ``'size'``, ``'md5'``, ``'sqlite'``, ``'read'``.
+            reason      : (str) Причина — подставляется в текст пользователю.
+            expected    : (Any) Ожидалось; None — не задано.
+            actual      : (Any) Получено; None — не задано.
+            operation   : (str/None) Что делали; None — ``default_operation``.
+            remote_path : (str/None) Файл на Диске; None — не задан.
+            local_path  : (str/None) Проверяемый локальный (временный) файл; None — не задан.
+            details     : (str/Mapping/None) Прочие подробности; None — нет.
+            original    : (BaseException/None) Исходная ошибка; None — из цепочки.
+
+        Example:
+            >>> YandexDiskVerifyError('sqlite', 'не база SQLite', actual='file is not a database').details['получено']
+            'file is not a database'
+        """
+        check_details: Dict[str, Any] = {
+            key: value
+            for key, value in (
+                ('проверка', check),
+                ('ожидалось', expected),
+                ('получено', actual),
+            )
+            if value is not None
+        }
+        if isinstance(details, Mapping): # подробности вызывающего — после проверки
+            check_details.update(details)
+        elif details:
+            check_details['прочее'] = details
+        super().__init__(
+            reason,                             # причина
+            operation   = operation,            # что делали
+            remote_path = remote_path,          # файл на Диске
+            local_path  = local_path,           # проверяемый файл
+            details     = check_details,        # проверка + прочее
+            original    = original,             # исходная ошибка
+        )
+        self.check = check
+        self.expected = expected
+        self.actual = actual
+
+
+class YandexDiskBackupError(YandexDiskError):
+    """
+    Резервная копия локальной базы перед заменой не удалась (код 5017).
+
+    Example:
+        >>> str(YandexDiskBackupError('нет прав на папку копий', local_path='clinic.db'))
+        '[5017] Яндекс.Диск, резервная копия локальной базы «clinic.db»: нет прав на папку копий'
+    """
+
+    default_code      : int = 5017                                # код
+    default_operation : str = 'резервная копия локальной базы'    # операция по умолчанию
 
 
 # ----------------------------------------------------------------------------------------

@@ -2,7 +2,8 @@
 
 > Файл для разработчиков: что делает модуль, как устроен, почему так и журнал проверок.
 > Обновляется вместе с кодом.
-> Последнее обновление: 2026-10-31, проход 4 — три уровня текста (Ф1.6.8а, ветка
+> Последнее обновление: 2026-11-01 — исключения Яндекс.Диска `YandexDisk*Error` (Ф1.5.1,
+> ветка `rework_work/network`); 2026-10-31, проход 4 — три уровня текста (Ф1.6.8а, ветка
 > `rework_work/w1-exceptions`).
 
 | Файл | Назначение |
@@ -21,6 +22,9 @@ AppException (message, code; details, original, original_text, log_text(); __str
 ├── EntityValidationError (+ValueError): entity, field, reason 9002 / по таблицам 1002…4002
 ├── PhotoFileError: path, operation, reason, errno             4003 (+ Permission/NoSpace)
 ├── SyncError → Download/Upload/TokenError                     5000–5003 (не используются)
+│   └── YandexDiskError (reason, operation, remote_path, local_path, server_response)  5010
+│       → Token 5011 / Connection 5012 / NotFound 5013 / NotAFile 5014 / Transfer 5015 /
+│         Verify 5016 (check, expected, actual) / Backup 5017 — бросает app/network/db_download.py
 └── DatabaseError → DbIntegrityError, DatabaseConnectionError  6000–6002 (с 2026-10-31 — app/database)
 
 photo_error_from_os_error(path, operation, exc) — OSError → PhotoStoragePermissionError /
@@ -149,6 +153,20 @@ PhotoStorageNoSpaceError / PhotoFileError (original=exc)
 классов (проверено `ast`); повторный проход — чистый; весь набор — 2093 / 0 / 8 / 5 xfail.
 «Пример:» в нетронутом `AppException.__str__` не переводился (решение владельца 30.10.2026).
 
+### Проход 5 (2026-11-01) — исключения Яндекс.Диска (Ф1.5.1, М13)
+
+| # | Что было | Почему плохо | Исправление |
+|---|---|---|---|
+| Y1 | Для Яндекс.Диска — только общие `SyncError` / `DownloadError` / `TokenError` с одной причиной | Решение владельца (И-9 / В-1): подробные — что делали, файл, ответ сервера, причина | `YandexDiskError(SyncError)`: `reason`, `operation`, `remote_path`, `local_path`, `server_response`; подробности — словарь (`операция`, `файл на Диске`, `локальный файл`, `ответ сервера` + переданные), исходная ошибка — `original` |
+| Y2 | — | Ловить по виду ошибки | Наследники с кодом и операцией по умолчанию (атрибуты класса `default_code`, `default_operation`, без своего `__init__`): `Token` 5011, `Connection` 5012, `NotFound` 5013, `NotAFile` 5014, `Transfer` 5015, `Backup` 5017; `YandexDiskVerifyError` 5016 — свой `__init__` (`check`, `expected`, `actual`) |
+
+Решения: встроенным `ConnectionError` / `FileNotFoundError` новые классы не наследуют —
+прежние функции сети их сохраняют, а у новых вызывающих (окно, М18) один `except
+YandexDiskError`; имя `YandexDiskConnectionError` в `__all__` не перекрывает встроенный
+`ConnectionError` (тест `import *`). Существующие классы не менялись. Тесты —
+`tests/test_network/test_db_download.py` (раздел «Исключения Яндекс.Диска») и примеры
+докстрингов (`test_e7_doctests`); все тесты модуля — 178, без изменений.
+
 ---
 
 ## 4. Дальше
@@ -181,6 +199,13 @@ PhotoStorageNoSpaceError / PhotoFileError (original=exc)
 `original` у всех, `IntegrityError` → `DbIntegrityError` (в таблице выше — прежнее имя),
 `photo_error_from_os_error` для ошибок ОС при копировании фото. Подключение по местам — М8
 (`Database.__init__`, `session_scope`), М11 (сервисы фото), М13 (Яндекс.Диск).
+
+**Подключено 2026-11-01 (М13, Ф1.5.1):** Яндекс.Диск — новые подробные `YandexDisk*Error`
+(проход 5 ниже); бросает новое безопасное скачивание `app/network/db_download.py`. Прежние
+функции `app/network/ya_dop.py` по-прежнему бросают встроенные исключения (их зовут окно и
+сервис синхронизации — переход в М18). `SyncError`, `DownloadError`, `UploadError`,
+`TokenError` — оставлены (решение владельца 2026-10-26); `DownloadError` / `UploadError` /
+`TokenError` по-прежнему нигде не бросаются.
 
 **Подключено 2026-10-31 (М8, Ф1.6.7в):** `DatabaseConnectionError` — `Database.__init__`
 (ошибка драйвера при открытии / обновлении), `DbIntegrityError` — `session_scope`

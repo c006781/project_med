@@ -14,6 +14,10 @@
   ``test_finished_signal_emitted_once_with_code``);
 * ``error(str)`` — исключение во время операции (текст для пользователя).
 
+:class:`CheckedDownloadThread` (с 2026-11-01) — безопасное скачивание базы во временный файл
+с проверкой (``app/network/db_download.py``); сверх общих сигналов — ``downloaded(object)``
+(итог) и ``failed(object)`` (исключение). Прежний :class:`DownloadThread` не изменён.
+
 Как добавить операцию (например, удаление файла на Диске)::
 
     class RemoveThread(YaDiskThread):
@@ -49,6 +53,8 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QThread, Signal # pip install PySide6
 
+from app.network.db_download import CheckedDownload, yadisk_download_db_checked
+from app.network.ya_dop import YaDiskResult # код успеха безопасного скачивания
 from app.network.ya_dop import yadisk_download_file, yadisk_upload_file
 # from app.network.ya_dop import (
 #     check_remote_file_exists, # проверка файла на Диске перед скачиванием (DownloadThread.run)
@@ -221,6 +227,116 @@ class UploadThread(YaDiskThread):
             overwrite=self.overwrite, # заменить существующий
             progress_callback=self._progress_callback, # прогресс → сигнал progress
         )
+
+
+class CheckedDownloadThread(YaDiskThread):
+    """
+    Поток безопасного скачивания базы (``app.network.db_download.yadisk_download_db_checked``).
+
+    Скачивает во временный файл и проверяет его; рабочую базу не меняет. Сигналы — как у
+    :class:`YaDiskThread` (``progress``, ``finished(int)`` — ``0`` при успехе, ``error(str)``)
+    и ещё два:
+
+    * ``downloaded(object)`` — :class:`~app.network.db_download.CheckedDownload` (перед
+      ``finished``): проверенный временный файл и сведения — что с ними делать, описано в
+      ``app/network/db_download.py``;
+    * ``failed(object)`` — само исключение (перед ``error``): ``exc.log_text()`` — для журнала,
+      класс ``YandexDisk*Error`` — для выбора текста окна.
+
+    Attributes:
+        downloaded  : (Signal) ``(object)`` — итог ``CheckedDownload``.
+        failed      : (Signal) ``(object)`` — исключение.
+        remote_path : (str) Путь к базе на Диске.
+        local_path  : (str) Рабочая база (не меняется).
+        backup_dir  : (str/None) Папка резервной копии; None — без копии.
+        result      : (CheckedDownload/None) Итог последнего запуска; None — не было успеха.
+
+    Example:
+        >>> thread = CheckedDownloadThread(                 # doctest: +SKIP
+        ...     token       =   'y0_...',                   # токен
+        ...     remote_path =   'Папка/clinic.db',          # база на Диске
+        ...     local_path  =   './clinic.db',              # рабочая база
+        ...     backup_dir  =   './backup',                 # копия рабочей
+        ... )
+        >>> thread.downloaded.connect(on_downloaded)        # doctest: +SKIP
+        >>> thread.failed.connect(on_failed)                # doctest: +SKIP
+        >>> thread.start()                                  # doctest: +SKIP
+    """
+
+    downloaded = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        token       : str,                          # OAuth-токен
+        remote_path : str,                          # путь к базе на Диске
+        local_path  : str,                          # рабочая база (не меняется)
+        backup_dir  : Optional[str] = None,         # папка резервной копии; None — без копии
+        parent      : Optional[QObject] = None,     # родитель Qt
+    ) -> None:
+        """
+        Создаёт поток; скачивание — по ``start()``.
+
+        Args:
+            token       : (str) OAuth-токен.
+            remote_path : (str) Путь к базе на Диске.
+            local_path  : (str) Рабочая база.
+            backup_dir  : (str/None) Папка резервной копии; None — без копии.
+            parent      : (QObject/None) Родитель Qt.
+
+        Example:
+            >>> CheckedDownloadThread('t', '/clinic.db', 'clinic.db').result is None
+            True
+        """
+        super().__init__(token=token, parent=parent)
+        self.remote_path = remote_path
+        self.local_path = local_path
+        self.backup_dir = backup_dir
+        self.result: Optional[CheckedDownload] = None
+
+    def _operation(self) -> int:
+        """
+        Безопасное скачивание; итог — в ``self.result``.
+
+        Returns:
+            (int) ``YaDiskResult.OK`` (ошибки — исключением ``YandexDisk*Error``).
+
+        Raises:
+            YandexDiskError: Любая ошибка скачивания, проверки или копии.
+
+        Example:
+            >>> thread._operation()   # doctest: +SKIP
+            <YaDiskResult.OK: 0>
+        """
+        self.result = yadisk_download_db_checked(
+            ya_token            =   self.token,                 # токен
+            ya_file_path        =   self.remote_path,           # откуда
+            local_db_path       =   self.local_path,            # рабочая база
+            backup_dir          =   self.backup_dir,            # копия рабочей
+            progress_callback   =   self._progress_callback,    # прогресс → сигнал progress
+        )
+        return YaDiskResult.OK
+
+    def run(self) -> None:
+        """
+        Выполняет :meth:`_operation`: успех — ``downloaded(result)``, затем ``finished(0)``;
+        исключение — ``failed(exc)``, затем ``error(text)``.
+
+        Порядок сигналов как у :meth:`YaDiskThread.run` (``finished`` / ``error`` — последним),
+        поэтому обработчики прежних сигналов работают так же.
+
+        Example:
+            >>> thread.start()   # doctest: +SKIP
+        """
+        self.result = None
+        try:
+            code = self._operation()
+        except Exception as exc:
+            self.failed.emit(exc)
+            self.error.emit(str(exc) or type(exc).__name__)
+            return
+        self.downloaded.emit(self.result)
+        self.finished.emit(int(code))
 
 
 # ↓ до rework-yadisk, проход 1 (2026-10-21): прежняя реализация потоков (T1 — дублирование

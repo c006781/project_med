@@ -53,6 +53,11 @@ from app.exceptions.exceptions_all import (
     # Синхронизация
     SyncError, DownloadError, UploadError, TokenError,
 
+    # Яндекс.Диск — подробные (app/network/db_download.py)
+    YandexDiskError, YandexDiskTokenError, YandexDiskConnectionError,
+    YandexDiskNotFoundError, YandexDiskNotAFileError, YandexDiskTransferError,
+    YandexDiskVerifyError, YandexDiskBackupError,
+
     # База данных
     # DatabaseError, IntegrityError, DatabaseConnectionError,
     # ↑ до 2026-10-31 (Ф1.6.8а): IntegrityError → DbIntegrityError (имя совпадало с
@@ -82,6 +87,9 @@ __all__ = [
     'PhotoStoragePermissionError', 'PhotoStorageNoSpaceError',
     'photo_error_from_os_error',
     'SyncError', 'DownloadError', 'UploadError', 'TokenError',
+    'YandexDiskError', 'YandexDiskTokenError', 'YandexDiskConnectionError',
+    'YandexDiskNotFoundError', 'YandexDiskNotAFileError', 'YandexDiskTransferError',
+    'YandexDiskVerifyError', 'YandexDiskBackupError',
     'DatabaseError', 'DbIntegrityError', 'DatabaseConnectionError',
 ]
 

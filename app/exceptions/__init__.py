@@ -63,6 +63,7 @@ from app.exceptions.exceptions_all import (
     # ↑ до 2026-10-31 (Ф1.6.8а): IntegrityError → DbIntegrityError (имя совпадало с
     #   sqlalchemy.exc.IntegrityError); прежнее имя — присваиванием ниже.
     DatabaseError, DbIntegrityError, DatabaseConnectionError,
+    TableEventError,  # события таблиц и сборщик мусора (Ф1.6.7г)
     # ConnectionError, # прежнее имя DatabaseConnectionError (импорт по имени; в __all__ нет)
     # ↑ до 2026-10-25 (E11): pyflakes — «imported but unused» (имени нет в __all__).
 )
@@ -91,6 +92,7 @@ __all__ = [
     'YandexDiskNotFoundError', 'YandexDiskNotAFileError', 'YandexDiskTransferError',
     'YandexDiskVerifyError', 'YandexDiskBackupError',
     'DatabaseError', 'DbIntegrityError', 'DatabaseConnectionError',
+    'TableEventError',
 ]
 
 # ↓ до rework-exceptions (2026-10-21): импорт и __all__ — без общих EntityValidationError,

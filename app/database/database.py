@@ -127,6 +127,8 @@ import sqlite3
 import time   # метка времени в имени резервной копии
 
 from app.exceptions import AppException, DatabaseConnectionError, DbIntegrityError
+from app.database.table_events import INFO_KEY as TABLE_EVENTS_INFO_KEY   # диспетчер в session.info
+from app.database.table_events import TableEvents, check_action_names     # события таблиц (Ф1.6.7г)
 
 
 # @AppLogger.get_instance(
@@ -559,6 +561,8 @@ class Database:
         engine         : (sqlalchemy.engine.Engine) Движок.
         Session        : (scoped_session) Фабрика сессий, одна сессия на поток.
         log_sql_params : (bool) Значения запросов видны в ошибках и журнале.
+        table_events   : (TableEvents) Диспетчер событий таблиц этой базы (Ф1.6.7г,
+            ``app/database/table_events.py``).
         logger         : (AppLogger) Журнал базы (создаётся при первом обращении).
 
     Example:
@@ -654,6 +658,8 @@ class Database:
                 (занята, нет доступа, файл не открывается); исходная — в цепочке
                 (``original``), текст — ``migrate.database_error_text``.
             MigrationError: Базу нельзя безопасно обновить (как раньше).
+            TableEventError: В описаниях таблиц названы незарегистрированные действия
+                событий (Ф1.6.7г, Р-9) — до открытия базы.
 
         Example:
             >>> db = Database(
@@ -663,6 +669,10 @@ class Database:
             False
         """
         self.log_sql_params = log_sql_params
+
+        # Ф1.6.7г (Р-9): имена действий из описаний таблиц сверяются с реестром до открытия —
+        # опечатка видна при запуске, а не при первом событии
+        check_action_names(Base)
 
         # self.engine = create_engine(
         #     db_url,
@@ -690,9 +700,21 @@ class Database:
         if self.engine.url.get_backend_name() == 'sqlite':
             event.listen(self.engine, 'connect', _register_unicode_functions)
 
+        # Session = sessionmaker(
+        #     bind   = self.engine,   # движок
+        #     future = True,          # стиль SQLAlchemy 2.0
+        # )
+        # ↑ до 2026-11-01 (Ф1.6.7г): без диспетчера событий таблиц.
+        # Диспетчер событий таблиц — свой у базы: сессии находят его в info, события сессии
+        # вешаются на эту фабрику один раз (переоткрытая база — новая фабрика, Р-8)
+        self.table_events = TableEvents()
         Session = sessionmaker(
-            bind   = self.engine,   # движок
-            future = True,          # стиль SQLAlchemy 2.0
+            bind   = self.engine,                              # движок
+            future = True,                                     # стиль SQLAlchemy 2.0
+            info   = {TABLE_EVENTS_INFO_KEY: self.table_events},  # диспетчер событий таблиц
+        )
+        self.table_events.listen(
+            Session,   # фабрика сессий этой базы
         )
 
         # Регистрация обработчиков

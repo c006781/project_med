@@ -26,7 +26,8 @@
     │       ├── YandexDiskTransferError                                5015
     │       ├── YandexDiskVerifyError (check, expected, actual)        5016
     │       └── YandexDiskBackupError                                  5017
-    └── DatabaseError → DbIntegrityError, DatabaseConnectionError      6000–6002
+    └── DatabaseError → DbIntegrityError, DatabaseConnectionError,     6000–6003
+                        TableEventError (события таблиц, Ф1.6.7г)
 
 Три уровня текста: ``str(exc)`` — понятный текст пользователю (``[код] текст``);
 ``details`` — что делали (файл, таблица, параметры, SQL); ``original`` — исходная ошибка
@@ -1719,6 +1720,52 @@ class DatabaseConnectionError(DatabaseError):
         super().__init__(
             message,                # текст
             code     = 6002,        # код подключения
+            details  = details,     # подробности
+            original = original,    # исходная ошибка
+        )
+        self.detail = detail
+
+
+class TableEventError(DatabaseError):
+    """
+    Ошибка действия, подключённого к событию таблицы (Ф1.6.7г, ``app/database/table_events.py``),
+    или сборщика мусора: действие упало не исключением приложения, предел цикла сборщика
+    превышен и т. п. Транзакция откатывается целиком.
+
+    Действие, которое отказывает в операции намеренно («перед удалением» и т. п.),
+    выбрасывает своё исключение приложения с понятным текстом — оно проходит как есть.
+
+    Attributes:
+        detail : (str) Что произошло — часть текста пользователю (не путать с ``details``).
+
+    Example:
+        >>> str(TableEventError('действие forbid_if_paid упало'))
+        '[6003] Ошибка обработки изменений таблицы: действие forbid_if_paid упало'
+    """
+
+    def __init__(
+        self,
+        detail   : str,                              # что произошло (в текст пользователю)
+        *,
+        details  : Optional[Details] = None,         # таблица, место, действие, id (для журнала)
+        original : Optional[BaseException] = None,   # исходная ошибка (None — из цепочки)
+    ) -> None:
+        """
+        Создаёт ошибку события таблицы (код 6003).
+
+        Args:
+            detail   : (str) Что произошло — подставляется в текст пользователю.
+            details  : (str/Mapping/None) Таблица, место, действие, id; None — нет.
+            original : (BaseException/None) Исходная ошибка; None — из цепочки.
+
+        Example:
+            >>> TableEventError('сбой').detail
+            'сбой'
+        """
+        message = f"Ошибка обработки изменений таблицы: {detail}"
+        super().__init__(
+            message,                # текст
+            code     = 6003,        # код события таблицы
             details  = details,     # подробности
             original = original,    # исходная ошибка
         )

@@ -7281,7 +7281,10 @@ class PhotoService(
         переводятся на новое имя; старую строку без ссылок убирает сборщик мусора, старый файл
         и опустевшую папку ``app_<N>`` — действие ``remove_photo_file`` после коммита. Откат
         пачки — новые копии удаляются, старое на месте. Старого файла нет на диске — строка
-        остаётся как есть (предупреждение; повтор при следующем запуске). Ошибка пачки — в
+        остаётся как есть (предупреждение; повтор при следующем запуске). Старая строка, на
+        которую не ссылается ни одно фото, не переносится (новая строка тоже осталась бы без
+        ссылок, а старая переносилась бы при каждом запуске): её и файл убирает полная
+        проверка по кнопке (``TableEvents.find_unused`` / ``delete_unused``, Р-13). Ошибка пачки — в
         журнал, перенос останавливается (остальное — при следующем запуске). Исключений не
         бросает: запуск программы не должен падать из-за переноса.
 
@@ -7290,25 +7293,30 @@ class PhotoService(
 
         Returns:
             (Dict[str, int]) ``moved`` — перенесено файлов, ``missing`` — старого файла нет,
-            ``failed`` — не перенесено из-за ошибки (пачка откачена и следующие).
+            ``unused`` — старых строк без ссылок (не переносятся), ``failed`` — не перенесено
+            из-за ошибки (пачка откачена и следующие).
 
         Example:
             >>> get_photo_service().relocate_legacy_files()
-            {'moved': 12, 'missing': 0, 'failed': 0}
+            {'moved': 12, 'missing': 0, 'unused': 0, 'failed': 0}
         """
         from app.database.database import backup_sqlite_database   # тут: копия базы только при переносе
         from app.database.file_actions import PHOTO_NAME_RE, photo_file_path
 
-        report = {'moved': 0, 'missing': 0, 'failed': 0}
+        report = {'moved': 0, 'missing': 0, 'unused': 0, 'failed': 0}
         try:
             with self._db.session_scope() as session:
                 legacy = sorted(
                     name for name in session.scalars(select(PhotoFile.file_path))
                     if not PHOTO_NAME_RE.match(name)
                 )
+                used = set(session.scalars(select(Photo.file_path).distinct()))
             root = self._storage_path
             present = []
             for old_name in legacy:
+                if old_name not in used: # ни одно фото не ссылается — переносить незачем (Р-13)
+                    report['unused'] += 1
+                    continue
                 source = photo_file_path(
                     root,       # папка фото
                     old_name,   # старое имя
@@ -7348,7 +7356,7 @@ class PhotoService(
                                 session,                                    # транзакция пачки
                                 added_at = row.created_at if row else None, # время добавления
                             )
-                            for photo in session.scalars(select(Photo).where(Photo.file_path == old_name)):
+                            for photo in session.scalars(select(Photo).where(Photo.file_path == old_name)).all():
                                 photo.file_path = new_name
                             moved += 1
                     report['moved'] += moved

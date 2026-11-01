@@ -66,7 +66,7 @@ def _backups(svc):
 
 def test_nothing_to_relocate_no_backup(svc):
     """Старых фото нет — ничего, даже копии базы."""
-    assert svc['photo'].relocate_legacy_files() == {'moved': 0, 'missing': 0, 'failed': 0}
+    assert svc['photo'].relocate_legacy_files() == {'moved': 0, 'missing': 0, 'unused': 0, 'failed': 0}
     assert _backups(svc) == []
 
 
@@ -75,7 +75,7 @@ def test_relocate_moves_file_links_and_cleans_old(svc):
     строка и опустевшая папка app_1 убраны; перед переносом — копия базы."""
     _legacy(svc, 'app_1\\a.JPG', [svc['a1'], svc['a2']], created=datetime.datetime(2025, 12, 31, 9, 0, 0))
     report = svc['photo'].relocate_legacy_files()
-    assert report == {'moved': 1, 'missing': 0, 'failed': 0}
+    assert report == {'moved': 1, 'missing': 0, 'unused': 0, 'failed': 0}
     assert _photos(svc) == ['20251231_090000.jpg', '20251231_090000.jpg']
     assert _rows(svc) == ['20251231_090000.jpg']
     assert sorted(os.listdir(svc['storage'])) == ['20251231_090000.jpg']
@@ -86,8 +86,18 @@ def test_relocate_moves_file_links_and_cleans_old(svc):
 def test_missing_old_file_left_as_is_without_backup(svc):
     """Старого файла нет на диске — строка и фото как есть, копии базы нет."""
     _legacy(svc, 'app_2/b.jpg', [svc['a1']], content=None)
-    assert svc['photo'].relocate_legacy_files() == {'moved': 0, 'missing': 1, 'failed': 0}
+    assert svc['photo'].relocate_legacy_files() == {'moved': 0, 'missing': 1, 'unused': 0, 'failed': 0}
     assert _photos(svc) == ['app_2/b.jpg'] and _backups(svc) == []
+
+
+def test_unused_legacy_row_not_copied_every_start(svc):
+    """Старая строка без ссылок не переносится (иначе копия плодилась бы при каждом запуске):
+    файл и строка на месте до полной проверки по кнопке, копии базы нет."""
+    _legacy(svc, 'app_5/u.jpg', [])
+    for _ in range(2):
+        assert svc['photo'].relocate_legacy_files() == {'moved': 0, 'missing': 0, 'unused': 1, 'failed': 0}
+    assert sorted(os.listdir(svc['storage'])) == ['app_5'] and _rows(svc) == ['app_5/u.jpg']
+    assert _backups(svc) == []
 
 
 def test_relocate_in_batches(svc):
@@ -96,7 +106,7 @@ def test_relocate_in_batches(svc):
     for i in range(5):
         _legacy(svc, f'app_1/{i}.jpg', [svc['a1']], created=stamp)
     report = svc['photo'].relocate_legacy_files(batch=2)
-    assert report == {'moved': 5, 'missing': 0, 'failed': 0}
+    assert report == {'moved': 5, 'missing': 0, 'unused': 0, 'failed': 0}
     assert _rows(svc) == ['20250102_030405.jpg'] + [f'20250102_030405_{n}.jpg' for n in range(2, 6)]
     assert sorted(os.listdir(svc['storage'])) == _rows(svc)
 
@@ -116,7 +126,7 @@ def test_failed_batch_rolled_back_and_stops(svc, monkeypatch):
         return real(source, session, added_at=added_at)
     monkeypatch.setattr(svc['photo'], '_store_new_file', flaky)
     report = svc['photo'].relocate_legacy_files(batch=2)
-    assert report == {'moved': 2, 'missing': 0, 'failed': 2}
+    assert report == {'moved': 2, 'missing': 0, 'unused': 0, 'failed': 2}
     assert _photos(svc) == ['20250101_000000.jpg', '20250101_000001.jpg', 'app_1/2.jpg', 'app_1/3.jpg']
     assert sorted(os.listdir(svc['storage'])) == ['20250101_000000.jpg', '20250101_000001.jpg', 'app_1']
     assert sorted(os.listdir(svc['storage'] / 'app_1')) == ['2.jpg', '3.jpg']

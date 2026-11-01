@@ -129,6 +129,7 @@ import time   # метка времени в имени резервной ко�
 from app.exceptions import AppException, DatabaseConnectionError, DbIntegrityError
 from app.database.table_events import INFO_KEY as TABLE_EVENTS_INFO_KEY   # диспетчер в session.info
 from app.database.table_events import TableEvents, check_action_names     # события таблиц (Ф1.6.7г)
+from app.database.file_actions import register_file_actions               # действия с файлами (Ф1.6.7б)
 
 
 # @AppLogger.get_instance(
@@ -705,6 +706,9 @@ class Database:
         """
         self.log_sql_params = log_sql_params
 
+        # Ф1.6.7б: встроенные действия слоя базы (удаление файла фото после коммита) — в
+        # реестр до сверки имён
+        register_file_actions()
         # Ф1.6.7г (Р-9): имена действий из описаний таблиц сверяются с реестром до открытия —
         # опечатка видна при запуске, а не при первом событии
         check_action_names(Base)

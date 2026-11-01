@@ -118,6 +118,8 @@ class EventContext:
             изменённых столбцов; иначе пусто.
         changes    : (Tuple[RowChange, ...]) События транзакции: строки этой таблицы,
             изменённые в транзакции (по порядку); строк — пусто.
+        resources  : (Dict[str, Any]) Ресурсы базы вне БД (:attr:`TableEvents.resources`:
+            например, папка фото ``photos_root``) — общий словарь диспетчера, только чтение.
 
     Example:
         >>> def forbid(ctx: EventContext) -> None:
@@ -133,6 +135,7 @@ class EventContext:
     connection : Any = None
     old        : Dict[str, Any] = field(default_factory=dict)
     changes    : Tuple[RowChange, ...] = ()
+    resources  : Dict[str, Any] = field(default_factory=dict)
 
 
 def register_action(
@@ -844,12 +847,16 @@ class TableEvents:
     раз. Обработчики событий строк общие для процесса (:func:`_install_row_listeners`).
 
     Attributes:
-        logger : (AppLogger) Журнал.
+        logger    : (AppLogger) Журнал.
+        resources : (Dict[str, Any]) Ресурсы базы вне БД для действий (``ctx.resources``):
+            их задают владельцы ресурсов — например, сервис фото кладёт папку фото
+            (``photos_root``, Ф1.6.7б). Слой базы о них ничего не знает (К6).
 
     Example:
         >>> events = TableEvents()
         >>> Session = sessionmaker(bind=engine, info={INFO_KEY: events})
         >>> events.listen(Session)
+        >>> events.resources['photos_root'] = 'C:/clinic/photos'
     """
 
     def __init__(
@@ -873,6 +880,7 @@ class TableEvents:
         )
         self.plan = _CollectorPlan({}, [], 0)           # без таблиц «только используемые»
         self._commits = 0                               # номер коммита для журнала (Р-11)
+        self.resources : Dict[str, Any] = {}            # ресурсы вне БД (папка фото …)
         _install_row_listeners()
 
     def configure(
@@ -1132,6 +1140,7 @@ class TableEvents:
                     target     = target,               # строка
                     connection = connection,           # чтение внутри flush
                     old        = old,                  # прежние значения (изменение)
+                    resources  = self.resources,       # ресурсы вне БД
                 ),
             )
             if (len(session.new), len(session.deleted)) != before_change:
@@ -1212,6 +1221,7 @@ class TableEvents:
             table_def = table_def,                  # описание
             session   = session,                    # сессия
             changes   = log.for_table(table_def),   # строки транзакции
+            resources = self.resources,             # ресурсы вне БД
         )
 
     def _before_commit(

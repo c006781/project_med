@@ -30,7 +30,7 @@ from typing import Any, Mapping, Optional
 
 import sqlalchemy as sa
 
-from .define import KEEP_USED, TableDef, children, column, computed, fk, key, note, timestamp
+from .define import KEEP_USED, TableDef, children, column, computed, fk, key, note, on, timestamp
 from .extras import calc, mark, total
 
 
@@ -250,6 +250,9 @@ PHOTO_FILES = TableDef(
     label       =   'Файл фото',                        # одна запись
     keep        =   KEEP_USED,                          # файл без ссылок убирает сборщик
     sqlite_autoincrement = False,                       # ключ — имя файла, не число
+    # строку без ссылок удалил сборщик — после коммита удаляется и файл в папке фото
+    # (app/database/file_actions.py; папка — ресурс базы photos_root от сервиса фото)
+    events      =   (on('after_commit', 'remove_photo_file'),),
     fields      =   (
         column(
             'file_path',                                # имя

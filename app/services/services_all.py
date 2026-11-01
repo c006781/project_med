@@ -67,6 +67,8 @@ from typing import (
 # ↑ до 2026-10-31 (pyflakes): не используется.
 # from datetime import time
 # import datetime
+import shutil                          # копирование нового файла фото (Ф1.6.7б)
+from datetime import datetime as _dt   # имя нового файла фото — время добавления (Ф1.6.7б)
 
 from contextlib import contextmanager
 
@@ -214,7 +216,9 @@ from app.exceptions import (
     AppointmentValidationError, AppointmentNoteValidationError, PhotoValidationError,
     EntityNotFoundError,  # DYN9: общее «не найдено»
     EntityValidationError, # общая ошибка проверки поля (таблица без своего класса)
+    photo_error_from_os_error,  # Ф1.6.10д: ошибка ОС при копировании фото → исключение фото
 )
+from app.database.file_actions import PHOTOS_ROOT   # ресурс базы: папка фото (Ф1.6.7б)
 # except ImportError as e:
 #     try:
 #         # Попытка абсолютного импорта, если модуль запущен как скрипт
@@ -6859,11 +6863,14 @@ class PhotoService(
     Сервис для работы с фотографиями приёмов.
 
     Особенности:
-        - Управляет файлами на диске (копирование, удаление).
+        - Новые файлы копирует прямо в папку фото, имя — время добавления (Ф1.6.7б); фото
+          ссылается на строку файла (`photo_files`), на один файл — несколько фото.
+        - Файлы сам не удаляет: файл без ссылок убирают сборщик мусора (строку) и действие
+          `remove_photo_file` после коммита (файл) — `app/database/file_actions.py`.
         - Реализует интерфейс для дочернего сервиса: `get_by_parent` (синоним `get_photos_for_appointment`)
           и `add_to_parent` (синоним `add_photo_to_appointment`).
-        - Путь к хранилищу фото можно менять через конфигурацию (`PHOTOS_STORAGE_PATH`).
-        - При удалении фото сначала удаляется файл, затем запись в БД (через `_delete_entity`).
+        - Путь к хранилищу фото можно менять через конфигурацию (`PHOTOS_STORAGE_PATH`); путь —
+          у объекта (ОСТ п. 5.10) и ресурс базы `photos_root`.
 
     Дополнительные методы:
         - `get_photos_for_appointment(appointment_id, session)`
@@ -6903,27 +6910,96 @@ class PhotoService(
             raise AppointmentNotFoundError(dto.appointment_id)
         super()._validate_parents(dto, session)   # DYN3: остальные ссылки
 
-    # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
-    _class_storage_path: Optional[str] = None
+    # # Классовый атрибут для хранения пути к папке с фото (общий для всех экземпляров)
+    # _class_storage_path: Optional[str] = None
+    #
+    # @property
+    # def _storage_path(self) -> str:
+    #     """Возвращает общий путь к хранилищу фото."""
+    #     if self.__class__._class_storage_path is None:
+    #         # Первое обращение – загружаем из конфига
+    #         # from app.config.config_manager.manager import AppConfigManager
+    #         self.__class__._class_storage_path = AppConfigManager.get_instance().get(
+    #             'PHOTOS_STORAGE_PATH', os.path.join('.', 'photos')
+    #         )
+    #
+    #     return self.__class__._class_storage_path
+    #
+    # @_storage_path.setter
+    # def _storage_path(self, value: str) -> None:
+    #     """Устанавливает общий путь для всех экземпляров."""
+    #     self.__class__._class_storage_path = value
+    #     if value:
+    #         os.makedirs(value, exist_ok=True)
+    # ↑ до 2026-11-01 (ОСТ п. 5.10, Ф1.6.7б): путь — атрибут КЛАССА, общий для всех объектов
+    #   (новый сервис с другой папкой, в том числе тестовый, менял её у прежних). Теперь —
+    #   поле объекта; папку видит и действие удаления файла после коммита (ресурс базы).
 
     @property
-    def _storage_path(self) -> str:
-        """Возвращает общий путь к хранилищу фото."""
-        if self.__class__._class_storage_path is None:
-            # Первое обращение – загружаем из конфига
-            # from app.config.config_manager.manager import AppConfigManager
-            self.__class__._class_storage_path = AppConfigManager.get_instance().get(
-                'PHOTOS_STORAGE_PATH', os.path.join('.', 'photos')
-            )
+    def _storage_path(self) -> str: # папка фото этого сервиса
+        """
+        Возвращает папку фото этого сервиса (поле объекта, ОСТ п. 5.10).
 
-        return self.__class__._class_storage_path
+        Объект создан без ``__init__`` (пути нет) — папка из настроек
+        (``PHOTOS_STORAGE_PATH``, нет — ``./photos``), как раньше при первом обращении.
+
+        Returns:
+            (str) Папка фото.
+
+        Example:
+            >>> photo_service._storage_path
+            'C:/clinic/photos'
+        """
+        path = getattr(self, '_photos_root', None)
+        if path is None:
+            path = self._photos_root = AppConfigManager.get_instance().get(
+                'PHOTOS_STORAGE_PATH',           # папка из настроек
+                os.path.join('.', 'photos'),     # по умолчанию
+            )
+        return path
 
     @_storage_path.setter
-    def _storage_path(self, value: str) -> None:
-        """Устанавливает общий путь для всех экземпляров."""
-        self.__class__._class_storage_path = value
+    def _storage_path(
+        self,
+        value : str,   # новая папка фото
+    ) -> None: # задаёт папку фото этого сервиса
+        """
+        Задаёт папку фото этого сервиса, создаёт её и сообщает базе (:meth:`_publish_storage`).
+
+        Args:
+            value : (str) Папка фото.
+
+        Raises:
+            OSError: Папку не удалось создать.
+
+        Example:
+            >>> photo_service._storage_path = 'D:/photos'
+        """
+        self._photos_root = value
         if value:
             os.makedirs(value, exist_ok=True)
+        self._publish_storage()
+
+    def _publish_storage(self) -> None: # папка фото — в ресурсы базы для действий событий
+        """
+        Кладёт папку фото в ресурсы базы (``TableEvents.resources['photos_root']``,
+        абсолютный путь): по ней действие ``remove_photo_file`` удаляет файл после коммита
+        (Ф1.6.7б). Слой базы настроек не читает — папку сообщает сервис. Базы без
+        диспетчера событий (тестовые заглушки) — ничего.
+
+        Note:
+            Ресурс — один на базу: два сервиса фото с разными папками на одной базе —
+            действует папка последнего (в приложении сервис один).
+
+        Example:
+            >>> photo_service._publish_storage()
+            >>> photo_service._db.table_events.resources['photos_root']
+            'C:\\\\clinic\\\\photos'
+        """
+        events = getattr(getattr(self, '_db', None), 'table_events', None)
+        path = getattr(self, '_photos_root', None)
+        if events is not None and path:
+            events.resources[PHOTOS_ROOT] = os.path.abspath(path)
 
     @AppLogger.get_instance(
         name = 'PhotoService',
@@ -6943,10 +7019,11 @@ class PhotoService(
         """
         Создаёт сервис фото и папку хранилища (если её нет).
 
-        Путь хранилища — общий для ВСЕХ экземпляров ``PhotoService`` (атрибут класса
-        ``_class_storage_path``, свойство :attr:`_storage_path`): новый сервис с другой папкой
-        меняет её и у прежних. Журнал сервиса — ``gui.PhotoService`` (файл ``user``);
-        ``logger_name`` задаёт только журнал, созданный базовым классом, и затем заменяется.
+        Путь хранилища — поле этого объекта (свойство :attr:`_storage_path`; до 2026-11-01 —
+        атрибут класса, общий для всех, ОСТ п. 5.10); он же — ресурс базы ``photos_root`` для
+        удаления файла после коммита (:meth:`_publish_storage`). Журнал сервиса —
+        ``gui.PhotoService`` (файл ``user``); ``logger_name`` задаёт только журнал, созданный
+        базовым классом, и затем заменяется.
 
         Args:
             db                  : (Database) База — источник сессий.
@@ -7000,9 +7077,48 @@ class PhotoService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def create(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+    # def create(self, dto: PhotoDTO, session: Optional[Session] = None) -> PhotoDTO:
+    # ↑ до 2026-11-01 (Ф1.6.7б): описание одной строкой, формат сигнатуры.
+    def create(
+        self,
+        dto     : PhotoDTO,                  # фото: приём, файл (абсолютный — новый), описание
+        session : Optional[Session] = None,  # внешняя транзакция; None — своя
+    ) -> PhotoDTO: # созданное фото
         """
-        Создаёт фото. file_path – копирует в хранилище.
+        Создаёт фото: новый файл кладёт в папку фото, фото ссылается на строку файла.
+
+        Путь в DTO (Ф1.6.7б, решение владельца В-3):
+
+        * абсолютный — новый файл (выбран пользователем, из черновика): копия прямо в папку
+          фото с именем по времени добавления ``ГГГГММДД_ЧЧММСС.<расш>`` (:meth:`_store_new_file`;
+          при откате копия удаляется), строка файла (``photo_files``) — тоже;
+        * относительный — ссылка на уже имеющийся файл (имя от папки фото): файл не копируется;
+          строки файла нет — ``PhotoValidationError`` (общая проверка ссылок).
+
+        Args:
+            dto     : (PhotoDTO) Новое фото; ``appointment_id`` обязателен для нового файла.
+            session : (Session/None) Сессия внешней транзакции; None — своя (DATA6).
+
+        Returns:
+            (PhotoDTO) Созданное фото (``file_path`` — имя от папки фото).
+
+        Raises:
+            PhotoValidationError: Нет приёма у нового файла; нет строки файла по ссылке.
+            FileNotFoundError: Исходного файла нет.
+            PhotoFileError: Ошибка ОС при копировании (нет прав — ``PhotoStoragePermissionError``,
+                нет места — ``PhotoStorageNoSpaceError``; Ф1.6.10д).
+            AppointmentNotFoundError: Приёма нет.
+
+        Example:
+            >>> photo = photo_service.create(
+            ...     PhotoDTO(appointment_id=1, file_path='C:/scan/1.JPG'),   # новый файл
+            ... )
+            >>> photo.file_path
+            '20261101_153000.jpg'
+            >>> photo_service.create(
+            ...     PhotoDTO(appointment_id=2, file_path=photo.file_path),  # тот же файл
+            ... ).file_path
+            '20261101_153000.jpg'
         """
         # DATA6 (2026-10-16): без переданной сессии копирование файла и регистрация его
         # удаления при откате получали session=None → AttributeError ('is_active'):
@@ -7010,29 +7126,141 @@ class PhotoService(
         if session is None:
             with self._session_scope(None) as sess:
                 return self.create(dto, session=sess)
-        if dto.file_path and os.path.isabs(dto.file_path):
-            # Определяем целевую директорию: self._storage_path/app_{appointment_id}
+        if dto.file_path and os.path.isabs(dto.file_path): # новый файл
             app_id = dto.appointment_id
             if not app_id:
                 # raise ValueError("Для фото необходимо указать appointment_id")
                 # ↑ до 2026-10-31 (S8): простой ValueError — без поля и таблицы (окно не может
                 #   подсветить поле); исключение таблицы — тоже ValueError, ловится как раньше.
                 raise self._validation_error('appointment_id', 'для фото необходимо указать приём')
-            
-            dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
 
-            # Копируем файл (при rollback удалится)
-            rel_path = self._new_file_field(
-                source_path=dto.file_path,
-                dest_dir=dest_dir,
-                naming_func=None,  # UUID
-                session=session
+            # dest_dir = os.path.join(self._storage_path, f"app_{app_id}")
+            #
+            # # Копируем файл (при rollback удалится)
+            # rel_path = self._new_file_field(
+            #     source_path=dto.file_path,
+            #     dest_dir=dest_dir,
+            #     naming_func=None,  # UUID
+            #     session=session
+            # )
+            # dto.file_path =  os.path.join(f"app_{app_id}",rel_path)
+            # self._add_file_row(dto.file_path, session)
+            # ↑ до 2026-11-01 (Ф1.6.7б, В-3): файл — в папку приёма app_<id> с именем UUID,
+            #   принадлежал одному фото. Теперь — прямо в папку фото, имя по времени, на файл
+            #   могут ссылаться несколько фото.
+            dto.file_path = self._store_new_file(
+                dto.file_path,   # исходный файл
+                session,         # транзакция: строка файла, удаление копии при откате
             )
-            dto.file_path =  os.path.join(f"app_{app_id}",rel_path)
-            self._add_file_row(dto.file_path, session)
+        # относительный путь — ссылка на имеющийся файл: строку файла проверит _validate_parents
 
         # Сохраняем в БД
         return self._create_entity(dto, session=session)
+
+    def _new_file_name(
+        self,
+        stamp   : str,       # время добавления ГГГГММДД_ЧЧММСС
+        ext     : str,       # расширение (строчными, с точкой)
+        number  : int,       # номер в той же секунде (1 — без номера)
+    ) -> str: # имя нового файла фото
+        """
+        Возвращает имя нового файла фото: ``<время><_номер><расш>`` (Р-27: только цифры и
+        ``_``, расширение строчными — на Windows регистр имени не различается).
+
+        Args:
+            stamp  : (str) Время добавления.
+            ext    : (str) Расширение.
+            number : (int) Номер в той же секунде; 1 — без номера.
+
+        Returns:
+            (str) Имя.
+
+        Example:
+            >>> photo_service._new_file_name('20261101_153000', '.jpg', 2)
+            '20261101_153000_2.jpg'
+        """
+        return f"{stamp}{ext}" if number == 1 else f"{stamp}_{number}{ext}"
+
+    def _store_new_file(
+        self,
+        source_path : str,       # исходный файл (абсолютный путь)
+        session     : Session,   # транзакция
+    ) -> str: # имя нового файла от папки фото
+        """
+        Копирует новый файл прямо в папку фото и добавляет его строку (``photo_files``).
+
+        Имя — время добавления ``ГГГГММДД_ЧЧММСС.<расш>`` (решение владельца 2026-11-01);
+        та же секунда (несколько снимков сразу) — ``_2``, ``_3``… — имя свободно и в папке, и
+        в базе (Р-27). Файл создаётся только новым (``open(…, 'xb')``): чужой файл с тем же
+        именем, появившийся между проверкой и копированием, не перезаписывается — берётся
+        следующий номер. Время изменения копии — время добавления (не исходника): по нему
+        сверка не трогает свежие файлы (Р-28). При откате транзакции копия удаляется;
+        ошибка копирования — недописанная копия удаляется сразу, исключение фото (Ф1.6.10д).
+
+        Args:
+            source_path : (str) Исходный файл.
+            session     : (Session) Сессия транзакции.
+
+        Returns:
+            (str) Имя файла от папки фото.
+
+        Raises:
+            FileNotFoundError: Исходного файла нет.
+            PhotoFileError: Ошибка ОС при копировании (``photo_error_from_os_error``).
+
+        Example:
+            >>> photo_service._store_new_file('C:/scan/IMG_1.JPG', session)
+            '20261101_153000.jpg'
+        """
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError(f"Исходный файл не найден: {source_path}")
+        root = self._storage_path
+        os.makedirs(root, exist_ok=True)
+        stamp = _dt.now().strftime('%Y%m%d_%H%M%S')
+        ext = os.path.splitext(source_path)[1].lower()
+        number = 1
+        while True:
+            name = self._new_file_name(
+                stamp,    # время
+                ext,      # расширение
+                number,   # номер в секунде
+            )
+            dest_path = os.path.join(root, name)
+            if session.get(PhotoFile, name) is not None or os.path.exists(dest_path): # занято
+                number += 1
+                continue
+            try:
+                with open(source_path, 'rb') as src, open(dest_path, 'xb') as dst:
+                    shutil.copyfileobj(src, dst)
+            except FileExistsError: # появился между проверкой и созданием — следующий номер
+                number += 1
+                continue
+            except OSError as exc:
+                if os.path.isfile(dest_path): # недописанная копия (нет места …) — своя, 'xb'
+                    try:
+                        os.remove(dest_path)
+                    except OSError as remove_exc:
+                        self.logger.warning(f"Недописанная копия фото не удалена: {dest_path}; {remove_exc}")
+                raise photo_error_from_os_error(
+                    source_path,                                    # файл
+                    'копирования',                                  # операция
+                    exc,                                            # ошибка ОС
+                    details = {'куда': dest_path},                  # подробности
+                ) from exc
+            break
+
+        # при откате транзакции копия не нужна
+        self._del_file_ctx(
+            file_path            = os.path.abspath(dest_path),                 # копия
+            ctx                  = DeletionContext(session, DeletionType.ROLLBACK),  # при откате
+            if_delete_parent_dir = False,                                      # папку фото — нет
+        )
+        self._add_file_row(
+            name,      # имя от папки фото
+            session,   # транзакция
+        )
+        self.logger.debug(f"Новый файл фото: {source_path} -> {name}")
+        return name
 
     def _add_file_row(
         self,
@@ -7051,7 +7279,7 @@ class PhotoService(
             session   : (Session) Сессия транзакции.
 
         Example:
-            >>> photo_service._add_file_row('app_5/0a1b.jpg', session)
+            >>> photo_service._add_file_row('20261101_153000.jpg', session)
         """
         session.add(
             PhotoFile(file_path=file_path),
@@ -7070,16 +7298,19 @@ class PhotoService(
         session : Optional[Session] = None, # внешняя транзакция; None — своя
     ) -> PhotoDTO: # изменённое фото
         """
-        Изменяет фото; новый файл копирует в хранилище, старый удаляет после коммита.
+        Изменяет фото; новый файл копирует в папку фото. Файлы сам не удаляет.
 
-        Путь в DTO:
-            * абсолютный (новый файл, например из черновика) — копия в
-              ``<хранилище>/app_<приём>/<uuid>.<расш>`` (при откате копия удаляется), прежний
-              файл — «удалить после коммита»;
-            * ``None`` при прежнем файле — прежний «удалить после коммита», путь очищается;
-            * относительный (прежний) — файл не трогается, в том числе при переносе фото в
-              другой приём (DATA11: файл остаётся в папке прежнего приёма).
-        Остальное — общий :meth:`BaseService._update_entity` (проверка приёма при переносе).
+        Путь в DTO (Ф1.6.7б):
+            * абсолютный (новый файл, например из черновика) — копия прямо в папку фото с
+              именем по времени (:meth:`_store_new_file`; при откате копия удаляется);
+            * относительный — ссылка на имеющийся файл (прежний или другой; строки файла нет —
+              ``PhotoValidationError``); при переносе фото в другой приём файл на месте
+              (DATA11);
+            * ``None`` — поле обязательное: ошибка проверки, файлы не трогаются.
+        Прежний файл, на который больше никто не ссылается, удаляет не сервис: его строку
+        убирает сборщик мусора перед коммитом, файл — действие ``remove_photo_file`` после
+        коммита (``app/database/file_actions.py``). Остальное — общий
+        :meth:`BaseService._update_entity` (проверка приёма при переносе).
 
         Args:
             dto     : (PhotoDTO) Новые значения; ``id`` обязателен.
@@ -7117,10 +7348,12 @@ class PhotoService(
         if not old_photo:
             raise PhotoNotFoundError(dto.id)
 
-        old_path = old_photo.file_path
+        # old_path = old_photo.file_path
+        # ↑ до 2026-11-01 (Ф1.6.7б): прежний путь нужен был для удаления прежнего файла.
         new_path = dto.file_path
 
-        dest_dir = os.path.join(self._storage_path, f"app_{dto.appointment_id}")
+        # dest_dir = os.path.join(self._storage_path, f"app_{dto.appointment_id}")
+        # ↑ до 2026-11-01 (Ф1.6.7б): новый файл шёл в папку приёма.
 
         # Обрабатываем файл
         if new_path and os.path.isabs(new_path):
@@ -7135,22 +7368,32 @@ class PhotoService(
             # ↑ до DATA8 (2026-10-16): _update_file_field удаляет старый файл от dest_dir
             #   (папки приёма), а старый путь хранится от корня — удалялся несуществующий
             #   файл, старое фото оставалось на диске. Старый — от корня, новый — в папку.
-            self._delete_file_field(old_path, self._storage_path, session)
-            rel_path = self._new_file_field(
-                source_path=new_path,
-                dest_dir=dest_dir,
-                naming_func=None,
-                session=session
+            # self._delete_file_field(old_path, self._storage_path, session)
+            # rel_path = self._new_file_field(
+            #     source_path=new_path,
+            #     dest_dir=dest_dir,
+            #     naming_func=None,
+            #     session=session
+            # )
+            # dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
+            # self._add_file_row(dto.file_path, session)
+            # ↑ до 2026-11-01 (Ф1.6.7б, В-3): прежний файл удалял сервис («после коммита»), хотя
+            #   на него могут ссылаться другие фото; новый — в папку приёма. Теперь прежний
+            #   файл убирают сборщик мусора и действие таблицы файлов, когда ссылок нет.
+            dto.file_path = self._store_new_file(
+                new_path,   # исходный файл
+                session,    # транзакция
             )
-            dto.file_path = os.path.join(f"app_{dto.appointment_id}",rel_path)
-            self._add_file_row(dto.file_path, session)
-        elif new_path is None and old_path:
-            # Файл удалён – помечаем старый на удаление при коммите
-            # self._delete_file_field(old_path, dest_dir, session)
-            # ↑ до DATA8: путь от корня склеивался с папкой приёма
-            self._delete_file_field(old_path, self._storage_path, session)
-            dto.file_path = None
-        # else: путь не изменился – ничего не делаем
+        # elif new_path is None and old_path:
+        #     # Файл удалён – помечаем старый на удаление при коммите
+        #     # self._delete_file_field(old_path, dest_dir, session)
+        #     # ↑ до DATA8: путь от корня склеивался с папкой приёма
+        #     self._delete_file_field(old_path, self._storage_path, session)
+        #     dto.file_path = None
+        # ↑ до 2026-11-01 (Ф1.6.7б): путь обязателен — запись с None всё равно отклоняла
+        #   проверка полей, а файл уже стоял в «удалить после коммита». Теперь None проходит
+        #   как есть в общую проверку, файлы не трогаются.
+        # else: путь не изменился (или ссылка на другой имеющийся файл) – файлы не трогаем
 
         return self._update_entity(dto, dto.id, session=session)
 
@@ -7165,12 +7408,13 @@ class PhotoService(
         session  : Optional[Session] = None,    # внешняя транзакция; None — своя
     ) -> None:
         """
-        Удаляет фото: запись сразу, файл — после коммита (при откате файл остаётся).
+        Удаляет фото (запись); файл — только если на него больше никто не ссылается.
 
-        Файл ставится в «удалить после коммита» (вместе с опустевшей папкой приёма), затем
-        запись удаляется общим :meth:`BaseService._delete_entity` (с заметками, если бы
-        они были). Сюда же приходят удаление приёма и пациента (дети — DYN7) и
-        :meth:`delete_photo`.
+        Запись удаляет общий :meth:`BaseService._delete_entity`. Файл сервис не трогает
+        (Ф1.6.7б): на один файл могут ссылаться несколько фото — строку файла без ссылок
+        убирает сборщик мусора перед коммитом, сам файл — действие ``remove_photo_file`` после
+        коммита; при откате файл остаётся. Сюда же приходят удаление приёма и пациента (дети —
+        DYN7) и :meth:`delete_photo`.
 
         Args:
             photo_id : (int) ID фото.
@@ -7206,7 +7450,9 @@ class PhotoService(
             #   ("app_<id>/<uuid>.jpg"), а склеивался с папкой приёма → удалялся
             #   несуществующий "app_<id>/app_<id>/<uuid>.jpg": файлы фото с диска
             #   не удалялись никогда.
-            self._delete_file_field(photo.file_path, self._storage_path, sess)
+            # self._delete_file_field(photo.file_path, self._storage_path, sess)
+            # ↑ до 2026-11-01 (Ф1.6.7б, В-3): файл удалялся вместе с фото, даже если на него
+            #   ссылаются другие фото. Теперь — сборщик мусора и действие таблицы файлов.
 
             # Удаляем запись из БД
             self._delete_entity(photo_id, sess)
@@ -7440,7 +7686,8 @@ class PhotoService(
 
         Raises:
             PhotoFileError: Исходного файла нет (``Ошибка проверки файла '<путь>': файл не
-                существует``).
+                существует``); ошибка ОС при копировании (нет прав, нет места — наследники,
+                Ф1.6.10д).
             AppointmentNotFoundError: Приёма с таким ID нет.
 
         Example:

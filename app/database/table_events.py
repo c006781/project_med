@@ -1345,7 +1345,7 @@ class TableEvents:
                     log,
                     table,
                     doomed,
-                    {i: (round_no, ids[i]) for i in doomed},
+                    {i: (round_no, ids.get(i)) for i in doomed},
                 )
             log.rounds.append({
                 'круг'      : round_no,                                         # номер

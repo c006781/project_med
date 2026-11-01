@@ -373,6 +373,36 @@ def _register_unicode_functions(
     )
 
 
+def _enable_foreign_keys(
+    dbapi_connection  : sqlite3.Connection,   # соединение sqlite3
+    connection_record : Any,                  # запись пула (не используется)
+) -> None: # включает проверку внешних ключей соединения
+    """
+    Включает проверку внешних ключей SQLite на соединении (``PRAGMA foreign_keys=ON``; по
+    умолчанию SQLite их не проверяет — Р-2, Ф1.6.7г). База отклоняет ссылку на
+    несуществующую строку и удаление строки, на которую ссылаются: ошибка сборщика мусора
+    или кода не оставит молча висячую ссылку (``DbIntegrityError``).
+
+    Движок миграций свой и ключи на время миграции выключает сам (M10) — его это не касается.
+
+    Args:
+        dbapi_connection  : (sqlite3.Connection) Соединение.
+        connection_record : (Any) Запись пула (не используется).
+
+    Example:
+        >>> event.listen(
+        ...     engine,                  # движок
+        ...     'connect',               # новое соединение
+        ...     _enable_foreign_keys,    # обработчик
+        ... )
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute('PRAGMA foreign_keys=ON')
+    finally:
+        cursor.close()
+
+
 # Сообщения SQLite о нарушении целостности → текст пользователю (DbIntegrityError.detail)
 _INTEGRITY_TEXTS : Tuple[Tuple[str, str], ...] = (
     ('UNIQUE constraint failed',      'повтор значения, которое должно быть уникальным'),
@@ -635,6 +665,7 @@ class Database:
         db_url         : str,            # URL базы ('sqlite:///clinic.db')
         *,
         log_sql_params : bool = False,   # значения запросов — в журнал (отладка)
+        foreign_keys   : bool = True,    # проверка внешних ключей SQLite (Р-2)
     ) -> None:
         """
         Открывает базу: движок, фабрика сессий, обработчики отложенных удалений и действий;
@@ -646,12 +677,15 @@ class Database:
         ``DbIntegrityError``. ``log_sql_params=True`` (настройка ``LOG_SQL_PARAMS``) — для
         отладки: значения видны, при открытии — предупреждение в журнал.
 
-        Для SQLite — ``check_same_thread=False`` (сессии из разных потоков) и свои
-        ``lower`` / ``upper`` для всех букв (APP1).
+        Для SQLite — ``check_same_thread=False`` (сессии из разных потоков), свои
+        ``lower`` / ``upper`` для всех букв (APP1) и, по умолчанию, проверка внешних ключей
+        (``PRAGMA foreign_keys=ON``, Р-2, с 2026-11-01).
 
         Args:
             db_url         : (str) URL подключения (``sqlite:///database.db``).
             log_sql_params : (bool) Писать значения запросов в журнал.
+            foreign_keys   : (bool) Проверять внешние ключи SQLite; False — как до
+                2026-11-01 (не проверять).
 
         Raises:
             DatabaseConnectionError: Ошибка драйвера при открытии или обновлении базы
@@ -707,6 +741,11 @@ class Database:
         # латиницу («иван» не находил «Иванов»). Свой lower — для всех букв (Юникод).
         if self.engine.url.get_backend_name() == 'sqlite':
             event.listen(self.engine, 'connect', _register_unicode_functions)
+            # Р-2 (2026-11-01, Ф1.6.7г): SQLite по умолчанию внешние ключи не проверяет —
+            # висячая ссылка (ошибка сборщика мусора или кода) прошла бы молча. Данные рабочей
+            # базы проверены до включения: PRAGMA foreign_key_check пуст.
+            if foreign_keys:
+                event.listen(self.engine, 'connect', _enable_foreign_keys)
 
         # Session = sessionmaker(
         #     bind   = self.engine,   # движок

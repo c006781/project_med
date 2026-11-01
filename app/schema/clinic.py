@@ -30,7 +30,7 @@ from typing import Any, Mapping, Optional
 
 import sqlalchemy as sa
 
-from .define import TableDef, children, column, computed, fk, key, note, timestamp
+from .define import KEEP_USED, TableDef, children, column, computed, fk, key, note, timestamp
 from .extras import calc, mark, total
 
 
@@ -228,6 +228,10 @@ NOTES = TableDef(
     entity      =   'note',                             # тип записи (сервис — get_note_service)
     title       =   'Заметки',                          # заголовок экрана
     label       =   'Заметка',                          # одна запись
+    # «только используемые» (Ф1.6.10ж, 2026-11-01): заметку, на которую в транзакции убрали
+    # последнюю ссылку, удаляет сборщик мусора слоя базы перед коммитом (раньше — вызовы
+    # NoteService.cleanup_unused_note в сервисах)
+    keep        =   KEEP_USED,
     fields      =   (
         key(
             'Уникальный идентификатор заметки',         # комментарий столбца

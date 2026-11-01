@@ -242,7 +242,14 @@ def db_session(engine):
     """
     connection = engine.connect()
     transaction = connection.begin()
-    session = Session(bind=connection)
+    # session = Session(bind=connection)
+    # ↑ до 2026-11-01 (Ф1.6.10ж): без диспетчера событий таблиц — сборщик мусора (уборка
+    #   ненужных заметок, как в программе через Database) в такой сессии не работал бы.
+    from app.database.table_events import INFO_KEY, TableEvents
+    events = TableEvents()
+    events.configure(Base)                       # план сборщика по моделям приложения
+    session = Session(bind=connection, info={INFO_KEY: events})
+    events.listen(session)                       # события транзакции — на этой сессии
     # Можно также использовать sessionmaker, но здесь просто пример
 
     yield session

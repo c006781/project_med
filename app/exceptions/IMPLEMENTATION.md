@@ -26,6 +26,7 @@ AppException (message, code; details, original, original_text, log_text(); __str
 │       → Token 5011 / Connection 5012 / NotFound 5013 / NotAFile 5014 / Transfer 5015 /
 │         Verify 5016 (check, expected, actual) / Backup 5017 — бросает app/network/db_download.py
 └── DatabaseError → DbIntegrityError, DatabaseConnectionError  6000–6002 (с 2026-10-31 — app/database)
+                    TableEventError                           6003 (с 2026-11-01 — события таблиц)
 
 photo_error_from_os_error(path, operation, exc) — OSError → PhotoStoragePermissionError /
 PhotoStorageNoSpaceError / PhotoFileError (original=exc)
@@ -166,6 +167,15 @@ YandexDiskError`; имя `YandexDiskConnectionError` в `__all__` не пере�
 `ConnectionError` (тест `import *`). Существующие классы не менялись. Тесты —
 `tests/test_network/test_db_download.py` (раздел «Исключения Яндекс.Диска») и примеры
 докстрингов (`test_e7_doctests`); все тесты модуля — 178, без изменений.
+
+### 2026-11-01 — `TableEventError` (Ф1.6.7г, ветка `rework_work/database`)
+
+`TableEventError(DatabaseError)`, код 6003, `detail` — что произошло: действие события
+таблицы упало не исключением приложения, действие не зарегистрировано (в том числе при
+открытии базы — Р-9), предел цикла сборщика мусора. Намеренный отказ действия («перед
+удалением» и т. п.) — своё исключение приложения, проходит как есть (Р-12). Где
+бросается — `app/database/table_events.py` (`app/database/IMPLEMENTATION.md` §10); в
+`__all__` пакета. Тесты — `tests/test_database_shema/test_table_events.py`.
 
 ---
 

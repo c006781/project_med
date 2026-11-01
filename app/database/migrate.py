@@ -57,7 +57,9 @@ import os
 # import shutil  # до M8 (2026-10-18): копия файла — теперь backup-API SQLite
 import sqlite3
 import sys
-import time
+# import time
+# ↑ до 2026-11-01 (итоговая перепроверка Ф1.6.7г): нужен был только прежнему _backup
+#   (закомментирован при выносе копии в database.backup_sqlite_database, Ф1.6.10а); pyflakes.
 from typing import List, Optional, Sequence, Tuple
 
 from alembic import command

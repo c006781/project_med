@@ -127,6 +127,8 @@ import sqlite3
 import time   # метка времени в имени резервной копии
 
 from app.exceptions import AppException, DatabaseConnectionError, DbIntegrityError
+from app.database.table_events import INFO_KEY as TABLE_EVENTS_INFO_KEY   # диспетчер в session.info
+from app.database.table_events import TableEvents, check_action_names     # события таблиц (Ф1.6.7г)
 
 
 # @AppLogger.get_instance(
@@ -371,6 +373,36 @@ def _register_unicode_functions(
     )
 
 
+def _enable_foreign_keys(
+    dbapi_connection  : sqlite3.Connection,   # соединение sqlite3
+    connection_record : Any,                  # запись пула (не используется)
+) -> None: # включает проверку внешних ключей соединения
+    """
+    Включает проверку внешних ключей SQLite на соединении (``PRAGMA foreign_keys=ON``; по
+    умолчанию SQLite их не проверяет — Р-2, Ф1.6.7г). База отклоняет ссылку на
+    несуществующую строку и удаление строки, на которую ссылаются: ошибка сборщика мусора
+    или кода не оставит молча висячую ссылку (``DbIntegrityError``).
+
+    Движок миграций свой и ключи на время миграции выключает сам (M10) — его это не касается.
+
+    Args:
+        dbapi_connection  : (sqlite3.Connection) Соединение.
+        connection_record : (Any) Запись пула (не используется).
+
+    Example:
+        >>> event.listen(
+        ...     engine,                  # движок
+        ...     'connect',               # новое соединение
+        ...     _enable_foreign_keys,    # обработчик
+        ... )
+    """
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute('PRAGMA foreign_keys=ON')
+    finally:
+        cursor.close()
+
+
 # Сообщения SQLite о нарушении целостности → текст пользователю (DbIntegrityError.detail)
 _INTEGRITY_TEXTS : Tuple[Tuple[str, str], ...] = (
     ('UNIQUE constraint failed',      'повтор значения, которое должно быть уникальным'),
@@ -559,6 +591,8 @@ class Database:
         engine         : (sqlalchemy.engine.Engine) Движок.
         Session        : (scoped_session) Фабрика сессий, одна сессия на поток.
         log_sql_params : (bool) Значения запросов видны в ошибках и журнале.
+        table_events   : (TableEvents) Диспетчер событий таблиц этой базы (Ф1.6.7г,
+            ``app/database/table_events.py``).
         logger         : (AppLogger) Журнал базы (создаётся при первом обращении).
 
     Example:
@@ -631,6 +665,7 @@ class Database:
         db_url         : str,            # URL базы ('sqlite:///clinic.db')
         *,
         log_sql_params : bool = False,   # значения запросов — в журнал (отладка)
+        foreign_keys   : bool = True,    # проверка внешних ключей SQLite (Р-2)
     ) -> None:
         """
         Открывает базу: движок, фабрика сессий, обработчики отложенных удалений и действий;
@@ -642,18 +677,24 @@ class Database:
         ``DbIntegrityError``. ``log_sql_params=True`` (настройка ``LOG_SQL_PARAMS``) — для
         отладки: значения видны, при открытии — предупреждение в журнал.
 
-        Для SQLite — ``check_same_thread=False`` (сессии из разных потоков) и свои
-        ``lower`` / ``upper`` для всех букв (APP1).
+        Для SQLite — ``check_same_thread=False`` (сессии из разных потоков), свои
+        ``lower`` / ``upper`` для всех букв (APP1) и, по умолчанию, проверка внешних ключей
+        (``PRAGMA foreign_keys=ON``, Р-2, с 2026-11-01).
 
         Args:
             db_url         : (str) URL подключения (``sqlite:///database.db``).
             log_sql_params : (bool) Писать значения запросов в журнал.
+            foreign_keys   : (bool) Проверять внешние ключи SQLite; False — как до
+                2026-11-01 (не проверять).
 
         Raises:
             DatabaseConnectionError: Ошибка драйвера при открытии или обновлении базы
                 (занята, нет доступа, файл не открывается); исходная — в цепочке
                 (``original``), текст — ``migrate.database_error_text``.
             MigrationError: Базу нельзя безопасно обновить (как раньше).
+            TableEventError: В описаниях таблиц названы незарегистрированные действия
+                событий (Ф1.6.7г, Р-9) или таблицы «только используемые» ссылаются по
+                кругу — до открытия базы.
 
         Example:
             >>> db = Database(
@@ -663,6 +704,17 @@ class Database:
             False
         """
         self.log_sql_params = log_sql_params
+
+        # Ф1.6.7г (Р-9): имена действий из описаний таблиц сверяются с реестром до открытия —
+        # опечатка видна при запуске, а не при первом событии
+        check_action_names(Base)
+        # Диспетчер событий таблиц — свой у базы; план сборщика мусора (таблицы «только
+        # используемые», предел кругов = глубина по схеме + 1) — тоже до открытия: круг ссылок
+        # среди «только используемых» — ошибка при запуске
+        self.table_events = TableEvents()
+        self.table_events.configure(
+            Base,   # модели приложения
+        )
 
         # self.engine = create_engine(
         #     db_url,
@@ -689,10 +741,26 @@ class Database:
         # латиницу («иван» не находил «Иванов»). Свой lower — для всех букв (Юникод).
         if self.engine.url.get_backend_name() == 'sqlite':
             event.listen(self.engine, 'connect', _register_unicode_functions)
+            # Р-2 (2026-11-01, Ф1.6.7г): SQLite по умолчанию внешние ключи не проверяет —
+            # висячая ссылка (ошибка сборщика мусора или кода) прошла бы молча. Данные рабочей
+            # базы проверены до включения: PRAGMA foreign_key_check пуст.
+            if foreign_keys:
+                event.listen(self.engine, 'connect', _enable_foreign_keys)
 
+        # Session = sessionmaker(
+        #     bind   = self.engine,   # движок
+        #     future = True,          # стиль SQLAlchemy 2.0
+        # )
+        # ↑ до 2026-11-01 (Ф1.6.7г): без диспетчера событий таблиц.
+        # Сессии находят диспетчер событий таблиц в info, события сессии вешаются на эту
+        # фабрику один раз (переоткрытая база — новая фабрика, Р-8)
         Session = sessionmaker(
-            bind   = self.engine,   # движок
-            future = True,          # стиль SQLAlchemy 2.0
+            bind   = self.engine,                              # движок
+            future = True,                                     # стиль SQLAlchemy 2.0
+            info   = {TABLE_EVENTS_INFO_KEY: self.table_events},  # диспетчер событий таблиц
+        )
+        self.table_events.listen(
+            Session,   # фабрика сессий этой базы
         )
 
         # Регистрация обработчиков

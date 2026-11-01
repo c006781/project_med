@@ -4,12 +4,14 @@
 Ядро черновиков ``app.utils.drafts`` — находки сверки модуля (М4, 2026-10-25): DR1–DR3, DR7.
 
 Каждый тест падает на коде до исправления (журнал — ``app/utils/drafts/IMPLEMENTATION.md``).
+DR7 с 2026-11-01: «переиспользуемые данные» (``collect``) убраны — описать их нельзя, а
+адаптеру без ``read`` удалять записи со ссылками можно (что удалять следом, узнавать не нужно).
 """
 
 import pytest
 
 from app.utils.drafts import (
-    DraftStore, EntityType, PlanError, Reference, SaveScope, TreeSchema, build_plan,
+    DraftStore, EntityType, PlanError, Reference, SaveScope, SchemaError, TreeSchema, build_plan,
     execute_plan,
 )
 
@@ -141,10 +143,12 @@ def test_dr3_created_records_keep_links_after_save(store, adapter):
 
 # ---------------------------------------------------------------------------
 # DR7: «переиспользуемые данные» описаны, а адаптер не умеет читать запись — отказ
+# (с 2026-11-01, Ф1.6.3а: collect убран — описание с ним отвергается, а без read
+#  записи со ссылками удаляются как обычно; цели ссылок черновики не трогают)
 # ---------------------------------------------------------------------------
 
 class _NoReadAdapter(MemoryAdapter):
-    """Адаптер без ``read``: найти, что удалять следом (``collect``), нельзя."""
+    """Адаптер без ``read`` (до 2026-11-01 — нельзя было найти, что удалять следом, ``collect``)."""
 
     def __getattribute__(self, name: str):
         if name == 'read':
@@ -152,34 +156,65 @@ class _NoReadAdapter(MemoryAdapter):
         return super().__getattribute__(name)
 
 
-def test_dr7_collect_without_read_is_refused_and_rolled_back():
-    schema = TreeSchema([
+# def test_dr7_collect_without_read_is_refused_and_rolled_back():
+#     schema = TreeSchema([
+#         EntityType('template', label='Шаблон'),
+#         EntityType('patient', label='Пациент'),
+#         EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём',
+#                    references=[Reference('template_id', 'template', collect=True)]),
+#     ])
+#     store, adapter = DraftStore(schema), _NoReadAdapter()
+#     assert not hasattr(adapter, 'read')
+#     adapter.rows[('template', 5)] = {'text': 'т'}
+#     adapter.rows[('appointment', 12)] = {'patient_id': 1, 'template_id': 5}
+#     store.delete('appointment', 12, parent_id=1)
+#     with pytest.raises(PlanError, match='read'):
+#         execute_plan(store, build_plan(store), adapter)
+#     assert ('appointment', 12) in adapter.rows and ('template', 5) in adapter.rows   # откат
+#     assert store.get('appointment', 12).deleted                                       # черновик на месте
+#
+#
+# def test_dr7_adapter_with_read_collects_as_before():
+#     schema = TreeSchema([
+#         EntityType('template', label='Шаблон'),
+#         EntityType('patient', label='Пациент'),
+#         EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём',
+#                    references=[Reference('template_id', 'template', collect=True)]),
+#     ])
+#     store, adapter = DraftStore(schema), MemoryAdapter()
+#     adapter.rows[('template', 5)] = {'text': 'т'}
+#     adapter.rows[('appointment', 12)] = {'patient_id': 1, 'template_id': 5}
+#     store.delete('appointment', 12, parent_id=1)
+#     result = execute_plan(store, build_plan(store), adapter)
+#     assert set(result.deleted) == {('appointment', 12), ('template', 5)}
+# ↑ до 2026-11-01 (Ф1.6.3а): collect=True — черновики сами удаляли ставший ненужным шаблон
+#   (без read у адаптера — отказ); теперь collect описать нельзя, шаблон остаётся
+
+
+def _template_schema() -> TreeSchema:
+    """Пациент → приём; приём ссылается на шаблон (обычная ссылка — запрет удаления цели)."""
+    return TreeSchema([
         EntityType('template', label='Шаблон'),
         EntityType('patient', label='Пациент'),
         EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём',
-                   references=[Reference('template_id', 'template', collect=True)]),
+                   references=[Reference('template_id', 'template')]),
     ])
-    store, adapter = DraftStore(schema), _NoReadAdapter()
-    assert not hasattr(adapter, 'read')
-    adapter.rows[('template', 5)] = {'text': 'т'}
-    adapter.rows[('appointment', 12)] = {'patient_id': 1, 'template_id': 5}
-    store.delete('appointment', 12, parent_id=1)
-    with pytest.raises(PlanError, match='read'):
-        execute_plan(store, build_plan(store), adapter)
-    assert ('appointment', 12) in adapter.rows and ('template', 5) in adapter.rows   # откат
-    assert store.get('appointment', 12).deleted                                       # черновик на месте
 
 
-def test_dr7_adapter_with_read_collects_as_before():
-    schema = TreeSchema([
-        EntityType('template', label='Шаблон'),
-        EntityType('patient', label='Пациент'),
-        EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём',
-                   references=[Reference('template_id', 'template', collect=True)]),
-    ])
-    store, adapter = DraftStore(schema), MemoryAdapter()
+def test_dr7_collect_refused_in_schema():
+    """«Переиспользуемые данные» в описании — понятная ошибка, а не тихое удаление при сохранении."""
+    with pytest.raises(SchemaError, match='collect=True не поддерживается'):
+        Reference('template_id', 'template', collect=True)
+
+
+@pytest.mark.parametrize('adapter_class', [_NoReadAdapter, MemoryAdapter])
+def test_dr7_delete_leaves_target_with_and_without_read(adapter_class):
+    """Удаление приёма: удаляется только он; шаблон остаётся — и при адаптере без ``read``."""
+    store, adapter = DraftStore(_template_schema()), adapter_class()
+    assert hasattr(adapter, 'read') is (adapter_class is MemoryAdapter)
     adapter.rows[('template', 5)] = {'text': 'т'}
     adapter.rows[('appointment', 12)] = {'patient_id': 1, 'template_id': 5}
     store.delete('appointment', 12, parent_id=1)
     result = execute_plan(store, build_plan(store), adapter)
-    assert set(result.deleted) == {('appointment', 12), ('template', 5)}
+    assert result.deleted == (('appointment', 12),)
+    assert adapter.rows[('template', 5)] == {'text': 'т'} and store.is_empty

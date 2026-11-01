@@ -1,8 +1,9 @@
 # tests/test_drafts/test_references.py
 
 """
-Черновики: ссылки (не владение) — порядок записи, замена временных id, правила удаления
-(запрет / обнуление / каскад), «переиспользуемые данные» (удаляются, когда никому не нужны).
+Черновики: ссылки (не владение) — порядок записи, замена временных id, удаление цели —
+только запрет, пока на неё ссылаются (2026-11-01: обнуления, каскада и «переиспользуемых
+данных» нет — черновики данные БД сами не меняют и не удаляют; описать их — ``SchemaError``).
 """
 
 import pytest
@@ -15,15 +16,22 @@ from app.utils.drafts import (
 from .conftest import MemoryAdapter
 
 
-def make(on_delete='restrict'):
-    """Пациент → приём; приём ссылается на врача (правило on_delete) и на шаблон (переиспользуемый)."""
+# def make(on_delete='restrict'):
+#     """Пациент → приём; приём ссылается на врача (правило on_delete) и на шаблон (переиспользуемый)."""
+# ↑ до 2026-11-01 (Ф1.6.3а): правило ссылки на врача задавалось параметром (set_null / cascade),
+#   шаблон был «переиспользуемым» (collect=True); теперь у ссылок одно правило — restrict
+def make() -> TreeSchema:
+    """Пациент → приём; приём ссылается на врача и на шаблон (обе ссылки — запрет удаления цели)."""
     return TreeSchema([
         EntityType('doctor', label='Врач'),
         EntityType('template', label='Шаблон'),
         EntityType('patient', label='Пациент'),
         EntityType('appointment', parent='patient', parent_field='patient_id', label='Приём', references=[
-            Reference('doctor_id', 'doctor', on_delete=on_delete),
-            Reference('template_id', 'template', collect=True),
+            # Reference('doctor_id', 'doctor', on_delete=on_delete),
+            # Reference('template_id', 'template', collect=True),
+            # ↑ до 2026-11-01 (Ф1.6.3а): см. make
+            Reference('doctor_id', 'doctor'),
+            Reference('template_id', 'template'),
         ]),
     ])
 
@@ -42,7 +50,21 @@ def test_schema_validation():
         Reference('x', 'y', on_delete='drop')
     schema = make()
     assert [t for t, _ in schema.referrers('doctor')] == ['appointment']
-    assert schema.references('appointment')[1].collect
+    # assert schema.references('appointment')[1].collect
+    # ↑ до 2026-11-01 (Ф1.6.3а): collect=True убран — см. test_removed_rules_refused_in_schema
+    assert [r.on_delete for r in schema.references('appointment')] == ['restrict', 'restrict']
+
+
+@pytest.mark.parametrize('rules, text', [
+    ({'on_delete': 'set_null'}, "правило удаления 'set_null' не поддерживается"),
+    ({'on_delete': 'cascade'}, "правило удаления 'cascade' не поддерживается"),
+    ({'collect': True}, 'collect=True не поддерживается'),
+])
+def test_removed_rules_refused_in_schema(rules, text):
+    """Обнуление, каскад и «переиспользуемые данные» — ошибка описания с понятным текстом (2026-11-01)."""
+    with pytest.raises(SchemaError, match=text) as info:
+        Reference('doctor_id', 'doctor', **rules)
+    assert 'черновики' in str(info.value)                                # объяснено, почему
 
 
 def test_new_target_created_first_and_id_mapped():
@@ -79,15 +101,18 @@ def test_unsaved_reference_remapped_after_target_saved():
     assert store.get('appointment', appointment).data['doctor_id'] == real
 
 
-def db_with_doctor(on_delete):
-    store, adapter = DraftStore(make(on_delete)), MemoryAdapter()
+# def db_with_doctor(on_delete):
+#     store, adapter = DraftStore(make(on_delete)), MemoryAdapter()
+# ↑ до 2026-11-01 (Ф1.6.3а): правило ссылки — параметром; теперь одно (restrict)
+def db_with_doctor():
+    store, adapter = DraftStore(make()), MemoryAdapter()
     adapter.rows.update({('doctor', 5): {'name': 'Врач'}, ('patient', 1): {'name': 'П'},
                          ('appointment', 12): {'patient_id': 1, 'doctor_id': 5}})
     return store, adapter
 
 
 def test_restrict_blocks_and_rolls_back():
-    store, adapter = db_with_doctor('restrict')
+    store, adapter = db_with_doctor()
     store.modify('patient', 1, {'name': 'Новое'}, original={'name': 'П'})
     store.delete('doctor', 5)
     with pytest.raises(DeleteBlocked) as info:
@@ -100,27 +125,43 @@ def test_restrict_blocks_and_rolls_back():
 
 def test_restrict_passes_when_reference_removed_in_same_save():
     """Ссылку на врача сняли в той же правке — удаление разрешено (правки пишутся раньше удаления)."""
-    store, adapter = db_with_doctor('restrict')
+    store, adapter = db_with_doctor()
     store.modify('appointment', 12, {'doctor_id': None}, original={'doctor_id': 5}, parent_id=1)
     store.delete('doctor', 5)
     save(store, adapter)
     assert ('doctor', 5) not in adapter.rows and adapter.rows[('appointment', 12)]['doctor_id'] is None
 
 
-def test_set_null_and_cascade():
-    store, adapter = db_with_doctor('set_null')
+# def test_set_null_and_cascade():
+#     store, adapter = db_with_doctor('set_null')
+#     store.delete('doctor', 5)
+#     save(store, adapter)
+#     assert adapter.rows[('appointment', 12)]['doctor_id'] is None
+#     store, adapter = db_with_doctor('cascade')
+#     store.delete('doctor', 5)
+#     result = save(store, adapter)
+#     assert ('appointment', 12) not in adapter.rows
+#     assert result.deleted == (('appointment', 12), ('doctor', 5))      # ссылающиеся — раньше цели
+# ↑ до 2026-11-01 (Ф1.6.3а): черновики обнуляли ссылки и удаляли ссылающиеся; теперь такие
+#   правила описать нельзя (test_removed_rules_refused_in_schema), удаление используемой
+#   цели — отказ без изменений БД (test_delete_used_target_changes_nothing)
+
+
+def test_delete_used_target_changes_nothing():
+    """Удаление используемого врача: ни обнуления ссылки, ни удаления приёма — отказ, БД как была."""
+    store, adapter = db_with_doctor()
     store.delete('doctor', 5)
-    save(store, adapter)
-    assert adapter.rows[('appointment', 12)]['doctor_id'] is None
-    store, adapter = db_with_doctor('cascade')
-    store.delete('doctor', 5)
-    result = save(store, adapter)
-    assert ('appointment', 12) not in adapter.rows
-    assert result.deleted == (('appointment', 12), ('doctor', 5))      # ссылающиеся — раньше цели
+    with pytest.raises(DeleteBlocked):
+        save(store, adapter)
+    assert adapter.rows[('appointment', 12)] == {'patient_id': 1, 'doctor_id': 5}
+    assert ('doctor', 5) in adapter.rows
+    assert [op for op, _, _ in adapter.log if op in ('update', 'delete')] == []   # БД не менялась
 
 
 def test_unsaved_draft_referencing_deleted_blocks_before_db():
-    store, adapter = db_with_doctor('set_null')
+    # store, adapter = db_with_doctor('set_null')
+    # ↑ до 2026-11-01 (Ф1.6.3а): было правило set_null (отказ — даже при нём); теперь одно правило
+    store, adapter = db_with_doctor()
     store.create('appointment', {'doctor_id': 5}, parent_id=1)          # новый, не сохраняется
     store.delete('doctor', 5)
     with pytest.raises(DeleteBlocked, match='несохранённые'):
@@ -128,17 +169,33 @@ def test_unsaved_draft_referencing_deleted_blocks_before_db():
     assert adapter.log == []                                            # до БД не дошло
 
 
-def test_collect_deletes_unused_shared_data_recursively():
+# def test_collect_deletes_unused_shared_data_recursively():
+#     store, adapter = DraftStore(make()), MemoryAdapter()
+#     adapter.rows.update({('patient', 1): {}, ('template', 7): {'text': 'общий'},
+#                          ('appointment', 11): {'patient_id': 1, 'template_id': 7},
+#                          ('appointment', 12): {'patient_id': 1, 'template_id': 7}})
+#     store.delete('appointment', 11)
+#     save(store, adapter)
+#     assert ('template', 7) in adapter.rows                               # ещё нужен приёму 12
+#     store.delete('appointment', 12)
+#     result = save(store, adapter)
+#     assert ('template', 7) not in adapter.rows and ('template', 7) in result.deleted
+# ↑ до 2026-11-01 (Ф1.6.3а): collect — черновики сами удаляли ставший ненужным шаблон;
+#   теперь он остаётся (убирает хранилище данных), описать collect=True — SchemaError
+
+
+def test_unused_target_left_in_db():
+    """Удалили все приёмы с общим шаблоном — удаляются только они; шаблон черновики не трогают."""
     store, adapter = DraftStore(make()), MemoryAdapter()
     adapter.rows.update({('patient', 1): {}, ('template', 7): {'text': 'общий'},
                          ('appointment', 11): {'patient_id': 1, 'template_id': 7},
                          ('appointment', 12): {'patient_id': 1, 'template_id': 7}})
     store.delete('appointment', 11)
-    save(store, adapter)
-    assert ('template', 7) in adapter.rows                               # ещё нужен приёму 12
     store.delete('appointment', 12)
     result = save(store, adapter)
-    assert ('template', 7) not in adapter.rows and ('template', 7) in result.deleted
+    assert set(result.deleted) == {('appointment', 11), ('appointment', 12)}
+    assert adapter.rows[('template', 7)] == {'text': 'общий'}            # никому не нужен, но на месте
+    assert ('delete', 'template', 7) not in adapter.log
 
 
 def test_cycle_of_new_records_refused():
@@ -175,7 +232,7 @@ class PlainAdapter:
 
 def test_adapter_without_reference_lookup_refused():
     """Ссылки описаны, а адаптер искать их не умеет — отказ (а не тихое удаление без проверки)."""
-    store, adapter = db_with_doctor('restrict')
+    store, adapter = db_with_doctor()
     store.delete('doctor', 5)
     with pytest.raises(PlanError, match='не умеет'):
         execute_plan(store, build_plan(store), PlainAdapter(adapter))

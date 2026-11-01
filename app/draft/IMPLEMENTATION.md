@@ -220,8 +220,8 @@ drafts.build_plan(targets=frame.selection_nodes(), scope=SaveScope.ANCESTORS | S
 `drafts_schema()`, `service_adapter()`); с 2026-10-31 (Ф1.3.4) в схеме и адаптере есть
 общие данные — заметки (`note`, корневой тип, цель ссылок `restrict`). Транзакция
 приложения — `get_db().session_scope()` (одна база на приложение, ТД-6). Черновики данные
-БД сами не удаляют (В-18, В-19); правила `collect` / `cascade` / `set_null` убирает Ф1.6.3а
-в `app/utils/drafts` — не здесь.
+БД сами не удаляют (В-18, В-19); правила `collect` / `cascade` / `set_null` убраны Ф1.6.3а
+(2026-11-01) в `app/utils/drafts` — не здесь.
 
 **Не менять без проверки зависимых:** имя, параметры и поведение `ServiceAdapter` читают
 `app/tables/spec.py` (`service_adapter`, два места), `tests/test_dataset_app/*` и главное

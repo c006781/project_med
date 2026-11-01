@@ -78,7 +78,7 @@ class MemoryAdapter:
         return [i for (e, i), row in self.rows.items() if e == entity and row.get(field) in wanted]
 
     def read(self, entity: str, entity_id: Hashable, tx: Any = None):
-        """Запись из «БД» (для переиспользуемых данных — что удалять следом)."""
+        """Запись из «БД»; ``None`` — её нет (цель ссылок, уже убранную хранилищем, повторно не удаляют)."""
         row = self.rows.get((entity, entity_id))
         return dict(row) if row is not None else None
 

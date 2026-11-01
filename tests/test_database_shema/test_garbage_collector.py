@@ -123,10 +123,12 @@ def test_plan_depth_and_limit(world):
     assert [t.name for t in events.plan.order] == ['gc_notes']
 
 
-def test_app_plan_without_used_tables_is_empty():
+def test_app_plan_notes_depth_one_limit_two():
+    """Схема клиники: «только используемые» — заметки; глубина 1, предел 2 (Ф1.6.10ж)."""
     from app.database.database_shema.clinic import Base
     plan = te._CollectorPlan.build(Base)
-    assert (plan.used, plan.depth, plan.limit) == ({}, 0, 1)   # заметки — «хранить всегда» до шага 4
+    assert [t.name for t in plan.order] == ['appointments_notes']
+    assert (plan.depth, plan.limit) == (1, 2)
 
 
 # ---------------------------------------------------------------------- уборка

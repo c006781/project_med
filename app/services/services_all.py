@@ -2047,9 +2047,11 @@ class BaseService(
             
             note_repo = AppointmentNoteRepository(sess)
             
-            # Обновляем заметки (прежние id — для очистки после записи новых ссылок, DATA1)
-            old_note_ids = {m['orm_id_field']: getattr(entity, m['orm_id_field'])
-                            for m in self._get_note_field_mappings()}
+            # # Обновляем заметки (прежние id — для очистки после записи новых ссылок, DATA1)
+            # old_note_ids = {m['orm_id_field']: getattr(entity, m['orm_id_field'])
+            #                 for m in self._get_note_field_mappings()}
+            # ↑ до 2026-11-01 (Ф1.6.10ж): прежние id нужны были только для
+            #   _cleanup_replaced_notes; ненужные заметки убирает сборщик мусора слоя базы.
             new_note_ids = self._apply_note_updates(
                 dto,
                 sess,
@@ -2069,7 +2071,11 @@ class BaseService(
             self._apply_simple_updates(entity, dto, session = sess)
 
             sess.flush()
-            self._cleanup_replaced_notes(old_note_ids, new_note_ids, sess)
+            # self._cleanup_replaced_notes(old_note_ids, new_note_ids, sess)
+            # ↑ до 2026-11-01 (Ф1.6.10ж): прежние заметки, ставшие ненужными, удалял сервис;
+            #   теперь заметки — «только используемые» (NOTES.keep), их убирает сборщик мусора
+            #   слоя базы перед коммитом (app/database/table_events.py) — при любом источнике
+            #   изменений, не только через этот метод.
             # DATA5 (2026-10-16): после смены внешних ключей заметок связи в объекте
             # оставались старыми — возвращённый DTO противоречил сам себе (id None, а текст
             # старый). Перечитываем объект.
@@ -2097,8 +2103,9 @@ class BaseService(
             2. Если запись не найдена – вызывает `_not_found_exception`.
             3. Собирает ID всех заметок, связанных с этой записью (через `_get_note_field_mappings`).
             4. Удаляет саму запись (каскадные удаления на уровне БД не используются – удаляем явно).
-            5. Вызывает `NoteService.cleanup_unused_note` для каждой собранной заметки,
-            чтобы удалить заметки, которые больше не используются нигде.
+            5. Заметки, которые больше не используются нигде, убирает сборщик мусора слоя
+            базы перед коммитом (заметки — «только используемые», Ф1.6.10ж, 2026-11-01;
+            до этого — вызов `NoteService.cleanup_unused_note` здесь).
 
         Параметры:
             entity_id (int): ID удаляемой записи.
@@ -2135,13 +2142,21 @@ class BaseService(
             self._delete_children(entity, sess)
             repo.delete(entity)
             sess.flush()
-            
-            # Очищаем неиспользуемые заметки
-            note_service = self._get_note_service()
-            if note_service:
-                for nid in note_ids:
-                    # self._get_note_service().cleanup_unused_note(nid, sess)
-                    note_service.cleanup_unused_note(nid, sess)
+
+            # # Очищаем неиспользуемые заметки
+            # note_service = self._get_note_service()
+            # if note_service:
+            #     for nid in note_ids:
+            #         # self._get_note_service().cleanup_unused_note(nid, sess)
+            #         note_service.cleanup_unused_note(nid, sess)
+            # ↑ до 2026-11-01 (Ф1.6.10ж): заметки удалённой записи чистил сервис; теперь их
+            #   убирает сборщик мусора слоя базы перед коммитом (NOTES.keep — «только
+            #   используемые»). note_ids собираются по-прежнему — для журнала ниже.
+            if note_ids:
+                self.logger.debug(
+                    f"удалена запись id={entity_id}: заметок записи {len(note_ids)} — проверит "
+                    f"сборщик мусора при коммите"
+                )
 
 
     @AppLogger.get_instance(
@@ -2627,9 +2642,9 @@ class BaseService(
         Возвращает сервис заметок для полей ``is_note``: атрибут ``_note_service`` или ``None``.
 
         Атрибут задают параметр ``note_service`` конструктора или наследник в своём
-        ``__init__`` (DYN9; раньше базовый метод бросал ``NotImplementedError``). ``None`` —
-        заметки при правке и удалении записи не чистятся (:meth:`_cleanup_replaced_notes`,
-        :meth:`_delete_entity`).
+        ``__init__`` (DYN9; раньше базовый метод бросал ``NotImplementedError``). Нужен для
+        записи текстов заметок (``_note_id_for_text``). Ненужные заметки с 2026-11-01
+        (Ф1.6.10ж) убирает сборщик мусора слоя базы, а не сервис заметок.
 
         Returns:
             (NoteService/None) Сервис заметок; None — не задан.
@@ -4036,8 +4051,8 @@ class PatientService(
         """
         Возвращает сервис заметок пациента (созданный в ``__init__``).
 
-        Им пользуются :meth:`_cleanup_replaced_notes` и :meth:`_delete_entity` — удаляют
-        заметки, на которые больше никто не ссылается.
+        Им пользуется запись текстов заметок; заметки, на которые больше никто не ссылается,
+        с 2026-11-01 убирает сборщик мусора слоя базы (Ф1.6.10ж).
 
         Returns:
             (NoteService) Сервис заметок.

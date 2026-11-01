@@ -1104,7 +1104,9 @@ class TableEvents:
                 connection,
                 target,
             )
-            log.pending_old[row_key] = old
+            # запомнить до «после изменения» — только если там они нужны (журнал, действия)
+            if journal or (table_def is not None and table_def.actions_for('after_update')):
+                log.pending_old[row_key] = old
         elif event_name == 'before_delete' and (journal or watched): # строка до удаления
             row = _row_from_db(
                 mapper,
@@ -1502,8 +1504,10 @@ class TableEvents:
         unknown = [name for name in expected if name not in by_name]
         if unknown:
             raise ValueError(f"не таблицы «только используемые»: {', '.join(unknown)}")
-        log = self._log(session)
+        # сначала транзакция (connection() её начинает), потом журнал: журнал, взятый до
+        # начала транзакции, ни к какой не привязан и был бы отброшен первым же событием
         existing = set(inspect(session.connection()).get_table_names())
+        log = self._log(session)
         result : Dict[str, List[Any]] = {}
         for name, ids in expected.items():
             table = by_name[name]

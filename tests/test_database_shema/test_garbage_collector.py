@@ -310,20 +310,25 @@ def test_chain_collected_in_depth_rounds_without_warning(tmp_path):
 
 def test_self_reference_among_used_rejected_at_configure():
     base = declarative_base()
-    TableDef('nodes', 'Node', 'NodeDTO', fields=(key(), fk('next_id', 'nodes', 'Node')),
-             keep=KEEP_USED).build_model(base)
+    # модель держать: реестр SQLAlchemy хранит классы слабо — выброшенную удалит сборщик Python
+    node = TableDef('nodes', 'Node', 'NodeDTO', fields=(key(), fk('next_id', 'nodes', 'Node')),
+                    keep=KEEP_USED).build_model(base)
     base.registry.configure()
     with pytest.raises(TableEventError, match='по кругу.*nodes → nodes'):
         te.TableEvents(logger=FakeLogger()).configure(base)
+    assert node.__tablename__ == 'nodes'
 
 
 def test_mutual_reference_among_used_rejected_at_configure():
     base = declarative_base()
-    TableDef('xa', 'XA', 'XADTO', fields=(key(), fk('b_id', 'xb', 'XB')), keep=KEEP_USED).build_model(base)
-    TableDef('xb', 'XB', 'XBDTO', fields=(key(), fk('a_id', 'xa', 'XA')), keep=KEEP_USED).build_model(base)
+    models = [   # держать (реестр хранит классы слабо)
+        TableDef('xa', 'XA', 'XADTO', fields=(key(), fk('b_id', 'xb', 'XB')), keep=KEEP_USED).build_model(base),
+        TableDef('xb', 'XB', 'XBDTO', fields=(key(), fk('a_id', 'xa', 'XA')), keep=KEEP_USED).build_model(base),
+    ]
     base.registry.configure()
     with pytest.raises(TableEventError, match='по кругу'):
         te.TableEvents(logger=FakeLogger()).configure(base)
+    assert len(models) == 2
 
 
 # ---------------------------------------------------------------------- предел и защита
@@ -412,3 +417,18 @@ def test_find_and_delete_unused(world):
     with pytest.raises(ValueError, match='не таблицы'):
         with factory() as s:
             events.delete_unused(s, {'holders': [1]})
+
+
+def test_delete_unused_on_fresh_session_keeps_log(world):
+    """Итоговая перепроверка: delete_unused первым действием сессии — журнал удалений не теряется."""
+    factory, events, note, _, _, _ = world
+    with factory() as s:
+        s.add_all([note(text='1'), note(text='2')])
+        s.commit()
+    with factory() as s:                    # транзакция ещё не начата
+        deleted = events.delete_unused(s, {'gc_notes': [1, 2]})
+        s.commit()
+        assert (deleted, _ids(s, note)) == ({'gc_notes': [1, 2]}, [])
+    info = [t for t in events.logger.texts('info') if 'полная проверка' in t]
+    assert len(info) == 2
+    assert not any('отброшен' in w for w in events.logger.texts('warning'))

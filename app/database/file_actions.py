@@ -25,6 +25,7 @@ Example:
 
 from __future__ import annotations
 
+import ntpath
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -68,7 +69,9 @@ def photo_file_path(
     Возвращает полный путь файла фото по имени из БД — только внутри папки фото.
 
     Старые пути Windows (``app_1\\a.jpg``, Р-29) понимаются на любой системе. Абсолютное
-    имя, выход из папки (``..``) или сама папка — None: такое имя не трогается.
+    имя (в том числе с буквой диска ``C:/x.jpg``, ``C:x.jpg`` — на любой системе, база
+    ходит между Windows и Linux), выход из папки (``..``) или сама папка — None: такое имя
+    не трогается.
 
     Args:
         root : (str) Папка фото.
@@ -82,11 +85,16 @@ def photo_file_path(
         'C:\\\\photos\\\\20261101_120000.jpg'
         >>> photo_file_path('C:/photos', '../clinic.db') is None
         True
+        >>> photo_file_path('/photos', 'C:/x.jpg') is None
+        True
     """
     if not root or not name:
         return None
     relative = name.replace('\\', '/')                # старые пути Windows (Р-29)
-    if os.path.isabs(relative) or relative.startswith('/'):
+    # ↑ до 2026-11-05 (M13): было `if os.path.isabs(relative) or relative.startswith('/')` —
+    #   на Linux имя с буквой диска (`C:/x.jpg`, `C:x.jpg`) считалось относительным, а на Windows
+    #   `C:x.jpg` ломало `commonpath`
+    if os.path.isabs(relative) or relative.startswith('/') or ntpath.splitdrive(relative)[0]:
         return None
     base = os.path.normpath(os.path.abspath(root))
     path = os.path.normpath(

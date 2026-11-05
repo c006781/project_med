@@ -279,10 +279,15 @@ def test_action_without_root_keeps_files(tmp_path, monkeypatch):
     assert 'Папка фото не задана' in log.warning.call_args.args[0]
 
 
-@pytest.mark.parametrize('name', ['../clinic.db', '/etc/passwd', 'C:/x.jpg', '', '.'])
+@pytest.mark.parametrize('name', ['../clinic.db', '/etc/passwd', 'C:/x.jpg', 'C:x.jpg', 'c:\\x.jpg', '', '.'])
 def test_photo_file_path_stays_inside_root(tmp_path, name):
     """Имя, ведущее вне папки фото (или сама папка), не трогается."""
     assert photo_file_path(str(tmp_path), name) is None
+
+
+def test_photo_file_path_legacy_windows_relative(tmp_path):
+    """Старый относительный путь Windows (Р-29) понимается на любой системе."""
+    assert photo_file_path(str(tmp_path), 'app_1\\a.jpg') == os.path.join(str(tmp_path), 'app_1', 'a.jpg')
 
 
 # ---------------------------------------------------------------- через черновики (В-3)

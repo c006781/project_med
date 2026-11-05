@@ -379,7 +379,7 @@ def test_savepoint_is_not_transaction_event(calls, tmp_path):
     assert [c[2] for c in calls] == ['before_commit', 'after_commit']
 
 
-@pytest.mark.filterwarnings('ignore:Usage of the .Session.add\(\). operation')
+@pytest.mark.filterwarnings(r'ignore:Usage of the .Session.add\(\). operation')
 def test_row_action_changing_session_is_error(tmp_path):
     """Р-21: действие строки добавляет строку внутри flush — TableEventError, откат."""
     def sneaky(ctx):

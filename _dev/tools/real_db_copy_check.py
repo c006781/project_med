@@ -10,9 +10,10 @@
 (`_dev/КАРТА.md` Ф3.6) и после правок моделей.
 
 Запуск (из корня проекта):
-    Windows: .venv310/Scripts/python.exe -X utf8 _dev/tools/real_db_copy_check.py [путь к базе]
-    Linux:   <venv>/bin/python -X utf8 _dev/tools/real_db_copy_check.py [путь к базе]
-По умолчанию — ``clinic.db`` в корне проекта.
+    Windows: .venv310/Scripts/python.exe -X utf8 _dev/tools/real_db_copy_check.py [путь к базе] [--keep]
+    Linux:   <venv>/bin/python -X utf8 _dev/tools/real_db_copy_check.py [путь к базе] [--keep]
+По умолчанию — ``clinic.db`` в корне проекта. Временная папка с копией в конце удаляется
+(``--keep`` — оставить; копия содержит персональные данные).
 
 Ожидаемо: «различий после: 0», «изменения моделей без миграции: 0», числа записей до и
 после совпадают. Создан 2026-10-19 (сессия Windows), перенесён в _dev/tools 2026-10-25.
@@ -25,7 +26,9 @@ import tempfile
 from typing import Dict
 
 ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-source: str = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'clinic.db')
+args: list = [a for a in sys.argv[1:] if not a.startswith('--')]
+KEEP: bool = '--keep' in sys.argv   # не удалять временную папку в конце
+source: str = args[0] if args else os.path.join(ROOT, 'clinic.db')
 
 # Временные настройки — ДО импорта приложения
 work: str = tempfile.mkdtemp(prefix='db_copy_check_')
@@ -82,3 +85,9 @@ print('изменения моделей без миграции:', len(pending_
 after = counts(engine)
 print('записей до:', before)
 print('записей после:', after, '| совпадают:', before == after)
+engine.dispose()   # файл копии больше не нужен
+if KEEP:
+    print('папка с копией оставлена:', work)
+else:
+    shutil.rmtree(work, ignore_errors=True)   # копия — персональные данные
+    print('временная папка удалена')

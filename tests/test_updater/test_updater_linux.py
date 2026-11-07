@@ -176,7 +176,7 @@ class Install:
     ):
         """Готовит обновление с фиксированной меткой."""
         if wait_pid is None:
-            finished = subprocess.Popen(['true'])
+            finished = subprocess.Popen([sys.executable, '-c', 'pass'])
             finished.wait()
             wait_pid = finished.pid
         return prepare_linux_update(

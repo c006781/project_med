@@ -1024,10 +1024,11 @@ def read_linux_manifest(
         UpdateError: Файла нет, это ссылка, он не читается или неверен.
 
     Example:
-        >>> read_linux_manifest('/нет/такой/папки')
-        Traceback (most recent call last):
-        ...
-        app.updater.UpdateError: Не удалось прочитать манифест обновления: /нет/такой/папки/.medicalapp_manifest
+        >>> try:
+        ...     read_linux_manifest('/нет/такой/папки')
+        ... except UpdateError as e:
+        ...     str(e).startswith('Не удалось прочитать манифест')
+        True
     """
     path = os.path.join(folder, LINUX_MANIFEST_FILE)
     try:
@@ -1248,7 +1249,7 @@ def safe_extract_tar(
                     raise UpdateError(f'Не удалось прочитать файл обновления: {member.name!r}')
                 descriptor = os.open(
                     target,                                     # файл
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,       # только новый файл
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0),  # только новый файл
                     (member.mode & 0o755) | 0o600,              # без setuid, владелец читает и пишет
                 )
                 with source, os.fdopen(descriptor, 'wb') as out:
@@ -1282,10 +1283,11 @@ def check_unpacked_update(
         UpdateError: Состав не совпал.
 
     Example:
-        >>> check_unpacked_update('/нет/такой/папки')
-        Traceback (most recent call last):
-        ...
-        app.updater.UpdateError: Не удалось прочитать манифест обновления: /нет/такой/папки/.medicalapp_manifest
+        >>> try:
+        ...     check_unpacked_update('/нет/такой/папки')
+        ... except UpdateError as e:
+        ...     str(e).startswith('Не удалось прочитать манифест')
+        True
     """
     paths = read_linux_manifest(payload_dir)
     on_disk = set()
@@ -2429,8 +2431,8 @@ class UpdateApplier(QObject):
         """
         Проверяет, возможна ли установка, выбирает файл релиза и запускает скачивание.
 
-        Ошибки (не та ОС, не собранная программа, нет файла для ОС) — в ``error`` ДО
-        скачивания. Хеш SHA-256 выбранного файла берётся из описания релиза
+        Ошибки (не та ОС, не собранная программа; на Linux — не установленный дистрибутив, рабочая
+        копия с ``.git``, нет прав на запись; нет файла для ОС) — в ``error`` ДО скачивания. Хеш SHA-256 выбранного файла берётся из описания релиза
         (:func:`release_asset_sha256`) и сверяется после скачивания; хеша нет — ``warning``
         и журнал, установка продолжается без сверки.
         """

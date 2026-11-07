@@ -162,6 +162,19 @@ def test_present_in_freeze_updates_version_and_sets_condition(proj):
         assert '0.17.5' not in text and '6.20.0' not in text
 
 
+def test_windows_only_dependencies_get_condition(proj):
+    """pefile и pywin32-ctypes из freeze на Windows записываются с условием; потом Linux их не стирает."""
+    proj.write('requirements.txt', OLD_PROD)
+    proj.write('requirements-dev.txt', OLD_DEV)
+    windows_freeze = LINUX_FREEZE + 'pefile==2024.8.26\npywin32-ctypes==0.2.3\n'
+    assert proj.run(freeze = windows_freeze).returncode == 0
+    assert f'pefile==2024.8.26{COND}' in proj.read('requirements.txt')
+    assert f'pywin32-ctypes==0.2.3{COND}' in proj.read('requirements.txt')
+    assert proj.run().returncode == 0
+    assert f'pefile==2024.8.26{COND}' in proj.read('requirements.txt')
+    assert f'pywin32-ctypes==0.2.3{COND}' in proj.read('requirements-dev.txt')
+
+
 def test_condition_added_to_legacy_line_missing_in_freeze(proj):
     """В прежнем файле строки без условия, во freeze их нет — условие дописывается, версия цела."""
     proj.write('requirements.txt', OLD_PROD.replace(COND, ''))

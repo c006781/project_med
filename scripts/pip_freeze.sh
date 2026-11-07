@@ -17,7 +17,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-CONDITIONAL_PACKAGES="pyinstaller altgraph pyinstaller-hooks-contrib"   # имена в каноническом виде
+# pefile и pywin32-ctypes — зависимости pyinstaller только на Windows: в файлах их пока нет, но
+# запуск на Windows их добавит, и без условия они попали бы в установку на Linux
+CONDITIONAL_PACKAGES="pyinstaller altgraph pyinstaller-hooks-contrib pefile pywin32-ctypes"   # имена в каноническом виде
 CONDITION='sys_platform == "win32"'                                     # условие установки
 
 # Что не попадает в requirements.txt (имена в каноническом виде)

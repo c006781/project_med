@@ -1,11 +1,27 @@
 # interfaces/gui/gui_window/main_window.py
 
 """
-Главное окно приложения.
+Главное окно приложения: собирает страницы, навигацию, обмен базой с Яндекс.Диском и обновления.
 
-Собирает все миксины и предоставляет единую точку входа в GUI.
-Содержит инициализацию UI, создание страниц, подключение сигналов,
-а также методы загрузки данных для списков (load_patients, load_appointments и т.д.).
+Класс :class:`MainWindow` наследует ``QMainWindow`` и миксины; у миксинов нет общих имён (проверяет
+тест), поэтому порядок наследования на поведение не влияет:
+
+* :class:`PagesCreationMixin` — создание страниц и менеджера страниц;
+* :class:`ConnectionsMixin` — сигналы страниц и шапки;
+* :class:`DeleteHandlersMixin` — удаление записей с подтверждением;
+* :class:`NavigationMixin` — «Назад», крошки, вход на страницу;
+* :class:`SyncMixin` — скачивание и выгрузка базы, резервные копии, замена файла базы;
+* :class:`UpdateMixin` — проверка и установка обновлений.
+
+Там же окна и поток импорта из Word (:class:`ParsingProgressDialog`, :class:`ParsingThread`) и окно
+ожидания установки (:class:`UpdateProgressDialog`). Точка входа — ``interfaces.gui.gui_window.main``.
+
+Проверочный запуск без сети: переменная окружения ``PROJECT_MED_NO_UPDATE_CHECK=1``
+(:func:`startup_update_check_enabled`). Устройство и решения — ``IMPLEMENTATION.md`` этой папки.
+
+Example:
+    >>> window = MainWindow()   # doctest: +SKIP
+    >>> window.show()           # doctest: +SKIP
 """
 
 import os
@@ -13,7 +29,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional, Set, Tuple
 # import sys
 
 from app.config import (
@@ -98,8 +114,10 @@ from PySide6.QtWidgets import (
     QStackedWidget, QFrame, QHBoxLayout, QTextEdit,
     QCheckBox,    # флажок в вопросе перед импортом из Word (ТД-8, 2026-10-25)
 )
-from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
-from PySide6.QtGui import QDesktopServices
+# from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
+# ↑ до 2026-11-07 (Ф2.1.7): Q_ARG не используется
+from PySide6.QtCore import QThread, QUrl, Qt, Signal, Slot, QTimer
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 
 # Проверочные запуски: непустое истинное значение выключает проверку обновлений при старте,
 # какой бы ни была настройка (окно не ходит в сеть и не задаёт вопрос об обновлении)
@@ -162,12 +180,17 @@ class PagesCreationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _set_patient(self):
+    # страницы пациентов
+    def _set_patient(self) -> None:
         """
         Создаёт страницу списка пациентов и страницу редактирования пациента.
+
         Устанавливает атрибуты:
-            - self.patient_list_page (DynamicListPage)
-            - self.patient_edit_page (DynamicEditPage)
+            - ``self.patient_list_page`` (``PatientsDraftPage``; черновики не создались — ``PatientListPage``)
+            - ``self.patient_edit_page`` (``DynamicEditPage``)
+
+        Example:
+            >>> window._set_patient()     # doctest: +SKIP
         """
         # Страница со списком пациентов
         # self.patient_list_page = DynamicListPage(
@@ -217,12 +240,17 @@ class PagesCreationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _set_appointment(self):
+    # страницы приёмов
+    def _set_appointment(self) -> None:
         """
         Создаёт страницу списка приёмов и страницу редактирования приёма.
+
         Устанавливает атрибуты:
-            - self.appointment_list_page (AppointmentListPage)
-            - self.appointment_edit_page (DynamicEditPage)
+            - ``self.appointment_list_page`` (``AppointmentListPage``)
+            - ``self.appointment_edit_page`` (``DynamicEditPage``)
+
+        Example:
+            >>> window._set_appointment()     # doctest: +SKIP
         """
         self.appointment_list_page = AppointmentListPage(
             service=get_appointment_service(),
@@ -259,12 +287,17 @@ class PagesCreationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _set_note(self):
+    # страницы заметок
+    def _set_note(self) -> None:
         """
         Создаёт страницу списка заметок и страницу редактирования заметки.
+
         Устанавливает атрибуты:
-            - self.note_list_page (DynamicListPage)
-            - self.note_edit_page (DynamicEditPage)
+            - ``self.note_list_page`` (``DynamicListPage``)
+            - ``self.note_edit_page`` (``DynamicEditPage``)
+
+        Example:
+            >>> window._set_note()     # doctest: +SKIP
         """
         self.note_list_page = DynamicListPage(
             service=get_note_service(),
@@ -294,12 +327,17 @@ class PagesCreationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _set_photo(self):
+    # страницы фотографий
+    def _set_photo(self) -> None:
         """
         Создаёт страницу списка фотографий и страницу редактирования фото.
+
         Устанавливает атрибуты:
-            - self.photo_list_page (DynamicListPage)
-            - self.photo_edit_page (DynamicEditPage)
+            - ``self.photo_list_page`` (``DynamicListPage``)
+            - ``self.photo_edit_page`` (``DynamicEditPage``)
+
+        Example:
+            >>> window._set_photo()     # doctest: +SKIP
         """
         self.photo_list_page = DynamicListPage(
             service=get_photo_service(),
@@ -329,12 +367,17 @@ class PagesCreationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _init_page_manager(self):
+    # все страницы и менеджер страниц
+    def _init_page_manager(self) -> None:
         """
-        Инициализирует менеджер страниц.
-        Сначала создаёт все страницы (пациенты, приёмы, заметки, фото),
-        затем собирает их в словарь, добавляет в QStackedWidget,
-        создаёт PageManager и подключает сигналы страниц.
+        Создаёт все страницы и менеджер страниц.
+
+        Сначала создаёт страницы (пациенты, приёмы, заметки, фото, настройки, «приёмы и фото», экран
+        наборов данных), затем добавляет их в ``QStackedWidget``, создаёт ``PageManager`` и подключает
+        сигналы страниц. Экран наборов данных необязателен: не создался — программа работает без него.
+
+        Example:
+            >>> window._init_page_manager()     # doctest: +SKIP
         """
         # Создаём все страницы (важно: порядок не имеет значения, но все должны быть созданы)
         self._set_patient()
@@ -416,13 +459,16 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_signals(self):
+    # основные сигналы окна
+    def _connect_signals(self) -> None:
         """
-        Подключает основные сигналы главного окна:
-            - кнопка "Назад"
-            - кнопка "Настройки"
-            - выбор действия в комбобоксе
-            - сигналы менеджера страниц (навигация, вход на страницу)
+        Подключает основные сигналы окна.
+
+        Подключаются кнопка «Назад», выбор действия в списке и сигналы менеджера страниц (навигация,
+        вход на страницу).
+
+        Example:
+            >>> window._connect_signals()   # doctest: +SKIP
         """
         # Кнопка возврата на предыдущую страницу
         self.back_btn.clicked.connect(self._on_back_clicked)
@@ -445,9 +491,13 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_page_signals(self):
+    # сигналы всех страниц
+    def _connect_page_signals(self) -> None:
         """
-        Связывает сигналы всех страниц (списков и редактирования) с методами-обработчиками.
+        Связывает сигналы страниц (списки и редактирование) с обработчиками.
+
+        Example:
+            >>> window._connect_page_signals()  # doctest: +SKIP
         """
         self._connect_patient()
         self._connect_appointment()
@@ -462,13 +512,19 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_patient(self):
+    # сигналы списка пациентов
+    def _connect_patient(self) -> None:
         """
-        Подключает сигналы страницы списка пациентов:
-            - add_requested → переход на страницу создания пациента
-            - edit_requested → переход на страницу редактирования с переданным DTO
-            - delete_requested → вызов обработчика удаления
-            - action_requested → переход к списку приёмов выбранного пациента
+        Подключает сигналы страницы списка пациентов.
+
+        Сигналы:
+            - ``add_requested`` — страница создания пациента
+            - ``edit_requested`` — страница редактирования с id записи
+            - ``delete_requested`` — обработчик удаления
+            - ``action_requested`` — приёмы выбранного пациента
+
+        Example:
+            >>> window._connect_patient()     # doctest: +SKIP
         """
         # Добавление нового пациента
         self.patient_list_page.add_requested.connect(
@@ -494,12 +550,18 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_appointment(self):
+    # сигналы списка приёмов
+    def _connect_appointment(self) -> None:
         """
-        Подключает сигналы страницы списка приёмов:
-            - add_requested → переход на страницу создания приёма (с patient_id, если есть)
-            - edit_requested → переход на страницу редактирования
-            - delete_requested → вызов обработчика удаления
+        Подключает сигналы страницы списка приёмов.
+
+        Сигналы:
+            - ``add_requested`` — страница создания приёма (с ``patient_id``, если есть)
+            - ``edit_requested`` — страница редактирования
+            - ``delete_requested`` — обработчик удаления
+
+        Example:
+            >>> window._connect_appointment()     # doctest: +SKIP
         """
 
         # Добавление нового приёма (если в extra_data есть patient_id, он будет передан)
@@ -531,12 +593,18 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_note(self):
+    # сигналы списка заметок
+    def _connect_note(self) -> None:
         """
-        Подключает сигналы страницы списка заметок:
-            - add_requested → переход на страницу создания заметки
-            - edit_requested → переход на страницу редактирования
-            - delete_requested → вызов обработчика удаления
+        Подключает сигналы страницы списка заметок.
+
+        Сигналы:
+            - ``add_requested`` — страница создания заметки
+            - ``edit_requested`` — страница редактирования
+            - ``delete_requested`` — обработчик удаления
+
+        Example:
+            >>> window._connect_note()     # doctest: +SKIP
         """
         self.note_list_page.add_requested.connect(
             lambda: self.page_manager.switch_to('note_edit', extra_data=None)
@@ -557,12 +625,18 @@ class ConnectionsMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_photo(self):
+    # сигналы списка фотографий
+    def _connect_photo(self) -> None:
         """
-        Подключает сигналы страницы списка фотографий:
-            - add_requested → переход на страницу создания фото
-            - edit_requested → переход на страницу редактирования
-            - delete_requested → вызов обработчика удаления
+        Подключает сигналы страницы списка фотографий.
+
+        Сигналы:
+            - ``add_requested`` — страница создания фото
+            - ``edit_requested`` — страница редактирования
+            - ``delete_requested`` — обработчик удаления
+
+        Example:
+            >>> window._connect_photo()     # doctest: +SKIP
         """
         self.photo_list_page.add_requested.connect(
             lambda: self.page_manager.switch_to('photo_edit', extra_data=None)
@@ -588,10 +662,21 @@ class DeleteHandlersMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_patient_delete(self, dto):
+    # удаление пациента с подтверждением
+    def _on_patient_delete(
+        self,
+        dto : PatientDTO,  # удаляемый пациент
+    ) -> None:
         """
-        Удаление пациента после подтверждения пользователя.
-        Удаляются также все связанные приёмы и фотографии (каскадно).
+        Удаляет пациента после подтверждения пользователя.
+
+        Удаляются также все связанные приёмы и фотографии (каскадно). Ошибка показывается и пишется в журнал.
+
+        Args:
+            dto : (PatientDTO) Удаляемый пациент.
+
+        Example:
+            >>> window._on_patient_delete(dto)    # doctest: +SKIP
         """
         # Запрашиваем подтверждение
         reply = QMessageBox.question(
@@ -621,9 +706,21 @@ class DeleteHandlersMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_appointment_delete(self, dto):
+    # удаление приёма с подтверждением
+    def _on_appointment_delete(
+        self,
+        dto : AppointmentDTO,  # удаляемый приём
+    ) -> None:
         """
-        Удаление приёма после подтверждения.
+        Удаляет приём после подтверждения пользователя.
+
+        Ошибка показывается и пишется в журнал.
+
+        Args:
+            dto : (AppointmentDTO) Удаляемый приём.
+
+        Example:
+            >>> window._on_appointment_delete(dto)    # doctest: +SKIP
         """
         reply = QMessageBox.question(
             self, "Подтверждение",
@@ -651,9 +748,21 @@ class DeleteHandlersMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_note_delete(self, dto):
+    # удаление заметки с подтверждением
+    def _on_note_delete(
+        self,
+        dto : AppointmentNoteDTO,  # удаляемая заметка
+    ) -> None:
         """
-        Удаление заметки после подтверждения.
+        Удаляет заметку после подтверждения пользователя.
+
+        Ошибка показывается и пишется в журнал.
+
+        Args:
+            dto : (AppointmentNoteDTO) Удаляемая заметка.
+
+        Example:
+            >>> window._on_note_delete(dto)    # doctest: +SKIP
         """
         reply = QMessageBox.question(
             self, "Подтверждение",
@@ -681,9 +790,21 @@ class DeleteHandlersMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_photo_delete(self, dto):
+    # удаление фото с подтверждением
+    def _on_photo_delete(
+        self,
+        dto : PhotoDTO,  # удаляемая фотография
+    ) -> None:
         """
-        Удаление фотографии (запись в БД и физический файл) после подтверждения.
+        Удаляет фотографию (запись в базе и файл) после подтверждения пользователя.
+
+        Ошибка показывается и пишется в журнал.
+
+        Args:
+            dto : (PhotoDTO) Удаляемая фотография.
+
+        Example:
+            >>> window._on_photo_delete(dto)    # doctest: +SKIP
         """
         reply = QMessageBox.question(
             self, "Подтверждение",
@@ -721,11 +842,19 @@ class NavigationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
-    def _on_back_clicked(self):
+    # кнопка «Назад»
+    def _on_back_clicked(self) -> None:
         """
-        Возврат на предыдущую страницу с проверкой несохранённых изменений,
-        если текущая страница – список в режиме редактирования.
+        Возвращает на предыдущую страницу, спросив о несохранённых изменениях.
+
+        Страница настроек может не отпустить (``can_leave``), страница с ``cancel_changes_and_leave``
+        решает сама; для списка в режиме правки вопрос задаётся здесь.
+
+        Example:
+            >>> window._on_back_clicked()   # doctest: +SKIP
         """
+        if getattr(self, '_transfer_running', False):  # вопрос о сохранении записал бы в передаваемый файл
+            return
 
         current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
 
@@ -790,21 +919,26 @@ class NavigationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
-    def _on_settings_clicked(self):
-        """Переход на страницу настроек."""
+    # переход к настройкам
+    def _on_settings_clicked(self) -> None:
+        """
+        Переходит на страницу настроек.
+
+        Example:
+            >>> window._on_settings_clicked()   # doctest: +SKIP
+        """
         self.page_manager.switch_to('settings')
 
     @Slot()
-    def _on_dataset_pilot_clicked(self):
+    # переход на экран наборов данных
+    def _on_dataset_pilot_clicked(self) -> None:
         """
-        Переход на пилотный экран наборов данных (не создался — кнопка ничего не делает,
-        причина — в журнале).
+        Переходит на пилотный экран наборов данных.
 
-        Returns:
-            None
+        Экран не создался — кнопка ничего не делает, причина в журнале.
 
-        Пример:
-            >>> window._on_dataset_pilot_clicked()
+        Example:
+            >>> window._on_dataset_pilot_clicked()  # doctest: +SKIP
         """
         if getattr(self, 'dataset_pilot_page', None) is not None:
             self.page_manager.switch_to('dataset_pilot')
@@ -817,10 +951,21 @@ class NavigationMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_patient_appointments_requested(self, patient_dto):
+    # приёмы выбранного пациента
+    def _on_patient_appointments_requested(
+        self,
+        patient_dto : PatientDTO,  # выбранный пациент
+    ) -> None:
         """
-        Переход к списку приёмов выбранного пациента.
-        Передаётся patient_id в extra_data для фильтрации списка.
+        Переходит к приёмам выбранного пациента.
+
+        ``patient_id`` передаётся в ``extra_data`` для отбора записей.
+
+        Args:
+            patient_dto : (PatientDTO) Выбранный пациент.
+
+        Example:
+            >>> window._on_patient_appointments_requested(dto)  # doctest: +SKIP
         """
         self.page_manager.switch_to(
             # 'appointment_list',
@@ -837,9 +982,24 @@ class NavigationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(list, str)
-    def _on_navigation_changed(self, history, current_page_id):
+    # хлебные крошки и кнопка «Назад»
+    def _on_navigation_changed(
+        self,
+        history         : List[Tuple[str, str]],  # история: (id страницы, заголовок)
+        current_page_id : str,                    # текущая страница
+    ) -> None:
         """
-        Обновляет хлебные крошки и состояние кнопки "Назад" при изменении навигации.
+        Обновляет хлебные крошки и состояние кнопки «Назад» при смене страницы.
+
+        Args:
+            history         : (List[Tuple[str, str]]) История: id страницы и заголовок.
+            current_page_id : (str) Текущая страница; пусто — только история.
+
+        Example:
+            >>> window._on_navigation_changed(
+            ...     [('patient_list', 'Пациенты')],     # история
+            ...     'settings',                         # текущая страница
+            ... )       # doctest: +SKIP
         """
         # Собираем заголовки страниц из истории
         titles = [title for _, title in history]
@@ -864,9 +1024,29 @@ class NavigationMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str, object)
-    def _on_page_entered(self, page_id, extra_data):
+    # вход на страницу
+    def _on_page_entered(
+        self,
+        page_id    : str,  # страница
+        extra_data : Any,  # данные перехода
+    ) -> None:
         """
-        Вызывается при входе на страницу. Передаёт extra_data в метод on_enter страницы.
+        Передаёт данные перехода в ``on_enter`` страницы при входе на неё.
+
+        Ошибка страницы пишется в журнал и идёт дальше.
+
+        Args:
+            page_id    : (str) Страница.
+            extra_data : (Any) Данные перехода; None — нет.
+
+        Raises:
+            Exception: Ошибка ``on_enter`` страницы.
+
+        Example:
+            >>> window._on_page_entered(
+            ...     'patient_edit',     # страница
+            ...     {'id': 3},          # запись
+            ... )       # doctest: +SKIP
         """
         page = self.page_manager._pages.get(page_id)
         if page and hasattr(page, 'on_enter'):
@@ -891,12 +1071,23 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
-    def _on_action_selected(self, index):
+    # выбор в списке действий
+    def _on_action_selected(
+        self,
+        index : int,  # номер пункта
+    ) -> None:
         """
-        Обработчик выбора действия в комбобоксе.
-            index 0 → скачать БД
-            index 1 → сохранить изменения (пока заглушка)
-            index 2 → отправить БД на сервер
+        Выполняет действие, выбранное в списке «Файл», и сбрасывает выбор.
+
+        Пункты: 1 — настройки, 2 — импорт из Word, 3 — инструкции, 5 — скачать базу, 6 — выгрузить базу
+        (0 — заголовок списка, 4 — разделитель). Выбор сбрасывается, чтобы то же действие можно было
+        выбрать снова.
+
+        Args:
+            index : (int) Номер пункта.
+
+        Example:
+            >>> window._on_action_selected(1)   # doctest: +SKIP
         """
         if index == 1:          # Настройки
             self._on_settings_clicked()
@@ -1338,10 +1529,21 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int, int)
-    def _update_progress(self, current, total):
+    # прогресс передачи базы
+    def _update_progress(
+        self,
+        current : int,  # передано байт
+        total   : int,  # всего байт; 0 — неизвестно
+    ) -> None:
         """
-        Обновляет прогресс-бар в соответствии с текущим и общим размером.
-        Если total == 0, переводим бар в режим "безлимитного" прогресса.
+        Обновляет полосу прогресса передачи базы.
+
+        Args:
+            current : (int) Передано байт.
+            total   : (int) Всего байт; 0 — размер неизвестен, бегущая полоса.
+
+        Example:
+            >>> window._update_progress(10, 100)    # doctest: +SKIP
         """
         if total > 0:
             self.progress_bar.setRange(0, total)
@@ -1473,9 +1675,19 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
-    def _on_upload_finished(self, code):
+    # завершение выгрузки базы
+    def _on_upload_finished(
+        self,
+        code : int,  # код потока: 0 — успех
+    ) -> None:
         """
-        Обработчик завершения загрузки на диск.
+        Показывает итог выгрузки базы на Диск и возвращает окно в работу.
+
+        Args:
+            code : (int) Код потока (``YaDiskResult``).
+
+        Example:
+            >>> window._on_upload_finished(0)   # doctest: +SKIP
         """
         self._set_transfer_running(False)
         if code == 0:
@@ -1494,9 +1706,19 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_upload_error(self, message):
+    # ошибка выгрузки базы
+    def _on_upload_error(
+        self,
+        message : str,  # причина
+    ) -> None:
         """
-        Обработчик ошибки в потоке загрузки.
+        Показывает ошибку выгрузки базы и возвращает окно в работу.
+
+        Args:
+            message : (str) Причина.
+
+        Example:
+            >>> window._on_upload_error('Нет места на Диске')   # doctest: +SKIP
         """
         self._set_transfer_running(False)
         QMessageBox.critical(self, "Ошибка", message)
@@ -1509,10 +1731,13 @@ class SyncMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _save_changes(self):
+    # заглушка сохранения
+    def _save_changes(self) -> None:
         """
-        Заглушка для сохранения изменений в локальной БД.
-        В текущей версии не реализовано.
+        Заглушка сохранения изменений в локальной базе: только сообщение.
+
+        Example:
+            >>> window._save_changes()  # doctest: +SKIP
         """
         self.logger.info("Сохранение изменений (заглушка)")
         QMessageBox.information(self, "Информация", "Функция сохранения изменений пока не реализована.")
@@ -1526,8 +1751,20 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     # Вспомогательные методы управления прогресс-баром (могут вызываться извне)
-    def show_progress(self, visible=True):
-        """Показать или скрыть прогресс-бар."""
+    # показать или скрыть полосу прогресса
+    def show_progress(
+        self,
+        visible : bool = True,  # показать
+    ) -> None:
+        """
+        Показывает или скрывает полосу прогресса.
+
+        Args:
+            visible : (bool) True — показать.
+
+        Example:
+            >>> window.show_progress(False)     # doctest: +SKIP
+        """
         self.progress_bar.setVisible(visible)
 
     @AppLogger.get_instance(
@@ -1538,8 +1775,22 @@ class SyncMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_progress_range(self, minimum, maximum):
-        """Установить диапазон значений прогресс-бара."""
+    # диапазон полосы прогресса
+    def set_progress_range(
+        self,
+        minimum : int,  # начало
+        maximum : int,  # конец
+    ) -> None:
+        """
+        Устанавливает диапазон полосы прогресса.
+
+        Args:
+            minimum : (int) Начало.
+            maximum : (int) Конец.
+
+        Example:
+            >>> window.set_progress_range(0, 100)   # doctest: +SKIP
+        """
         self.progress_bar.setRange(minimum, maximum)
 
     @AppLogger.get_instance(
@@ -1550,8 +1801,20 @@ class SyncMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def set_progress_value(self, value):
-        """Установить текущее значение прогресса."""
+    # значение полосы прогресса
+    def set_progress_value(
+        self,
+        value : int,  # значение
+    ) -> None:
+        """
+        Устанавливает значение полосы прогресса.
+
+        Args:
+            value : (int) Значение.
+
+        Example:
+            >>> window.set_progress_value(50)   # doctest: +SKIP
+        """
         self.progress_bar.setValue(value)
 
 class UpdateMixin:
@@ -1566,8 +1829,17 @@ class UpdateMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _init_updater(self):
-        """Инициализирует модуль обновлений и подключает сигналы."""
+    # модуль обновлений и его сигналы
+    def _init_updater(self) -> None:
+        """
+        Создаёт модуль обновлений и подключает его сигналы.
+
+        Ошибка создания не роняет окно: пишется в журнал, ``self.updater`` не появляется, и проверка при
+        запуске пропускается.
+
+        Example:
+            >>> window._init_updater()  # doctest: +SKIP
+        """
         try:
             self.updater = AppUpdater(self)
             # Подключаем сигналы
@@ -1595,8 +1867,16 @@ class UpdateMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def check_for_updates(self):
-        """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
+    # ручная проверка обновлений
+    def check_for_updates(self) -> None:
+        """
+        Запускает ручную проверку обновлений.
+
+        В ``MainWindow`` заменён одноимённым методом, который ещё снимает признак автоматической проверки.
+
+        Example:
+            >>> window.check_for_updates()  # doctest: +SKIP
+        """
         if hasattr(self, 'updater'):
             self.updater.check_for_updates()
         else:
@@ -1637,7 +1917,24 @@ class UpdateMixin:
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     @Slot(str, str)
-    def _on_update_available(self, new_version: str, release_url: str):
+    # вопрос о найденном обновлении
+    def _on_update_available(
+        self,
+        new_version : str,  # тег новой версии
+        release_url : str,  # страница релиза
+    ) -> None:
+        """
+        Спрашивает, что делать с найденным обновлением: установить, открыть страницу или отказаться.
+
+        Установка — :meth:`_install_update`: вопрос о несохранённом и запрет правок до выхода.
+
+        Args:
+            new_version : (str) Тег новой версии.
+            release_url : (str) Страница релиза.
+
+        Example:
+            >>> window._on_update_available('v2.0', 'https://github.com/…')     # doctest: +SKIP
+        """
         self._auto_check = False   # сбрасываем флаг автоматической проверки
 
         self.logger.debug(
@@ -1695,7 +1992,14 @@ class UpdateMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
-    def _on_no_update(self):
+    # обновлений нет
+    def _on_no_update(self) -> None:
+        """
+        Сообщает, что обновлений нет; при автоматической проверке молчит.
+
+        Example:
+            >>> window._on_no_update()  # doctest: +SKIP
+        """
         # При автоматической проверке не показываем сообщение
         if getattr(self, '_auto_check', False):
             self._auto_check = False
@@ -1913,11 +2217,23 @@ class UpdateMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _apply_update_file(self, new_file_path: str):
+    # замена исполняемого файла скачанным
+    def _apply_update_file(
+        self,
+        new_file_path : str,  # скачанный файл
+    ) -> None:
         """
-        Заменяет текущий исполняемый файл на новый.
-        Работает только если программа запущена из EXE (собранной).
-        В режиме разработки (из .py) просто показывает сообщение.
+        Заменяет исполняемый файл собранной программы скачанным и закрывает её (только Windows).
+
+        Обычная установка идёт через ``UpdateApplier``; сюда приходит только путь
+        ``AppUpdater.download_update``, который программа сейчас не вызывает. Из исходников (в том числе
+        установка Linux) только сообщает, что замена недоступна.
+
+        Args:
+            new_file_path : (str) Скачанный файл.
+
+        Example:
+            >>> window._apply_update_file('C:/Temp/update.exe')     # doctest: +SKIP
         """
         if getattr(sys, 'frozen', False):
             current_exe = sys.executable
@@ -2046,10 +2362,34 @@ class UpdateProgressDialog(QProgressDialog):
 
 # ========== Диалог прогресса ==========
 class ParsingProgressDialog(QDialog):
+    """
+    Окно прогресса импорта из Word: статус каждого файла, в конце итоги.
+
+    Отменить импорт нельзя: кнопка до конца импорта только скрывает окно, поток продолжает работу.
+
+    Attributes:
+        finished_closed : (Signal) Итоги показаны, окно закрыто.
+
+    Example:
+        >>> ParsingProgressDialog(window).show()    # doctest: +SKIP
+    """
 
     finished_closed = Signal()   # итоги показаны, окно закрыто
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent : Optional[QWidget] = None,  # окно программы
+    ) -> None:
+        """
+        Создаёт окно: список файлов, скрытые до конца итоги и кнопка.
+
+        Args:
+            parent : (QWidget/None) Окно программы.
+
+        Example:
+            >>> ParsingProgressDialog().close_btn.text()    # doctest: +SKIP
+            'Скрыть'
+        """
         super().__init__(parent)
         self.setWindowTitle("Импорт данных из Word")
         self.setMinimumWidth(600)
@@ -2079,7 +2419,20 @@ class ParsingProgressDialog(QDialog):
         self._items = {}
 
     @Slot(list)
-    def set_file_list(self, file_names: list):
+    # список файлов импорта
+    def set_file_list(
+        self,
+        file_names : List[str],  # имена файлов
+    ) -> None:
+        """
+        Заполняет список файлов импорта статусом «Ожидание».
+
+        Args:
+            file_names : (List[str]) Имена файлов.
+
+        Example:
+            >>> dialog.set_file_list(['а.docx'])    # doctest: +SKIP
+        """
         self.list_widget.clear()
         self._items.clear()
         for name in file_names:
@@ -2090,6 +2443,7 @@ class ParsingProgressDialog(QDialog):
             self._items[name] = item
 
     @Slot(str, str, str)
+    # статус файла в списке
     def update_file_status(
         self,
         file_name : str,        # имя файла в списке
@@ -2100,16 +2454,17 @@ class ParsingProgressDialog(QDialog):
         Показывает статус файла в списке диалога импорта.
 
         Args:
-            file_name (str): Имя файла (как в ``set_file_list``).
-            status (str): Статус от ``batch_parse``: 'processing', 'success', 'failed'.
-            error_msg (str): Текст ошибки; у 'success' — предупреждения через «; »
-                (например, телефон не распознан и не записан — ``parsers/IMPLEMENTATION.md``).
+            file_name : (str) Имя файла (как в ``set_file_list``).
+            status    : (str) Статус от ``batch_parse``: 'processing', 'success', 'failed'.
+            error_msg : (str) Текст ошибки; у 'success' — предупреждения через «; » (например, телефон не
+                распознан и не записан — ``parsers/IMPLEMENTATION.md``).
 
-        Returns:
-            None
-
-        Пример:
-            >>> dialog.update_file_status('а.docx', 'success', 'Телефон не распознан: «12-34-56» …')
+        Example:
+            >>> dialog.update_file_status(
+            ...     'а.docx',                           # файл
+            ...     'success',                          # статус
+            ...     'Телефон не распознан: «12-34-56»', # предупреждение
+            ... )       # doctest: +SKIP
         """
         item = self._items.get(file_name)
         if not item:
@@ -2162,15 +2517,36 @@ class ParsingProgressDialog(QDialog):
             pass
         self.close_btn.clicked.connect(self._on_close_finished)
 
-    def _on_close_clicked(self):
+    # кнопка до конца импорта
+    def _on_close_clicked(self) -> None:
+        """
+        Скрывает окно, пока импорт идёт: поток продолжает работу, итоги покажет главное окно.
+
+        Example:
+            >>> dialog._on_close_clicked()  # doctest: +SKIP
+        """
         if not self._finished:
             self.reject()
 
-    def _on_close_finished(self):
+    # кнопка после итогов
+    def _on_close_finished(self) -> None:
+        """
+        Закрывает окно после итогов и сообщает об этом (``finished_closed``).
+
+        Example:
+            >>> dialog._on_close_finished()     # doctest: +SKIP
+        """
         self.finished_closed.emit()
         self.accept()
 
-    def reject(self):
+    # клавиша Esc
+    def reject(self) -> None:
+        """
+        Клавиша Esc: до итогов скрывает окно, после итогов закрывает, как кнопка.
+
+        Example:
+            >>> dialog.reject()     # doctest: +SKIP
+        """
         if not self._finished:
             super().reject()
         else:
@@ -2178,18 +2554,59 @@ class ParsingProgressDialog(QDialog):
             # ↑ до 2026-11-07 (MW5): Esc закрывал окно без сигнала, страницы не обновлялись
             self._on_close_finished()
 
-    def closeEvent(self, event):
+    # закрытие окна
+    def closeEvent(
+        self,
+        event : QCloseEvent,  # событие закрытия Qt
+    ) -> None:
+        """
+        Закрытие окна: после итогов сообщает об этом (``finished_closed``).
+
+        Args:
+            event : (QCloseEvent) Событие закрытия.
+
+        Example:
+            >>> dialog.close()      # doctest: +SKIP
+        """
         if self._finished:
             self.finished_closed.emit()
         event.accept()
 
-    def _set_status(self, item: QListWidgetItem, text: str):
+    # подпись статуса у файла
+    def _set_status(
+        self,
+        item : QListWidgetItem,  # строка списка
+        text : str,              # статус
+    ) -> None:
+        """
+        Показывает статус рядом с именем файла, заменяя прежний.
+
+        Args:
+            item : (QListWidgetItem) Строка списка.
+            text : (str) Статус.
+
+        Example:
+            >>> dialog._set_status(item, '✅ Готово')    # doctest: +SKIP
+        """
         # item.setText(f"{item.text()}   {text}")
         # ↑ до 2026-11-07 (MW7): статусы копились в строке («⏳ Ожидание   🔄 Обработка...   ✅ Готово»)
         item.setText(f"{item.data(Qt.UserRole)}   {text}")
 
 # ========== Поток парсинга ==========
 class ParsingThread(QThread):
+    """
+    Поток импорта из Word (``parsers.word_importer.batch_parse``).
+
+    Attributes:
+        finished        : (Signal) ``(dict)`` — итоги с ключом ``log_path``; заменяет сигнал ``QThread``.
+        error           : (Signal) ``(str)`` — сбой импорта.
+        file_list_ready : (Signal) ``(list)`` — файлы, которые будут обработаны.
+        status_update   : (Signal) ``(str, str, str)`` — файл, статус, ошибка или предупреждения.
+
+    Example:
+        >>> ParsingThread('C:/Документы').start()   # doctest: +SKIP
+    """
+
     finished = Signal(dict)
     error = Signal(str)
     file_list_ready = Signal(list)        # список имён файлов
@@ -2201,18 +2618,18 @@ class ParsingThread(QThread):
         find_existing : bool = False,   # искать пациента по ФИО + дате (ТД-8, выбор пользователя)
     ) -> None:
         """
-        Поток импорта из Word.
+        Создаёт поток импорта из Word.
 
         Args:
-            folder_path (str): Папка с документами.
-            find_existing (bool): Искать существующего пациента по ФИО + дате рождения
+            folder_path   : (str) Папка с документами.
+            find_existing : (bool) Искать существующего пациента по ФИО и дате рождения
                 (``parsers.word_importer.parse_one_file``, ТД-8).
 
-        Returns:
-            None
-
-        Пример:
-            >>> ParsingThread('C:/Документы', find_existing=True).start()
+        Example:
+            >>> ParsingThread(
+            ...     'C:/Документы',             # папка
+            ...     find_existing   =   True,   # искать пациента
+            ... ).start()       # doctest: +SKIP
         """
         super().__init__()
         self.folder_path = folder_path
@@ -2222,16 +2639,51 @@ class ParsingThread(QThread):
         #     self.update_existing = update_existing
         # ↑ до 2026-10-25 (ТД-8, parsers): флаг «обновлять пациента» не работал и не задавался
 
-    def run(self):
+    # импорт в потоке
+    def run(self) -> None:
+        """
+        Выполняет импорт: статусы файлов — сигналами, итог — ``finished``, сбой — ``error``.
+
+        Example:
+            >>> thread.start()      # doctest: +SKIP
+        """
         try:
             from parsers.word_importer import batch_parse
 
             # Колбэк: получили список всех файлов, которые будут обработаны
-            def on_start(file_names):
+            # получен список файлов
+            def on_start(
+                file_names : List[str],  # файлы импорта
+            ) -> None:
+                """
+                Передаёт окну список файлов, которые будут обработаны.
+
+                Args:
+                    file_names : (List[str]) Имена файлов.
+
+                Example:
+                    >>> on_start(['а.docx'])    # doctest: +SKIP
+                """
                 self.file_list_ready.emit(file_names)
 
             # Колбэк: обновление статуса файла
-            def on_update(file_name, status, error_msg):
+            # статус файла
+            def on_update(
+                file_name : str,  # файл
+                status    : str,  # статус
+                error_msg : str,  # ошибка или предупреждения
+            ) -> None:
+                """
+                Передаёт окну статус файла.
+
+                Args:
+                    file_name : (str) Файл.
+                    status    : (str) Статус.
+                    error_msg : (str) Ошибка или предупреждения.
+
+                Example:
+                    >>> on_update('а.docx', 'success', '')  # doctest: +SKIP
+                """
                 self.status_update.emit(file_name, status, error_msg)
 
             # Вызываем batch_parse с specific_files=None – она сама определит,
@@ -2267,20 +2719,15 @@ class MainWindow(
     Наследует QMainWindow и все миксины, предоставляющие готовую функциональность.
     """
 
+    # черновики окна и мост сигналов
     def _init_drafts(self) -> None:
         """
-        Создаёт черновики приложения (``self.drafts``) и мост сигналов Qt
-        (``self.drafts_bridge``).
+        Создаёт черновики приложения (``self.drafts``) и мост сигналов Qt (``self.drafts_bridge``).
 
-        Ошибка создания не роняет окно: черновики будут недоступны (``None``), в лог —
-        трассировка.
+        Ошибка создания не роняет окно: черновики будут недоступны (``None``), в журнал — трассировка.
 
-        Returns:
-            None
-
-        Пример:
-            >>> window._init_drafts(); window.drafts.store.is_empty
-            True
+        Example:
+            >>> window._init_drafts()   # doctest: +SKIP
         """
         from app.draft.integration import create_app_drafts
         from interfaces.gui.gui_window.drafts_qt import DraftsQtBridge
@@ -2312,39 +2759,47 @@ class MainWindow(
             ),
         )
 
-    def _save_from_draft_page(self, page) -> bool:
+    # «Сохранить» на экране с черновиками
+    def _save_from_draft_page(
+        self,
+        page : Any,  # страница DraftTablePage
+    ) -> bool:
         """
-        «Сохранить» на экране с новыми черновиками: вопрос «всё / текущее», затем
-        ``save_drafts``. Цель «текущее» — выделенные строки, а если ничего не выделено —
-        вся выборка страницы.
+        Сохраняет с экрана черновиков: вопрос «всё / текущее», затем ``save_drafts``.
+
+        Цель «текущее» — выделенные строки, а если ничего не выделено, вся выборка страницы.
 
         Args:
-            page: Страница (``DraftTablePage``), где нажали «Сохранить».
+            page : (DraftTablePage) Страница, где нажали «Сохранить».
 
         Returns:
-            ``True`` — сохранено.
+            (bool) True — сохранено.
 
-        Пример:
-            >>> window._save_from_draft_page(frame.appointments)
+        Example:
+            >>> window._save_from_draft_page(frame.appointments)    # doctest: +SKIP
             True
         """
         from interfaces.gui.gui_window.pages.draft_pages import save_from_page
         return save_from_page(self, page, frame_nodes=page.page_nodes)
 
-    def save_drafts(self, targets=None, scope=None) -> bool:
+    # сохранение черновиков с вопросами
+    def save_drafts(
+        self,
+        targets : Any = None,  # узлы цели; None — всё
+        scope   : Any = None,  # направления; None — BRANCH
+    ) -> bool:
         """
         Сохраняет черновики с вопросами пользователю (новые родители, удаляемые ветки).
 
         Args:
-            targets: Узлы цели (``None`` — всё).
-            scope: Направления (``SaveScope``; по умолчанию ``BRANCH``).
+            targets : (Iterable/None) Узлы цели; None — всё.
+            scope   : (SaveScope/None) Направления; None — ``BRANCH``.
 
         Returns:
-            ``True`` — сохранено (или нечего сохранять); ``False`` — отказ или ошибка
-            (сообщение пользователю уже показано).
+            (bool) True — сохранено или нечего сохранять; False — отказ или ошибка (сообщение уже показано).
 
-        Пример:
-            >>> window.save_drafts()
+        Example:
+            >>> window.save_drafts()    # doctest: +SKIP
             True
         """
         from interfaces.gui.gui_window.drafts_qt import make_confirmations
@@ -2360,19 +2815,22 @@ class MainWindow(
             return False
         return result is not None
 
-    def closeEvent(self, event) -> None:
+    # закрытие окна
+    def closeEvent(
+        self,
+        event : QCloseEvent,  # событие закрытия Qt
+    ) -> None:
         """
-        Закрытие окна: при несохранённых черновиках — вопрос «сохранить / не сохранять /
-        отмена» (требование 8: черновики только в памяти).
+        Закрывает окно, решив с пользователем судьбу несохранённого (:meth:`_resolve_unsaved_before_exit`).
+
+        Черновики хранятся только в памяти (требование 8). Идёт обмен с Диском или импорт — окно не
+        закрывается.
 
         Args:
-            event: Событие закрытия Qt.
+            event : (QCloseEvent) Событие закрытия.
 
-        Returns:
-            None
-
-        Пример:
-            >>> window.close()      # с изменениями — диалог
+        Example:
+            >>> window.close()      # doctest: +SKIP
         """
         if not self._resolve_unsaved_before_exit():
             event.ignore()
@@ -2506,16 +2964,23 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent : Optional[QWidget] = None,  # родитель Qt
+    ) -> None:
         """
-        Инициализирует главное окно:
-            - устанавливает заголовок и размер
-            - создаёт логгер
-            - подготавливает UI (шапка, стек страниц, лог-вьюер)
-            - инициализирует менеджер страниц
-            - подключает сигналы
-            - инициализирует систему обновлений (updater4pyi)
-            - проверяет наличие конфигурации и открывает соответствующую страницу
+        Создаёт главное окно и открывает нужную страницу.
+
+        Порядок: заголовок и размер, журнал, интерфейс, уборка недокачанных файлов базы, черновики,
+        страницы, сигналы, модуль обновлений. Затем таймеры: причина отката обновления Linux и проверка
+        обновлений через 1,5 с. Нет файла настроек или он испорчен — открываются настройки, иначе список
+        пациентов.
+
+        Args:
+            parent : (QWidget/None) Родитель Qt.
+
+        Example:
+            >>> MainWindow().show()     # doctest: +SKIP
         """
         super().__init__(parent)
 
@@ -2545,6 +3010,9 @@ class MainWindow(
         # Идёт ли обмен с Диском и где копия рабочей базы последней передачи
         self._transfer_running = False
         self._db_backup_path = None
+
+        # Идёт ли автоматическая проверка обновлений (молчит об отсутствии обновлений и ошибке)
+        self._auto_check = False
 
         # Недокачанные файлы базы от прошлого аварийного выхода
         self._remove_stale_db_downloads()
@@ -2674,8 +3142,14 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _show_instructions_dialog(self):
-        """Открывает диалог с инструкциями."""
+    # окно инструкций
+    def _show_instructions_dialog(self) -> None:
+        """
+        Открывает окно со списком инструкций.
+
+        Example:
+            >>> window._show_instructions_dialog()      # doctest: +SKIP
+        """
         dialog = InstructionsDialog(self)
         dialog.exec()
 
@@ -2687,8 +3161,16 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def check_for_updates(self):
-        """Запускает ручную проверку обновлений (вызывается из SettingsPage)."""
+    # ручная проверка обновлений
+    def check_for_updates(self) -> None:
+        """
+        Запускает ручную проверку обновлений (вызывает страница настроек).
+
+        В отличие от проверки при запуске, показывает «обновлений нет» и ошибку.
+
+        Example:
+            >>> window.check_for_updates()  # doctest: +SKIP
+        """
 
         self._auto_check = False   # ручная проверка – сообщение "нет обновлений" нужно показывать
         
@@ -2705,7 +3187,16 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _start_parsing(self):
+    # запуск импорта из Word
+    def _start_parsing(self) -> None:
+        """
+        Начинает импорт из Word: папка, вопрос о поиске пациентов, окно прогресса, поток.
+
+        Выбор открывается в папке документов из настроек. Идёт другая работа — импорт не начинается.
+
+        Example:
+            >>> window._start_parsing()     # doctest: +SKIP
+        """
         running = self._running_task()
         if running:  # второй поток импорта или импорт во время замены базы
             QMessageBox.warning(self, "Импорт из Word", f"Сейчас идёт {running}. Дождитесь окончания.")
@@ -2744,22 +3235,24 @@ class MainWindow(
 
         self.parsing_thread.start()
 
+    # вопрос перед импортом
     def _ask_find_existing(
         self,
         folder : str,   # выбранная папка (показывается в вопросе)
     ) -> Optional[bool]:
         """
-        Перед импортом из Word: подтверждение и флажок «искать существующих пациентов»
-        (ТД-8, решение владельца 2026-10-25 — выбор пользователя, по умолчанию выключен).
+        Спрашивает подтверждение импорта и «искать ли существующих пациентов».
+
+        ТД-8, решение владельца 2026-10-25: выбор пользователя, по умолчанию флажок снят.
 
         Args:
-            folder (str): Папка с документами.
+            folder : (str) Папка с документами.
 
         Returns:
-            Optional[bool]: None — пользователь отменил импорт; True / False — флажок.
+            (bool/None) None — импорт отменён; True / False — состояние флажка.
 
-        Пример:
-            >>> window._ask_find_existing('C:/Документы')     # «Импорт», флажок снят
+        Example:
+            >>> window._ask_find_existing('C:/Документы')   # doctest: +SKIP
             False
         """
         box = QMessageBox(self)
@@ -2791,25 +3284,25 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    # итоги импорта
     def _on_parsing_finished(
         self,
         results : dict,   # результаты batch_parse (+ log_path)
     ) -> None:
         """
-        Показывает итоги импорта из Word: счётчики, ошибки, предупреждения (W2: нераспознанный
-        телефон не записан), путь к журналу (``parsers.word_importer.format_results``).
+        Показывает итоги импорта из Word: счётчики, ошибки, предупреждения, путь к журналу.
 
-        Окно прогресса открыто — итоги в нём, рядом со статусами файлов, страницы обновляются
-        при его закрытии. Пользователь его скрыл — отдельным сообщением, страницы сразу.
+        W2: нераспознанный телефон не записан. Текст — ``parsers.word_importer.format_results``. Окно
+        прогресса открыто — итоги в нём, рядом со статусами файлов, страницы обновляются при его закрытии.
+        Пользователь его скрыл — отдельным сообщением, страницы сразу.
 
         Args:
-            results (dict): Результаты ``batch_parse`` с ключом ``log_path``.
+            results : (dict) Результаты ``batch_parse`` с ключом ``log_path``.
 
-        Returns:
-            None
-
-        Пример:
-            >>> window._on_parsing_finished({'total': 1, 'success': 1, 'failed': 0, 'warnings': []})
+        Example:
+            >>> window._on_parsing_finished(
+            ...     {'total': 1, 'success': 1, 'failed': 0, 'warnings': []},    # итоги
+            ... )       # doctest: +SKIP
         """
         # if hasattr(self, 'progress_dialog'):
         #     self.progress_dialog.accept()
@@ -2849,13 +3342,25 @@ class MainWindow(
             # ↑ до 2026-10-25 (W2, parsers): без ошибок по файлам и предупреждений
             self._refresh_after_parsing()
 
-    def _on_parsing_dialog_closed(self):
-        """Вызывается, когда пользователь закрыл диалог прогресса после завершения парсинга."""
+    # окно итогов импорта закрыто
+    def _on_parsing_dialog_closed(self) -> None:
+        """
+        Обновляет страницы, когда пользователь закрыл окно итогов импорта.
+
+        Example:
+            >>> window._on_parsing_dialog_closed()  # doctest: +SKIP
+        """
         self._refresh_after_parsing()
         self.progress_dialog = None
 
-    def _refresh_after_parsing(self):
-        """Обновляет страницы, которые могут содержать новые данные."""
+    # страницы после импорта
+    def _refresh_after_parsing(self) -> None:
+        """
+        Обновляет страницы, на которых могут появиться новые данные импорта.
+
+        Example:
+            >>> window._refresh_after_parsing()     # doctest: +SKIP
+        """
         if hasattr(self, 'patient_list_page'):
             self.patient_list_page.refresh_data()
         if hasattr(self, 'appointment_list_page'):
@@ -2919,10 +3424,23 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def load_patients(self, extra_data):
+    # данные списка пациентов
+    def load_patients(
+        self,
+        extra_data : Optional[Mapping[str, Any]],  # данные перехода (не используются)
+    ) -> List[PatientDTO]:
         """
-        Возвращает список всех пациентов из БД.
-        Используется как loader_func для DynamicListPage.
+        Возвращает всех пациентов для ``DynamicListPage``.
+
+        Args:
+            extra_data : (Mapping/None) Данные перехода; не используются.
+
+        Returns:
+            (List[PatientDTO]) Пациенты.
+
+        Example:
+            >>> window.load_patients(None)      # doctest: +SKIP
+            []
         """
         return get_patient_service().get_all_patients()
 
@@ -2934,11 +3452,23 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def load_appointments(self, extra_data):
+    # данные списка приёмов
+    def load_appointments(
+        self,
+        extra_data : Optional[Mapping[str, Any]],  # данные перехода: patient_id
+    ) -> List[AppointmentDTO]:
         """
-        Возвращает список приёмов.
-        Если в extra_data передан patient_id – только приёмы этого пациента,
-        иначе – все приёмы.
+        Возвращает приёмы пациента из ``extra_data`` или, без пациента, все приёмы.
+
+        Args:
+            extra_data : (Mapping/None) Данные перехода; ``patient_id`` — отбор по пациенту.
+
+        Returns:
+            (List[AppointmentDTO]) Приёмы.
+
+        Example:
+            >>> window.load_appointments({'patient_id': 3})     # doctest: +SKIP
+            []
         """
         patient_id = extra_data.get('patient_id') if extra_data else None
         service = get_appointment_service()
@@ -2955,8 +3485,24 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def load_notes(self, extra_data):
-        """Возвращает список всех заметок."""
+    # данные списка заметок
+    def load_notes(
+        self,
+        extra_data : Optional[Mapping[str, Any]],  # данные перехода (не используются)
+    ) -> List[AppointmentNoteDTO]:
+        """
+        Возвращает все заметки.
+
+        Args:
+            extra_data : (Mapping/None) Данные перехода; не используются.
+
+        Returns:
+            (List[AppointmentNoteDTO]) Заметки.
+
+        Example:
+            >>> window.load_notes(None)     # doctest: +SKIP
+            []
+        """
         return get_note_service().get_all()
 
     @AppLogger.get_instance(
@@ -2967,8 +3513,24 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def load_photos(self, extra_data):
-        """Возвращает список всех фотографий."""
+    # данные списка фотографий
+    def load_photos(
+        self,
+        extra_data : Optional[Mapping[str, Any]],  # данные перехода (не используются)
+    ) -> List[PhotoDTO]:
+        """
+        Возвращает все фотографии.
+
+        Args:
+            extra_data : (Mapping/None) Данные перехода; не используются.
+
+        Returns:
+            (List[PhotoDTO]) Фотографии.
+
+        Example:
+            >>> window.load_photos(None)    # doctest: +SKIP
+            []
+        """
         return get_photo_service().get_all()
 
     # ----------------------------------------------------------------------
@@ -2983,10 +3545,13 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_ui(self):
+    # основа интерфейса
+    def _setup_ui(self) -> None:
         """
-        Создаёт центральный виджет, основной вертикальный layout,
-        шапку (header), стек страниц и виджет просмотра логов.
+        Создаёт центральный виджет: шапку, стек страниц и панель журнала.
+
+        Example:
+            >>> window._setup_ui()  # doctest: +SKIP
         """
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -3013,10 +3578,19 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_header(self, main_layout):
+    # шапка окна
+    def _setup_header(
+        self,
+        main_layout : QVBoxLayout,  # основная раскладка
+    ) -> None:
         """
-        Создаёт верхнюю панель (шапку) с комбобоксом действий,
-        кнопкой настроек, хлебными крошками, кнопкой "Назад" и прогресс-баром.
+        Создаёт шапку: список действий, кнопку наборов данных, крошки, «Назад» и полосу прогресса.
+
+        Args:
+            main_layout : (QVBoxLayout) Основная раскладка.
+
+        Example:
+            >>> window._setup_header(layout)    # doctest: +SKIP
         """
         header_frame = QFrame()
         header_frame.setFrameShape(QFrame.Shape.StyledPanel)
@@ -3091,10 +3665,19 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_log_viewer_widget(self, main_layout):
+    # панель журнала
+    def _setup_log_viewer_widget(
+        self,
+        main_layout : QVBoxLayout,  # основная раскладка
+    ) -> None:
         """
-        Создаёт виджет LogViewer и добавляет его в основной layout.
-        Кнопка показа/скрытия логов добавляется в шапку после создания виджета.
+        Создаёт панель журнала и кнопку её показа в шапке.
+
+        Args:
+            main_layout : (QVBoxLayout) Основная раскладка.
+
+        Example:
+            >>> window._setup_log_viewer_widget(layout)     # doctest: +SKIP
         """
         self.log_viewer = LogViewer()
         main_layout.addWidget(self.log_viewer)
@@ -3123,10 +3706,13 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_log_viewer(self):
+    # журнал в панель окна
+    def _setup_log_viewer(self) -> None:
         """
-        Добавляет глобальный обработчик логов, который перенаправляет все записи
-        в виджет LogViewer.
+        Добавляет общий обработчик журнала, который передаёт записи в панель журнала.
+
+        Example:
+            >>> window._setup_log_viewer()  # doctest: +SKIP
         """
         handler = LogViewerHandler(self.log_viewer)
         AppLogger.add_global_handler(handler)
@@ -3136,32 +3722,31 @@ class MainWindow(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # применение настроек в окне
     def on_settings_changed(
         self,
-        changed_blocks: set = None,
-    ):
+        changed_blocks : Optional[Set[str]] = None,  # изменившиеся блоки; None — всё
+    ) -> None:
         """
-        Слот, вызываемый при изменении настроек (после сохранения в SettingsPage).
-        (Перезагружает сервисы, обновляет пути и перезагружает текущую страницу.)
+        Применяет изменения настроек в окне, только по изменившимся блокам.
 
-        Применяет изменения в UI в зависимости от того, какие блоки настроек изменились.
-        Это позволяет избежать полной перезагрузки всего интерфейса.
-
-        Параметры:
-            changed_blocks (set, optional): Множество строк – названия блоков,
-                которые изменились (например, {'photos', 'database'}).
-                Если None, считается, что изменилось всё (для обратной совместимости).
+        Вызывается после сохранения настроек и после замены файла базы. Так не нужно перестраивать весь
+        интерфейс.
 
         Логика:
-            - Если блок 'photos' изменился (или changed_blocks is None), обновляет
-              путь к хранилищу фото во всех виджетах PhotoUploaderWidget.
-            - Если блок 'database' или 'photos' изменился, перезагружает данные
-              на всех страницах-списках (пациенты, приёмы, заметки, фото).
-            - Если блок 'database' изменился и текущая страница – редактирование,
-              перезагружает её данные через вызов on_enter с сохранёнными extra_data.
+            - ``drafts``: правило перенесённой записи передаётся хранилищу черновиков;
+            - ``photos``: новый путь к хранилищу во всех ``PhotoUploaderWidget``;
+            - ``database`` или ``photos``: перезагрузка страниц-списков;
+            - ``database``: текущая страница другого вида перезагружается через ``on_enter`` с прежними
+              ``extra_data``; открытый экран наборов данных перечитывается.
 
-        Returns:
-            None
+        Args:
+            changed_blocks : (Set[str]/None) Блоки, например ``{'photos', 'database'}``; None — всё.
+
+        Example:
+            >>> window.on_settings_changed(
+            ...     changed_blocks  =   {'database'},   # сменилась база
+            ... )       # doctest: +SKIP
         """
 
         self.logger.info("Применение новых настроек...")
@@ -3223,8 +3808,18 @@ class MainWindow(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _find_all_photo_widgets(self):
-        """Рекурсивно собирает все виджеты PhotoUploaderWidget в окне."""
+    # все виджеты фото окна
+    def _find_all_photo_widgets(self) -> List[PhotoUploaderWidget]:
+        """
+        Собирает все виджеты ``PhotoUploaderWidget`` окна.
+
+        Returns:
+            (List[PhotoUploaderWidget]) Виджеты.
+
+        Example:
+            >>> window._find_all_photo_widgets()    # doctest: +SKIP
+            []
+        """
         result = []
         for child in self.findChildren(PhotoUploaderWidget):
             result.append(child)
@@ -3232,14 +3827,34 @@ class MainWindow(
 
 
 # ----------- методы для отладки расположения виджетов
-    def _dump_layout_sizes(self):
-        """Выводит в консоль дерево размеров всех виджетов окна."""
+    # отладка: дерево размеров
+    def _dump_layout_sizes(self) -> None:
+        """
+        Выводит в консоль дерево размеров всех виджетов окна (отладка, кнопка в шапке отключена).
+
+        Example:
+            >>> window._dump_layout_sizes()     # doctest: +SKIP
+        """
         print("\n=== DUMP LAYOUT SIZES ===")
         self._dump_widget_info(self, indent=0)
         print("=== END DUMP ===\n")
 
-    def _dump_widget_info(self, widget, indent=0):
-        """Рекурсивно выводит информацию о виджете и его дочерних элементах."""
+    # отладка: размеры виджета
+    def _dump_widget_info(
+        self,
+        widget : QWidget,  # виджет
+        indent : int = 0,  # отступ вывода
+    ) -> None:
+        """
+        Выводит сведения о размерах виджета и, рекурсивно, его прямых дочерних виджетов.
+
+        Args:
+            widget : (QWidget) Виджет.
+            indent : (int) Отступ вывода.
+
+        Example:
+            >>> window._dump_widget_info(window)    # doctest: +SKIP
+        """
         prefix = "  " * indent
         try:
             min_hint = widget.minimumSizeHint()
@@ -3257,8 +3872,14 @@ class MainWindow(
             if child.parent() == widget:
                 self._dump_widget_info(child, indent + 1)
 
-    def _dump_photo_cell_sizes(self):
-        """Выводит в консоль размеры ячеек таблицы фото (для отладки)."""
+    # отладка: ячейки таблицы фото
+    def _dump_photo_cell_sizes(self) -> None:
+        """
+        Выводит в консоль размеры ячеек таблицы фото текущей страницы (отладка).
+
+        Example:
+            >>> window._dump_photo_cell_sizes()     # doctest: +SKIP
+        """
         current_page = self.page_manager._pages.get(self.page_manager.current_page_id)
         if not current_page:
             print("Текущая страница не найдена")

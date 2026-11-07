@@ -291,6 +291,14 @@ def test_update_refused_during_transfer(window, messages):
     window.updater.apply_update_from_release.assert_not_called()
 
 
+def test_back_does_nothing_during_transfer(window):
+    """«Назад» во время передачи: вопрос о сохранении записал бы в передаваемый файл."""
+    window._transfer_running = True
+    window.page_manager = MagicMock()
+    mw.NavigationMixin._on_back_clicked(window)
+    window.page_manager.go_back.assert_not_called()
+
+
 def test_stale_downloads_removed_at_start(window, work_db):
     """Старт: недокачанные файлы этой базы убраны."""
     stale = work_db.parent / 'clinic.db.download-old.part'

@@ -11,8 +11,8 @@
 
 from app.utils.drafts_qt.bridge import DraftsQtBridge  # noqa: F401
 from app.utils.drafts_qt.dialogs import (  # noqa: F401
-    ask_on_close, ask_save_target, describe_nodes, make_confirmations,
+    ask_on_close, ask_save_target, describe_deletes, describe_nodes, make_confirmations,
 )
 
-__all__ = ['DraftsQtBridge', 'ask_on_close', 'ask_save_target', 'describe_nodes',
-           'make_confirmations']
+__all__ = ['DraftsQtBridge', 'ask_on_close', 'ask_save_target', 'describe_deletes',
+           'describe_nodes', 'make_confirmations']

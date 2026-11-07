@@ -488,8 +488,18 @@ class DraftTableModel(QAbstractTableModel):
         if self.record(index.row()).get(column.field) == value:
             return True
         parent_id = base.get(self._fk, MISSING) if self._fk else MISSING
-        self.store.modify(self.entity, base[self.id_field], {column.field: value},
-                          original={column.field: base.get(column.field)}, parent_id=parent_id)
+        # self.store.modify(self.entity, base[self.id_field], {column.field: value},
+        #                   original={column.field: base.get(column.field)}, parent_id=parent_id)
+        # ↑ до 2026-11-07 (DR10): хранилище не знало, что правку сделал пользователь; от этого
+        #   зависит судьба записи, перенесённой в новую запись, которую потом удалили
+        self.store.modify(
+            self.entity,                                    # тип
+            base[self.id_field],                            # id
+            {column.field: value},                          # новое значение
+            original    =   {column.field: base.get(column.field)},   # значение из БД
+            parent_id   =   parent_id,                      # родитель из строки
+            by_user     =   True,                           # правка из таблицы — всегда пользователь
+        )
         return True
 
     # ------------------------------------------------------------------

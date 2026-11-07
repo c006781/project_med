@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ContextManager, Dict, Hashable, List, Mapping, Tuple
 
-from ._model import DeleteBlocked, NodeKey, PlanError, StalePlanError
+from ._model import DeleteBlocked, Draft, NodeKey, PlanError, StalePlanError
 from .plan import SavePlan
 
 try:
@@ -130,8 +130,9 @@ class SaveResult:
         id_map: Временный ключ новой записи → id из хранилища данных.
         created: Созданные записи (ключи с НАСТОЯЩИМИ id).
         updated: Изменённые записи.
-        deleted: Удалённые записи.
+        deleted: Удалённые записи (и помеченные, и перенесённые).
         dropped: Поглощённые черновики (внутри удалённых веток).
+        moved_deleted: Из ``deleted`` — перенесённые в удалённую новую запись.
 
     Пример:
         >>> result.created
@@ -143,6 +144,7 @@ class SaveResult:
     updated: Tuple[NodeKey, ...] = ()
     deleted: Tuple[NodeKey, ...] = ()
     dropped: Tuple[NodeKey, ...] = ()
+    moved_deleted: Tuple[NodeKey, ...] = ()
 
 
 def _real_id(store: 'DraftStore', entity: str, value: Any, id_map: Mapping[NodeKey, Hashable]) -> Any:
@@ -234,26 +236,31 @@ def _blocked_message(store: 'DraftStore', target: NodeKey, users: List[NodeKey],
     return f"Нельзя удалить {_human(store, target)}: на неё ссылаются {who}: {shown}{more}"
 
 
-def _check_unsaved_referrers(store: 'DraftStore', plan: SavePlan) -> None:
+def _check_unsaved_referrers(
+    store : 'DraftStore',   # хранилище
+    plan  : SavePlan,       # план
+) -> None:
     """
-    Удаляемую запись не должен использовать несохранённый черновик, который останется
+    Проверяет, что удаляемую запись не использует несохранённый черновик, который останется
     после сохранения (иначе потом он сохранился бы со ссылкой на удалённое).
 
     Args:
-        store: Хранилище.
-        plan: План.
-
-    Returns:
-        None
+        store : (DraftStore) Хранилище.
+        plan  : (SavePlan) План.
 
     Raises:
         DeleteBlocked: Есть такие черновики.
 
-    Пример:
-        >>> _check_unsaved_referrers(store, plan)
+    Example:
+        >>> _check_unsaved_referrers(
+        ...     store,  # хранилище
+        ...     plan,   # план без таких черновиков
+        ... )
     """
     consumed = plan.consumed
-    for draft in plan.deletes:
+    # for draft in plan.deletes:
+    # ↑ до 2026-11-07 (DR10): перенесённые записи (moved_deletes) удаляются так же
+    for draft in (*plan.deletes, *plan.moved_deletes):
         users = []
         for referrer_type, ref in store.schema.referrers(draft.entity):
             for other in store.drafts(referrer_type):
@@ -263,6 +270,62 @@ def _check_unsaved_referrers(store: 'DraftStore', plan: SavePlan) -> None:
                     users.append(other.key)
         if users:
             raise DeleteBlocked(draft.key, users, _blocked_message(store, draft.key, users, True))
+
+
+# сверка перенесённых записей с БД перед удалением
+def _moved_still_in_place(
+    store   : 'DraftStore',       # хранилище (схема, подписи для сообщений)
+    drafts  : Tuple[Draft, ...],  # перенесённые записи плана
+    adapter : Any,                # связь с хранилищем данных
+    tx      : Any,                # транзакция сохранения
+) -> Tuple[List[NodeKey], List[NodeKey]]:
+    """
+    Проверяет внутри транзакции, что перенесённая запись лежит там, откуда её перенёс
+    пользователь. Если родитель в БД другой, запись успели перенести мимо черновика
+    (объединение, импорт, другое окно): такой перенос пользователь не делал и удалять запись
+    нельзя — отказ и откат всего сохранения. Записи уже нет — удалять нечего.
+
+    Args:
+        store   : (DraftStore) Хранилище черновиков.
+        drafts  : (Tuple[Draft, ...]) Перенесённые записи плана.
+        adapter : (Any) Связь с хранилищем данных (нужен ``read``).
+        tx      : (Any) Транзакция сохранения.
+
+    Returns:
+        (Tuple[List[NodeKey], List[NodeKey]]) ``(удалить, записей уже нет)``.
+
+    Raises:
+        PlanError: Адаптер не умеет читать записи (``нет read``) или родитель записи в БД
+            другой (``Нельзя удалить «Фото #7»: её перенесли не через черновики …``).
+
+    Example:
+        >>> _moved_still_in_place(
+        ...     store,                  # хранилище
+        ...     plan.moved_deletes,     # фото 7, в БД всё ещё у прежнего приёма
+        ...     adapter,                # связь с БД
+        ...     tx,                     # транзакция
+        ... )
+        ([('photo', 7)], [])
+    """
+    if drafts and not hasattr(adapter, 'read'):
+        raise PlanError("адаптер не умеет читать записи (нет read) — проверить, откуда "
+                        "перенесена удаляемая запись, нельзя")
+    present: List[NodeKey] = []
+    gone: List[NodeKey] = []
+    for draft in drafts:
+        current = adapter.read(draft.entity, draft.id, tx)
+        if current is None:
+            gone.append(draft.key)
+            continue
+        fk = store.schema.parent_field(draft.entity)
+        if current.get(fk) != draft.original[fk]:
+            raise PlanError(
+                f"Нельзя удалить {_human(store, draft.key)}: её перенесли не через черновики "
+                f"(сейчас родитель #{current.get(fk)}, а пользователь переносил от "
+                f"#{draft.original[fk]}). Отмените новую запись или перенос."
+            )
+        present.append(draft.key)
+    return present, gone
 
 
 def _delete_with_references(
@@ -435,27 +498,40 @@ def _delete_with_references(
     return removed
 
 
-def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapter) -> SaveResult:
+def execute_plan(
+    store   : 'DraftStore',         # хранилище черновиков (то же, что у плана)
+    plan    : SavePlan,             # план
+    adapter : PersistenceAdapter,   # связь с хранилищем данных
+) -> SaveResult:
     """
     Выполняет план в одной транзакции; при успехе убирает сохранённые черновики и
     заменяет временные id настоящими (в том числе у оставшихся черновиков детей).
 
+    Перенесённые записи (``plan.moved_deletes``) удаляются так же, как помеченные: тем же
+    ``adapter.delete`` в той же транзакции. Откат оставляет и запись, и её файл: файл убирает
+    только хранилище данных и только после коммита.
+
     Args:
-        store: Хранилище черновиков (то же, по которому строился план).
-        plan: План (``build_plan``).
-        adapter: Связь с хранилищем данных.
+        store   : (DraftStore) Хранилище черновиков (то же, по которому строился план).
+        plan    : (SavePlan) План (``build_plan``).
+        adapter : (PersistenceAdapter) Связь с хранилищем данных.
 
     Returns:
-        Итог сохранения.
+        (SaveResult) Итог сохранения.
 
     Raises:
-        PlanError: В плане остались новые предки вне объёма (не спросили пользователя).
+        PlanError: В плане остались новые предки вне объёма (не спросили пользователя);
+            перенесённую запись в БД успели перенести мимо черновика.
         StalePlanError: Черновики изменились после построения плана.
         Exception: Любая ошибка адаптера — транзакция откатывается, черновики не
             меняются, исключение пробрасывается.
 
-    Пример:
-        >>> execute_plan(store, build_plan(store, None), adapter).id_map
+    Example:
+        >>> execute_plan(
+        ...     store,                      # хранилище
+        ...     build_plan(store, None),    # план на всё
+        ...     adapter,                    # связь с БД
+        ... ).id_map
         {('photo', -1): 301}
     """
     if plan.missing_new_ancestors:
@@ -498,10 +574,26 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
         #   (отказ / обнуление / каскад; ставшие ненужными переиспользуемые — тоже)
         #   С 2026-11-01 (Ф1.6.3а) снова удаляются только помеченные — с проверкой ссылок
         #   (отказ, если на удаляемую ссылаются); обнуления, каскада и уборки ненужного нет
-        removed = _delete_with_references(store, [d.key for d in plan.deletes], adapter, tx)
+        # removed = _delete_with_references(store, [d.key for d in plan.deletes], adapter, tx)
+        # ↑ до 2026-11-07 (DR10): удалялись только помеченные; перенесённые записи идут вместе
+        #   с ними снизу вверх — фото раньше приёма, который удалит его каскадом
+        moved_present, moved_gone = _moved_still_in_place(
+            store,                  # хранилище
+            plan.moved_deletes,     # перенесённые записи
+            adapter,                # связь с БД
+            tx,                     # транзакция
+        )
+        present = set(moved_present)
+        roots = sorted(
+            (*plan.deletes, *(d for d in plan.moved_deletes if d.key in present)),
+            key = lambda d: (-store.schema.depth(d.entity), d.order),    # снизу вверх
+        )
+        removed = _delete_with_references(store, [d.key for d in roots], adapter, tx)
 
     # deleted = tuple(d.key for d in plan.deletes)
-    deleted = tuple(removed)
+    # deleted = tuple(removed)
+    # ↑ до 2026-11-07 (DR10): записей, которых в БД уже нет, связи тоже надо забыть
+    deleted = (*removed, *moved_gone)
     # store._commit(plan.consumed, id_map, removed=deleted)
     # ↑ до 2026-10-16: закрытый метод хранилища; теперь открытый apply_saved
     store.apply_saved(plan.consumed, id_map, removed=deleted)
@@ -511,5 +603,6 @@ def execute_plan(store: 'DraftStore', plan: SavePlan, adapter: PersistenceAdapte
         updated=tuple(d.key for d in plan.updates),
         deleted=deleted,
         dropped=tuple(d.key for d in plan.dropped),
+        moved_deleted=tuple(d.key for d in plan.moved_deletes),
     )
 

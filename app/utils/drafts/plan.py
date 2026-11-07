@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
 
-from ._model import DeleteBlocked, Draft, NodeKey, PlanError
+from ._model import DeleteBlocked, Draft, MovedRule, NodeKey, PlanError
 from .policies import CascadeDeletePolicy, DeletePolicy
 from .scope import SaveScope, select_nodes
 
@@ -37,6 +37,11 @@ class SavePlan:
         creates: Новые записи — сверху вниз по дереву (родитель раньше детей).
         updates: Изменения существующих записей.
         deletes: Удаляемые существующие записи — снизу вверх.
+        moved_deletes: Существующие записи, которые пользователь перенёс в новую запись, а
+            новую удалил, — удаляются (``MovedRule.DELETE``, сохраняется ветка прежнего
+            родителя); снизу вверх. Отдельно от ``deletes``: сами они на удаление не помечены.
+        moved_kept: Перенесённые записи из ``dropped``, которые остаются у прежнего родителя:
+            перенос и их правки не пишутся (показать пользователю).
         dropped: Черновики, поглощаемые без записи (внутри удаляемых веток).
         deleted_branches: Корни удаляемых веток — показать пользователю.
         blocked: Выбранные узлы, не попавшие в план: их предок удаляется, но не
@@ -56,6 +61,8 @@ class SavePlan:
     creates: Tuple[Draft, ...] = ()
     updates: Tuple[Draft, ...] = ()
     deletes: Tuple[Draft, ...] = ()
+    moved_deletes: Tuple[Draft, ...] = ()
+    moved_kept: Tuple[Draft, ...] = ()
     dropped: Tuple[Draft, ...] = ()
     deleted_branches: Tuple[NodeKey, ...] = ()
     blocked: Tuple[NodeKey, ...] = ()
@@ -66,45 +73,242 @@ class SavePlan:
     @property
     def is_empty(self) -> bool:
         """
-        Нечего сохранять и нечего поглощать.
+        Сообщает, что нечего сохранять и нечего поглощать.
 
         Returns:
-            ``True``, если план пуст.
+            (bool) ``True``, если план пуст.
 
-        Пример:
+        Example:
             >>> SavePlan().is_empty
             True
         """
-        return not (self.creates or self.updates or self.deletes or self.dropped)
+        return not (self.creates or self.updates or self.deletes or self.moved_deletes
+                    or self.dropped)
+
+    @property
+    def needs_delete_confirmation(self) -> bool:
+        """
+        Сообщает, что есть о чём спросить перед удалением: удаляемые ветки или судьба
+        перенесённых записей (сказать нужно при любом значении ``MovedRule``).
+
+        Returns:
+            (bool) ``True``, если нужен вопрос ``confirm_deletes``.
+
+        Example:
+            >>> SavePlan().needs_delete_confirmation
+            False
+        """
+        return bool(self.deleted_branches or self.moved_deletes or self.moved_kept)
 
     @property
     def needs_confirmation(self) -> bool:
         """
-        Нужен вопрос пользователю: новые предки вне объёма или удаляемые ветки.
+        Сообщает, что нужен вопрос пользователю: новые предки вне объёма, удаляемые ветки
+        или судьба перенесённых записей.
 
         Returns:
-            ``True``, если нужен.
+            (bool) ``True``, если нужен.
 
-        Пример:
+        Example:
             >>> SavePlan().needs_confirmation
             False
         """
-        return bool(self.missing_new_ancestors or self.deleted_branches)
+        return bool(self.missing_new_ancestors or self.needs_delete_confirmation)
 
     @property
     def consumed(self) -> FrozenSet[NodeKey]:
         """
-        Узлы, чьи черновики будут убраны из хранилища после успешного сохранения.
+        Возвращает узлы, чьи черновики будут убраны из хранилища после успешного сохранения.
 
         Returns:
-            Множество ключей.
+            (FrozenSet[NodeKey]) Множество ключей.
 
-        Пример:
+        Example:
             >>> ('photo', -1) in plan.consumed
             True
         """
-        return frozenset(d.key for group in (self.creates, self.updates, self.deletes, self.dropped)
-                         for d in group)
+        groups = (self.creates, self.updates, self.deletes, self.moved_deletes, self.dropped)
+        return frozenset(d.key for group in groups for d in group)
+
+
+# исходный родитель перенесённой записи
+def _old_parent(
+    store : 'DraftStore',   # хранилище (схема)
+    draft : Draft,          # черновик записи
+) -> Optional[NodeKey]:
+    """
+    Возвращает прежнего родителя записи по исходному значению поля внешнего ключа.
+
+    Args:
+        store : (DraftStore) Хранилище (схема).
+        draft : (Draft) Черновик записи.
+
+    Returns:
+        (NodeKey/None) Узел прежнего родителя; None — исходное значение неизвестно или пусто.
+
+    Example:
+        >>> _old_parent(
+        ...     store,                  # хранилище
+        ...     store.get('photo', 7),  # фото, перенесённое из приёма 12
+        ... )
+        ('appointment', 12)
+    """
+    fk = store.schema.parent_field(draft.entity)
+    value = draft.original.get(fk) if fk else None
+    return None if value is None else (store.schema.parent_type(draft.entity), value)
+
+
+# запись перенесена пользователем в новую запись, которую удалили
+def _is_user_move_into_deleted_new(
+    store : 'DraftStore',   # хранилище
+    draft : Draft,          # черновик записи
+) -> bool:
+    """
+    Проверяет, что к записи применимо ``MovedRule.DELETE``: это существующая запись, перенос
+    сделал пользователь, откуда перенесена — известно, а над ней до удалённой записи только
+    новые записи (их в БД нет, поэтому запись, кроме как у прежнего родителя, нигде не лежит).
+
+    Над записью встретилась существующая запись — не применимо: тогда запись уходит вместе с
+    ней или остаётся у прежнего родителя, как при отмене новой записи (N2).
+
+    Args:
+        store : (DraftStore) Хранилище.
+        draft : (Draft) Черновик записи.
+
+    Returns:
+        (bool) ``True``, если применимо.
+
+    Example:
+        >>> _is_user_move_into_deleted_new(
+        ...     store,                  # хранилище
+        ...     store.get('photo', 7),  # перенесено пользователем в удалённый новый приём
+        ... )
+        True
+    """
+    fk = store.schema.parent_field(draft.entity)
+    if draft.is_new or not draft.moved_by_user or fk not in draft.data or fk not in draft.original:
+        return False
+    for ancestor in store.ancestors(draft.key):
+        above = store.get(*ancestor)
+        if above is None or not above.is_new:
+            return False
+        if above.deleted:
+            return True
+    return False
+
+
+# ветка прежнего родителя (или сама запись) входит в сохранение
+def _old_branch_saved(
+    store   : 'DraftStore',             # хранилище
+    draft   : Draft,                    # черновик перенесённой записи
+    targets : Optional[List[NodeKey]],  # узлы цели; None — всё
+    scope   : SaveScope,                # направления
+) -> bool:
+    """
+    Проверяет, что сохраняется не только новая запись, а и то, откуда запись перенесли:
+    сохраняется всё, выбрана сама запись или выбран её прежний родитель (его предок) с
+    потомками. Иначе «сохранили только новую запись» — поглощение (В-21).
+
+    Перенесённая запись по связям лежит уже под новым родителем, поэтому ``select_nodes`` от
+    прежнего родителя её не находит — сверка идёт по исходному значению поля связи.
+
+    Args:
+        store   : (DraftStore) Хранилище.
+        draft   : (Draft) Черновик перенесённой записи.
+        targets : (List[NodeKey]/None) Узлы цели; None — всё.
+        scope   : (SaveScope) Направления.
+
+    Returns:
+        (bool) ``True``, если ветка прежнего родителя сохраняется.
+
+    Example:
+        >>> _old_branch_saved(
+        ...     store,                  # хранилище
+        ...     store.get('photo', 7),  # перенесённое фото
+        ...     [('appointment', -1)],  # сохраняют только новый приём
+        ...     SaveScope.BRANCH,       # с потомками
+        ... )
+        False
+    """
+    if targets is None:
+        return True
+    if SaveScope.SELF in scope and draft.key in targets:
+        return True
+    old = _old_parent(store, draft)
+    if old is None or SaveScope.DESCENDANTS not in scope:
+        return False
+    return any(node in targets for node in (old, *store.ancestors(old)))
+
+
+# перенесённые записи, которые удаляются по правилу MovedRule.DELETE
+def _moved_to_delete(
+    store   : 'DraftStore',             # хранилище
+    targets : Optional[List[NodeKey]],  # узлы цели; None — всё
+    scope   : SaveScope,                # направления
+) -> List[NodeKey]:
+    """
+    Находит записи, которые пользователь перенёс в новую запись, удалил её и сохраняет ветку
+    прежнего родителя. Единственное место, где читается значение правила.
+
+    Args:
+        store   : (DraftStore) Хранилище.
+        targets : (List[NodeKey]/None) Узлы цели; None — всё.
+        scope   : (SaveScope) Направления.
+
+    Returns:
+        (List[NodeKey]) Узлы; при ``MovedRule.KEEP`` — всегда пусто.
+
+    Example:
+        >>> _moved_to_delete(
+        ...     store,              # правило DELETE, фото 7 перенесено в удалённый новый приём
+        ...     None,               # сохраняют всё
+        ...     SaveScope.BRANCH,   # направления
+        ... )
+        [('photo', 7)]
+    """
+    if store.moved_rule is not MovedRule.DELETE:
+        return []
+    return [draft.key for draft in store.drafts()
+            if _is_user_move_into_deleted_new(store, draft)
+            and _old_branch_saved(store, draft, targets, scope)]
+
+
+# поглощаемые перенесённые записи, которые останутся у прежнего родителя
+def _moved_kept(
+    store   : 'DraftStore',         # хранилище
+    dropped : List[NodeKey],        # поглощаемые узлы
+    removed : Set[NodeKey],         # узлы, удаляемые из БД этим сохранением
+) -> List[NodeKey]:
+    """
+    Отбирает из поглощаемых черновиков существующие записи с переносом: они остаются у
+    прежнего родителя. Прежний родитель сам удаляется в этом сохранении — запись уходит вместе
+    с ним (об этом говорит список удаляемых веток), обещать «останется» нельзя.
+
+    Args:
+        store   : (DraftStore) Хранилище.
+        dropped : (List[NodeKey]) Поглощаемые узлы.
+        removed : (Set[NodeKey]) Узлы, удаляемые из БД этим сохранением.
+
+    Returns:
+        (List[NodeKey]) Узлы в порядке ``dropped``.
+
+    Example:
+        >>> _moved_kept(
+        ...     store,              # фото 7 перенесено в удалённый новый приём
+        ...     [('photo', 7)],     # поглощается
+        ...     set(),              # из БД ничего не удаляется
+        ... )
+        [('photo', 7)]
+    """
+    kept: List[NodeKey] = []
+    for node in dropped:
+        draft = store.get(*node)
+        if draft.is_new or store.schema.parent_field(node[0]) not in draft.data:
+            continue
+        old = _old_parent(store, draft)
+        if old is None or not any(x in removed for x in (old, *store.ancestors(old))):
+            kept.append(node)
+    return kept
 
 
 def _dependencies(store: 'DraftStore', node: NodeKey) -> List[NodeKey]:
@@ -286,11 +490,11 @@ def _ordered_creates(store: 'DraftStore', creates: List[Draft], depth: Callable[
 
 
 def build_plan(
-    store: 'DraftStore',
-    targets: Optional[Iterable[NodeKey]] = None,
-    scope: SaveScope = SaveScope.BRANCH,
-    delete_policy: Optional[DeletePolicy] = None,
-    include_new_ancestors: bool = False,
+    store                 : 'DraftStore',                       # хранилище
+    targets               : Optional[Iterable[NodeKey]] = None, # узлы цели; None — всё
+    scope                 : SaveScope = SaveScope.BRANCH,       # направления
+    delete_policy         : Optional[DeletePolicy] = None,      # политика; None — каскад
+    include_new_ancestors : bool = False,                       # добавить новых предков вне объёма
 ) -> SavePlan:
     """
     Строит план сохранения для объёма (цель × направления).
@@ -298,21 +502,26 @@ def build_plan(
     Шаги:
         1. Узлы с черновиками в объёме (``select_nodes``).
         2. Политика удаления: удаляемые ветки, поглощаемые черновики, заблокированные узлы.
-        3. Новые предки сохраняемых записей вне объёма → ``missing_new_ancestors``
+        3. Перенесённые в удалённую новую запись: при ``store.moved_rule`` ``DELETE`` и
+           сохранении ветки прежнего родителя — удаляются (``moved_deletes``), иначе
+           поглощаются и остаются у прежнего родителя (``moved_kept``).
+        4. Новые предки сохраняемых записей вне объёма → ``missing_new_ancestors``
            (или добавляются, если ``include_new_ancestors``; добавляются ТОЛЬКО сами
            предки, без их других детей).
-        4. Порядок: создание сверху вниз, удаление снизу вверх; внутри уровня — порядок
+        5. Порядок: создание сверху вниз, удаление снизу вверх; внутри уровня — порядок
            появления черновиков.
 
     Args:
-        store: Хранилище.
-        targets: Узлы цели (строка — один узел, фрейм — его выборка); ``None`` — всё.
-        scope: Направления (``SaveScope``).
-        delete_policy: Политика удаления; по умолчанию ``CascadeDeletePolicy``.
-        include_new_ancestors: Добавить в план новых предков вне объёма.
+        store                 : (DraftStore) Хранилище.
+        targets               : (Iterable[NodeKey]/None) Узлы цели (строка — один узел, фрейм —
+            его выборка); None — всё.
+        scope                 : (SaveScope) Направления.
+        delete_policy         : (DeletePolicy/None) Политика удаления; None —
+            ``CascadeDeletePolicy``.
+        include_new_ancestors : (bool) Добавить в план новых предков вне объёма.
 
     Returns:
-        План.
+        (SavePlan) План.
 
     Raises:
         PlanError: Политика удаления запретила сохранение; нужная новая запись помечена
@@ -320,11 +529,15 @@ def build_plan(
         DeleteBlocked: Сохраняемая (или нужная ей новая) запись ссылается на удалённую
             новую запись.
 
-    Пример:
-        >>> build_plan(store, None).is_empty          # сохранить всё
+    Example:
+        >>> build_plan(
+        ...     store,      # хранилище
+        ...     None,       # сохранить всё
+        ... ).is_empty
         False
     """
     policy = delete_policy or CascadeDeletePolicy()
+    targets = None if targets is None else list(targets)
     selected: Set[NodeKey] = select_nodes(store, targets, scope)
     resolution = policy.resolve(store, selected)
     # F3 (проверка ядра 2): решение политики проверяется — ошибочная политика не должна
@@ -339,8 +552,20 @@ def build_plan(
                 f"политика удаления хочет удалить из БД {node[0]}:{node[1]}, "
                 "но запись не помечена на удаление или ещё не сохранена"
             )
-    by_delete = set(resolution.deletes) | set(resolution.dropped)
-    writable = selected - by_delete - set(resolution.blocked)
+    # by_delete = set(resolution.deletes) | set(resolution.dropped)
+    # writable = selected - by_delete - set(resolution.blocked)
+    # ↑ до 2026-11-07 (DR10): всё в удаляемой новой ветке поглощалось; запись, перенесённая в
+    #   неё пользователем, оставалась у прежнего родителя и при сохранении его ветки.
+    #   Теперь такая запись (MovedRule.DELETE) удаляется, а вложенные в неё черновики
+    #   поглощаются вместе с ней, даже если сама ветка не в объёме сохранения.
+    moved = [n for n in _moved_to_delete(store, targets, scope) if n not in resolution.deletes]
+    inside = {d for n in moved for d in store.descendants(n) if store.has_draft(*d)}
+    inside -= set(moved) | set(resolution.deletes)
+    dropped_nodes = [n for n in resolution.dropped if n not in moved and n not in inside]
+    dropped_nodes.extend(sorted(inside, key=lambda n: store.get(*n).order))
+    resolved_blocked = [n for n in resolution.blocked if n not in moved and n not in inside]
+    by_delete = set(resolution.deletes) | set(dropped_nodes) | set(moved)
+    writable = selected - by_delete - set(resolved_blocked)
     # F1 (проверка ядра 1): гарантии НЕ зависят от политики — помеченное на удаление
     # никогда не создаётся и не изменяется, а потомок удаляемой записи вне её ветки не
     # пишется. Раньше это полностью доверялось политике: своя политика могла пропустить
@@ -354,7 +579,10 @@ def build_plan(
     extra_blocked = [n for n in writable
                      if any((a := store.get(*x)) is not None and a.deleted for x in store.ancestors(n))]
     writable.difference_update(extra_blocked)
-    blocked = tuple(resolution.blocked) + tuple(n for n in extra_blocked if n not in resolution.blocked)
+    # blocked = tuple(resolution.blocked) + tuple(n for n in extra_blocked if n not in resolution.blocked)
+    # ↑ до 2026-11-07 (DR10): перенесённая запись могла быть в blocked (выбрана она сама, а
+    #   удалённая новая вне объёма), теперь она удаляется — в blocked ей делать нечего
+    blocked = tuple(resolved_blocked) + tuple(n for n in extra_blocked if n not in resolved_blocked)
 
     # missing: List[NodeKey] = []
     # for node in sorted(writable, key=lambda n: store.get(*n).order):
@@ -407,10 +635,23 @@ def build_plan(
                      key=lambda d: (depth(d.key), d.order))
     deletes = sorted((drafts[n] for n in resolution.deletes),
                      key=lambda d: (-depth(d.key), d.order))
-    dropped = [drafts[n] for n in resolution.dropped]
+    moved_deletes = sorted((drafts[n] for n in moved), key=lambda d: (-depth(d.key), d.order))
+    kept = _moved_kept(
+        store,                                  # хранилище
+        dropped_nodes,                          # поглощаемые узлы
+        set(resolution.deletes) | set(moved),   # удаляемые из БД
+    )
+    dropped = [drafts[n] for n in dropped_nodes]
     return SavePlan(
-        creates=tuple(creates), updates=tuple(updates), deletes=tuple(deletes),
-        dropped=tuple(dropped), deleted_branches=resolution.branches,
-        blocked=blocked, missing_new_ancestors=tuple(missing),
-        version=store.version, store_token=store.token,
+        creates                 =   tuple(creates),                 # создать
+        updates                 =   tuple(updates),                 # изменить
+        deletes                 =   tuple(deletes),                 # удалить помеченные
+        moved_deletes           =   tuple(moved_deletes),           # удалить перенесённые
+        moved_kept              =   tuple(drafts[n] for n in kept), # останутся у прежнего родителя
+        dropped                 =   tuple(dropped),                 # поглотить
+        deleted_branches        =   resolution.branches,            # показать пользователю
+        blocked                 =   blocked,                        # не попали в план
+        missing_new_ancestors   =   tuple(missing),                 # спросить пользователя
+        version                 =   store.version,                  # версия хранилища
+        store_token             =   store.token,                    # метка хранилища
     )

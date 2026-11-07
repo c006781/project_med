@@ -29,21 +29,22 @@ Confirm = Callable[[SavePlan], bool]
 
 
 def save_with_confirmation(
-    store: DraftStore,
-    adapter: PersistenceAdapter,
-    targets: Optional[Iterable[NodeKey]] = None,
-    scope: Optional[SaveScope] = None,
-    confirm_new_ancestors: Optional[Confirm] = None,
-    confirm_deletes: Optional[Confirm] = None,
-    delete_policy: Optional[DeletePolicy] = None,
+    store                 : DraftStore,                         # хранилище черновиков
+    adapter               : PersistenceAdapter,                 # связь с БД
+    targets               : Optional[Iterable[NodeKey]] = None, # узлы цели; None — всё
+    scope                 : Optional[SaveScope] = None,         # направления; None — BRANCH
+    confirm_new_ancestors : Optional[Confirm] = None,           # «сохранить и новых родителей?»
+    confirm_deletes       : Optional[Confirm] = None,           # «удалить эти ветки?»
+    delete_policy         : Optional[DeletePolicy] = None,      # политика удаления; None — каскад
 ) -> Optional[SaveResult]:
     """
-    Сохранение с вопросами пользователю:
+    Сохраняет черновики с вопросами пользователю:
 
         1. План для цели × направлений.
         2. Новые предки вне объёма (треб. 6) — ``confirm_new_ancestors(plan)``; согласие —
            план строится заново с ними, отказ — сохранение отменяется (``None``).
-        3. Удаляемые ветки (треб. 7) — ``confirm_deletes(plan)``; отказ — отмена.
+        3. Удаляемые ветки (треб. 7) и судьба записей, перенесённых в удалённую новую запись
+           (при любом значении ``MovedRule``), — ``confirm_deletes(plan)``; отказ — отмена.
         4. Исполнение одной транзакцией.
 
     Вопрос не задаётся, если функция не передана: без ``confirm_new_ancestors`` новые
@@ -51,25 +52,32 @@ def save_with_confirmation(
     подтверждённым (вызывающий сам отвечает за вопрос).
 
     Args:
-        store: Хранилище черновиков.
-        adapter: Связь с БД.
-        targets: Узлы цели; ``None`` — всё.
-        scope: Направления; по умолчанию ``SaveScope.BRANCH``.
-        confirm_new_ancestors: Вопрос «сохранить и новых родителей?».
-        confirm_deletes: Вопрос «удалить эти ветки?».
-        delete_policy: Политика удаления (по умолчанию — каскад).
+        store                 : (DraftStore) Хранилище черновиков.
+        adapter               : (PersistenceAdapter) Связь с БД.
+        targets               : (Iterable[NodeKey]/None) Узлы цели; None — всё.
+        scope                 : (SaveScope/None) Направления; None — ``SaveScope.BRANCH``.
+        confirm_new_ancestors : (Confirm/None) Вопрос «сохранить и новых родителей?».
+        confirm_deletes       : (Confirm/None) Вопрос «удалить эти ветки?».
+        delete_policy         : (DeletePolicy/None) Политика удаления; None — каскад.
 
     Returns:
-        Итог сохранения; ``None`` — пользователь отказался (или нечего сохранять —
-        тогда пустой ``SaveResult``).
+        (SaveResult/None) Итог сохранения; None — пользователь отказался (нечего сохранять —
+            пустой ``SaveResult``).
 
     Raises:
-        PlanError: Политика удаления запретила сохранение.
+        PlanError: Политика удаления запретила сохранение; перенесённую запись в БД успели
+            перенести мимо черновика (откат).
         Exception: Ошибка БД (транзакция откатана, черновики на месте).
 
-    Пример:
-        >>> save_with_confirmation(store, adapter, [('appointment', 12)], SaveScope.BRANCH,
-        ...                        confirm_new_ancestors=ask_user, confirm_deletes=ask_user)
+    Example:
+        >>> save_with_confirmation(
+        ...     store,                                  # хранилище
+        ...     adapter,                                # связь с БД
+        ...     [('appointment', 12)],                  # цель
+        ...     SaveScope.BRANCH,                       # с потомками
+        ...     confirm_new_ancestors   =   ask_user,   # вопрос про родителей
+        ...     confirm_deletes         =   ask_user,   # вопрос про удаление
+        ... )
     """
     scope = SaveScope.BRANCH if scope is None else scope
     targets = None if targets is None else list(targets)
@@ -80,7 +88,10 @@ def save_with_confirmation(
             return None
         include = True
         plan = build_plan(store, targets, scope, delete_policy, include_new_ancestors=True)
-    if plan.deleted_branches and confirm_deletes is not None and not confirm_deletes(plan):
+    # if plan.deleted_branches and confirm_deletes is not None and not confirm_deletes(plan):
+    # ↑ до 2026-11-07 (DR10): без удаляемых веток вопроса не было, а перенесённая запись теперь
+    #   удаляется и тогда, когда удалённая новая запись не входит в объём
+    if plan.needs_delete_confirmation and confirm_deletes is not None and not confirm_deletes(plan):
         return None
     if plan.is_empty:
         return SaveResult()
@@ -89,7 +100,9 @@ def save_with_confirmation(
     # предков — спрашиваем заново (рекурсия не глубже числа изменений пользователя).
     final = build_plan(store, targets, scope, delete_policy, include_new_ancestors=include)
     if (final.deleted_branches != plan.deleted_branches
-            or final.missing_new_ancestors != plan.missing_new_ancestors):
+            or final.missing_new_ancestors != plan.missing_new_ancestors
+            or final.moved_deletes != plan.moved_deletes
+            or final.moved_kept != plan.moved_kept):
         return save_with_confirmation(store, adapter, targets, scope,
                                       confirm_new_ancestors, confirm_deletes, delete_policy)
     return execute_plan(store, final, adapter)

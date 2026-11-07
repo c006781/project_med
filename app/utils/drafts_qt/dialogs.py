@@ -24,9 +24,9 @@ if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
 
     try:
-        from ..drafts import SavePlan, TreeSchema
+        from ..drafts import Draft, SavePlan, TreeSchema
     except ImportError:  # pragma: no cover
-        from drafts import SavePlan, TreeSchema
+        from drafts import Draft, SavePlan, TreeSchema
 
 
 def describe_nodes(schema: 'TreeSchema', nodes: Iterable[NodeKey], limit: int = 15) -> str:
@@ -55,6 +55,92 @@ def describe_nodes(schema: 'TreeSchema', nodes: Iterable[NodeKey], limit: int = 
     if len(nodes) > limit:
         lines.append(f"… и ещё {len(nodes) - limit}")
     return "\n".join(lines)
+
+
+# прежний родитель перенесённой записи в сообщении
+def _moved_lines(
+    schema : 'TreeSchema',      # схема (названия типов)
+    drafts : Iterable['Draft'], # перенесённые записи
+    limit  : int = 15,          # сколько показать
+) -> str:
+    """
+    Собирает список перенесённых записей с прежним родителем: откуда запись перенесена,
+    пользователю важно не меньше, чем что это за запись.
+
+    Args:
+        schema : (TreeSchema) Схема (названия типов).
+        drafts : (Iterable[Draft]) Перенесённые записи.
+        limit  : (int) Сколько показать; остальное — «и ещё N».
+
+    Returns:
+        (str) Многострочный текст.
+
+    Example:
+        >>> _moved_lines(
+        ...     schema,                     # схема
+        ...     [store.get('photo', 7)],    # фото, перенесённое из приёма 12
+        ... )
+        '• Фото №7 (перенесено из: Приём №12)'
+    """
+    drafts = list(drafts)
+    lines = []
+    for draft in drafts[:limit]:
+        line = describe_nodes(schema, [draft.key])
+        fk = schema.parent_field(draft.entity)
+        old = draft.original.get(fk) if fk else None
+        if old is not None:
+            where = describe_nodes(schema, [(schema.parent_type(draft.entity), old)])
+            line += f" (перенесено из: {where.lstrip('• ')})"
+        lines.append(line)
+    if len(drafts) > limit:
+        lines.append(f"… и ещё {len(drafts) - limit}")
+    return "\n".join(lines)
+
+
+# текст вопроса об удалении по плану
+def describe_deletes(
+    schema : 'TreeSchema',  # схема (названия типов)
+    plan   : 'SavePlan',    # план
+) -> str:
+    """
+    Собирает текст вопроса перед сохранением: что будет удалено, что потеряется и что
+    останется. Отдельно от окна: текст проверяется тестами без Qt.
+
+    Перенесённые записи называются отдельно при любом значении правила: они либо удаляются
+    (``plan.moved_deletes``), либо остаются у прежнего родителя (``plan.moved_kept``).
+
+    Args:
+        schema : (TreeSchema) Схема (названия типов).
+        plan   : (SavePlan) План.
+
+    Returns:
+        (str) Текст без последнего вопроса «Продолжить?».
+
+    Example:
+        >>> describe_deletes(
+        ...     schema,     # схема
+        ...     plan,       # фото 7 перенесено в удалённый новый приём, правило DELETE
+        ... )
+        'Будут удалены записи ВМЕСТЕ со всеми вложенными …\n\n• Приём (новая запись)\n\n…'
+    """
+    parts = []
+    if plan.deleted_branches:
+        parts.append("Будут удалены записи ВМЕСТЕ со всеми вложенными (приёмы, фото …):\n\n"
+                     f"{describe_nodes(schema, plan.deleted_branches)}")
+    if plan.moved_deletes:
+        parts.append("Записи, перенесённые в удалённую новую запись, будут УДАЛЕНЫ вместе с ней "
+                     "(файл удаляется, только если на него больше никто не ссылается):\n\n"
+                     f"{_moved_lines(schema, plan.moved_deletes)}")
+    if plan.moved_kept:
+        parts.append("Записи, перенесённые в удаляемую ветку, ОСТАНУТСЯ у прежнего родителя "
+                     "(перенос и их несохранённые правки не сохранятся):\n\n"
+                     f"{_moved_lines(schema, plan.moved_kept)}")
+    kept = {d.key for d in plan.moved_kept}
+    lost = [d.key for d in plan.dropped if d.key not in plan.deleted_branches and d.key not in kept]
+    if lost:
+        parts.append("Несохранённые изменения внутри этих веток будут потеряны:\n"
+                     f"{describe_nodes(schema, lost)}")
+    return "\n\n".join(parts)
 
 
 def ask_save_target(parent: Optional['QWidget'], has_current: bool = True) -> Optional[str]:
@@ -132,30 +218,44 @@ def make_confirmations(
         )
         return answer == QMessageBox.Yes
 
-    def confirm_deletes(plan: 'SavePlan') -> bool:
+    def confirm_deletes(
+        plan : 'SavePlan',  # план
+    ) -> bool:
         """
-        «Будут удалены ветки целиком — продолжить?»
+        Спрашивает «Будут удалены ветки целиком — продолжить?»; называет и судьбу записей,
+        перенесённых в удалённую новую запись (``describe_deletes``).
 
         Args:
-            plan: План (``deleted_branches``, ``dropped``).
+            plan : (SavePlan) План.
 
         Returns:
-            Согласие.
+            (bool) Согласие.
 
-        Пример:
-            >>> confirm_deletes(plan)
+        Example:
+            >>> confirm_deletes(
+            ...     plan,   # удаляемая ветка
+            ... )
             False
         """
-        extra = ""
-        lost = [d.key for d in plan.dropped if d.key not in plan.deleted_branches]
-        if lost:
-            extra = ("\n\nНесохранённые изменения внутри этих веток будут потеряны:\n"
-                     f"{describe_nodes(schema, lost)}")
+        # extra = ""
+        # lost = [d.key for d in plan.dropped if d.key not in plan.deleted_branches]
+        # if lost:
+        #     extra = ("\n\nНесохранённые изменения внутри этих веток будут потеряны:\n"
+        #              f"{describe_nodes(schema, lost)}")
+        # answer = QMessageBox.warning(
+        #     parent, "Удаление",
+        #     "Будут удалены записи ВМЕСТЕ со всеми вложенными (приёмы, фото …):\n\n"
+        #     f"{describe_nodes(schema, plan.deleted_branches)}{extra}\n\nПродолжить?",
+        #     QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        # )
+        # ↑ до 2026-11-07 (DR10): перенесённая запись шла общим списком «изменения потеряны»,
+        #   без слов о том, удалится она или останется; без удаляемых веток текст был бы пуст
         answer = QMessageBox.warning(
-            parent, "Удаление",
-            "Будут удалены записи ВМЕСТЕ со всеми вложенными (приёмы, фото …):\n\n"
-            f"{describe_nodes(schema, plan.deleted_branches)}{extra}\n\nПродолжить?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            parent,                                     # окно
+            "Удаление",                                 # заголовок
+            f"{describe_deletes(schema, plan)}\n\nПродолжить?",   # что будет
+            QMessageBox.Yes | QMessageBox.No,           # кнопки
+            QMessageBox.No,                             # по умолчанию — не удалять
         )
         return answer == QMessageBox.Yes
 

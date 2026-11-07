@@ -36,7 +36,7 @@ from typing import (
     Any, Callable, Dict, Hashable, Iterable, Iterator, List, Mapping, Optional, Set, Tuple,
 )
 
-from ._model import MISSING, Draft, DraftEvent, NodeKey
+from ._model import MISSING, Draft, DraftEvent, MovedRule, NodeKey
 from .schema import TreeSchema
 from .scope import SaveScope, select_nodes
 
@@ -127,6 +127,7 @@ class _Record:
     data: Dict[str, Any] = field(default_factory=dict)
     original: Dict[str, Any] = field(default_factory=dict)
     order: int = 0
+    moved_by_user: bool = False     # перенос (поле внешнего ключа в data) сделал пользователь
 
     @property
     def has_own_changes(self) -> bool:
@@ -144,36 +145,55 @@ class _Record:
 
     def copy(self) -> '_Record':
         """
-        Независимая копия (для истории отмены).
+        Возвращает независимую копию (для истории отмены).
 
         Returns:
-            Копия записи.
+            (_Record) Копия записи.
 
-        Пример:
+        Example:
             >>> _Record('photo', 3, data={'a': 1}).copy().data
             {'a': 1}
         """
-        return _Record(self.entity, self.id, self.is_new, self.deleted, dict(self.data),
-                       dict(self.original), self.order)
+        return _Record(
+            entity          =   self.entity,            # тип
+            id              =   self.id,                # id
+            is_new          =   self.is_new,            # новая запись
+            deleted         =   self.deleted,           # помечена на удаление
+            data            =   dict(self.data),        # изменённые поля
+            original        =   dict(self.original),    # исходные значения
+            order           =   self.order,             # порядок появления
+            moved_by_user   =   self.moved_by_user,     # перенос сделал пользователь
+        )
 
-    def snapshot(self, parent_id: Optional[Hashable] = None) -> Draft:
+    def snapshot(
+        self,
+        parent_id : Optional[Hashable] = None,  # id родителя (из индекса связей хранилища)
+    ) -> Draft:
         """
-        Неизменяемая копия.
+        Возвращает неизменяемую копию.
 
         Args:
-            parent_id: Id родителя (хранится в индексе связей хранилища).
+            parent_id : (Hashable/None) Id родителя (хранится в индексе связей хранилища).
 
         Returns:
-            ``Draft``.
+            (Draft) Снимок.
 
-        Пример:
-            >>> _Record('photo', 3, data={'a': 1}).snapshot(12).parent_id
+        Example:
+            >>> _Record('photo', 3, data={'a': 1}).snapshot(
+            ...     12,     # родитель
+            ... ).parent_id
             12
         """
         return Draft(
-            entity=self.entity, id=self.id, parent_id=parent_id, is_new=self.is_new,
-            deleted=self.deleted, data=dict(self.data), original=dict(self.original),
-            order=self.order,
+            entity          =   self.entity,            # тип
+            id              =   self.id,                # id
+            parent_id       =   parent_id,              # родитель
+            is_new          =   self.is_new,            # новая запись
+            deleted         =   self.deleted,           # помечена на удаление
+            data            =   dict(self.data),        # изменённые поля
+            original        =   dict(self.original),    # исходные значения
+            order           =   self.order,             # порядок появления
+            moved_by_user   =   self.moved_by_user,     # перенос сделал пользователь
         )
 
 
@@ -200,27 +220,36 @@ class DraftStore:
 
     def __init__(
         self,
-        schema: TreeSchema,
-        parent_resolver: Optional[ParentResolver] = None,
-        temp_id_factory: Optional[Callable[[], Hashable]] = None,
-        history_limit: int = 100,
+        schema          : TreeSchema,                               # описание дерева типов
+        parent_resolver : Optional[ParentResolver] = None,          # родитель записи без черновика
+        temp_id_factory : Optional[Callable[[], Hashable]] = None,  # генератор временных id
+        history_limit   : int = 100,                                # глубина отмены; 0 — выключена
+        moved_rule      : MovedRule = MovedRule.KEEP,               # перенесённая в удалённую новую запись
     ) -> None:
         """
         Создаёт пустое хранилище.
 
         Args:
-            schema: Описание дерева типов.
-            parent_resolver: Определитель родителя записи без черновика (необязательно).
-            temp_id_factory: Генератор временных id новых записей; по умолчанию
+            schema          : (TreeSchema) Описание дерева типов.
+            parent_resolver : (ParentResolver/None) Определитель родителя записи без черновика;
+                None — родителей сообщает интерфейс.
+            temp_id_factory : (Callable/None) Генератор временных id новых записей; None —
                 ``negative_ids()``.
-            history_limit: Сколько шагов отмены (undo) помнить; 0 — история выключена.
+            history_limit   : (int) Сколько шагов отмены (undo) помнить; 0 — история выключена.
+            moved_rule      : (MovedRule) Судьба записи, которую пользователь перенёс в новую
+                запись, а новую удалил. По умолчанию ``KEEP``: пакет сам ничего не удаляет,
+                пока вызывающий не выбрал ``DELETE`` явно. Меняется и позже (``moved_rule``).
 
-        Пример:
-            >>> DraftStore(TreeSchema([EntityType('patient')])).is_empty
-            True
+        Example:
+            >>> DraftStore(
+            ...     TreeSchema([EntityType('patient')]),    # дерево из одного типа
+            ...     moved_rule   =   MovedRule.DELETE,      # удалять вместе с новой записью
+            ... ).moved_rule
+            <MovedRule.DELETE: 'delete'>
         """
         schema.validate()
         self.schema = schema
+        self._moved_rule = MovedRule(moved_rule)
         self._resolver = parent_resolver
         self._next_temp_id = temp_id_factory or negative_ids()
         self._records: Dict[NodeKey, _Record] = {}
@@ -379,6 +408,45 @@ class DraftStore:
             True
         """
         return self._version
+
+    @property
+    def moved_rule(self) -> MovedRule:
+        """
+        Возвращает правило для записи, перенесённой в удалённую новую запись (читает план).
+
+        Returns:
+            (MovedRule) Текущее значение.
+
+        Example:
+            >>> DraftStore(schema).moved_rule
+            <MovedRule.KEEP: 'keep'>
+        """
+        return self._moved_rule
+
+    @moved_rule.setter
+    def moved_rule(
+        self,
+        value : Any,    # MovedRule или его строковое значение (из настроек)
+    ) -> None:
+        """
+        Меняет правило (например, с экрана настроек). План, построенный при прежнем значении,
+        устаревает: пользователю показали другое, поэтому он не исполняется (``StalePlanError``).
+
+        Args:
+            value : (MovedRule/str) Новое значение.
+
+        Raises:
+            ValueError: Неизвестное значение (``'x' is not a valid MovedRule``).
+
+        Example:
+            >>> store.moved_rule = 'delete'
+            >>> store.moved_rule
+            <MovedRule.DELETE: 'delete'>
+        """
+        rule = MovedRule(value)
+        if rule is not self._moved_rule:
+            self._moved_rule = rule
+            self._version += 1
 
     @property
     def token(self) -> object:
@@ -746,36 +814,46 @@ class DraftStore:
     @_undoable
     def modify(
         self,
-        entity: str,
-        entity_id: Hashable,
-        changes: Mapping[str, Any],
-        original: Optional[Mapping[str, Any]] = None,
-        parent_id: Any = MISSING,
+        entity    : str,                                # тип
+        entity_id : Hashable,                           # id
+        changes   : Mapping[str, Any],                  # новые значения полей
+        original  : Optional[Mapping[str, Any]] = None, # исходные значения
+        parent_id : Any = MISSING,                      # известный родитель (сведения о дереве)
+        by_user   : bool = False,                       # правку сделал пользователь на экране
     ) -> None:
         """
-        Изменение полей записи (новой или существующей); повторные изменения
-        дополняют черновик (требование 3).
+        Изменяет поля записи (новой или существующей); повторные изменения дополняют
+        черновик (требование 3).
 
         Для существующей записи: если передан ``original`` (исходные значения из БД),
         поле, вернувшееся к исходному значению, убирается из черновика; черновик без
         изменений удаляется целиком. Изменение поля внешнего ключа переносит запись к
         другому родителю.
 
+        Кто сделал перенос, запоминается при каждом изменении поля внешнего ключа: решает
+        последний перенос. По умолчанию ``by_user=False`` — перенос кодом (объединение,
+        импорт) никогда не приведёт к удалению записи; ``True`` передаёт только интерфейс.
+
         Args:
-            entity: Тип.
-            entity_id: Id.
-            changes: Новые значения полей.
-            original: Исходные значения (запоминаются при первом изменении поля).
-            parent_id: Известный родитель записи (не изменение, а сведения о дереве).
+            entity    : (str) Тип.
+            entity_id : (Hashable) Id.
+            changes   : (Mapping[str, Any]) Новые значения полей.
+            original  : (Mapping[str, Any]/None) Исходные значения (запоминаются при первом
+                изменении поля); None — неизвестны.
+            parent_id : (Any) Известный родитель записи (не изменение, а сведения о дереве);
+                ``MISSING`` — не сообщают.
+            by_user   : (bool) Правку сделал пользователь на экране (важно для переноса).
 
-        Returns:
-            None
-
-        Пример:
-            >>> store.modify('appointment', 12, {'cost': 500}, original={'cost': 400}, parent_id=1)
-            >>> store.modify('appointment', 12, {'cost': 400})   # вернули — черновика нет
-            >>> store.has_draft('appointment', 12)
-            False
+        Example:
+            >>> store.modify(
+            ...     'photo',                            # тип
+            ...     7,                                  # id
+            ...     {'appointment_id': -1},             # перенос в новый приём
+            ...     original  =   {'appointment_id': 12},   # прежний приём
+            ...     by_user   =   True,                 # перенёс пользователь
+            ... )
+            >>> store.get('photo', 7).moved_by_user
+            True
         """
         entity_type = self.schema.get(entity)
         node = (entity, entity_id)
@@ -804,6 +882,8 @@ class DraftStore:
                 else:
                     record.data[name] = value
             if fk and name == fk:
+                # по этому признаку план отличает перенос пользователя от переноса кодом
+                record.moved_by_user = by_user and name in record.data
                 previous = self._set_link(node, value)
                 if previous is not None:
                     old_parents.append(previous)
@@ -951,24 +1031,27 @@ class DraftStore:
         return (record is not None and not record.is_new and fk is not None
                 and fk in record.data and fk in record.original)
 
-    def _move_back(self, node: NodeKey) -> None:
+    def _move_back(
+        self,
+        node : NodeKey,     # узел
+    ) -> None:
         """
         Откатывает перенос существующей записи (поле внешнего ключа → исходное
         значение); черновик без других изменений удаляется (N2).
 
         Args:
-            node: Узел.
+            node : (NodeKey) Узел.
 
-        Returns:
-            None
-
-        Пример:
-            >>> store._move_back(('photo', 7))
+        Example:
+            >>> store._move_back(
+            ...     ('photo', 7),   # перенесённое фото
+            ... )
         """
         record = self._records[node]
         fk = self.schema.parent_field(node[0])
         old_parents = self.ancestors(node)
         record.data.pop(fk, None)
+        record.moved_by_user = False
         self._set_link(node, record.original[fk])
         if not record.has_own_changes:
             del self._records[node]
@@ -1075,6 +1158,7 @@ class DraftStore:
                 continue
             record.data.pop(name)
             if name == fk:
+                record.moved_by_user = False
                 old_parents = self.ancestors(node)
                 self._set_link(node, record.original[fk])
         if not record.has_own_changes:

@@ -17,10 +17,14 @@
 # tt = sys.modules['app.config.config_manager.manager'] 
 from .manager import BaseConfigManager, AppConfigManager, get_config_env
 from .manager import WORD_DOCUMENTS_PATH_KEY   # ключ «Папка документов Word» (CM17)
+from .manager import DRAFT_MOVED_RULE_KEY, DRAFT_MOVED_RULE_VALUES, draft_moved_rule_value   # правило черновиков (CM20)
 
 __all__ = [
     'BaseConfigManager',
     'AppConfigManager',
     'get_config_env',
     'WORD_DOCUMENTS_PATH_KEY',
+    'DRAFT_MOVED_RULE_KEY',
+    'DRAFT_MOVED_RULE_VALUES',
+    'draft_moved_rule_value',
 ]

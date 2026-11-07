@@ -30,7 +30,11 @@ from app.utils.logger.logger import AppLogger
 from app.network.ya_dop import DB_EXTENSIONS, check_and_create_path, check_token, normalize_remote_path
 
 from app.config.config_applier import ConfigApplier
-from app.config.config_manager.manager import AppConfigManager
+from app.config.config_manager.manager import (
+    DRAFT_MOVED_RULE_KEY,       # правило перенесённой записи
+    WORD_DOCUMENTS_PATH_KEY,    # папка документов Word
+    AppConfigManager,           # менеджер настроек
+)
 
 from interfaces.gui.gui_window.pages.base_page import BasePage
 
@@ -553,6 +557,18 @@ class SettingsPage(BasePage):
 
         form_layout.addRow("Папка для фото:", photos_layout)
 
+        # Папка документов Word: откуда импорт берёт .docx без указания папки
+        self.word_path_edit = QLineEdit()
+        self.word_path_edit.setToolTip("Папка с документами Word для импорта; пусто — папку спросит импорт")
+        self.word_path_btn = QPushButton("Обзор...")
+        self.word_path_btn.setMaximumWidth(80)
+
+        word_layout = QHBoxLayout()
+        word_layout.addWidget(self.word_path_edit)
+        word_layout.addWidget(self.word_path_btn)
+
+        form_layout.addRow("Папка документов Word:", word_layout)
+
         # Токен Яндекс.Диска
         self.token_edit = QLineEdit()
         self.token_edit.setEchoMode(QLineEdit.Password)
@@ -620,6 +636,19 @@ class SettingsPage(BasePage):
         form_layout.addRow(self.update_keep_label, self.update_keep_row)
         for widget in (self.update_keep_label, self.update_keep_row):
             widget.setVisible(sys.platform.startswith('linux'))
+
+        # Что делать с записью, перенесённой в новую запись, если новую потом удалили
+        self.draft_moved_rule_combo = QComboBox()
+        self.draft_moved_rule_combo.addItem("удалить вместе с новой записью", 'delete')
+        self.draft_moved_rule_combo.addItem("оставить у прежней записи", 'keep')
+        self.draft_moved_rule_hint = QLabel(
+            "Например, фото перенесли из приёма 1 в новый приём 2, а приём 2 удалили, "
+            "не сохранив: фото удалится вместе с приёмом 2 или останется у приёма 1."
+        )
+        self.draft_moved_rule_hint.setWordWrap(True)
+
+        form_layout.addRow("Перенесённая запись при удалении новой:", self.draft_moved_rule_combo)
+        form_layout.addRow(self.draft_moved_rule_hint)
 
         # ----- Группа настроек логирования -----
         self.log_group = QGroupBox("Настройки логирования")
@@ -704,6 +733,17 @@ class SettingsPage(BasePage):
         log_layout.addRow("Макс. размер файла (байт):", self.log_max_bytes_spin)
         log_layout.addRow("Количество бэкапов:", self.log_backup_count_spin)
 
+
+        # Значения запросов к базе в журнале: только для отладки, это личные данные
+        self.log_sql_params_check = QCheckBox("Значения запросов к базе в журнал")
+        self.log_sql_params_hint = QLabel(
+            "Только для отладки: в журнал попадут личные данные пациентов (ФИО, телефоны, "
+            "тексты приёмов). При смене база будет открыта заново."
+        )
+        self.log_sql_params_hint.setWordWrap(True)
+
+        log_layout.addRow(self.log_sql_params_check)
+        log_layout.addRow(self.log_sql_params_hint)
 
         # Кнопка открытия папки логов
         self.log_folder_btn = QPushButton()
@@ -807,6 +847,7 @@ class SettingsPage(BasePage):
         """
         self.db_path_btn.clicked.connect(lambda: self._browse_file(self.db_path_edit, "Выберите файл БД", "*.db"))
         self.photos_path_btn.clicked.connect(lambda: self._browse_dir(self.photos_path_edit, "Выберите папку для фото"))
+        self.word_path_btn.clicked.connect(lambda: self._browse_dir(self.word_path_edit, "Выберите папку документов Word"))
         self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
         self.log_dir_btn.clicked.connect(lambda: self._browse_dir(self.log_dir_edit, "Выберите папку для логов"))
         self.save_btn.clicked.connect(self._save_settings)
@@ -1206,6 +1247,7 @@ class SettingsPage(BasePage):
         self._text_fields : Tuple[Tuple[str, QLineEdit], ...] = (
             ('database_local_path', self.db_path_edit),         # путь к базе
             ('PHOTOS_STORAGE_PATH', self.photos_path_edit),     # папка фото
+            (WORD_DOCUMENTS_PATH_KEY, self.word_path_edit),     # папка документов Word
             ('YANDEX_TOKEN', self.token_edit),                  # токен Диска
             ('database_remote_path', self.remote_path_edit),    # путь на Диске
             ('BACKUP_PATH', self.backup_path_edit),             # папка копий базы
@@ -1220,6 +1262,7 @@ class SettingsPage(BasePage):
         )
         self._flag_fields : Tuple[Tuple[str, QCheckBox], ...] = (
             ('use_timestamp', self.log_timestamp_check),            # дата в имени журнала
+            ('LOG_SQL_PARAMS', self.log_sql_params_check),          # значения запросов в журнал
             ('system_enabled', self.system_enabled_check),          # системный журнал
             ('system_console_enabled', self.system_console_check),  # он же в консоль
             ('system_file_enabled', self.system_file_check),        # он же в файл
@@ -1233,6 +1276,7 @@ class SettingsPage(BasePage):
         )
         self._choice_fields : Tuple[Tuple[str, QComboBox], ...] = (
             ('UPDATE_BACKUP_KEEP_MODE', self.update_keep_mode_combo),  # как хранить копии кода
+            (DRAFT_MOVED_RULE_KEY, self.draft_moved_rule_combo),       # перенесённая запись
         )
 
     # значение настройки; нет у менеджера — умолчание программы
@@ -1379,7 +1423,8 @@ class SettingsPage(BasePage):
             >>> page._open_log_folder()    # doctest: +SKIP
         """
         log_dir = self.log_dir_edit.text().strip()
-        еее = os.path.exists(log_dir)
+        # еее = os.path.exists(log_dir)
+        # ↑ до 2026-11-07 (ST6): значение нигде не использовалось (оставлено от отладки).
         if (not log_dir) or (not os.path.exists(log_dir)):
             QMessageBox.warning(self, "Ошибка", f"Папка логов не существует:\n{log_dir}")
             return

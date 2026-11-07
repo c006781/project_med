@@ -53,6 +53,36 @@ import msgpack # pip install msgpack
 # (parsers/word_importer.pars_start_args без --folder; экран настроек — М19, окно — М18).
 WORD_DOCUMENTS_PATH_KEY = 'WORD_DOCUMENTS_PATH'
 
+# Правило черновиков «запись перенесли в новую, новую удалили» (CM20): значения —
+# app.utils.drafts.MovedRule; здесь только строки, настройки не зависят от черновиков.
+DRAFT_MOVED_RULE_KEY     : str = 'DRAFT_MOVED_RULE'
+DRAFT_MOVED_RULE_DELETE  : str = 'delete'
+DRAFT_MOVED_RULE_KEEP    : str = 'keep'
+DRAFT_MOVED_RULE_VALUES  : Tuple[str, ...] = (DRAFT_MOVED_RULE_DELETE, DRAFT_MOVED_RULE_KEEP)
+
+
+# правило перенесённой записи из значения настройки
+def draft_moved_rule_value(
+    value : Any,  # значение настройки DRAFT_MOVED_RULE
+) -> str:
+    """
+    Возвращает допустимое значение правила перенесённой записи; неизвестное — ``delete``.
+
+    Файл настроек можно править вручную: ``MovedRule(<неизвестная строка>)`` бросил бы
+    ``ValueError`` при запуске окна.
+
+    Args:
+        value : (Any) Значение настройки ``DRAFT_MOVED_RULE``.
+
+    Returns:
+        (str) ``'delete'`` или ``'keep'``.
+
+    Example:
+        >>> draft_moved_rule_value('keep'), draft_moved_rule_value('нечто')
+        ('keep', 'delete')
+    """
+    return value if value in DRAFT_MOVED_RULE_VALUES else DRAFT_MOVED_RULE_DELETE
+
 
 
 class BaseConfigManager:
@@ -823,6 +853,10 @@ class AppConfigManager(BaseConfigManager):
         # Папка документов Word для импорта (CM17, Ф1.4.4; решение владельца 2026-10-25,
         # вариант В): pars_start.py без --folder берёт её; пусто — --folder обязателен
         WORD_DOCUMENTS_PATH_KEY: '',
+
+        # Запись перенесли в новую запись, новую потом удалили (решение владельца 2026-11-07,
+        # В-21; CM20): 'delete' — запись удаляется вместе с новой, 'keep' — остаётся у прежней
+        DRAFT_MOVED_RULE_KEY: DRAFT_MOVED_RULE_DELETE,
 
         # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
         # 'GITHUB_TOKEN': '',

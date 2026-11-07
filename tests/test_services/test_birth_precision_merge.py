@@ -119,7 +119,8 @@ def test_year_matches_exact_date_of_same_year(svc):
     _patient(svc, birth=datetime.date(1986, 1, 1), precision='year')   # другой год
     [pair] = svc['merge'].find_duplicate_pairs()
     assert (pair.first.id, pair.second.id) == (a.id, b.id)
-    assert pair.match.label == MATCH_FULL and pair.match.date_precision == 'year'
+    assert pair.match.label == MATCH_PARTIAL and pair.match.date_precision == 'year'
+    assert 'только по году' in pair.match.describe()
 
 
 def test_first_of_january_exact_is_not_year(svc):
@@ -178,7 +179,7 @@ def test_merge_takes_exact_date_from_duplicate(svc):
     dup = _patient(svc)
     plan = svc['merge'].plan_merge(main.id, [dup.id])
     assert [(c.field, c.value) for c in plan.changes] == [('birth_date', EXACT), ('birth_date_precision', 'day')]
-    assert plan.matches[0][0] == dup.id and plan.matches[0][1].label == MATCH_FULL
+    assert plan.matches[0][0] == dup.id and plan.matches[0][1].label == MATCH_PARTIAL
     assert plan.warnings == ()
     svc['merge'].merge_patients(main.id, [dup.id], expected=plan, backup=False)
     stored = svc['patient'].get_by_id(main.id)

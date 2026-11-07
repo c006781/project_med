@@ -453,6 +453,23 @@ class PatientMatch:
         return not self.differing_fields
 
     @property
+    def date_is_coarse(self) -> bool:
+        """
+        Сообщает, что даты совпали не с точностью до дня: у кого-то известен только год или месяц.
+
+        Такое совпадение не доказывает, что это один человек, поэтому метка — «неполное»
+        (решение владельца 2026-11-07, В-36).
+
+        Returns:
+            (bool) True — даты сравнены по году или по месяцу.
+
+        Example:
+            >>> PatientMatch(date_precision='year').date_is_coarse
+            True
+        """
+        return self.date_precision not in (None, BIRTH_PRECISION_DAY)
+
+    @property
     def label(self) -> str:
         """
         Возвращает метку: «полное» (всё известно и равно), «неполное» (что-то пусто), «разные».
@@ -466,7 +483,9 @@ class PatientMatch:
         """
         if self.differing_fields:
             return MATCH_DIFFERENT
-        return MATCH_PARTIAL if self.empty_fields else MATCH_FULL
+        # return MATCH_PARTIAL if self.empty_fields else MATCH_FULL
+        # ↑ до 2026-11-07 (В-36): год и точная дата того же года считались полным совпадением
+        return MATCH_PARTIAL if self.empty_fields or self.date_is_coarse else MATCH_FULL
 
     def describe(
         self,
@@ -489,10 +508,29 @@ class PatientMatch:
             names, verb = self.differing_fields, 'различаются'
         elif self.empty_fields:
             names, verb = self.empty_fields, 'пусто'
+        elif self.date_is_coarse:
+            return f"{self.label}: {self._coarse_date_text()}"
         else:
             return self.label
         listed = ', '.join(titles.get(name, name) for name in names)
-        return f"{self.label}: {verb} {listed}"
+        text = f"{self.label}: {verb} {listed}"
+        if not self.differing_fields and self.date_is_coarse:
+            text += f"; {self._coarse_date_text()}"
+        return text
+
+    # пояснение к дате, совпавшей не с точностью до дня
+    def _coarse_date_text(self) -> str:
+        """
+        Возвращает пояснение, с какой точностью совпала дата.
+
+        Returns:
+            (str) Текст для метки.
+
+        Example:
+            >>> PatientMatch(date_precision='year')._coarse_date_text()
+            'дата совпала только по году'
+        """
+        return f"дата совпала только по {'году' if self.date_precision == BIRTH_PRECISION_YEAR else 'месяцу'}"
 
 
 def match_patients(

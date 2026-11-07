@@ -145,13 +145,29 @@ def test_path_exists(page, messages, fake_client):
     assert page.check_path_btn.text() == "Проверить наличие папки"
 
 
-def test_path_missing_created(page, messages, fake_client):
-    """Папки нет: создаётся, сообщение об этом."""
+def test_path_missing_refused_not_created(page, messages, fake_client):
+    """Папки нет, пользователь отказался: Диск не меняется."""
+    messages.answer = sp.QMessageBox.StandardButton.No
     page.token_edit.setText('y0')
     page.remote_path_edit.setText('Новая/папка')
     page._check_remote_path()
     _run_thread(page.path_thread)
+    assert fake_client.created == []
+    assert [kind for kind, *_ in messages] == ['question']
+    assert 'Новая/папка' in messages[0][2]
+    assert page.check_path_btn.isEnabled()
+
+
+def test_path_missing_created(page, messages, fake_client):
+    """Папки нет, пользователь согласился: сначала вопрос, потом создаётся."""
+    page.token_edit.setText('y0')
+    page.remote_path_edit.setText('Новая/папка')
+    page._check_remote_path()
+    _run_thread(page.path_thread)
+    assert messages[0][0] == 'question'
+    _run_thread(page.path_thread)
     assert fake_client.created == ['Новая/папка']
+    del messages[0]
     assert messages == [('information', "Результат", "Путь успешно создан: Новая/папка")]
 
 
@@ -160,6 +176,8 @@ def test_path_with_db_file_checks_its_folder(page, messages, fake_client):
     page.token_edit.setText('y0')
     page.remote_path_edit.setText('Проекты/test/bd/clinic.db')
     page._check_remote_path()
+    _run_thread(page.path_thread)
+    assert 'Проекты/test/bd' in messages[0][2] and 'clinic.db' not in messages[0][2]
     _run_thread(page.path_thread)
     assert fake_client.created == ['Проекты/test/bd']
 

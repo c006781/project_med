@@ -68,6 +68,9 @@ ProgressCallback = Callable[[int, int], None]
 # Расширения файла БД: путь на Диске без них считается папкой (remote_db_file_path)
 DB_EXTENSIONS: Tuple[str, ...] = ('.db', '.sqlite', '.sqlite3')
 
+# Начало сообщения check_and_create_path, когда пути нет: так вызывающий отличает его от ошибки
+PATH_MISSING_PREFIX: str = 'Путь не существует'
+
 # Схема пути Яндекс.Диска ('disk:/папка'); у корня без схемы — '/'
 _DISK_SCHEMA = 'disk:'
 
@@ -598,7 +601,7 @@ def check_and_create_path(
             if client.exists(ya_path):
                 return True, 'Путь существует'
             if not create_if_missing:
-                return False, f'Путь не существует: {ya_path}'
+                return False, f'{PATH_MISSING_PREFIX}: {ya_path}'
             client.makedirs(ya_path) # с родителями (у mkdir 3.x нет parents)
             return True, f'Путь успешно создан: {ya_path}'
         except Exception as exc:

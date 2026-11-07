@@ -1687,10 +1687,11 @@ def launch_linux_update_script(
         OSError: Скрипт не запустился (нет bash).
 
     Example:
-        >>> launch_linux_update_script('/нет/такого.sh', '/нет/такой/папки')
-        Traceback (most recent call last):
-        ...
-        FileNotFoundError: [Errno 2] No such file or directory: '/нет/такой/папки'
+        >>> try:
+        ...     launch_linux_update_script('/нет/такого.sh', '/нет/такой/папки')
+        ... except FileNotFoundError:
+        ...     'папки установки нет'
+        'папки установки нет'
     """
     subprocess.Popen(
         ['bash', script_path],                      # без оболочки: пробелы в пути не мешают

@@ -23,7 +23,7 @@ from app.config import (
 
 from app.utils.logger.logger import AppLogger
 
-from app.updater import AppUpdater
+from app.updater import AppUpdater, current_system, pop_linux_update_failure
 
 from app.config.config_manager.manager import AppConfigManager, UPDATE_CHECK_ON_START_KEY
 
@@ -81,6 +81,12 @@ from PySide6.QtGui import QDesktopServices
 # Проверочные запуски: непустое истинное значение выключает проверку обновлений при старте,
 # какой бы ни была настройка (окно не ходит в сеть и не задаёт вопрос об обновлении)
 NO_UPDATE_CHECK_ENV : str = 'PROJECT_MED_NO_UPDATE_CHECK'
+
+# Откат обновления на Linux возвращает только код; скрипт называет копию базы не в каждой причине
+LINUX_ROLLBACK_DB_HINT : str = (
+    "Откат возвращает только код программы: база, которую новая версия успела обновить, "
+    "не возвращается. Копия базы до обновления лежит рядом с файлом базы (<база>.bak-…)."
+)
 
 
 # нужна ли проверка обновлений при запуске окна
@@ -1197,9 +1203,15 @@ class UpdateMixin:
             self.updater.update_available.connect(self._on_update_available)
             self.updater.no_update.connect(self._on_no_update)
             self.updater.check_error.connect(self._on_update_error)
-            self.updater.download_progress.connect(self._on_download_progress)
-            self.updater.download_finished.connect(self._on_download_finished)
-            self.updater.download_error.connect(self._on_download_error)
+            # self.updater.download_progress.connect(self._on_download_progress)
+            # self.updater.download_finished.connect(self._on_download_finished)
+            # self.updater.download_error.connect(self._on_download_error)
+            # ↑ до 2026-11-07 (MW2): SyncMixin стоит раньше в наследовании, и одноимённые обработчики
+            #   брались у него: ошибка обновления шла как ошибка базы, файл — как код скачивания.
+            self.updater.download_progress.connect(self._on_update_download_progress)
+            self.updater.download_finished.connect(self._on_update_download_finished)
+            self.updater.download_error.connect(self._on_update_download_error)
+            self.updater.download_warning.connect(self._on_update_download_warning)
 
             self.logger.info(f"Модуль обновлений инициализирован, версия: {APP_VERSION}")
         except Exception as e:
@@ -1285,15 +1297,18 @@ class UpdateMixin:
         clicked = msg.clickedButton()
         if clicked == download_btn:
             self.logger.debug("Download button clicked, trying to apply update from release data")
-            if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
-                data = self.updater._pending_release_data
+            # if hasattr(self, 'updater') and hasattr(self.updater, '_pending_release_data'):
+            #     data = self.updater._pending_release_data
+            # ↑ до 2026-11-07 (Ф2.1.4): чтение закрытого атрибута; у модуля есть свойство
+            data = self.updater.pending_release_data if hasattr(self, 'updater') else None
+            if data:
                 # self.logger.debug(f"Pending release data keys: {list(self.updater._pending_release_data.keys())}")
                 self.logger.debug(
                     f"_pending_release_data exists, "
                     f"type={type(data)}, "
                     f"keys={data.keys() if data else None}"
                 )
-                self.updater.apply_update_from_release(data)
+                self._install_update(data)
             else:
                 self.logger.error("No pending release data or updater missing")
                 QMessageBox.warning(self, "Ошибка", "Не удалось получить данные релиза")
@@ -1354,14 +1369,29 @@ class UpdateMixin:
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
     @Slot(int, int)
-    def _on_download_progress(self, current: int, total: int):
-        """Обновляет прогресс-бар в главном окне."""
-        if total > 0:
-            self.progress_bar.setRange(0, total)
-            self.progress_bar.setValue(current)
-        else:
-            self.progress_bar.setRange(0, 0)
+    def _on_update_download_progress(
+        self,
+        current : int,  # скачано байт
+        total   : int,  # всего байт; 0 — неизвестно
+    ) -> None:
+        """
+        Показывает прогресс скачивания обновления: в окне и в окне ожидания установки.
+
+        Args:
+            current : (int) Скачано байт.
+            total   : (int) Всего байт; 0 — размер неизвестен, бегущая полоса.
+
+        Example:
+            >>> window._on_update_download_progress(10, 100)    # doctest: +SKIP
+        """
+        maximum = total if total > 0 else 0
+        self.progress_bar.setRange(0, maximum)
+        self.progress_bar.setValue(current if total > 0 else 0)
         self.progress_bar.setVisible(True)
+        dialog = getattr(self, 'update_progress_dialog', None)
+        if dialog is not None:
+            dialog.setRange(0, maximum)
+            dialog.setValue(current if total > 0 else 0)
 
     @AppLogger.get_instance(
         name='UpdateMixin',
@@ -1371,7 +1401,21 @@ class UpdateMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_download_finished(self, file_path: str):
+    def _on_update_download_finished(
+        self,
+        file_path : str,    # скачанный файл обновления
+    ) -> None:
+        """
+        Файл обновления только скачан (``AppUpdater.download_update``): спрашивает о замене.
+
+        Обычная установка идёт другим путём (:meth:`_install_update`) и сюда не приходит.
+
+        Args:
+            file_path : (str) Скачанный файл.
+
+        Example:
+            >>> window._on_update_download_finished('/tmp/update.exe')  # doctest: +SKIP
+        """
         self.progress_bar.setVisible(False)
         reply = QMessageBox.question(
             self, "Обновление загружено",
@@ -1379,7 +1423,7 @@ class UpdateMixin:
             "Заменить текущую программу? (потребуется перезапуск)",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        if reply == QMessageBox.StandardButton.Yes:
+        if reply == QMessageBox.StandardButton.Yes and self._resolve_unsaved_before_exit():
             self._apply_update_file(file_path)
 
     @AppLogger.get_instance(
@@ -1390,10 +1434,106 @@ class UpdateMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_download_error(self, error_msg: str):
-        self.logger.error(f"Download error: {error_msg}")
+    def _on_update_download_error(
+        self,
+        error_msg : str,    # причина
+    ) -> None:
+        """
+        Показывает, почему обновление не установлено; программа продолжает работу.
+
+        Сюда приходит не только обрыв скачивания, но и отказ до него (нет прав на папку установки,
+        не тот вид установки, нет файла для этой ОС) и несовпавшая контрольная сумма, поэтому
+        заголовок не говорит о скачивании.
+
+        Args:
+            error_msg : (str) Причина.
+
+        Example:
+            >>> window._on_update_download_error('Нет прав на запись')  # doctest: +SKIP
+        """
+        self.logger.error(f"Update error: {error_msg}")
         self.progress_bar.setVisible(False)
-        QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось скачать обновление:\n{error_msg}")
+        self._close_update_progress()
+        # QMessageBox.warning(self, "Ошибка загрузки", f"Не удалось скачать обновление:\n{error_msg}")
+        # ↑ до 2026-11-07 (MW3): заголовок неточен, это может быть отказ проверки или нет прав
+        QMessageBox.warning(self, "Обновление не установлено", error_msg)
+
+    @Slot(str)
+    def _on_update_download_warning(
+        self,
+        text : str,     # предупреждение
+    ) -> None:
+        """
+        Показывает предупреждение установки (релиз без контрольной суммы); установка продолжается.
+
+        Args:
+            text : (str) Предупреждение.
+
+        Example:
+            >>> window._on_update_download_warning('Нет хеша')  # doctest: +SKIP
+        """
+        self.logger.warning(f"Update warning: {text}")
+        QMessageBox.warning(self, "Предупреждение об обновлении", text)
+
+    # установка обновления: сначала несохранённое, потом запрет правок до выхода
+    def _install_update(
+        self,
+        release_data : dict,    # данные релиза GitHub
+    ) -> None:
+        """
+        Запускает установку обновления, не теряя несохранённого.
+
+        Модуль обновлений в конце установки сам завершает программу (``sys.exit``), минуя
+        ``closeEvent``. Поэтому вопрос о несохранённом задаётся до начала, а на время скачивания
+        окно закрыто модальным окном ожидания: правка, сделанная после вопроса, пропала бы молча.
+        При ошибке окно ожидания закрывается и работа продолжается.
+
+        Args:
+            release_data : (dict) Данные релиза.
+
+        Example:
+            >>> window._install_update(window.updater.pending_release_data)     # doctest: +SKIP
+        """
+        if not self._resolve_unsaved_before_exit():
+            self.logger.info("Обновление отменено: есть несохранённые изменения")
+            return
+        self.update_progress_dialog = UpdateProgressDialog(self)
+        self.update_progress_dialog.show()
+        self.updater.apply_update_from_release(release_data)
+
+    # закрыть окно ожидания установки
+    def _close_update_progress(self) -> None:
+        """
+        Закрывает окно ожидания установки, если оно открыто.
+
+        Example:
+            >>> window._close_update_progress()     # doctest: +SKIP
+        """
+        dialog = getattr(self, 'update_progress_dialog', None)
+        if dialog is not None:
+            dialog.finish()
+            self.update_progress_dialog = None
+
+    # причина неудачного обновления Linux: показать один раз
+    def _show_linux_update_failure(self) -> None:
+        """
+        Показывает при старте, почему обновление Linux откатилось; только на Linux, один раз.
+
+        Скрипт обновления оставляет причину в файле, ``pop_linux_update_failure`` читает и удаляет
+        его. Без сообщения пользователь просто увидел бы прежнюю версию. Подсказка о копии базы
+        добавляется, если причина её не содержит: откат базу не возвращает.
+
+        Example:
+            >>> window._show_linux_update_failure()     # doctest: +SKIP
+        """
+        if current_system() != 'linux':
+            return
+        reason = pop_linux_update_failure()
+        if reason is None:
+            return
+        self.logger.warning(f"Обновление откатилось: {reason}")
+        text = reason if '.bak-' in reason else f"{reason}\n\n{LINUX_ROLLBACK_DB_HINT}"
+        QMessageBox.warning(self, "Обновление не установлено", text)
 
     @AppLogger.get_instance(
         name='UpdateMixin',
@@ -1433,23 +1573,105 @@ del "%~f0"
                 f.write(bat_content)
             subprocess.Popen([bat_path], shell=True)
             QApplication.quit()
-        elif system == "Linux":
-            # Создаём shell-скрипт
-            sh_content = f"""#!/bin/bash
-sleep 2
-cp "{new_file_path}" "{current_exe}"
-chmod +x "{current_exe}"
-"{current_exe}" &
-rm "$0"
-"""
-            sh_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
-            with open(sh_path, "w") as f:
-                f.write(sh_content)
-            os.chmod(sh_path, 0o755)
-            subprocess.Popen([sh_path])
-            QApplication.quit()
+#         elif system == "Linux":
+#             # Создаём shell-скрипт
+#             sh_content = f"""#!/bin/bash
+# sleep 2
+# cp "{new_file_path}" "{current_exe}"
+# chmod +x "{current_exe}"
+# "{current_exe}" &
+# rm "$0"
+# """
+#             sh_path = os.path.join(tempfile.gettempdir(), "update_medicalapp.sh")
+#             with open(sh_path, "w") as f:
+#                 f.write(sh_content)
+#             os.chmod(sh_path, 0o755)
+#             subprocess.Popen([sh_path])
+#             QApplication.quit()
+        # ↑ до 2026-11-07 (MW4): ветка не работала. Linux-версия ставится архивом и запускается из
+        #   исходников (sys.frozen ложно, выход выше), файл на замену окну никто не передаёт:
+        #   обновление Linux — UpdateApplier и update.sh (app/UPDATER.md §1.3).
         else:
-            QMessageBox.warning(self, "ОС не поддерживается", "Автоматическая замена файла доступна только для Windows и Linux.")  
+            QMessageBox.warning(self, "ОС не поддерживается", "Замена файла окном есть только на Windows; на Linux обновление ставит сама программа.")
+
+class UpdateProgressDialog(QProgressDialog):
+    """
+    Модальное окно ожидания установки обновления; пользователь не может его закрыть.
+
+    Пока оно открыто, правки в окне программы невозможны. Модуль обновлений не умеет отменять
+    скачивание и сам завершает программу; при ошибке окно закрывает :meth:`finish`.
+
+    Example:
+        >>> UpdateProgressDialog(window).show()     # doctest: +SKIP
+    """
+
+    def __init__(
+        self,
+        parent : Optional[QWidget] = None,  # окно программы
+    ) -> None:
+        """
+        Создаёт окно ожидания без кнопки отмены, с бегущей полосой до известного размера.
+
+        Args:
+            parent : (QWidget/None) Окно программы.
+
+        Example:
+            >>> UpdateProgressDialog().minimum()    # doctest: +SKIP
+            0
+        """
+        super().__init__(
+            "Обновление скачивается. После установки программа перезапустится.",    # текст
+            "",                                                                     # кнопки нет
+            0,                                                                      # начало шкалы
+            0,                                                                      # 0..0 — бегущая
+            parent,                                                                 # окно
+        )
+        self.setWindowTitle("Обновление программы")
+        self.setCancelButton(None)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setAutoClose(False)
+        self.setAutoReset(False)
+        self.setMinimumDuration(0)
+        self._closing = False
+
+    def finish(self) -> None:
+        """
+        Закрывает окно (установка не состоялась).
+
+        Example:
+            >>> dialog.finish()     # doctest: +SKIP
+        """
+        self._closing = True
+        self.close()
+        self.deleteLater()
+
+    def reject(self) -> None:
+        """
+        Клавиша Esc: окно не закрывается, отменить установку нельзя.
+
+        Example:
+            >>> dialog.reject()     # doctest: +SKIP
+        """
+
+    def closeEvent(
+        self,
+        event : Any,    # событие закрытия Qt
+    ) -> None:
+        """
+        Закрытие окна пользователем не срабатывает, срабатывает только :meth:`finish`.
+
+        Args:
+            event : (QCloseEvent) Событие закрытия.
+
+        Example:
+            >>> dialog.close()      # doctest: +SKIP
+            False
+        """
+        if self._closing:
+            event.accept()
+        else:
+            event.ignore()
+
 
 # ========== Диалог прогресса ==========
 class ParsingProgressDialog(QDialog):
@@ -1741,6 +1963,34 @@ class MainWindow(
         Пример:
             >>> window.close()      # с изменениями — диалог
         """
+        if not self._resolve_unsaved_before_exit():
+            event.ignore()
+            return
+        if getattr(self, 'drafts_bridge', None) is not None:
+            self.drafts_bridge.detach()
+        super().closeEvent(event)
+
+    # несохранённое перед выходом: закрытие окна и установка обновления
+    def _resolve_unsaved_before_exit(self) -> bool:
+        """
+        Решает с пользователем судьбу несохранённого перед выходом из программы.
+
+        Порядок:
+            1. незавершённая правка экрана наборов данных переводится в черновики;
+            2. черновики: вопрос «сохранить / не сохранять / отмена» (требование 8);
+            3. старые экраны со своими правками: вопрос, потерять ли их.
+
+        Черновики при «не сохранять» здесь не очищаются: если выход не состоится (ошибка
+        обновления), пользователь продолжит с ними.
+
+        Returns:
+            (bool) True — можно выходить; False — выход отменён (пользователем или ошибкой
+                сохранения; сообщение уже показано).
+
+        Example:
+            >>> window._resolve_unsaved_before_exit()   # нет изменений — без вопросов
+            True
+        """
         from interfaces.gui.gui_window.drafts_qt import ask_on_close
         # F7 (2026-10-18): незавершённая правка на экране наборов данных — ещё не в черновиках
         # (и не в БД); без этого вопрос «сохранить?» её не видел, и она пропадала молча
@@ -1751,17 +2001,81 @@ class MainWindow(
                 QMessageBox.warning(self, "Незавершённая правка",
                                     "На экране «Наборы данных» правка не прошла проверку:\n"
                                     f"{problem}\n\nИсправьте или отмените её.")
-                event.ignore()
-                return
+                return False
         drafts = getattr(self, 'drafts', None)
         if drafts is not None and not drafts.store.is_empty:
             choice = ask_on_close(self)
             if choice == 'cancel' or (choice == 'save' and not self.save_drafts()):
-                event.ignore()
-                return
-        if getattr(self, 'drafts_bridge', None) is not None:
-            self.drafts_bridge.detach()
-        super().closeEvent(event)
+                return False
+        return self._confirm_old_pages_loss("Выйти")
+
+    # названия старых экранов, где есть свои несохранённые правки
+    def _old_pages_with_changes(self) -> List[str]:
+        """
+        Возвращает названия экранов со своими несохранёнными правками, вне общих черновиков.
+
+        Экран проверяется, если у него есть ``_has_unsaved_changes``. Сбой проверки считается
+        наличием правок: лучше лишний вопрос, чем молчаливая потеря.
+
+        Returns:
+            (List[str]) Названия экранов; пусто — правок нет.
+
+        Example:
+            >>> window._old_pages_with_changes()
+            []
+        """
+        manager = getattr(self, 'page_manager', None)
+        titles : List[str] = []
+        if manager is None:
+            return titles
+        for page_id, page in manager._pages.items():
+            check = getattr(page, '_has_unsaved_changes', None)
+            if check is None:
+                continue
+            try:
+                changed = check()
+            except Exception as e:
+                self.logger.exception(f"Не удалось проверить правки экрана {page_id}: {e}")
+                changed = True
+            if changed:
+                titles.append(manager._get_page_title(page_id))
+        return titles
+
+    # вопрос: потерять правки старых экранов или отказаться от действия
+    def _confirm_old_pages_loss(
+        self,
+        action : str,   # название действия на кнопке вопроса, например 'Выйти'
+    ) -> bool:
+        """
+        Спрашивает, продолжать ли действие, если на старых экранах есть несохранённые правки.
+
+        Эти экраны хранят правки сами и сохраняют своей кнопкой. По умолчанию выбран отказ.
+
+        Args:
+            action : (str) Название действия для текста вопроса.
+
+        Returns:
+            (bool) True — правок нет или пользователь согласен их потерять.
+
+        Example:
+            >>> window._confirm_old_pages_loss('Выйти')     # нет правок — без вопроса
+            True
+        """
+        titles = self._old_pages_with_changes()
+        if not titles:
+            return True
+        reply = QMessageBox.question(
+            self,                                                           # родитель
+            "Несохранённые изменения",                                      # заголовок
+            "Не сохранены изменения на экранах: {pages}.\n"
+            "Они будут потеряны. {action} без сохранения?".format(
+                pages   =   ', '.join(titles),  # экраны
+                action  =   action,             # что собираемся сделать
+            ),                                                              # текст
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, # кнопки
+            QMessageBox.StandardButton.No,                                  # по умолчанию отказ
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
 
     @AppLogger.get_instance(
@@ -1805,6 +2119,9 @@ class MainWindow(
         self.download_thread = None
         self.upload_thread = None
 
+        # Окно ожидания установки обновления (создаётся на время установки)
+        self.update_progress_dialog = None
+
         # Построение интерфейса
         self._setup_ui()
 
@@ -1830,6 +2147,9 @@ class MainWindow(
 
         # Инициализация системы обновлений (собственный модуль)
         self._init_updater()
+
+        # Откат обновления Linux: сообщение после показа окна
+        QTimer.singleShot(0, self._show_linux_update_failure)
 
         # Не вызываем check_for_updates сразу, а планируем через 1 секунду
         QTimer.singleShot(1500, self._delayed_check_updates)

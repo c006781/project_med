@@ -56,6 +56,41 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QPixmap, QDesktopServices
 
 
+# открытие папки в файловом менеджере (Linux и другие Unix)
+def open_folder_in_file_manager(
+    folder : str,  # папка, которую нужно показать
+) -> Optional[str]:
+    """
+    Открывает папку в файловом менеджере системы через ``QDesktopServices``.
+
+    ``QDesktopServices.openUrl`` возвращает False, когда нет программы для папки
+    (на Linux — нет ``xdg-open`` или менеджера файлов) или запуск не удался; раньше
+    результат не проверялся, и пользователь не видел ничего. Путь превращается в URL
+    через ``QUrl.fromLocalFile`` — пробелы и кириллица кодируются корректно.
+
+    Args:
+        folder : (str) Путь к существующей папке.
+
+    Returns:
+        (str/None) Текст ошибки для пользователя; None — папка открыта.
+
+    Example:
+        >>> open_folder_in_file_manager(
+        ...     folder   =   "/home/user/photos/Иванов И.И.",   # папка с пробелом и кириллицей
+        ... )
+    """
+    if not os.path.isdir(folder): # папку могли удалить после проверки файла
+        return f"Папка не найдена:\n{folder}"
+    if not QDesktopServices.openUrl(
+        QUrl.fromLocalFile(folder),
+    ):
+        return (
+            "Не удалось открыть папку: в системе нет программы для открытия папок "
+            f"(например, xdg-open или файлового менеджера).\nПапка:\n{folder}"
+        )
+    return None
+
+
 class PhotoEditDialog(QDialog):
     """
     Диалог для просмотра и редактирования фотографии.
@@ -1058,8 +1093,15 @@ class PhotoEditDialog(QDialog):
         elif system_name == "Darwin":  # macOS
             subprocess.Popen(["open", "-R", full_path])
         else:  # Linux и другие Unix
-            folder = os.path.dirname(full_path)
-            if os.path.exists(folder):
-                from PySide6.QtGui import QDesktopServices
-                from PySide6.QtCore import QUrl
-                QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+            # folder = os.path.dirname(full_path)
+            # if os.path.exists(folder):
+            #     from PySide6.QtGui import QDesktopServices
+            #     from PySide6.QtCore import QUrl
+            #     QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+            # ↑ до 2026-11-07 (LX1): результат openUrl не проверялся, при отсутствии папки
+            #   или программы пользователь не получал никакого сообщения.
+            error = open_folder_in_file_manager(
+                os.path.dirname(full_path),     # папка с фото
+            )
+            if error:
+                QMessageBox.warning(self, "Не удалось открыть папку", error)

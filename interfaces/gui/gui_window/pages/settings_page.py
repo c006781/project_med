@@ -1,7 +1,9 @@
 # interfaces/gui/gui_window/pages/settings_page.py
 
 import os
+import shutil
 import sys
+from typing import Optional
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
@@ -23,6 +25,55 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QProcess, QThread, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QDesktopServices
+
+# запуск файлового менеджера для папки отдельным процессом
+def open_folder_detached(
+    folder   : str,       # путь к существующей папке
+    platform : str = '',  # sys.platform; '' — текущая система
+) -> Optional[str]:
+    """
+    Открывает папку в файловом менеджере, не дожидаясь его завершения.
+
+    Windows — ``explorer``, macOS — ``open``, остальные — ``xdg-open``. Раньше результат
+    ``QProcess.startDetached`` не проверялся: без ``xdg-open`` (минимальный Linux, контейнер)
+    кнопка молча ничего не делала. Путь передаётся аргументом списка, без оболочки, поэтому
+    пробелы и кириллица безопасны.
+
+    Args:
+        folder   : (str) Путь к существующей папке.
+        platform : (str) Значение ``sys.platform``; '' — взять текущее.
+
+    Returns:
+        (str/None) Текст ошибки для пользователя; None — программа запущена.
+
+    Example:
+        >>> open_folder_detached(
+        ...     folder   =   "/home/user/Журнал приёмов/logs",   # путь с пробелом и кириллицей
+        ... )
+    """
+    platform = platform or sys.platform
+    if platform == 'win32':
+        program = 'explorer'
+    elif platform == 'darwin':
+        program = 'open'
+    else: # Linux и другие Unix
+        program = 'xdg-open'
+
+    # программа должна быть в PATH — иначе startDetached вернёт False без пояснений
+    if shutil.which(program) is None and platform != 'win32':
+        return (
+            f"Не найдена программа «{program}» для открытия папки.\n"
+            f"Откройте папку вручную:\n{folder}"
+        )
+    result = QProcess.startDetached(
+        program,        # файловый менеджер
+        [folder],       # аргумент — папка
+    )
+    started = result[0] if isinstance(result, tuple) else bool(result) # PySide6 отдаёт (успех, pid)
+    if not started:
+        return f"Не удалось запустить «{program}».\nОткройте папку вручную:\n{folder}"
+    return None
+
 
 class SettingsPage(BasePage):
     """
@@ -725,12 +776,18 @@ class SettingsPage(BasePage):
         # from PySide6.QtGui import QDesktopServices
 
         log_dir = os.path.join(log_dir, '')
-        if sys.platform == 'win32':
-            QProcess.startDetached('explorer', [log_dir])
-        elif sys.platform == 'darwin':
-            QProcess.startDetached('open', [log_dir])
-        else:  # Linux
-            QProcess.startDetached('xdg-open', [log_dir])
+        # if sys.platform == 'win32':
+        #     QProcess.startDetached('explorer', [log_dir])
+        # elif sys.platform == 'darwin':
+        #     QProcess.startDetached('open', [log_dir])
+        # else:  # Linux
+        #     QProcess.startDetached('xdg-open', [log_dir])
+        # ↑ до 2026-11-07 (LX2): результат запуска не проверялся — без xdg-open кнопка молчала.
+        error = open_folder_detached(
+            log_dir,    # папка логов
+        )
+        if error:
+            QMessageBox.warning(self, "Не удалось открыть папку", error)
 
         # try:
         #     url = QUrl.fromLocalFile(log_dir)

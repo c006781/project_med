@@ -16,6 +16,7 @@ Example:
 """
 
 import os
+import posixpath
 import shutil
 import sys
 from typing import Any, Dict, Optional
@@ -26,7 +27,7 @@ from app.dependencies import create_config_applier  # применитель с 
 from app.utils.logger.bool_strings import to_bool  # одно правило для строк-флагов
 from app.utils.logger.logger import AppLogger
 
-from app.network.ya_dop import check_and_create_path
+from app.network.ya_dop import DB_EXTENSIONS, check_and_create_path, check_token, normalize_remote_path
 
 from app.config.config_applier import ConfigApplier
 from app.config.config_manager.manager import AppConfigManager
@@ -89,6 +90,164 @@ def open_folder_detached(
     if not started:
         return f"Не удалось запустить «{program}».\nОткройте папку вручную:\n{folder}"
     return None
+
+
+# Журнал страницы настроек и её потоков проверки
+_log = AppLogger.get_instance(
+    name                 = 'gui.SettingsPage',  # тот же логгер, что у страницы
+    enable_file_logging  = 'user',              # файл пользовательского журнала
+    use_name_in_filename = False,               # имя логгера не в имени файла
+)
+
+
+# папка на Диске, которую проверяет кнопка
+def remote_folder_of(
+    remote_path : str,  # значение поля «Удалённый путь БД»
+) -> str:
+    """
+    Возвращает папку на Яндекс.Диске для пути из настроек.
+
+    В настройке можно указать и папку, и файл базы: путь с расширением базы (``DB_EXTENSIONS``) —
+    это файл (так же считает ``remote_db_file_path``), его папка — родительская. Файл в корне
+    Диска — папка ``/``.
+
+    Args:
+        remote_path : (str) Значение поля «Удалённый путь БД».
+
+    Returns:
+        (str) Нормализованный путь к папке.
+
+    Example:
+        >>> remote_folder_of("Проекты/test/bd/clinic.db")
+        'Проекты/test/bd'
+        >>> remote_folder_of("Проекты/test/bd/")
+        'Проекты/test/bd'
+        >>> remote_folder_of("clinic.db")
+        '/'
+    """
+    normalized = normalize_remote_path(remote_path)
+    if normalized.lower().endswith(DB_EXTENSIONS): # файл базы
+        return posixpath.dirname(normalized) or '/'
+    return normalized
+
+
+class TokenCheckThread(QThread):
+    """
+    Поток проверки токена Яндекс.Диска: результат и любая ошибка приходят сигналом ``result``.
+
+    Без перехвата исключение в ``run`` терялось бы вместе с сигналом, и кнопка проверки навсегда
+    осталась бы выключенной.
+
+    Attributes:
+        token : (str) OAuth-токен.
+
+    Example:
+        >>> thread = TokenCheckThread("y0_...")                     # doctest: +SKIP
+        >>> thread.result.connect(page._on_token_checked)           # doctest: +SKIP
+        >>> thread.start()                                          # doctest: +SKIP
+    """
+
+    result = Signal(bool, str)   # успех, сообщение пользователю
+
+    # поток проверки заданного токена
+    def __init__(
+        self,
+        token : str,  # OAuth-токен
+    ) -> None:
+        """
+        Запоминает токен; проверка начнётся при ``start()``.
+
+        Args:
+            token : (str) OAuth-токен.
+
+        Example:
+            >>> thread = TokenCheckThread("y0_...")    # doctest: +SKIP
+        """
+        super().__init__()
+        self.token = token
+
+    # проверка токена в отдельном потоке
+    def run(self) -> None:
+        """
+        Проверяет токен и всегда отправляет ``result``: ошибка — ``(False, текст)`` и запись в журнал.
+
+        Example:
+            >>> thread.run()    # doctest: +SKIP
+        """
+        try:
+            ok = check_token(self.token)
+            message = "Токен действителен" if ok else "Токен недействителен или нет соединения"
+        except Exception as exc:
+            _log.exception(f"Ошибка проверки токена Яндекс.Диска: {exc}")
+            ok = False
+            message = f"Не удалось проверить токен: {exc}"
+        self.result.emit(
+            ok,         # успех
+            message,    # сообщение
+        )
+
+
+class PathCheckThread(QThread):
+    """
+    Поток проверки папки на Яндекс.Диске: нет папки — создаёт её; результат и любая ошибка — сигналом.
+
+    Attributes:
+        token : (str) OAuth-токен.
+        path  : (str) Значение поля «Удалённый путь БД» (папка или файл базы).
+
+    Example:
+        >>> thread = PathCheckThread("y0_...", "Проекты/test/bd")   # doctest: +SKIP
+        >>> thread.result.connect(page._on_path_checked)            # doctest: +SKIP
+        >>> thread.start()                                          # doctest: +SKIP
+    """
+
+    result = Signal(bool, str)   # успех, сообщение пользователю
+
+    # поток проверки заданной папки
+    def __init__(
+        self,
+        token : str,  # OAuth-токен
+        path  : str,  # значение поля «Удалённый путь БД»
+    ) -> None:
+        """
+        Запоминает токен и путь; проверка начнётся при ``start()``.
+
+        Args:
+            token : (str) OAuth-токен.
+            path  : (str) Значение поля «Удалённый путь БД».
+
+        Example:
+            >>> thread = PathCheckThread("y0_...", "Проекты/test/bd")    # doctest: +SKIP
+        """
+        super().__init__()
+        self.token = token
+        self.path = path
+
+    # проверка папки в отдельном потоке
+    def run(self) -> None:
+        """
+        Проверяет папку и всегда отправляет ``result``: ошибка — ``(False, текст)`` и запись в журнал.
+
+        Example:
+            >>> thread.run()    # doctest: +SKIP
+        """
+        try:
+            # ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
+            # ↑ до 2026-11-07 (ST2): путь по умолчанию — файл (…/clinic.db), на Диске создавалась
+            #   папка с именем файла, и потом база не могла туда записаться.
+            ok, message = check_and_create_path(
+                self.token,                     # токен
+                remote_folder_of(self.path),    # папка, а не файл базы
+                create_if_missing   =   True,   # нет — создать
+            )
+        except Exception as exc:
+            _log.exception(f"Ошибка проверки папки на Яндекс.Диске: {exc}")
+            ok = False
+            message = f"Не удалось проверить папку: {exc}"
+        self.result.emit(
+            ok,         # успех
+            message,    # сообщение
+        )
 
 
 class SettingsPage(BasePage):
@@ -190,9 +349,17 @@ class SettingsPage(BasePage):
 
         self.first_start = False          # флаг первого запуска
 
+        self.token_thread : Optional[TokenCheckThread] = None   # идущая или последняя проверка токена
+        self.path_thread  : Optional[PathCheckThread] = None    # идущая или последняя проверка папки
+
         self._setup_ui()
         self.setMinimumHeight(400)
         self._load_settings()
+
+        # Поток проверки, уничтоженный на ходу при выходе из программы, роняет процесс
+        application = QApplication.instance()
+        if application is not None:
+            application.aboutToQuit.connect(self.wait_check_threads)
 
     # ----------------------------------------------------------------------
     # Построение интерфейса
@@ -1102,38 +1269,64 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _check_token(self):
-        """Проверяет токен Яндекс.Диска асинхронно."""
+    # проверка токена в отдельном потоке
+    def _check_token(self) -> None:
+        """
+        Запускает проверку токена в отдельном потоке и выключает кнопку до результата.
+
+        Результат — ``_on_token_checked``. Токен не задан — предупреждение, поток не запускается.
+
+        Example:
+            >>> page._check_token()    # doctest: +SKIP
+        """
         token = self.token_edit.text().strip()
         
         if not token:
             QMessageBox.warning(self, "Ошибка", "Токен не задан.")
             return
 
-        class TokenCheckThread(QThread):
-            result = Signal(bool, str)
-            def __init__(self, token):
-                super().__init__()
-                self.token = token
-
-            def run(self):
-                from app.network.ya_dop import check_token # циклы
-                ok = check_token(self.token)
-                msg = "Токен действителен" if ok else "Токен недействителен или нет соединения"
-                self.result.emit(ok, msg)
+        # class TokenCheckThread(QThread):
+        #     result = Signal(bool, str)
+        #     def __init__(self, token):
+        #         super().__init__()
+        #         self.token = token
+        #
+        #     def run(self):
+        #         from app.network.ya_dop import check_token # циклы
+        #         ok = check_token(self.token)
+        #         msg = "Токен действителен" if ok else "Токен недействителен или нет соединения"
+        #         self.result.emit(ok, msg)
+        # ↑ до 2026-11-07 (ST3): класс внутри метода, исключение в run не доходило до сообщения,
+        #   кнопка оставалась выключенной. Теперь TokenCheckThread на уровне модуля. Импорт
+        #   check_token — наверху модуля: check_and_create_path из того же модуля уже был там.
 
         self.token_thread = TokenCheckThread(token)
         self.token_thread.result.connect(self._on_token_checked)
-        self.token_thread.start()
         self.check_token_btn.setEnabled(False)
         self.check_token_btn.setText("Проверка...")
+        self.token_thread.start()
 
     @AppLogger.get_instance(
         name='SettingsPage',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _on_token_checked(self, ok: bool, message: str):
+    # результат проверки токена
+    def _on_token_checked(
+        self,
+        ok      : bool,  # токен действителен
+        message : str,   # сообщение пользователю
+    ) -> None:
+        """
+        Возвращает кнопку проверки токена и показывает результат.
+
+        Args:
+            ok      : (bool) Токен действителен.
+            message : (str) Сообщение пользователю.
+
+        Example:
+            >>> page._on_token_checked(True, "Токен действителен")    # doctest: +SKIP
+        """
         self.check_token_btn.setEnabled(True)
         self.check_token_btn.setText("Проверить")
 
@@ -1147,8 +1340,18 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _check_remote_path(self):
-        """Проверяет существование удалённого пути на Яндекс.Диске, предлагает создать."""
+    # проверка папки на Диске в отдельном потоке
+    def _check_remote_path(self) -> None:
+        """
+        Запускает проверку папки на Яндекс.Диске в отдельном потоке и выключает кнопку до результата.
+
+        Папки нет — поток создаёт её (без вопроса). В поле может быть и файл базы — проверяется
+        его папка (``remote_folder_of``). Результат — ``_on_path_checked``. Токен или путь не
+        заданы — предупреждение, поток не запускается.
+
+        Example:
+            >>> page._check_remote_path()    # doctest: +SKIP
+        """
         token = self.token_edit.text().strip()
         path = self.remote_path_edit.text().strip()
         if not token:
@@ -1159,37 +1362,77 @@ class SettingsPage(BasePage):
             QMessageBox.warning(self, "Ошибка", "Удалённый путь не задан.")
             return
 
-        class PathCheckThread(QThread):
-            result = Signal(bool, str)
-
-            def __init__(self, token, path):
-                super().__init__()
-                self.token = token
-                self.path = path
-
-            def run(self):
-                # from app.network.ya_dop import check_and_create_path
-                ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
-                self.result.emit(ok, msg)
+        # class PathCheckThread(QThread):
+        #     result = Signal(bool, str)
+        #
+        #     def __init__(self, token, path):
+        #         super().__init__()
+        #         self.token = token
+        #         self.path = path
+        #
+        #     def run(self):
+        #         # from app.network.ya_dop import check_and_create_path
+        #         ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
+        #         self.result.emit(ok, msg)
+        # ↑ до 2026-11-07 (ST3): как TokenCheckThread в _check_token.
 
         self.path_thread = PathCheckThread(token, path)
         self.path_thread.result.connect(self._on_path_checked)
-        self.path_thread.start()
         self.check_path_btn.setEnabled(False)
         self.check_path_btn.setText("Проверка...")
+        self.path_thread.start()
 
     @AppLogger.get_instance(
         name='SettingsPage',
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _on_path_checked(self, ok: bool, message: str):
+    # результат проверки папки
+    def _on_path_checked(
+        self,
+        ok      : bool,  # папка есть или создана
+        message : str,   # сообщение пользователю
+    ) -> None:
+        """
+        Возвращает кнопку проверки папки и показывает результат.
+
+        Args:
+            ok      : (bool) Папка есть или создана.
+            message : (str) Сообщение пользователю.
+
+        Example:
+            >>> page._on_path_checked(True, "Путь существует")    # doctest: +SKIP
+        """
         self.check_path_btn.setEnabled(True)
         self.check_path_btn.setText("Проверить наличие папки")
         if ok:
             QMessageBox.information(self, "Результат", message)
         else:
             QMessageBox.warning(self, "Результат", message)
+
+    # ожидание потоков проверки перед выходом
+    def wait_check_threads(
+        self,
+        timeout_ms : int = 3000,  # сколько ждать каждый поток, мс
+    ) -> None:
+        """
+        Ждёт завершения идущих проверок Диска; вызывается при выходе из программы.
+
+        Поток не прерывается: прерванный посреди запроса он может оставить интерпретатор в плохом
+        состоянии. Не успел за ``timeout_ms`` (медленная сеть) — на выходе будет то же сообщение Qt,
+        что и без этого ожидания; настройки и база от него не зависят.
+
+        Args:
+            timeout_ms : (int) Сколько ждать каждый поток, мс.
+
+        Example:
+            >>> page.wait_check_threads(
+            ...     timeout_ms  =   100,   # не дольше 0,1 с на поток
+            ... )    # doctest: +SKIP
+        """
+        for thread in (self.token_thread, self.path_thread):
+            if thread is not None and thread.isRunning():
+                thread.wait(timeout_ms)
 
     # ----------------------------------------------------------------------
     # Сохранение настроек и перезагрузка логгеров

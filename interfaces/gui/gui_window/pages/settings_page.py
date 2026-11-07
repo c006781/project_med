@@ -19,7 +19,7 @@ import os
 import posixpath
 import shutil
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
@@ -722,6 +722,8 @@ class SettingsPage(BasePage):
         # Обновляем текст кнопки пути к папке логов (после того, как она создана)
         self._update_log_folder_button()
 
+        self._bind_settings_fields()
+
     @AppLogger.get_instance(
         name = 'SettingsPage',
         # share_file_with = 'system',
@@ -1104,41 +1106,84 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _load_settings(self):
-        # Основные
-        self.db_path_edit.setText(self.config_manager.get('database_local_path', ''))
-        self.photos_path_edit.setText(self.config_manager.get('PHOTOS_STORAGE_PATH', ''))
-        self.token_edit.setText(self.config_manager.get('YANDEX_TOKEN', ''))
-        self.remote_path_edit.setText(self.config_manager.get('database_remote_path', ''))
-        self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))
-        self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
-        keep_index = self.update_keep_mode_combo.findData(
-            self.config_manager.get('UPDATE_BACKUP_KEEP_MODE', 'count'),
-        )
-        self.update_keep_mode_combo.setCurrentIndex(max(keep_index, 0))
-        self.update_keep_count_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_COUNT', 3)))
-        self.update_keep_days_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_DAYS', 30)))
+    # значения настроек — в поля формы
+    def _load_settings(self) -> None:
+        """
+        Заполняет поля формы значениями менеджера настроек.
+
+        Значение негодного типа (строка вместо числа в старом файле) не роняет экран: показывается
+        умолчание, в журнал — предупреждение; в файл оно попадёт только при сохранении. Какие
+        поля какими настройками заполняются — ``_bind_settings_fields``.
+
+        Example:
+            >>> page._load_settings()    # doctest: +SKIP
+        """
+    # def _load_settings(self):
+    #     # Основные
+    #     self.db_path_edit.setText(self.config_manager.get('database_local_path', ''))
+    #     self.photos_path_edit.setText(self.config_manager.get('PHOTOS_STORAGE_PATH', ''))
+    #     self.token_edit.setText(self.config_manager.get('YANDEX_TOKEN', ''))
+    #     self.remote_path_edit.setText(self.config_manager.get('database_remote_path', ''))
+    #     self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))
+    #     self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
+    #     keep_index = self.update_keep_mode_combo.findData(
+    #         self.config_manager.get('UPDATE_BACKUP_KEEP_MODE', 'count'),
+    #     )
+    #     self.update_keep_mode_combo.setCurrentIndex(max(keep_index, 0))
+    #     self.update_keep_count_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_COUNT', 3)))
+    #     self.update_keep_days_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_DAYS', 30)))
+    #     self._on_update_keep_mode_changed()
+    #
+    #     # Настройки логирования
+    #     self.log_dir_edit.setText(self.config_manager.get('LOG_DIR', ''))
+    #     self.log_timestamp_check.setChecked(self._to_bool(self.config_manager.get('use_timestamp', False)))
+    #
+    #     # Системный логгер
+    #     self.system_enabled_check.setChecked(self._to_bool(self.config_manager.get('system_enabled', True)))
+    #     self.system_console_check.setChecked(self._to_bool(self.config_manager.get('system_console_enabled', True)))
+    #     self.system_file_check.setChecked(self._to_bool(self.config_manager.get('system_file_enabled', True)))
+    #     self.system_level_combo.setCurrentText(self.config_manager.get('system_LEVEL', 'DEBUG'))
+    #
+    #     # Пользовательский логгер
+    #     self.user_enabled_check.setChecked(self._to_bool(self.config_manager.get('user_enabled', True)))
+    #     self.user_console_check.setChecked(self._to_bool(self.config_manager.get('user_console_enabled', True)))
+    #     self.user_file_check.setChecked(self._to_bool(self.config_manager.get('user_file_enabled', True)))
+    #     self.user_level_combo.setCurrentText(self.config_manager.get('user_LEVEL', 'DEBUG'))
+    #
+    #     # Ротация
+    #     self.log_max_bytes_spin.setValue(int(self.config_manager.get('LOG_MAX_BYTES', 10 * 1024 * 1024)))
+    #     self.log_backup_count_spin.setValue(int(self.config_manager.get('LOG_BACKUP_COUNT', 5)))
+    #
+    # ↑ до 2026-11-07 (ST4): int() падал на строке вроде '10 МБ', которую менеджер намеренно
+    #   оставляет как есть, — экран настроек не открывался. Теперь поля заполняются по таблице.
+        for key, edit in self._text_fields:
+            edit.setText(
+                self._text_setting(key),
+            )
+        for key, spin in self._int_fields:
+            self._load_spin(
+                spin,   # поле
+                key,    # настройка
+            )
+        for key, check in self._flag_fields:
+            check.setChecked(
+                self._to_bool(
+                    self._setting(key),
+                ),
+            )
+        for key, combo in self._level_fields:
+            self._load_level(
+                combo,  # поле
+                key,    # настройка
+            )
+        for key, combo in self._choice_fields:
+            combo.setCurrentIndex(
+                max(
+                    combo.findData(self._setting(key)),  # индекс сохранённого значения
+                    0,                                   # неизвестное значение — первое в списке
+                ),
+            )
         self._on_update_keep_mode_changed()
-
-        # Настройки логирования
-        self.log_dir_edit.setText(self.config_manager.get('LOG_DIR', ''))
-        self.log_timestamp_check.setChecked(self._to_bool(self.config_manager.get('use_timestamp', False)))
-
-        # Системный логгер
-        self.system_enabled_check.setChecked(self._to_bool(self.config_manager.get('system_enabled', True)))
-        self.system_console_check.setChecked(self._to_bool(self.config_manager.get('system_console_enabled', True)))
-        self.system_file_check.setChecked(self._to_bool(self.config_manager.get('system_file_enabled', True)))
-        self.system_level_combo.setCurrentText(self.config_manager.get('system_LEVEL', 'DEBUG'))
-
-        # Пользовательский логгер
-        self.user_enabled_check.setChecked(self._to_bool(self.config_manager.get('user_enabled', True)))
-        self.user_console_check.setChecked(self._to_bool(self.config_manager.get('user_console_enabled', True)))
-        self.user_file_check.setChecked(self._to_bool(self.config_manager.get('user_file_enabled', True)))
-        self.user_level_combo.setCurrentText(self.config_manager.get('user_LEVEL', 'DEBUG'))
-
-        # Ротация
-        self.log_max_bytes_spin.setValue(int(self.config_manager.get('LOG_MAX_BYTES', 10 * 1024 * 1024)))
-        self.log_backup_count_spin.setValue(int(self.config_manager.get('LOG_BACKUP_COUNT', 5)))
 
         self._update_log_folder_button()
 
@@ -1147,6 +1192,159 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # таблицы «настройка — поле» для чтения и записи
+    def _bind_settings_fields(self) -> None:
+        """
+        Составляет таблицы «настройка — поле», по которым читаются и пишутся значения.
+
+        Тип значения задаёт таблица: текст — ``str``, спин — ``int``, флажок — ``bool``, уровень —
+        ``str`` из списка уровней, выбор — ``currentData`` списка. Новое поле — одна строка здесь.
+
+        Example:
+            >>> page._bind_settings_fields()    # doctest: +SKIP
+        """
+        self._text_fields : Tuple[Tuple[str, QLineEdit], ...] = (
+            ('database_local_path', self.db_path_edit),         # путь к базе
+            ('PHOTOS_STORAGE_PATH', self.photos_path_edit),     # папка фото
+            ('YANDEX_TOKEN', self.token_edit),                  # токен Диска
+            ('database_remote_path', self.remote_path_edit),    # путь на Диске
+            ('BACKUP_PATH', self.backup_path_edit),             # папка копий базы
+            ('LOG_DIR', self.log_dir_edit),                     # папка журналов
+        )
+        self._int_fields : Tuple[Tuple[str, QSpinBox], ...] = (
+            ('BACKUP_COUNT', self.backup_count_spin),                   # число копий базы
+            ('UPDATE_BACKUP_KEEP_COUNT', self.update_keep_count_spin),  # копий кода: штук
+            ('UPDATE_BACKUP_KEEP_DAYS', self.update_keep_days_spin),    # копий кода: дней
+            ('LOG_MAX_BYTES', self.log_max_bytes_spin),                 # размер файла журнала
+            ('LOG_BACKUP_COUNT', self.log_backup_count_spin),           # архивов журнала
+        )
+        self._flag_fields : Tuple[Tuple[str, QCheckBox], ...] = (
+            ('use_timestamp', self.log_timestamp_check),            # дата в имени журнала
+            ('system_enabled', self.system_enabled_check),          # системный журнал
+            ('system_console_enabled', self.system_console_check),  # он же в консоль
+            ('system_file_enabled', self.system_file_check),        # он же в файл
+            ('user_enabled', self.user_enabled_check),              # пользовательский журнал
+            ('user_console_enabled', self.user_console_check),      # он же в консоль
+            ('user_file_enabled', self.user_file_check),            # он же в файл
+        )
+        self._level_fields : Tuple[Tuple[str, QComboBox], ...] = (
+            ('system_LEVEL', self.system_level_combo),  # уровень системного журнала
+            ('user_LEVEL', self.user_level_combo),      # уровень пользовательского журнала
+        )
+        self._choice_fields : Tuple[Tuple[str, QComboBox], ...] = (
+            ('UPDATE_BACKUP_KEEP_MODE', self.update_keep_mode_combo),  # как хранить копии кода
+        )
+
+    # значение настройки; нет у менеджера — умолчание программы
+    def _setting(
+        self,
+        key : str,  # ключ настройки
+    ) -> Any:
+        """
+        Возвращает значение настройки как есть, без приведения типа.
+
+        Args:
+            key : (str) Ключ настройки.
+
+        Returns:
+            (Any) Значение менеджера; нет ключа — умолчание программы.
+
+        Example:
+            >>> page._setting('BACKUP_COUNT')    # doctest: +SKIP
+            5
+        """
+        return self.config_manager.get(
+            key,                                # ключ
+            AppConfigManager.default_of(key),   # нет ключа
+        )
+
+    # значение настройки как текст поля
+    def _text_setting(
+        self,
+        key : str,  # ключ настройки
+    ) -> str:
+        """
+        Возвращает значение настройки как текст для поля ввода.
+
+        Args:
+            key : (str) Ключ настройки.
+
+        Returns:
+            (str) Текст; нет значения — пустая строка.
+
+        Example:
+            >>> page._text_setting('BACKUP_PATH')    # doctest: +SKIP
+            './backups'
+        """
+        value = self._setting(key)
+        return '' if value is None else str(value)
+
+    # значение настройки в числовое поле
+    def _load_spin(
+        self,
+        spin : QSpinBox,  # поле
+        key  : str,       # ключ настройки
+    ) -> None:
+        """
+        Показывает значение настройки в числовом поле, приведя его к границам поля.
+
+        Не число (``'10 МБ'`` из старого файла) — показывается умолчание, в журнал — предупреждение.
+
+        Args:
+            spin : (QSpinBox) Поле.
+            key  : (str) Ключ настройки.
+
+        Example:
+            >>> page._load_spin(page.backup_count_spin, 'BACKUP_COUNT')    # doctest: +SKIP
+        """
+        raw = self._setting(key)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = int(
+                AppConfigManager.default_of(
+                    key,                    # ключ
+                    fallback    =   0,      # без умолчания
+                ),
+            )
+            self.logger.warning(f"Настройка {key}: не число ({raw!r}), показано умолчание {value}")
+        # границы — здесь: слишком большое целое setValue не примет вообще (OverflowError)
+        spin.setValue(
+            min(
+                max(value, spin.minimum()),     # не меньше нижней границы
+                spin.maximum(),                 # не больше верхней
+            ),
+        )
+
+    # значение настройки в список уровней журнала
+    def _load_level(
+        self,
+        combo : QComboBox,  # список уровней
+        key   : str,        # ключ настройки
+    ) -> None:
+        """
+        Выбирает уровень журнала в списке; неизвестный уровень — умолчание программы.
+
+        Регистр не важен (``'debug'`` — ``DEBUG``).
+
+        Args:
+            combo : (QComboBox) Список уровней.
+            key   : (str) Ключ настройки.
+
+        Example:
+            >>> page._load_level(page.user_level_combo, 'user_LEVEL')    # doctest: +SKIP
+        """
+        index = combo.findText(
+            self._text_setting(key).strip().upper(),
+        )
+        if index < 0: # неизвестный уровень
+            index = combo.findText(
+                str(AppConfigManager.default_of(key, 'DEBUG')),
+            )
+        combo.setCurrentIndex(
+            max(index, 0),
+        )
+
     # текст кнопки папки логов
     def _update_log_folder_button(
         self,
@@ -1446,36 +1644,105 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _sawe_new_config(
-        self
-    ):
-        # Сохраняем основные настройки
-        self.config_manager.set('database_local_path', self.db_path_edit.text())
-        self.config_manager.set('PHOTOS_STORAGE_PATH', self.photos_path_edit.text())
-        self.config_manager.set('YANDEX_TOKEN', self.token_edit.text())
-        self.config_manager.set('database_remote_path', self.remote_path_edit.text())
-        self.config_manager.set('BACKUP_PATH', self.backup_path_edit.text())
-        self.config_manager.set('BACKUP_COUNT', self.backup_count_spin.value())
-        self.config_manager.set('UPDATE_BACKUP_KEEP_MODE', self.update_keep_mode_combo.currentData())
-        self.config_manager.set('UPDATE_BACKUP_KEEP_COUNT', self.update_keep_count_spin.value())
-        self.config_manager.set('UPDATE_BACKUP_KEEP_DAYS', self.update_keep_days_spin.value())
+    # поля формы — в менеджер настроек, нужных типов
+    def _sawe_new_config(self) -> None:
+        """
+        Записывает значения полей в менеджер настроек (в файл — только ``save()``).
 
-        # Сохраняем настройки логирования
-        self.config_manager.set('LOG_DIR', self.log_dir_edit.text())
-        self.config_manager.set('use_timestamp', self.log_timestamp_check.isChecked())
+        Типы задаёт таблица ``_bind_settings_fields``: текст без пробелов по краям, числа ``int``,
+        флажки ``bool``, выбор — строка из списка. Пустая папка копий базы заменяется умолчанием,
+        и поле это показывает: пустое значение менеджер всё равно считает «не задано».
 
-        self.config_manager.set('system_enabled', self.system_enabled_check.isChecked())
-        self.config_manager.set('system_console_enabled', self.system_console_check.isChecked())
-        self.config_manager.set('system_file_enabled', self.system_file_check.isChecked())
-        self.config_manager.set('system_LEVEL', self.system_level_combo.currentText())
+        Example:
+            >>> page._sawe_new_config()    # doctest: +SKIP
+        """
+        if not self.backup_path_edit.text().strip():
+            self.backup_path_edit.setText(
+                self._text_default('BACKUP_PATH'),
+            )
+        for key, edit in self._text_fields:
+            self.config_manager.set(
+                key,                    # настройка
+                edit.text().strip(),    # пробелы вокруг пути и токена — следствие вставки
+            )
+        for key, spin in self._int_fields:
+            self.config_manager.set(
+                key,            # настройка
+                spin.value(),   # int
+            )
+        for key, check in self._flag_fields:
+            self.config_manager.set(
+                key,                # настройка
+                check.isChecked(),  # bool
+            )
+        for key, combo in self._level_fields:
+            self.config_manager.set(
+                key,                    # настройка
+                combo.currentText(),    # уровень
+            )
+        for key, combo in self._choice_fields:
+            self.config_manager.set(
+                key,                    # настройка
+                combo.currentData(),    # значение выбранного пункта
+            )
 
-        self.config_manager.set('user_enabled', self.user_enabled_check.isChecked())
-        self.config_manager.set('user_console_enabled', self.user_console_check.isChecked())
-        self.config_manager.set('user_file_enabled', self.user_file_check.isChecked())
-        self.config_manager.set('user_LEVEL', self.user_level_combo.currentText())
+    # умолчание настройки как текст поля
+    @staticmethod
+    def _text_default(
+        key : str,  # ключ настройки
+    ) -> str:
+        """
+        Возвращает умолчание настройки как текст для поля ввода.
 
-        self.config_manager.set('LOG_MAX_BYTES', self.log_max_bytes_spin.value())
-        self.config_manager.set('LOG_BACKUP_COUNT', self.log_backup_count_spin.value())
+        Args:
+            key : (str) Ключ настройки.
+
+        Returns:
+            (str) Текст умолчания; нет умолчания — пустая строка.
+
+        Example:
+            >>> SettingsPage._text_default('BACKUP_PATH')    # doctest: +SKIP
+            './backups'
+        """
+        return str(
+            AppConfigManager.default_of(
+                key,                    # ключ
+                fallback    =   '',     # без умолчания
+            ),
+        )
+
+    # def _sawe_new_config(
+    #     self
+    # ):
+    #     # Сохраняем основные настройки
+    #     self.config_manager.set('database_local_path', self.db_path_edit.text())
+    #     self.config_manager.set('PHOTOS_STORAGE_PATH', self.photos_path_edit.text())
+    #     self.config_manager.set('YANDEX_TOKEN', self.token_edit.text())
+    #     self.config_manager.set('database_remote_path', self.remote_path_edit.text())
+    #     self.config_manager.set('BACKUP_PATH', self.backup_path_edit.text())
+    #     self.config_manager.set('BACKUP_COUNT', self.backup_count_spin.value())
+    #     self.config_manager.set('UPDATE_BACKUP_KEEP_MODE', self.update_keep_mode_combo.currentData())
+    #     self.config_manager.set('UPDATE_BACKUP_KEEP_COUNT', self.update_keep_count_spin.value())
+    #     self.config_manager.set('UPDATE_BACKUP_KEEP_DAYS', self.update_keep_days_spin.value())
+    #
+    #     # Сохраняем настройки логирования
+    #     self.config_manager.set('LOG_DIR', self.log_dir_edit.text())
+    #     self.config_manager.set('use_timestamp', self.log_timestamp_check.isChecked())
+    #
+    #     self.config_manager.set('system_enabled', self.system_enabled_check.isChecked())
+    #     self.config_manager.set('system_console_enabled', self.system_console_check.isChecked())
+    #     self.config_manager.set('system_file_enabled', self.system_file_check.isChecked())
+    #     self.config_manager.set('system_LEVEL', self.system_level_combo.currentText())
+    #
+    #     self.config_manager.set('user_enabled', self.user_enabled_check.isChecked())
+    #     self.config_manager.set('user_console_enabled', self.user_console_check.isChecked())
+    #     self.config_manager.set('user_file_enabled', self.user_file_check.isChecked())
+    #     self.config_manager.set('user_LEVEL', self.user_level_combo.currentText())
+    #
+    #     self.config_manager.set('LOG_MAX_BYTES', self.log_max_bytes_spin.value())
+    #     self.config_manager.set('LOG_BACKUP_COUNT', self.log_backup_count_spin.value())
+    # ↑ до 2026-11-07 (ST5): значения писались построчно, текст — как ввели: токен с пробелом после
+    #   вставки сохранялся неверным, а путь к базе проверялся без пробелов, сохранялся с ними.
 
     @AppLogger.get_instance(
         name = 'SettingsPage',

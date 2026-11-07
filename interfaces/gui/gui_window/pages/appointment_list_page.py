@@ -1506,6 +1506,27 @@ class AppointmentListPage(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    # подсказки описаний фото без пустых значений
+    def _photo_description_hints(self) -> list:
+        """
+        Возвращает значения описаний фото для автодополнения, без пустых.
+
+        Сервис отдаёт и None (фото без описания), для подсказки это не значение. Отбрасывается
+        только здесь: в списках значений фильтров таблиц «пусто» может быть нужно.
+
+        Returns:
+            (list) Описания строками.
+
+        Example:
+            >>> page._photo_description_hints()   # в базе: 'снимок', None
+            ['снимок']
+        """
+        return [
+            str(value)
+            for value in self.photo_service.get_unique_values('description')
+            if value is not None    # фото без описания
+        ]
+
     def _setup_ui(self): # - оставить
         """
         Переопределяем метод для создания вертикального сплиттера, включающего панель информации о пациенте и горизонтальный сплиттер (таблица + правая панель).
@@ -1533,9 +1554,9 @@ class AppointmentListPage(
         self.photo_widget.photosChanged.connect(self._on_photos_changed)
 
         # Настраиваем уникальные значения для автодополнения описаний
-        self.photo_widget.set_unique_values_func(
-            lambda: [str(v) for v in self.photo_service.get_unique_values('description')]
-        )
+        self.photo_widget.set_unique_values_func(self._photo_description_hints)
+        # ↑ до 2026-11-07 (В-16): lambda: [str(v) for v in self.photo_service.get_unique_values('description')]
+        #   фото без описания давало подсказку со строкой 'None'
 
         # Добавляем фото-виджет в конец layout (под таблицей)
         self.main_layout.addWidget(self.photo_widget)

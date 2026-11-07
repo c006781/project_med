@@ -25,7 +25,7 @@ import threading
 import time
 import uuid
 import weakref
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 
 # Импорты модулей
@@ -33,6 +33,7 @@ from app.config.conf.get_config import get_config_env as _old_get_config_env
 # Логгер не читает конфиг (развязка 2026-10-14), поэтому импорт безопасен:
 # зависимость только в сторону config → logger.
 from app.utils.logger.logger import AppLogger
+from app.utils.logger.bool_strings import parse_bool_string  # одно правило для строк-флагов
 
 # До настройки логирования (setup_logging) логгер пишет только в консоль — сообщения
 # о битом конфиге при старте видны в консоли и дублируются окном в MainWindow.
@@ -51,6 +52,36 @@ import msgpack # pip install msgpack
 # Ключ настройки «Папка документов Word» (CM17, 2026-10-25): папка .docx для импорта
 # (parsers/word_importer.pars_start_args без --folder; экран настроек — М19, окно — М18).
 WORD_DOCUMENTS_PATH_KEY = 'WORD_DOCUMENTS_PATH'
+
+# Правило черновиков «запись перенесли в новую, новую удалили» (CM20): значения —
+# app.utils.drafts.MovedRule; здесь только строки, настройки не зависят от черновиков.
+DRAFT_MOVED_RULE_KEY     : str = 'DRAFT_MOVED_RULE'
+DRAFT_MOVED_RULE_DELETE  : str = 'delete'
+DRAFT_MOVED_RULE_KEEP    : str = 'keep'
+DRAFT_MOVED_RULE_VALUES  : Tuple[str, ...] = (DRAFT_MOVED_RULE_DELETE, DRAFT_MOVED_RULE_KEEP)
+
+
+# правило перенесённой записи из значения настройки
+def draft_moved_rule_value(
+    value : Any,  # значение настройки DRAFT_MOVED_RULE
+) -> str:
+    """
+    Возвращает допустимое значение правила перенесённой записи; неизвестное — ``delete``.
+
+    Файл настроек можно править вручную: ``MovedRule(<неизвестная строка>)`` бросил бы
+    ``ValueError`` при запуске окна.
+
+    Args:
+        value : (Any) Значение настройки ``DRAFT_MOVED_RULE``.
+
+    Returns:
+        (str) ``'delete'`` или ``'keep'``.
+
+    Example:
+        >>> draft_moved_rule_value('keep'), draft_moved_rule_value('нечто')
+        ('keep', 'delete')
+    """
+    return value if value in DRAFT_MOVED_RULE_VALUES else DRAFT_MOVED_RULE_DELETE
 
 
 
@@ -72,6 +103,9 @@ class BaseConfigManager:
 
     _config_path = 'config.msgpack'
     _defaults = {}
+
+    # Ключи, у которых пустое значение в файле значит «не задано» — берётся умолчание (CM19)
+    _EMPTY_MEANS_DEFAULT : Tuple[str, ...] = ()
 
     _listeners = []   # список callable-функций
 
@@ -310,9 +344,12 @@ class BaseConfigManager:
         #     self.logger.error(f"Ошибка при чтении файла конфигурации: {e}")
         #     pass
 
-    # Строки, означающие «да» / «нет» (как у логгера BaseAppLogger._to_bool для «да»)
-    _TRUE_STRINGS = ('true', '1', 'yes')
-    _FALSE_STRINGS = ('false', '0', 'no', '')
+    # # Строки, означающие «да» / «нет» (как у логгера BaseAppLogger._to_bool для «да»)
+    # _TRUE_STRINGS = ('true', '1', 'yes')
+    # _FALSE_STRINGS = ('false', '0', 'no', '')
+    # ↑ до 2026-11-07 (CM18): свои списки — 'on' и 'off' оставались строками, а 'off' потом
+    #   считался истиной там, где значение проверяют обычным bool(). Правило теперь одно на
+    #   всю программу: app/utils/logger/bool_strings.py.
 
     @classmethod
     def _coerce_value(
@@ -324,31 +361,38 @@ class BaseConfigManager:
         Переводит строку из старого файла в тип умолчания (bool / int); иначе — как есть (CM6).
 
         Переводятся только строки и только для ключей, у которых умолчание — ``bool`` или
-        ``int``. Строка, которую не перевести (``'on'``, ``'10 МБ'``), остаётся как есть —
-        без потерь (её поймёт или отвергнет читатель, например логгер).
+        ``int``. Флаги — по единому правилу программы (``parse_bool_string``: ``'on'`` —
+        истина, ``'off'`` — ложь, пустая строка — ложь). Строка, которую не перевести
+        (``'нечто'``, ``'10 МБ'``), намеренно остаётся как есть — значение из файла не
+        теряется (его поймёт или отвергнет читатель, например логгер).
 
         Args:
-            value: Значение из файла.
-            default: Умолчание ключа.
+            value   : (Any) Значение из файла.
+            default : (Any) Умолчание ключа.
 
         Returns:
-            Значение нужного типа или исходное.
+            (Any) Значение нужного типа или исходное.
 
-        Пример:
+        Example:
             >>> AppConfigManager._coerce_value('False', True), AppConfigManager._coerce_value('5', 1)
             (False, 5)
-            >>> AppConfigManager._coerce_value('on', False)
-            'on'
+            >>> AppConfigManager._coerce_value('on', False), AppConfigManager._coerce_value('off', True)
+            (True, False)
+            >>> AppConfigManager._coerce_value('нечто', False)
+            'нечто'
         """
         if not isinstance(value, str):
             return value
         text = value.strip()
         if isinstance(default, bool):          # bool раньше int: bool — подкласс int
-            if text.lower() in cls._TRUE_STRINGS:
-                return True
-            if text.lower() in cls._FALSE_STRINGS:
-                return False
-            return value
+            # if text.lower() in cls._TRUE_STRINGS:
+            #     return True
+            # if text.lower() in cls._FALSE_STRINGS:
+            #     return False
+            # return value
+            # ↑ до 2026-11-07 (CM18): свои списки строк.
+            flag = parse_bool_string(text)
+            return value if flag is None else flag
         if isinstance(default, int):
             try:
                 return int(text)
@@ -363,23 +407,29 @@ class BaseConfigManager:
         """
         Значения из файла с типами умолчаний (CM6, 2026-10-25): старые строки → bool / int.
 
-        Ключи без умолчания и значения других типов — как есть. Файл не переписывается:
-        типы — в памяти, в файл попадут при следующем ``save()``.
+        Ключи без умолчания и значения других типов — как есть. Пустое значение ключа из
+        ``_EMPTY_MEANS_DEFAULT`` заменяется умолчанием. Файл не переписывается: типы — в
+        памяти, в файл попадут при следующем ``save()``.
 
         Args:
-            data: Значения из файла.
+            data : (Dict[str, Any]) Значения из файла.
 
         Returns:
-            Новый словарь.
+            (Dict[str, Any]) Новый словарь.
 
-        Пример:
+        Example:
             >>> m._coerce_types({'LOG_ARGS': 'False', 'LOG_MAX_BYTES': '10485760', 'X': 'False'})
             {'LOG_ARGS': False, 'LOG_MAX_BYTES': 10485760, 'X': 'False'}
         """
-        return {
+        coerced = {
             key: (self._coerce_value(value, self._defaults[key]) if key in self._defaults else value)
             for key, value in data.items()
         }
+        # Пустое значение таких ключей — «не задано» (CM19), а не настоящее значение
+        for key in self._EMPTY_MEANS_DEFAULT:
+            if key in coerced and key in self._defaults and not str(coerced[key]).strip():
+                coerced[key] = self._defaults[key]
+        return coerced
 
     def _report_unreadable_file(self, error: OSError) -> None:
         """
@@ -718,6 +768,12 @@ class AppConfigManager(BaseConfigManager):
         'UPDATE_BACKUP_KEEP_DAYS': 30,
         'database_remote_path': 'Проекты/test/bd/clinic.db',
 
+        # Резервные копии базы при обмене с Яндекс.Диском (решение владельца 2026-11-01, В-20;
+        # CM19): папка в корне программы и сколько копий хранить. Копирование и удаление
+        # старых копий — главное окно
+        'BACKUP_PATH': os.path.join('.', 'backups'),
+        'BACKUP_COUNT': 5,
+
         # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===
         'LOG_DIR': os.path.join('.', 'logs'),          # вместо LOG_FILE
         # 'LOG_LEVEL': 'DEBUG',
@@ -798,9 +854,17 @@ class AppConfigManager(BaseConfigManager):
         # вариант В): pars_start.py без --folder берёт её; пусто — --folder обязателен
         WORD_DOCUMENTS_PATH_KEY: '',
 
+        # Запись перенесли в новую запись, новую потом удалили (решение владельца 2026-11-07,
+        # В-21; CM20): 'delete' — запись удаляется вместе с новой, 'keep' — остаётся у прежней
+        DRAFT_MOVED_RULE_KEY: DRAFT_MOVED_RULE_DELETE,
+
         # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
         # 'GITHUB_TOKEN': '',
     }
+
+    # Экран настроек сохранял пустую папку копий, пока умолчания не было: у таких файлов
+    # 'BACKUP_PATH': '' — иначе умолчание до них не дошло бы (CM19)
+    _EMPTY_MEANS_DEFAULT = ('BACKUP_PATH',)
 
     # Хранилище для экземпляров (Multiton)
     _instances = {}
@@ -810,6 +874,40 @@ class AppConfigManager(BaseConfigManager):
 
     # Путь к конфигу из .env (APP_CONFIG_PATH), прочитанный один раз (E6)
     _resolved_default_path: Optional[str] = None
+
+    # умолчание настройки программы
+    @classmethod
+    def default_of(
+        cls,
+        key      : str,          # ключ настройки
+        fallback : Any = None,   # значение, если у ключа нет умолчания
+    ) -> Any:
+        """
+        Возвращает умолчание настройки, не обращаясь к файлу и не создавая менеджер.
+
+        Нужно тем, кто заменяет негодное значение (экран настроек): файл не читается и не
+        меняется.
+
+        Args:
+            key      : (str) Ключ настройки.
+            fallback : (Any) Значение, если у ключа нет умолчания.
+
+        Returns:
+            (Any) Умолчание ключа или ``fallback``.
+
+        Example:
+            >>> AppConfigManager.default_of('BACKUP_COUNT')
+            5
+            >>> AppConfigManager.default_of(
+            ...     'НЕТ_ТАКОГО',    # ключ без умолчания
+            ...     fallback    =   7,   # что вернуть
+            ... )
+            7
+        """
+        return cls._defaults.get(
+            key,        # ключ настройки
+            fallback,   # нет умолчания
+        )
 
     @classmethod
     def _default_config_path(cls) -> str:

@@ -132,6 +132,9 @@ SETTINGS_BLOCKS: Dict[str, Tuple[str, ...]] = {
                        'LOG_ARGS', 'use_timestamp', 'show_call_depth',
                        'enabled', 'console_enabled', 'file_enabled'),
     'backup': ('BACKUP_PATH', 'BACKUP_COUNT'),
+    # Правило черновиков (CM20): применитель ничего не делает, блок сообщает главному окну
+    # (on_settings_changed), что правило сменилось — черновики живут там.
+    'drafts': ('DRAFT_MOVED_RULE',),
 }
 
 # Все ключи логирования (блоки logging_*)
@@ -248,7 +251,7 @@ class ConfigApplier:
         Returns:
             Set[str]: Множество строк – названий блоков, которые изменились.
                       Возможные значения: 'database', 'photos', 'sync',
-                      'logging_system', 'logging_user', 'logging_common', 'backup'.
+                      'logging_system', 'logging_user', 'logging_common', 'backup', 'drafts'.
 
         Пример:
             >>> old = {'database_local_path': './clinic.db', 'PHOTOS_STORAGE_PATH': './photos'}
@@ -994,7 +997,7 @@ class ConfigApplier:
 
         Returns:
             Множество изменившихся блоков (``'database'``, ``'photos'``, ``'sync'``,
-            ``'logging_*'``, ``'backup'``) — для ``MainWindow.on_settings_changed``.
+            ``'logging_*'``, ``'backup'``, ``'drafts'``) — для ``MainWindow.on_settings_changed``.
             Блоки, которые применить не удалось, — в ``self.errors`` (AP4): сбой одного
             не прерывает остальные.
 

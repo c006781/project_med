@@ -37,6 +37,7 @@ from app.network.ya_dop import DB_EXTENSIONS, check_and_create_path, check_token
 from app.config.config_applier import ConfigApplier
 from app.config.config_manager.manager import (
     DRAFT_MOVED_RULE_KEY,       # правило перенесённой записи
+    UPDATE_CHECK_ON_START_KEY,  # проверка обновлений при запуске
     WORD_DOCUMENTS_PATH_KEY,    # папка документов Word
     AppConfigManager,           # менеджер настроек
 )
@@ -747,6 +748,10 @@ class SettingsPage(BasePage):
         form_layout.addRow("Перенесённая запись при удалении новой:", self.draft_moved_rule_combo)
         form_layout.addRow(self.draft_moved_rule_hint)
 
+        # Проверка обновлений при запуске: обращение к api.github.com через 1,5 с после старта
+        self.update_check_on_start_check = QCheckBox("Проверять обновления при запуске")
+        form_layout.addRow(self.update_check_on_start_check)
+
         # ----- Группа уборки: файлы и строки, на которые никто не ссылается -----
         self.maintenance_group = QGroupBox("Уборка данных")
         maintenance_layout = QVBoxLayout(self.maintenance_group)
@@ -1381,14 +1386,15 @@ class SettingsPage(BasePage):
             ('LOG_BACKUP_COUNT', self.log_backup_count_spin),           # архивов журнала
         )
         self._flag_fields : Tuple[Tuple[str, QCheckBox], ...] = (
-            ('use_timestamp', self.log_timestamp_check),            # дата в имени журнала
-            ('LOG_SQL_PARAMS', self.log_sql_params_check),          # значения запросов в журнал
-            ('system_enabled', self.system_enabled_check),          # системный журнал
-            ('system_console_enabled', self.system_console_check),  # он же в консоль
-            ('system_file_enabled', self.system_file_check),        # он же в файл
-            ('user_enabled', self.user_enabled_check),              # пользовательский журнал
-            ('user_console_enabled', self.user_console_check),      # он же в консоль
-            ('user_file_enabled', self.user_file_check),            # он же в файл
+            ('use_timestamp', self.log_timestamp_check),                    # дата в имени журнала
+            ('LOG_SQL_PARAMS', self.log_sql_params_check),                  # значения запросов в журнал
+            (UPDATE_CHECK_ON_START_KEY, self.update_check_on_start_check),  # проверка при запуске
+            ('system_enabled', self.system_enabled_check),                  # системный журнал
+            ('system_console_enabled', self.system_console_check),          # он же в консоль
+            ('system_file_enabled', self.system_file_check),                # он же в файл
+            ('user_enabled', self.user_enabled_check),                      # пользовательский журнал
+            ('user_console_enabled', self.user_console_check),              # он же в консоль
+            ('user_file_enabled', self.user_file_check),                    # он же в файл
         )
         self._level_fields : Tuple[Tuple[str, QComboBox], ...] = (
             ('system_LEVEL', self.system_level_combo),  # уровень системного журнала

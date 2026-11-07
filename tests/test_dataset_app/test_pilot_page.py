@@ -9,9 +9,16 @@ import pytest
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
-from PySide6.QtWidgets import QApplication, QDateEdit, QLineEdit, QPlainTextEdit  # noqa: E402
+from PySide6.QtWidgets import QApplication, QDateEdit, QLineEdit, QMessageBox, QPlainTextEdit  # noqa: E402
 
 from interfaces.gui.gui_window.pages.dataset_pilot_page import DataSetPilotPage  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def answer_save_questions_yes(monkeypatch):
+    """Экран без обработчика окна задаёт вопросы при сохранении: окна не показываются, ответ «да»."""
+    monkeypatch.setattr(QMessageBox, 'warning', staticmethod(lambda *args, **kwargs: QMessageBox.Yes))
+    monkeypatch.setattr(QMessageBox, 'question', staticmethod(lambda *args, **kwargs: QMessageBox.Yes))
 
 
 

@@ -315,20 +315,32 @@ from unittest.mock import patch, MagicMock
 #     )
 #     # Колбэк может не вызываться, если файл маленький, но проверим, что он передан
 
+# def test_sync_service_download_with_progress(sync_service):
+#     with patch('app.network.ya_dop.yadisk.YaDisk') as mock_yadisk_class:
+#         mock_y = MagicMock()
+#         mock_y.check_token.return_value = True
+#         mock_y.exists.return_value = True
+#         mock_yadisk_class.return_value = mock_y
+#
+#         progress_called = []
+#         def progress_cb(current, total):
+#             progress_called.append((current, total))
+#
+#         result = sync_service.download_sync(progress_callback=progress_cb)
+#         assert result == 0
+#         mock_y.download.assert_called_once()
+# ↑ до 2026-11-07 (ТД-1): прежнее скачивание в рабочий файл; новое — безопасное, колбэк и порядок
+#   шагов на настоящих файлах — tests/test_main_window/test_sync_db_replace.py
 def test_sync_service_download_with_progress(sync_service):
-    with patch('app.network.ya_dop.yadisk.YaDisk') as mock_yadisk_class:
-        mock_y = MagicMock()
-        mock_y.check_token.return_value = True
-        mock_y.exists.return_value = True
-        mock_yadisk_class.return_value = mock_y
-
-        progress_called = []
-        def progress_cb(current, total):
-            progress_called.append((current, total))
-
+    with patch('app.services.sync_service.backup_db_before_transfer'), \
+         patch('app.services.sync_service.install_checked_download') as install, \
+         patch('app.services.sync_service.yadisk_download_db_checked') as download:
+        download.return_value = MagicMock(warnings=(), needs_replace=True, local_newer=False)
+        progress_cb = MagicMock()
         result = sync_service.download_sync(progress_callback=progress_cb)
-        assert result == 0
-        mock_y.download.assert_called_once()
+    assert result == 0
+    assert download.call_args.kwargs['progress_callback'] is progress_cb
+    install.assert_called_once_with(download.return_value)
 
 # def test_sync_service_upload_with_progress(sync_service):
 #     mock_upload = patch('app.network.ya_dop.yadisk_upload_file').start()
@@ -397,9 +409,13 @@ def test_sync_service_sync_uses_file_path_and_overwrite(sync_service, tmp_path):
     local.write_bytes(b"data")
     sync_service.local_path = str(local)
     sync_service.remote_path = "Папка/база"
-    with patch('app.services.sync_service.yadisk_download_file') as mock_download, \
+    # with patch('app.services.sync_service.yadisk_download_file') as mock_download, \
+    # ↑ до 2026-11-07 (ТД-1): скачивание теперь безопасное
+    with patch('app.services.sync_service.backup_db_before_transfer'), \
+         patch('app.services.sync_service.install_checked_download'), \
+         patch('app.services.sync_service.yadisk_download_db_checked') as mock_download, \
          patch('app.services.sync_service.yadisk_upload_file') as mock_upload:
-        mock_download.return_value = 0
+        mock_download.return_value = MagicMock(warnings=(), needs_replace=True, local_newer=False)
         mock_upload.return_value = 0
         assert sync_service.download_sync() == 0
         assert sync_service.upload_sync() == 0

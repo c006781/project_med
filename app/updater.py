@@ -138,6 +138,7 @@ _LINUX_RESERVED_PARTS = frozenset({
     'logs',
     'logs_parser',
     'MedicalAppUpdates',
+    'backups',
 })
 _LINUX_RESERVED_TOP_NAMES = frozenset({LINUX_UPDATE_SCRIPT, LINUX_UPDATE_LOG})
 _LINUX_RESERVED_TOP_PREFIXES = (LINUX_WORK_PREFIX, LINUX_BACKUP_PREFIX)

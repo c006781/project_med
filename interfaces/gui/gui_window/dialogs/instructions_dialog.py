@@ -1,13 +1,43 @@
 # interfaces/gui/gui_window/dialogs/instructions_dialog.py
 
+"""
+Диалог со списком инструкций (PDF из папки ``docs`` программы).
+
+Папка определяется от положения кода, а не от текущей папки (:func:`docs_folder`).
+"""
+
 import os
-from typing import Dict, List, Optional
+import sys
+from typing import Optional
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QPushButton
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QPushButton, QWidget
 
 from app.utils.logger.logger import AppLogger
+
+
+# папка инструкций программы
+def docs_folder() -> str:
+    """
+    Возвращает папку ``docs`` программы, не зависящую от текущей папки.
+
+    Из исходников (в том числе установка Linux) — корень проекта, от положения этого файла.
+    Собранная программа — рядом с исполняемым файлом: код лежит во временной папке сборки.
+
+    Returns:
+        (str) Абсолютный путь; папки может не быть.
+
+    Example:
+        >>> os.path.basename(docs_folder())
+        'docs'
+    """
+    if getattr(sys, 'frozen', False):
+        return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'docs')
+    code_dir = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.abspath(os.path.join(code_dir, '..', '..', '..', '..'))  # dialogs → gui_window → gui → interfaces → корень
+    return os.path.join(root, 'docs')
+
 
 class InstructionsDialog(QDialog):
     """
@@ -19,8 +49,19 @@ class InstructionsDialog(QDialog):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent : Optional[QWidget] = None,  # окно программы
+    ) -> None:
+        """
+        Создаёт диалог и заполняет дерево инструкций.
 
+        Args:
+            parent : (QWidget/None) Окно программы.
+
+        Example:
+            >>> InstructionsDialog(window).exec()   # doctest: +SKIP
+        """
         super().__init__(parent)
 
         self.setWindowTitle("Инструкции")
@@ -36,7 +77,12 @@ class InstructionsDialog(QDialog):
         self._load_docs_tree()
 
     def _setup_ui(self) -> None:
-        """Создаёт интерфейс: дерево + кнопка закрытия."""
+        """
+        Создаёт интерфейс: дерево и кнопку закрытия.
+
+        Example:
+            >>> dialog._setup_ui()      # doctest: +SKIP
+        """
 
         layout = QVBoxLayout(self)
 
@@ -50,13 +96,20 @@ class InstructionsDialog(QDialog):
         layout.addWidget(close_btn)
 
     def _load_docs_tree(self) -> None:
-        """Рекурсивно сканирует папку docs и строит дерево."""
+        """
+        Строит дерево по папке инструкций (:func:`docs_folder`); нет папки — дерево пустое, в журнал предупреждение.
+
+        Example:
+            >>> dialog._load_docs_tree()    # doctest: +SKIP
+        """
 
         # Определяем путь к папке docs (относительно корня проекта)
         # base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'docs')
-        base_dir = os.path.join('.', 'docs')
-
-        base_dir = os.path.abspath(base_dir) # ПОЛУЧАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ НЕ ПО ПОЛОЖЕНИЮ ЗАПУСКА ПРОГРАММЫ
+        # base_dir = os.path.join('.', 'docs')
+        #
+        # base_dir = os.path.abspath(base_dir) # ПОЛУЧАЕМ АБСОЛЮТНЫЙ ПУТЬ К ФАЙЛУ НЕ ПО ПОЛОЖЕНИЮ ЗАПУСКА ПРОГРАММЫ
+        # ↑ до 2026-11-07 (MW10): путь считался от текущей папки, из другой папки — «docs не найдена»
+        base_dir = docs_folder()
 
         if not os.path.exists(base_dir):
             self.logger.warning(f"Папка docs не найдена: {base_dir}")
@@ -67,8 +120,16 @@ class InstructionsDialog(QDialog):
 
     def _add_directory_to_tree(self, parent_item: QTreeWidgetItem, dir_path: str) -> None:
         """
-        Рекурсивно добавляет содержимое директории в дерево.
-        Папки становятся ветками (некликабельными), файлы .pdf – листьями.
+        Рекурсивно добавляет содержимое папки в дерево.
+
+        Папки становятся ветками (некликабельными), файлы .pdf — листьями; остальное не показывается.
+
+        Args:
+            parent_item : (QTreeWidgetItem) Родительский элемент.
+            dir_path    : (str) Папка.
+
+        Example:
+            >>> dialog._add_directory_to_tree(item, './docs')   # doctest: +SKIP
         """
 
         try:
@@ -93,7 +154,16 @@ class InstructionsDialog(QDialog):
                 file_item.setData(0, Qt.UserRole, full_path)  # сохраняем полный путь
 
     def _on_item_double_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        """Обработка двойного клика: открыть .pdf в браузере."""
+        """
+        Открывает выбранный .pdf программой по умолчанию; папка ничего не делает.
+
+        Args:
+            item   : (QTreeWidgetItem) Элемент дерева.
+            column : (int) Столбец.
+
+        Example:
+            >>> dialog._on_item_double_clicked(item, 0)     # doctest: +SKIP
+        """
 
         file_path = item.data(0, Qt.UserRole)
         if file_path and os.path.isfile(file_path):

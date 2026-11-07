@@ -467,9 +467,42 @@ class DataSetPilotPage(BasePage):
         if self._save_handler is not None:
             ok = bool(self._save_handler(list(targets), None))
         else:
-            ok = self.clinic.drafts.save(list(targets)) is not None
+            # ok = self.clinic.drafts.save(list(targets)) is not None
+            # ↑ до 2026-11-07 (MW9): без вопросов запись к удалению молча отменяла сохранение
+            ok = self._save_with_questions(list(targets))
         self.show_status('Сохранено' if ok else 'Сохранение отменено')
         return ok
+
+    # сохранение черновиков с вопросами, когда окно не передало свой обработчик
+    def _save_with_questions(
+        self,
+        targets : Optional[List[Tuple[str, Any]]],  # узлы (тип, id); None — всё
+    ) -> bool:
+        """
+        Сохраняет черновики с вопросами о новых родителях и удаляемых ветках.
+
+        Без вопроса об удалении сохранение отменилось бы молча, а про перенесённую запись
+        пользователь бы не узнал (``describe_deletes``).
+
+        Args:
+            targets : (List/None) Узлы ``(тип, id)``; None — всё.
+
+        Returns:
+            (bool) True — сохранено.
+
+        Example:
+            >>> page._save_with_questions([('patient', 3)])     # doctest: +SKIP
+            True
+        """
+        from interfaces.gui.gui_window.drafts_qt import make_confirmations
+        ask_new, ask_delete = make_confirmations(self, self.clinic.drafts.schema)
+        result = self.clinic.drafts.save(
+            targets,                                    # что сохранять
+            None,                                       # направления по умолчанию
+            confirm_new_ancestors   =   ask_new,        # вопрос о новых родителях
+            confirm_deletes         =   ask_delete,     # вопрос об удалении
+        )
+        return result is not None
 
     def save(self, current: bool = False) -> bool:
         """
@@ -503,7 +536,9 @@ class DataSetPilotPage(BasePage):
             if self._save_handler is not None:
                 ok = bool(self._save_handler(targets, None))
             else:
-                ok = self.clinic.drafts.save(targets) is not None
+                # ok = self.clinic.drafts.save(targets) is not None
+                # ↑ до 2026-11-07 (MW9): без вопросов запись к удалению молча отменяла сохранение
+                ok = self._save_with_questions(targets)
         except Exception as exc:
             self.show_error(f"Не сохранено: {exc}")
             return False

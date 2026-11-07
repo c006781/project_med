@@ -227,8 +227,18 @@ class DraftsWriter:
         draft = self.store.get(self.entity, key)
         base = None if draft is not None and draft.is_new else {k: original.get(k) for k in changes}
         with self._mine():
-            self.store.modify(self.entity, key, dict(changes), original=base,
-                              parent_id=self._parent(row))
+            # self.store.modify(self.entity, key, dict(changes), original=base,
+            #                   parent_id=self._parent(row))
+            # ↑ до 2026-11-07 (MW9): перенос с этого экрана считался переносом кодом, и правило
+            #   перенесённой записи здесь не действовало (ОСТ п. 5.20)
+            self.store.modify(
+                self.entity,                        # тип
+                key,                                # id
+                dict(changes),                      # новые значения
+                original    =   base,               # исходные значения
+                parent_id   =   self._parent(row),  # известный родитель
+                by_user     =   True,               # правку делает пользователь на экране
+            )
         return dict(row)
 
     def delete(self, dataset: DataSet, key: Hashable, row: Mapping[str, Any]) -> None:

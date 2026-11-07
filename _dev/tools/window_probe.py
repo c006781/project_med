@@ -46,6 +46,7 @@ with open(config, 'wb') as f:
 os.environ['APP_CONFIG_PATH'] = config
 os.environ['PROJECT_MED_ENV_DIR'] = work
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+os.environ['PROJECT_MED_NO_UPDATE_CHECK'] = '1'  # без обращения к api.github.com при старте
 sys.path.insert(0, ROOT)
 
 from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402

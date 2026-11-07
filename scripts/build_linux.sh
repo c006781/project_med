@@ -33,6 +33,11 @@ chmod +x "$BUILD_DIR/install.sh" "$BUILD_DIR/run.sh" "$BUILD_DIR/setup_prod.sh"
 # ↑ до 2026-10-26 (W19): setup_prod.sh в архив не попадал — install.sh падал
 #   «./setup_prod.sh: No such file or directory»
 
+# Кэш байт-кода из рабочей папки (после запусков и тестов) в архив не нужен
+find "$BUILD_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
+# ↑ до 2026-11-07 (SC1): кэш не удалялся — при сборке в папке, где запускали программу, в архив
+#   попадали app/**/__pycache__ и interfaces/**/__pycache__ (.pyc под чужую версию Python)
+
 # Архивация
 tar -czf "$OUTPUT_TAR" "$BUILD_DIR"
 rm -rf "$BUILD_DIR"

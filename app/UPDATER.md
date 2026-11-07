@@ -167,6 +167,16 @@ AppUpdater.check_for_updates()
 Полный набор: 2151 прошли, 0 падают, 8 пропущено, 5 xfail (было 2121 / 0 / 8 / 5 — +30
 тестов прохода 4).
 
+### Проверка 6 (2026-11-07, Linux) — хеш на настоящем Linux-архиве
+
+Код не менялся. `MedicalApp-linux.tar.gz` собран `scripts/build_linux.sh` на копии проекта;
+офлайн (без сети, `requests.get` подменён, временные `PROJECT_MED_ENV_DIR` и `APP_CONFIG_PATH`):
+`sha256sum` совпал с `file_sha256`; описание релиза в формате шага `release.yml`
+(`<64 hex>  MedicalApp-linux.tar.gz`) разобрано `parse_release_hashes` / `release_asset_sha256`;
+`UpdateApplier.start` с настоящим `UpdateDownloader`: верный хеш — файл принят, неверный —
+`error` «контрольная сумма SHA-256 не совпала», файла и `.part` нет, релиз без хеша —
+предупреждение и приём. Живой релиз (Ф3.5) и замена кода на Linux (Ф1.5.5) — не проверялись.
+
 ---
 
 ## 4. Дальше

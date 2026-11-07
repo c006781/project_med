@@ -1238,6 +1238,8 @@ class SyncMixin:
         Example:
             >>> window._start_upload()      # doctest: +SKIP
         """
+        if not self._running_task() and not self._confirm_upload_unsaved():  # идёт работа — откажет проверка ниже
+            return
         settings = self._prepare_transfer("Выгрузка")
         if settings is None:
             return
@@ -1255,6 +1257,37 @@ class SyncMixin:
         self._set_transfer_running(True)
         self.upload_thread.start()
         self.logger.info("Запущен поток загрузки БД")
+
+    # несохранённое перед выгрузкой базы на Диск
+    def _confirm_upload_unsaved(self) -> bool:
+        """
+        Предупреждает, что несохранённые изменения не попадут на Диск (решение владельца, В-39).
+
+        На Диск уходит файл базы, а черновики и незавершённая правка экрана наборов данных в нём
+        ещё не записаны. Вопрос задаётся до резервной копии: отказ ничего не меняет. Сохранять здесь
+        не предлагается: сохранение идёт своими вопросами, пользователь сделает его сам.
+
+        Returns:
+            (bool) True — можно выгружать: изменений нет или пользователь согласился.
+
+        Example:
+            >>> window._confirm_upload_unsaved()    # нет изменений — без вопроса
+            True
+        """
+        pilot = getattr(self, 'dataset_pilot_page', None)
+        pending = pilot.finish_pending_edits() if pilot is not None else None
+        drafts = getattr(self, 'drafts', None)
+        if not pending and (drafts is None or drafts.store.is_empty):
+            return True
+        reply = QMessageBox.question(
+            self,                                                               # родитель
+            "Несохранённые изменения",                                          # заголовок
+            "Есть несохранённые изменения: на Диск они не попадут, "
+            "уйдёт база без них.\n\nВсё равно выгрузить?",                       # текст
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,     # кнопки
+            QMessageBox.StandardButton.No,                                      # по умолчанию отказ
+        )
+        return reply == QMessageBox.StandardButton.Yes
 
     # проверки и резервная копия перед передачей
     def _prepare_transfer(

@@ -32,6 +32,7 @@ from app.database.table_events import table_def_of  # заголовки таб�
 from app.utils.logger.bool_strings import to_bool  # одно правило для строк-флагов
 from app.utils.logger.logger import AppLogger
 
+from app.network.ya_dop import PATH_MISSING_PREFIX  # отличить «нет папки» от ошибки
 from app.network.ya_dop import DB_EXTENSIONS, check_and_create_path, check_token, normalize_remote_path
 
 from app.config.config_applier import ConfigApplier
@@ -140,6 +141,31 @@ def remote_folder_of(
     if normalized.lower().endswith(DB_EXTENSIONS): # файл базы
         return posixpath.dirname(normalized) or '/'
     return normalized
+
+
+# удаляется ли большая часть файлов фото
+def cleanup_removes_most(
+    extra  : int,   # файлов без ссылок, к удалению
+    linked : int,   # файлов со ссылками
+) -> bool:
+    """
+    Сообщает, что к удалению — больше половины файлов папки фото (решение владельца, В-35).
+
+    Обычно так бывает, когда сохранён путь к другой базе, а папка фото прежняя: тогда «без ссылок»
+    окажутся нужные снимки.
+
+    Args:
+        extra  : (int) Файлов без ссылок, к удалению.
+        linked : (int) Файлов со ссылками.
+
+    Returns:
+        (bool) True — нужно отдельное подтверждение.
+
+    Example:
+        >>> cleanup_removes_most(1, 1), cleanup_removes_most(2, 1), cleanup_removes_most(0, 0)
+        (False, True, False)
+    """
+    return extra > linked
 
 
 # окно подтверждения уборки со списком того, что будет удалено
@@ -288,7 +314,7 @@ class TokenCheckThread(QThread):
 
 class PathCheckThread(QThread):
     """
-    Поток проверки папки на Яндекс.Диске: нет папки — создаёт её; результат и любая ошибка — сигналом.
+    Поток проверки папки на Яндекс.Диске (создаёт только при ``create=True``, иначе сигнал ``missing``): нет папки — создаёт её; результат и любая ошибка — сигналом.
 
     Attributes:
         token : (str) OAuth-токен.
@@ -301,12 +327,14 @@ class PathCheckThread(QThread):
     """
 
     result = Signal(bool, str)   # успех, сообщение пользователю
+    missing = Signal(str)        # папки нет, а создавать не просили: какая папка
 
     # поток проверки заданной папки
     def __init__(
         self,
-        token : str,  # OAuth-токен
-        path  : str,  # значение поля «Удалённый путь БД»
+        token  : str,           # OAuth-токен
+        path   : str,           # значение поля «Удалённый путь БД»
+        create : bool = False,  # создать отсутствующую папку (пользователь согласился)
     ) -> None:
         """
         Запоминает токен и путь; проверка начнётся при ``start()``.
@@ -314,6 +342,7 @@ class PathCheckThread(QThread):
         Args:
             token : (str) OAuth-токен.
             path  : (str) Значение поля «Удалённый путь БД».
+            create : (bool) Создать отсутствующую папку; False — только сообщить ``missing``.
 
         Example:
             >>> thread = PathCheckThread("y0_...", "Проекты/test/bd")    # doctest: +SKIP
@@ -321,6 +350,7 @@ class PathCheckThread(QThread):
         super().__init__()
         self.token = token
         self.path = path
+        self.create = create
 
     # проверка папки в отдельном потоке
     def run(self) -> None:
@@ -334,11 +364,16 @@ class PathCheckThread(QThread):
             # ok, msg = check_and_create_path(self.token, self.path, create_if_missing=True)
             # ↑ до 2026-11-07 (ST2): путь по умолчанию — файл (…/clinic.db), на Диске создавалась
             #   папка с именем файла, и потом база не могла туда записаться.
+            # ↑ до 2026-11-07 (В-34): папка создавалась сразу, без вопроса пользователю
+            folder = remote_folder_of(self.path)
             ok, message = check_and_create_path(
-                self.token,                     # токен
-                remote_folder_of(self.path),    # папка, а не файл базы
-                create_if_missing   =   True,   # нет — создать
+                self.token,                         # токен
+                folder,                             # папка, а не файл базы
+                create_if_missing   =   self.create,  # создать, только если согласились
             )
+            if not ok and not self.create and message.startswith(PATH_MISSING_PREFIX):
+                self.missing.emit(folder)   # вопрос задаёт экран
+                return
         except Exception as exc:
             _log.exception(f"Ошибка проверки папки на Яндекс.Диске: {exc}")
             ok = False
@@ -1747,11 +1782,78 @@ class SettingsPage(BasePage):
         #         self.result.emit(ok, msg)
         # ↑ до 2026-11-07 (ST3): как TokenCheckThread в _check_token.
 
-        self.path_thread = PathCheckThread(token, path)
+        self._start_path_thread(
+            token,  # токен
+            path,   # значение поля
+            False,  # только проверить
+        )
+
+    # запуск потока проверки папки
+    def _start_path_thread(
+        self,
+        token  : str,   # OAuth-токен
+        path   : str,   # значение поля «Удалённый путь БД»
+        create : bool,  # создать отсутствующую папку
+    ) -> None:
+        """
+        Запускает поток проверки папки и выключает кнопку на это время.
+
+        Args:
+            token  : (str) OAuth-токен.
+            path   : (str) Значение поля «Удалённый путь БД».
+            create : (bool) Создать отсутствующую папку.
+
+        Example:
+            >>> page._start_path_thread(
+            ...     'y0_...',           # токен
+            ...     'Проекты/test/bd',  # путь
+            ...     False,              # только проверить
+            ... )    # doctest: +SKIP
+        """
+        self.path_thread = PathCheckThread(
+            token,                  # токен
+            path,                   # путь
+            create  =   create,     # создавать ли
+        )
         self.path_thread.result.connect(self._on_path_checked)
+        self.path_thread.missing.connect(self._on_path_missing)
         self.check_path_btn.setEnabled(False)
         self.check_path_btn.setText("Проверка...")
         self.path_thread.start()
+
+    # папки нет: спросить, создавать ли
+    def _on_path_missing(
+        self,
+        folder : str,   # папка на Диске
+    ) -> None:
+        """
+        Спрашивает, создать ли отсутствующую папку на Диске (решение владельца, В-34).
+
+        Кнопка называется «проверить», поэтому Диск без согласия не меняется. По умолчанию — отказ.
+
+        Args:
+            folder : (str) Папка на Диске.
+
+        Example:
+            >>> page._on_path_missing('Проекты/test/bd')    # doctest: +SKIP
+        """
+        finished_thread = self.path_thread
+        finished_thread.wait()  # поток уже отправил сигнал; ссылка на него сейчас заменится
+        self.check_path_btn.setEnabled(True)
+        self.check_path_btn.setText("Проверить наличие папки")
+        reply = QMessageBox.question(
+            self,                                                               # родитель
+            "Папки нет",                                                        # заголовок
+            f"На Яндекс.Диске нет папки:\n{folder}\n\nСоздать её?",              # текст
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,     # кнопки
+            QMessageBox.StandardButton.No,                                      # по умолчанию отказ
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_path_thread(
+                finished_thread.token,  # тот же токен
+                finished_thread.path,   # тот же путь
+                True,                   # создать
+            )
 
     @AppLogger.get_instance(
         name='SettingsPage',
@@ -1867,6 +1969,20 @@ class SettingsPage(BasePage):
         )
         if not confirmed:
             return
+        linked = service.linked_file_count(report)
+        if cleanup_removes_most(len(files), linked):  # похоже на чужую базу при прежней папке
+            reply = QMessageBox.question(
+                self,                                                               # родитель
+                "Очистка фото: проверьте базу",                                     # заголовок
+                f"Будет удалено файлов: {len(files)}, останется со ссылками: {linked}.\n\n"
+                f"Удаляется больше половины папки. Так бывает, если открыта другая база:\n"
+                f"{self._text_setting('database_local_path')}\n\n"
+                "Файлы удаляются безвозвратно. Всё равно удалить?",                  # текст
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,     # кнопки
+                QMessageBox.StandardButton.No,                                      # по умолчанию отказ
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
 
         try:
             result = service.clean_storage(report)

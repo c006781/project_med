@@ -100,6 +100,33 @@ def test_clean_photos_lists_then_deletes(world, page, dialogs, messages):
     assert messages == [('information', "Очистка фото", "Удалено: 1.")]
 
 
+def test_clean_photos_most_of_folder_second_question_refused(world, page, dialogs, messages):
+    """К удалению больше половины, второй вопрос, отказ: ничего не удалено."""
+    messages.answer = sp.QMessageBox.StandardButton.No
+    first = _orphan(world.storage, '20250101_000000.jpg')
+    second = _orphan(world.storage, '20250101_000001.jpg')
+    page._on_clean_photos_clicked()
+    assert [kind for kind, *_ in messages] == ['question']
+    assert 'Будет удалено файлов: 2, останется со ссылками: 1' in messages[0][2]
+    assert first.exists() and second.exists()
+
+
+def test_clean_photos_most_of_folder_second_question_accepted(world, page, dialogs, messages):
+    """К удалению больше половины, согласие: удалено, связанный файл на месте."""
+    first = _orphan(world.storage, '20250101_000000.jpg')
+    second = _orphan(world.storage, '20250101_000001.jpg')
+    page._on_clean_photos_clicked()
+    assert not first.exists() and not second.exists()
+    assert (world.storage / world.linked).exists()
+
+
+def test_clean_photos_half_no_second_question(world, page, dialogs, messages):
+    """Ровно половина: второго вопроса нет."""
+    _orphan(world.storage, '20250101_000000.jpg')
+    page._on_clean_photos_clicked()
+    assert 'question' not in [kind for kind, *_ in messages]
+
+
 def test_clean_photos_cancel_deletes_nothing(world, page, dialogs, messages):
     """Отказ в подтверждении: ничего не удалено, сообщений нет."""
     orphan = _orphan(world.storage, '20250101_000000.jpg')

@@ -7838,6 +7838,32 @@ class PhotoService(
         )
         return report
 
+    # сколько файлов фото числится в базе и лежит в папке
+    def linked_file_count(
+        self,
+        report : Dict[str, List[str]],  # результат check_storage
+    ) -> int:
+        """
+        Считает файлы со ссылками: строки ``photo_files`` без тех, чьего файла нет в папке.
+
+        Нужно экрану уборки, чтобы сравнить удаляемое с тем, что остаётся (В-35).
+
+        Args:
+            report : (Dict[str, List[str]]) Результат ``check_storage``.
+
+        Returns:
+            (int) Число файлов со ссылками.
+
+        Example:
+            >>> photo_service.linked_file_count(
+            ...     photo_service.check_storage(),  # сверка
+            ... )
+            3
+        """
+        with self._db.session_scope() as session:
+            rows = session.scalar(select(func.count()).select_from(PhotoFile))
+        return max(0, rows - len(report.get('missing', [])))
+
     def clean_storage(
         self,
         expected : Dict[str, List[str]],      # подтверждённый список (check_storage)

@@ -38,6 +38,37 @@ find "$BUILD_DIR" -type d -name __pycache__ -prune -exec rm -rf {} +
 # ↑ до 2026-11-07 (SC1): кэш не удалялся — при сборке в папке, где запускали программу, в архив
 #   попадали app/**/__pycache__ и interfaces/**/__pycache__ (.pyc под чужую версию Python)
 
+# Данные из рабочей папки (журналы, фото, настройки, базы) в код не попадают: манифест с такими
+# путями автообновление отклонит (app/updater.py, validate_manifest_path)
+find "$BUILD_DIR" -type d \
+    \( -name logs -o -name logs_parser -o -name 'photos*' -o -name MedicalAppUpdates \) \
+    -prune -exec rm -rf {} +
+find "$BUILD_DIR" -type f \
+    \( -name '*.env' -o -name '*.db' -o -name '*.db-*' -o -name '*.sqlite' -o -name '*.sqlite3' \
+    -o -name '*.msgpack' -o -name '*.log' -o -name '*.log.*' -o -name '*.part' \) \
+    -delete
+
+# Метка и манифест для автообновления (app/UPDATER.md, раздел 1.3). Метка: «это установленный
+# дистрибутив». Манифест: все файлы кода поимённо — обновление заменяет только их, поэтому данные
+# в папках кода (parsers/logs, parsers/photos) не затрагиваются
+MARKER_FILE=".medicalapp_dist"
+MANIFEST_FILE=".medicalapp_manifest"
+printf 'MedicalApp Linux %s\n' "$VERSION" > "$BUILD_DIR/$MARKER_FILE"
+# Только обычные файлы и папки: ссылки автообновление не принимает
+if [ -n "$(find "$BUILD_DIR" ! -type f ! -type d)" ]; then
+    echo "Ошибка: в дистрибутиве есть ссылки или спецфайлы:" >&2
+    find "$BUILD_DIR" ! -type f ! -type d >&2
+    exit 1
+fi
+{
+    echo "# medicalapp manifest v1"
+    {
+        echo "$MANIFEST_FILE"
+        (cd "$BUILD_DIR" && find . -type f -printf '%P\n')
+    } | LC_ALL=C sort
+} > "$BUILD_DIR.manifest.tmp"
+mv "$BUILD_DIR.manifest.tmp" "$BUILD_DIR/$MANIFEST_FILE"
+
 # Архивация
 tar -czf "$OUTPUT_TAR" "$BUILD_DIR"
 rm -rf "$BUILD_DIR"

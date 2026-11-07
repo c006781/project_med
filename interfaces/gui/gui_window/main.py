@@ -125,8 +125,11 @@ def main():
 
     # Настройка High DPI (должна быть до создания QApplication)
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    # QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    # ↑ до 2026-11-07 (LX3): в Qt 6 оба атрибута устарели и ничего не делают (масштабирование
+    #   включено всегда), PySide6 печатает DeprecationWarning; политика округления выше —
+    #   PassThrough — и есть то, что нужно.
     app = QApplication(sys.argv)
 
     # Загружаем стили (если есть)

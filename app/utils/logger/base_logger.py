@@ -74,6 +74,7 @@ import queue
 from ._common import (
     LOGGER_CODE_FILES, _NOT_FOUND, _STOP_OUTPUT, _level_to_int,
 )
+from .bool_strings import parse_bool_string
 from .handlers import CallableHandler, RobustRotatingFileHandler
 from ._registry import _RegistryMixin
 from ._config import _ConfigMixin
@@ -400,10 +401,16 @@ class BaseAppLogger(
         if isinstance(enable_file_logging, str):
             # self._enable_file_logging_ref = enable_file_logging
             # self._enable_file_logging = False  # placeholder
-            low = enable_file_logging.lower()
-            if low in ('true', 'false'):
-                enable_file_logging = low == 'true'
-                
+            # low = enable_file_logging.lower()
+            # if low in ('true', 'false'):
+            #     enable_file_logging = low == 'true'
+            # ↑ до 2026-11-07 (LG1): только 'true' / 'false'; 'on', 'off' считались именем логгера.
+            file_flag = parse_bool_string(enable_file_logging)
+            if file_flag is not None:
+                enable_file_logging = file_flag
+                # LG2: без этой строки конструктор со строкой-флагом падал с AttributeError
+                self._enable_file_logging_ref = None
+
             else:
                 self._enable_file_logging_ref = enable_file_logging
                 enable_file_logging = True # файловое логирование включаем, но обработчик будет общим  
@@ -414,9 +421,14 @@ class BaseAppLogger(
         self._enable_file_logging = enable_file_logging
 
         if isinstance(use_name_in_filename, str):
-            low = use_name_in_filename.lower()
-            if low in ('true', 'false'):
-                use_name_in_filename = low == 'true'
+            # low = use_name_in_filename.lower()
+            # if low in ('true', 'false'):
+            #     use_name_in_filename = low == 'true'
+            # ↑ до 2026-11-07 (LG1): как у enable_file_logging выше.
+            name_flag = parse_bool_string(use_name_in_filename)
+            if name_flag is not None:
+                use_name_in_filename = name_flag
+                self._use_name_in_filename_ref = None # LG2: как у enable_file_logging выше
 
             else:
                 self._use_name_in_filename_ref = use_name_in_filename

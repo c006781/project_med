@@ -29,6 +29,7 @@ import threading
 
 
 from ._common import LOGGER_CODE_FILES
+from .bool_strings import parse_bool_string
 from .handlers import CallableHandler
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
@@ -1048,18 +1049,26 @@ class _RegistryMixin:
             isinstance(enable_file_logging, str) 
             # and enable_file_logging.lower() not in ('true', 'false')
         ):
-            low = enable_file_logging.lower()
-            if low in ('true', 'false'):
-                enable_file_logging = low == 'true'
-                
+            # low = enable_file_logging.lower()
+            # if low in ('true', 'false'):
+            #     enable_file_logging = low == 'true'
+            # ↑ до 2026-11-07 (LG1): только 'true' / 'false'; 'on', 'off' считались именем логгера.
+            file_flag = parse_bool_string(enable_file_logging)
+            if file_flag is not None:
+                enable_file_logging = file_flag
+
             else:
                 share_file_with = enable_file_logging
                 # enable_file_logging = True # файловое логирование включаем, но обработчик будет общим  
 
         if isinstance(use_name_in_filename, str):
-            low = use_name_in_filename.lower()
-            if low in ('true', 'false'):
-                use_name_in_filename = low == 'true'
+            # low = use_name_in_filename.lower()
+            # if low in ('true', 'false'):
+            #     use_name_in_filename = low == 'true'
+            # ↑ до 2026-11-07 (LG1): как у enable_file_logging выше.
+            name_flag = parse_bool_string(use_name_in_filename)
+            if name_flag is not None:
+                use_name_in_filename = name_flag
             else:
                 # небулева строка – оставляем как есть, конструктор разберётся
                 pass

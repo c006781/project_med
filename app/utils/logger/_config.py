@@ -25,6 +25,7 @@ from typing import List, Optional, Dict, Any, Callable, Union
 
 
 from ._common import LOGGER_CODE_FILES, _NOT_FOUND
+from .bool_strings import to_bool
 
 LOGGER_CODE_FILES.append((lambda: None).__code__.co_filename)
 
@@ -699,27 +700,33 @@ class _ConfigMixin:
         return config
 
     @staticmethod
-    def _to_bool(value: Any) -> bool:
+    def _to_bool(
+        value : Any,  # значение из конфига
+    ) -> bool:
         """
-        Приводит значение из конфига к ``bool``.
+        Приводит значение из конфига к ``bool`` по единому правилу программы.
 
-        Строки: ``'true'``, ``'1'``, ``'yes'`` (без учёта регистра) → ``True``, любые другие
-        (в том числе ``'on'``) → ``False``. Не строки — обычный ``bool(value)``.
+        Строки — ``bool_strings.parse_bool_string``: ``'on'`` — истина, ``'off'`` — ложь,
+        нераспознанная строка — ложь. Не строки — обычный ``bool(value)``.
 
         Args:
-            value: Значение из конфига (строка из msgpack/.env или bool/int).
+            value : (Any) Значение из конфига (строка из msgpack/.env или bool/int).
 
         Returns:
-            ``True``/``False``.
+            (bool) Значение флага.
 
-        Пример:
+        Example:
             >>> BaseAppLogger._to_bool('Yes'), BaseAppLogger._to_bool('on'), BaseAppLogger._to_bool(1)
-            (True, False, True)
+            (True, True, True)
+            >>> BaseAppLogger._to_bool('off'), BaseAppLogger._to_bool('нечто')
+            (False, False)
         """
-        if isinstance(value, str):
-            return value.lower() in ('true', '1', 'yes')
-        return bool(value)
-    
+        # if isinstance(value, str):
+        #     return value.lower() in ('true', '1', 'yes')
+        # return bool(value)
+        # ↑ до 2026-11-07 (LG1): своё правило — 'on' было ложью, а на экране настроек истиной.
+        return to_bool(value)
+
     def _get_config_param (
             self,
             config: Dict[str, Any],

@@ -18,6 +18,7 @@
 | [_handlers_mgmt.py](_handlers_mgmt.py) | Сборка обработчиков (`_update_handlers`), путь к файлу |
 | [_sharing.py](_sharing.py) | Общий файл (мастер/слейв) |
 | [_modes.py](_modes.py) | Режимы на лету, `reconfigure`, свойства, `close` |
+| [bool_strings.py](bool_strings.py) | Единое правило строк-флагов программы: `parse_bool_string`, `to_bool` (LG1) |
 | [_outputs.py](_outputs.py) | `add_output`, общие выводы класса (`OUTPUTS`) |
 | [_emit.py](_emit.py) | `debug`…`exception`, место вызова, глубина |
 | [_decorator.py](_decorator.py) | `log_execution_time` |
@@ -643,3 +644,4 @@ log = AppLogger.get_instance('worker', enable_file_logging='system')
 |---|---|---|
 | 2026-10-14 | Характеризующие тесты, развязка с конфигом, R1–R6, S1–S4, B1–B7, D1, проход по коду, P1–P8, разбиение на модули (§5, §7.2, §9) | Первая проверка модуля |
 | 2026-10-25 | Сверка М2 (`_dev/ПЛАН.md` Ф1.6.1, ветка `rework-logger`): К8 — учебный класс примера в `logger.py` переименован `PatientService` → `ExampleService` (путался с сервисом пациентов), методы примера с докстрингами и типами; 11 pyflakes в `base_logger.py` — оставлены, помечены (§6); устаревшие места этого файла (обрывок старой таблицы, `_THIS_CODE_FILENAME`, «system/user при импорте», задачи вне логгера, уже исправленные); тест `test_logger_docs.py` — докстринг и тип возврата у каждой функции пакета, на уровне `logger.py` только `AppLogger` | Модуль ✅: опись 0 нд / 0 нт, pyflakes — только записанные исключения |
+| 2026-11-07 | LG1: `_to_bool` и флаги `enable_file_logging`, `use_name_in_filename` — через новый `bool_strings.py` (`'on'` — истина, `'off'` — ложь; правило одно с менеджером и экраном настроек, решение владельца В-12; нераспознанная строка — ложь, а у этих двух флагов — имя другого логгера). `_modes.py` своих списков не имеет, идёт через `_to_bool`. Файл в этом пакете, потому что пакет переносится копированием папки (`test_portability`), подробно — `app/config/IMPLEMENTATION.md` §4.z. LG2: `BaseAppLogger(enable_file_logging='true')` падал с `AttributeError` — ссылка `_enable_file_logging_ref` не задавалась для строки-флага (`get_instance` переводил строку раньше, поэтому в работе не проявлялось) | Одно правило на всю программу; тесты — `tests/test_config/test_bool_rule.py` |

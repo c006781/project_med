@@ -50,7 +50,9 @@ def test_parse_log_level_rejects_bad_types(bad, exc):
 @pytest.mark.parametrize('raw, expected', [
     ('True', True), ('true', True), ('1', True), ('yes', True),
     ('False', False), ('false', False), ('0', False), ('no', False), ('', False),
-    ('on', False),  # 'on' не распознаётся как истина
+    # ('on', False),  # 'on' не распознаётся как истина
+    # ↑ до 2026-11-07 (LG1): одно правило на всю программу, 'on' — истина, 'off' — ложь.
+    ('on', True), ('ON', True), ('off', False), ('нечто', False),
     (True, True), (False, False), (1, True), (0, False), (None, False),
 ])
 def test_to_bool(raw, expected):

@@ -329,11 +329,14 @@ def test_cm6_unparseable_string_kept_as_is(config_sandbox):
     from app.config.config_manager.manager import AppConfigManager
 
     path = str(config_sandbox / 'config.msgpack')
-    _write_msgpack(path, {'LOG_MAX_BYTES': '10 МБ', 'use_timestamp': 'on'})
+    # _write_msgpack(path, {'LOG_MAX_BYTES': '10 МБ', 'use_timestamp': 'on'})
+    # ↑ до 2026-11-07 (CM18): 'on' теперь флаг, нераспознанная строка — другая.
+    _write_msgpack(path, {'LOG_MAX_BYTES': '10 МБ', 'use_timestamp': 'нечто'})
 
     m = AppConfigManager.get_instance(config_path=path)
     assert m.get('LOG_MAX_BYTES') == '10 МБ'
-    assert m.get('use_timestamp') == 'on'
+    # assert m.get('use_timestamp') == 'on'
+    assert m.get('use_timestamp') == 'нечто'
 
 
 def test_cm6_old_file_not_rewritten_on_read(config_sandbox):

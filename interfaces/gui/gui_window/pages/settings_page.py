@@ -3,11 +3,12 @@
 import os
 import shutil
 import sys
-from typing import Optional
+from typing import Any, Optional
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
 from app.dependencies import create_config_applier  # применитель с сервисами (К6)
+from app.utils.logger.bool_strings import to_bool  # одно правило для строк-флагов
 from app.utils.logger.logger import AppLogger
 
 from app.network.ya_dop import check_and_create_path
@@ -87,16 +88,37 @@ class SettingsPage(BasePage):
     # ).log_execution_time(
     #     level=AppLogger._parse_log_level('DEBUG')
     # )
+    # значение настройки как bool по единому правилу программы
     @staticmethod
-    def _to_bool(value) -> bool:
-        """Преобразует значение в bool, поддерживая строки 'true'/'false', '1'/'0', 'yes'/'no'."""
-        if isinstance(value, bool):
-            return value
-        
-        if isinstance(value, str):
-            return value.lower() in ('true', '1', 'yes', 'on')
-        
-        return bool(value)
+    def _to_bool(
+        value : Any,  # значение настройки
+    ) -> bool:
+        """
+        Приводит значение настройки к ``bool`` по единому правилу программы.
+
+        Строки — ``parse_bool_string``: ``'on'`` — истина, ``'off'`` — ложь, нераспознанная
+        строка — ложь (менеджер настроек такую строку оставляет как есть, флажок экрана
+        показывает её снятой). Не строки — обычный ``bool(value)``.
+
+        Args:
+            value : (Any) Значение настройки.
+
+        Returns:
+            (bool) Значение флага.
+
+        Example:
+            >>> SettingsPage._to_bool('on'), SettingsPage._to_bool('off'), SettingsPage._to_bool(1)
+            (True, False, True)
+        """
+        # if isinstance(value, bool):
+        #     return value
+        #
+        # if isinstance(value, str):
+        #     return value.lower() in ('true', '1', 'yes', 'on')
+        #
+        # return bool(value)
+        # ↑ до 2026-11-07 (ST1): своё правило — у журналов и менеджера настроек оно было другим.
+        return to_bool(value)
 
     @AppLogger.get_instance(
         name = 'SettingsPage',

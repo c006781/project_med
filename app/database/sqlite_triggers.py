@@ -381,9 +381,9 @@ def _single_trigger_error(
 
     Example:
         >>> _single_trigger_error(
-        ...     connection,                                   # база в памяти
-        ...     't',                                          # имя
-        ...     StoredTrigger('a', 'CREATE TRIGGER "t" ...'),  # таблица и текст
+        ...     connection,                                     # база в памяти
+        ...     't',                                            # имя
+        ...     StoredTrigger('a', 'CREATE TRIGGER "t" ...'),   # таблица и текст
         ... ) is None
         True
     """
@@ -452,8 +452,8 @@ def keep_triggers(
     Example:
         >>> with keep_triggers():
         ...     with op.batch_alter_table(
-        ...         'photos',                # таблица
-        ...         recreate    =   'always',  # пересборка
+        ...         'photos',                   # таблица
+        ...         recreate    =   'always',   # пересборка
         ...     ) as batch:
         ...         batch.drop_column('description')
     """

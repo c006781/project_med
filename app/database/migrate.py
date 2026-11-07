@@ -880,8 +880,8 @@ def _plan_repair(
 
     Example:
         >>> added, ignored = _plan_repair(
-        ...     conn,                       # соединение
-        ...     schema_at(head_revision()),  # схема последней миграции
+        ...     conn,                           # соединение
+        ...     schema_at(head_revision()),     # схема последней миграции
         ... )
         >>> added
         []

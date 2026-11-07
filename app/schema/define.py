@@ -774,7 +774,7 @@ class TableDef:
         triggers: Встроенные триггеры SQLite (``trigger(...)``, Ф1.6.7д): правила внутри
             данных, создаются миграцией. Модель несёт их текст в ``Table.info``.
 
-    Пример:
+    Example:
         >>> PATIENTS.build_config()['last_name']['title']
         'Фамилия'
     """

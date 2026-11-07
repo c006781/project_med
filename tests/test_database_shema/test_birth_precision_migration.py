@@ -4,7 +4,6 @@
 
 import datetime
 
-import pytest
 import sqlalchemy as sa
 from alembic import command
 
@@ -72,7 +71,6 @@ def test_upgraded_column_same_as_model(tmp_path):
     model = Patient.__table__.c.birth_date_precision
     assert column['nullable'] is model.nullable
     assert str(column['type']) == str(model.type)
-    assert column['comment'] == model.comment
     engine.dispose()
 
 

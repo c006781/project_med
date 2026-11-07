@@ -115,8 +115,9 @@ def test_plan_fills_empty_fields_and_warns_on_differences(svc):
     plan = svc['merge'].plan_merge(main.id, [dup.id])
     assert [(c.field, c.value) for c in plan.changes] == [('middle_name', 'Петровна')]
     assert any(w.startswith('Телефон:') and 'остаётся значение главного' in w for w in plan.warnings)
-    # отчество было пустым у главного — ключи разные, предупреждение
-    assert any('не совпадают с главным' in w for w in plan.warnings)
+    # assert any('не совпадают с главным' in w for w in plan.warnings)
+    # ↑ до 2026-11-07 (Ф1.6.10е): пустое отчество было отличием; теперь пустое не противоречит
+    assert not any('не совпадают с главным' in w for w in plan.warnings)
 
 
 def test_join_texts():

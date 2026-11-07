@@ -342,6 +342,34 @@ def _log_ref(
     """
     return f"{type(entity).__name__} id={getattr(entity, 'id', None)}"
 
+
+def _page_slice(
+    items  : List[Any],        # все записи после отбора
+    offset : int,              # сколько пропустить
+    limit  : Optional[int],    # сколько взять; None — все
+) -> List[Any]: # записи страницы
+    """
+    Вырезает страницу из списка в памяти (нечёткий поиск отбирает записи после запроса).
+
+    Args:
+        items  : (List[Any]) Все записи после отбора.
+        offset : (int) Сколько пропустить.
+        limit  : (int/None) Сколько взять; None — все после ``offset``.
+
+    Returns:
+        (List[Any]) Записи страницы.
+
+    Example:
+        >>> _page_slice(
+        ...     [1, 2, 3],  # записи
+        ...     1,          # пропустить
+        ...     None,       # без предела
+        ... )
+        [2, 3]
+    """
+    return items[offset:] if limit is None else items[offset:offset + limit]
+
+
 class BaseService(
     Generic[
         ModelType,
@@ -1270,33 +1298,42 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_page_filtered(
         self,
-        offset: int,
-        limit: int,
-        filters: Optional[List[Dict[str, Any]]] = None,
-        order_by: Optional[List] = None,
-        relations: Optional[List] = None,
-        fuzzy_threshold: int = 60,
-        session: Optional[Session] = None,
-        sql_compute: Optional[Iterable[str]] = None,
+        offset          : int,                                  # сколько записей пропустить
+        limit           : Optional[int],                        # записей на странице; None — все
+        filters         : Optional[List[Dict[str, Any]]] = None,  # фильтры
+        order_by        : Optional[List] = None,                # поля сортировки
+        relations       : Optional[List] = None,                # связи для жадной подгрузки
+        fuzzy_threshold : int = 60,                             # порог нечёткого поиска
+        session         : Optional[Session] = None,             # внешняя сессия
+        sql_compute     : Optional[Iterable[str]] = None,       # какие sql_compute считать
     ) -> Tuple[List[DTOType], int]:
         """
         Возвращает страницу записей с учётом фильтров, сортировки и подгрузки связей,
         а также общее количество записей (без пагинации).
 
         Args:
-            offset (int): Смещение (сколько записей пропустить).
-            limit (int): Максимальное количество записей на странице.
-            filters (Optional[List[Dict[str, Any]]]): Список фильтров.
-            order_by (Optional[List]): Список полей для сортировки.
-            relations (Optional[List]): Список имён отношений для жадной подгрузки.
-            fuzzy_threshold (int): Порог схожести для нечёткого поиска.
-            session (Optional[Session]): Опциональная внешняя сессия.
-            sql_compute (Optional[Iterable[str]]): Какие поля ``sql_compute`` считать
+            offset          : (int) Смещение (сколько записей пропустить).
+            limit           : (int/None) Записей на странице; None — все после ``offset``
+                (в том числе при нечётком поиске).
+            filters         : (List[Dict[str, Any]]/None) Список фильтров.
+            order_by        : (List/None) Список полей для сортировки.
+            relations       : (List/None) Список имён отношений для жадной подгрузки.
+            fuzzy_threshold : (int) Порог схожести для нечёткого поиска.
+            session         : (Session/None) Опциональная внешняя сессия.
+            sql_compute     : (Iterable[str]/None) Какие поля ``sql_compute`` считать
                 подзапросом (``None`` — все, как раньше; пусто — ни одного: запрос таблицы
                 данных остаётся простым — итоги считает отдельный объект, 2026-10-18).
 
         Returns:
-            Tuple[List[DTOType], int]: Кортеж (список DTO на странице, общее количество).
+            (Tuple[List[DTOType], int]) Список DTO на странице, общее количество.
+
+        Example:
+            >>> items, total = service.get_page_filtered(
+            ...     0,      # с начала
+            ...     None,   # без предела
+            ... )
+            >>> len(items) == total
+            True
         """
 
         with self._session_scope(session) as sess:
@@ -1395,7 +1432,9 @@ class BaseService(
                 # from app.utils.filtering.filtering import apply_post_filters
                 items = apply_post_filters(items, post_filters, self._model_class)
                 total = len(items)                       # DATA7: счёт после fuzzy
-                items = items[offset:offset + limit]     # DATA7: нарезка после fuzzy
+                # items = items[offset:offset + limit]     # DATA7: нарезка после fuzzy
+                # ↑ до 2026-11-07 (S14): limit=None («без предела», так зовут черновики) — TypeError.
+                items = _page_slice(items, offset, limit)   # DATA7: нарезка после fuzzy
 
             # Пост-обработка (например, добавление временных атрибутов для подсчётов)
             items = self._post_process_items(items, sess)
@@ -1412,13 +1451,13 @@ class BaseService(
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def get_page_filtered_exact(
         self,
-        offset: int,
-        limit: int,
-        filters: Optional[List[Dict[str, Any]]] = None,
-        order_by: Optional[List] = None,
-        relations: Optional[List] = None,
-        fuzzy_threshold: int = 60,
-        session: Optional[Session] = None,
+        offset          : int,                                  # сколько записей пропустить
+        limit           : Optional[int],                        # записей на странице; None — все
+        filters         : Optional[List[Dict[str, Any]]] = None,  # фильтры (может включать fuzzy)
+        order_by        : Optional[List] = None,                # поля сортировки
+        relations       : Optional[List] = None,                # связи для жадной подгрузки
+        fuzzy_threshold : int = 60,                             # порог нечёткого поиска
+        session         : Optional[Session] = None,             # внешняя сессия
     ) -> Tuple[List[DTOType], int]:
         """
         Возвращает страницу записей с точным учётом пост-фильтров (включая fuzzy).
@@ -1430,16 +1469,25 @@ class BaseService(
         количество критично, а объём данных не превышает нескольких тысяч строк.
 
         Args:
-            offset (int): Смещение (сколько записей пропустить).
-            limit (int): Максимальное количество записей на странице.
-            filters (Optional[List[Dict[str, Any]]]): Список фильтров (может включать fuzzy).
-            order_by (Optional[List]): Список полей для сортировки.
-            relations (Optional[List]): Список имён отношений для жадной подгрузки.
-            fuzzy_threshold (int): Порог схожести для нечёткого поиска.
-            session (Optional[Session]): Опциональная внешняя сессия.
+            offset          : (int) Смещение (сколько записей пропустить).
+            limit           : (int/None) Записей на странице; None — все после ``offset``.
+            filters         : (List[Dict[str, Any]]/None) Список фильтров (может включать fuzzy).
+            order_by        : (List/None) Список полей для сортировки.
+            relations       : (List/None) Список имён отношений для жадной подгрузки.
+            fuzzy_threshold : (int) Порог схожести для нечёткого поиска.
+            session         : (Session/None) Опциональная внешняя сессия.
 
         Returns:
-            Tuple[List[DTOType], int]: Кортеж (список DTO на странице, точное общее количество).
+            (Tuple[List[DTOType], int]) Список DTO на странице, точное общее количество.
+
+        Example:
+            >>> items, total = service.get_page_filtered_exact(
+            ...     0,                                                              # с начала
+            ...     None,                                                           # без предела
+            ...     [{'column': 'last_name', 'operator': 'fuzzy', 'value': 'Иванов'}],   # нечёткий поиск
+            ... )
+            >>> len(items) == total
+            True
         """
         with self._session_scope(session) as sess:
             base_query = sess.query(self._model_class)
@@ -1470,7 +1518,9 @@ class BaseService(
             total = len(all_items)
 
             # Пагинация в памяти
-            paginated_items = all_items[offset:offset + limit]
+            # paginated_items = all_items[offset:offset + limit]
+            # ↑ до 2026-11-07 (S14): limit=None — TypeError.
+            paginated_items = _page_slice(all_items, offset, limit)
 
             # Пост-обработка (добавление временных атрибутов)
             paginated_items = self._post_process_items(paginated_items, sess)

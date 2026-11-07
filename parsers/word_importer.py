@@ -63,8 +63,10 @@ from app.schema.clinic import patient_full_name
 # в app.utils.record_keys без изменения поведения (app не зависит от parsers).
 from app.utils.record_keys import (
     APPOINTMENT_KEY_FIELDS,
+    BIRTH_PRECISION_YEAR,
     PATIENT_KEY_FIELDS,
     appointment_key,
+    match_patients,
     normalize_match,
     normalize_text,
     record_key,
@@ -503,7 +505,8 @@ class PatientInfoExtractor:
         Returns:
             Optional[PatientDTO]: DTO с заполненными полями (first_name, last_name, ...)
                                   или None, если формат не распознан. Телефон — как в
-                                  тексте (приводит ``normalize_phone``), год — 1 января.
+                                  тексте (приводит ``normalize_phone``), год — 1 января
+                                  с точностью «только год» (``birth_date_precision``).
 
         Пример:
             >>> dto = PatientInfoExtractor.extract('Иванов Иван 1990 8 (3842) 12-34-56 тётя')
@@ -546,12 +549,15 @@ class PatientInfoExtractor:
             description = None
 
         return PatientDTO(
-            first_name       = data['first_name'].strip(),
-            last_name        = data['last_name'].strip(),
-            middle_name      = (data.get('middle_name') or '').strip() or None,  # группа может не совпасть — None
-            birth_date       = birth_date,
-            phone            = phone,
-            description_text = description,
+            first_name           = data['first_name'].strip(),
+            last_name            = data['last_name'].strip(),
+            middle_name          = (data.get('middle_name') or '').strip() or None,  # группа может не совпасть — None
+            birth_date           = birth_date,
+            # в шапке только год: 01.01 — не настоящая дата (Ф1.6.10е), без этого сравнение
+            # с пациентом базы шло бы по полной дате
+            birth_date_precision = BIRTH_PRECISION_YEAR if birth_date else None,
+            phone                = phone,
+            description_text     = description,
         )
         # middle_name=data.get('middle_name', '').strip() or None,
         # ↑ до 2026-10-25 (W6): отчество стало необязательным — группа может быть None
@@ -1114,13 +1120,13 @@ def patient_key(
     birth_date  : Optional[date],   # дата рождения (сравнивается целиком)
 ) -> Tuple[Any, ...]: # ключ «тот же пациент»
     """
-    Ключ «тот же пациент» — ФИО + полная дата рождения (``PATIENT_KEY_FIELDS``; решения
-    владельца 2026-10-25, ТД-8, и 2026-10-31 — дата, а не год).
+    Точный ключ: ФИО + полная дата рождения (``PATIENT_KEY_FIELDS``; решения владельца
+    2026-10-25, ТД-8, и 2026-10-31 — дата, а не год).
 
     ФИО сравнивается после ``normalize_match`` (регистр, «ё», пунктуация, пробелы не
-    важны); дата — целиком. Документ с одним годом («1985г») даёт дату 01.01.1985 и
-    находит только пациента с той же датой: 14.06.1985 — другой пациент (объединить —
-    в программе, Ф1.6.10а). Тот же ключ — у поиска дублей при объединении.
+    важны); дата — целиком, без учёта точности. Поиск пациента при импорте с 2026-11-07
+    идёт не по этому ключу, а через ``match_patients`` (``find_patients_by_key``): дата с
+    точностью общим ключом не выражается.
 
     Args:
         last_name   : (str/None) Фамилия.
@@ -1165,7 +1171,13 @@ def find_patients_by_key(
     patient_dto : PatientDTO,   # пациент из документа (после нормализации)
 ) -> List['Patient']:
     """
-    Пациенты базы с тем же ключом ``patient_key`` (ФИО + дата рождения), ТД-8.
+    Пациенты базы, совпавшие с пациентом документа по ФИО и дате рождения, ТД-8.
+
+    Сравнение — ``match_patients``: дата по наименее точной из двух (в документе только год —
+    по году). Поле, заполненное только у одного (в документе нет отчества, в базе есть), здесь
+    НЕ считается совпадением: найденному пациенту импорт сразу добавляет приёмы, а совмещать
+    по неполному совпадению можно только с одобрения пользователя (форма совмещения — Ф1.1.14,
+    Ф2.4.3). Поле, пустое у обоих, совпадает, как раньше.
 
     Перебирает всех пациентов базы (для клиники — десятки / сотни записей).
 
@@ -1182,18 +1194,29 @@ def find_patients_by_key(
         [7]
     """
 
-    key = patient_key(
-        patient_dto.last_name,
-        patient_dto.first_name,
-        patient_dto.middle_name,
-        patient_dto.birth_date,
-    )
-
-    return [
-        patient
-        for patient in PatientRepository(session).get_all()
-        if patient_key(patient.last_name, patient.first_name, patient.middle_name, patient.birth_date) == key
-    ]
+    # key = patient_key(
+    #     patient_dto.last_name,
+    #     patient_dto.first_name,
+    #     patient_dto.middle_name,
+    #     patient_dto.birth_date,
+    # )
+    #
+    # return [
+    #     patient
+    #     for patient in PatientRepository(session).get_all()
+    #     if patient_key(patient.last_name, patient.first_name, patient.middle_name, patient.birth_date) == key
+    # ]
+    # ↑ до 2026-11-07 (Ф1.6.10е): равенство ключей с полной датой; документ с годом не находил
+    #   пациента с точной датой того же года.
+    found = []
+    for patient in PatientRepository(session).get_all():
+        match = match_patients(
+            patient_dto,    # из документа
+            patient,        # из базы
+        )
+        if match.same and not match.one_sided_fields:
+            found.append(patient)
+    return found
 
 
 def _add_warning(

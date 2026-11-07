@@ -194,9 +194,9 @@ def record_key(
     Ключ записи по списку полей: строки — после ``normalize_match`` (None и '' — ''),
     остальные значения (даты, числа) — как есть.
 
-    Поиск дублей пациентов (Ф1.6.10а) — ``record_key(patient, ('last_name', 'first_name',
-    'middle_name', 'birth_date'))``: дата рождения сравнивается целиком (решение владельца
-    2026-10-31), отчество None и '' — одно и то же.
+    Точный ключ: дата сравнивается целиком, отчество None и '' — одно и то же. Пациентов
+    так не сравнивают: дата с точностью и пустые поля общим ключом не выражаются —
+    ``match_patients`` (Ф1.6.10е).
 
     Args:
         record : (Any) Словарь или объект с атрибутами.
@@ -536,17 +536,15 @@ def match_patients(
     one_sided = []
     date_precision = None
     for name in fields:
-        left = _field_value(first, name)
-        right = _field_value(second, name)
-        if name == BIRTH_DATE_FIELD and left is not None and right is not None:
+        [left] = record_key(first, (name,))
+        [right] = record_key(second, (name,))
+        if name == BIRTH_DATE_FIELD and left != '' and right != '': # даты есть у обоих
             date_precision = coarser_precision(
                 effective_birth_precision(left, _field_value(first, BIRTH_PRECISION_FIELD)),
                 effective_birth_precision(right, _field_value(second, BIRTH_PRECISION_FIELD)),
             )
             left = birth_date_key(left, date_precision)
             right = birth_date_key(right, date_precision)
-        else:
-            left, right = record_key({name: left}, (name,))[0], record_key({name: right}, (name,))[0]
         if name not in name_fields and (left == '' or right == ''): # пустое не противоречит
             empty.append(name)
             if left != right: # заполнено только у одного

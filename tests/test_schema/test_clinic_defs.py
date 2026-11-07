@@ -20,15 +20,55 @@ from app.schema.define import rebuild_dtos
 from .legacy_snapshot import SNAPSHOT
 
 
+# Столбец точности даты рождения (Ф1.6.10е) — намеренное изменение после снимка
+PRECISION_COMMENT = 'Точность даты рождения: day, month, year'
+PRECISION_DTO = (
+    'birth_date_precision',
+    'Optional[str]',
+    'None',
+    'Точность даты рождения: day, month, year (None — полная)',
+)
+PRECISION_CONFIG = (
+    'birth_date_precision',
+    {'title': 'Точность даты рождения', 'editable': False, 'hidden': True},
+)
+
+
+def _expected_dto(name):
+    """Ожидаемый снимок DTO: прежний и поле точности даты у пациента (Ф1.6.10е)."""
+    expected = list(SNAPSHOT['dtos'][name])
+    if name == 'PatientDTO':
+        expected.insert(
+            [row[0] for row in expected].index('birth_date') + 1,   # сразу после даты
+            PRECISION_DTO,
+        )
+    return expected
+
+
+def _expected_config(name):
+    """Ожидаемый снимок настроек: прежний и поле точности даты у пациента (в конце, Ф1.6.10е)."""
+    expected = list(SNAPSHOT['configs'][name])
+    if name == 'PATIENT_CONFIG':
+        expected.append(PRECISION_CONFIG)
+    return expected
+
+
 def _expected_model(name):
     """
     Ожидаемый снимок модели: прежний (написанный вручную) и намеренные изменения после него.
 
     Фото (Ф1.6.7б, 2026-11-01): ``file_path`` — внешний ключ на файлы фото
     (``photo_files.file_path``), индекс ``ix_photo_file_path``, связь ``file`` к строке
-    файла. Остальное — как в снимке.
+    файла. Пациент (Ф1.6.10е, 2026-11-07): столбец точности даты ``birth_date_precision``.
+    Остальное — как в снимке.
     """
     expected = copy.deepcopy(SNAPSHOT['models'][name])
+    if name == 'Patient':
+        columns = expected['columns']
+        columns.insert(
+            [c[0] for c in columns].index('birth_date') + 1,   # сразу после даты
+            ('birth_date_precision', 'String(length=10)', True, False, [], PRECISION_COMMENT, False),
+        )
     if name == 'Photo':
         columns = expected['columns']
         index = [c[0] for c in columns].index('file_path')
@@ -101,7 +141,7 @@ def test_models_same_as_handwritten(generated, name):
 def test_dtos_same_as_handwritten(generated, name):
     _, dtos, _ = generated
     got = dto_snapshot(dtos[name])
-    expected = SNAPSHOT['dtos'][name]
+    expected = _expected_dto(name)
     # ссылка на DTO фото: у написанного вручную — ForwardRef('PhotoDTO'), у сгенерированного —
     # тоже ссылка по имени; сравниваются имена полей, типы, умолчания, описания
     def normalize(rows):
@@ -114,7 +154,7 @@ def test_dtos_same_as_handwritten(generated, name):
 @pytest.mark.parametrize('name', ['PATIENT_CONFIG', 'APPOINTMENT_CONFIG', 'PHOTO_CONFIG'])
 def test_configs_same_as_handwritten(generated, name):
     _, _, configs = generated
-    assert config_snapshot(configs[name]) == SNAPSHOT['configs'][name]
+    assert config_snapshot(configs[name]) == _expected_config(name)
 
 
 def test_config_functions_behave_the_same(generated):
@@ -166,9 +206,9 @@ def test_app_uses_generated_classes():
         assert model.__module__ == models.__name__
         assert model_snapshot(model) == _expected_model(d.model_name)
         name = f'{d.entity.upper()}_CONFIG'
-        assert config_snapshot(getattr(field_configs, name)) == SNAPSHOT['configs'][name]
+        assert config_snapshot(getattr(field_configs, name)) == _expected_config(name)
         assert [n for n, *_ in dto_snapshot(getattr(dto_all, d.dto_name))] == \
-            [n for n, *_ in SNAPSHOT['dtos'][d.dto_name]]
+            [n for n, *_ in _expected_dto(d.dto_name)]
         spec = CLINIC.get(d.name)
         assert spec.model is model and spec.dto is getattr(dto_all, d.dto_name)
     assert repr(models.Patient(first_name='Иван', last_name='Петров')) == '<Patient(id=None, name=Петров Иван)>'

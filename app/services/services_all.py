@@ -251,6 +251,7 @@ from app.utils.filtering.filtering import (
 
 
 from app.utils.virtual_fields import enrich_dto_with_computed_fields
+from app.utils.record_keys import BIRTH_PRECISION_FIELD, normalize_birth_date   # точность даты рождения (Ф1.6.10е)
 
 # Сторонние библиотеки
 
@@ -4115,6 +4116,9 @@ class PatientService(
         # )
         # ↑ до 2026-10-31 (S5): DTO пациента целиком (ФИО, телефон, дата рождения) — в журнал.
         self.logger.debug("Создание пациента")
+        patient_dto = self._with_birth_precision(
+            patient_dto,    # точность даты — в вид для базы (Ф1.6.10е)
+        )
 
         # if not patient_dto.first_name or not patient_dto.last_name:
         #     self.logger.warning("Попытка создания пациента без имени/фамилии")
@@ -4233,7 +4237,16 @@ class PatientService(
         # )
         # ↑ до 2026-10-31 (S5): фамилия в журнале — личные данные.
         self.logger.debug(f"Обновление пациента id={patient_dto.id}")
-        return self._update_entity(patient_dto, patient_dto.id, session)
+        # return self._update_entity(patient_dto, patient_dto.id, session)
+        # ↑ до 2026-11-07 (S11): точность даты рождения не приводилась к виду для базы: форма, не
+        #   знающая о точности, оставила бы «только год» у введённой точной даты.
+        with self._session_scope(session) as sess:
+            stored = sess.get(self._model_class, patient_dto.id)
+            patient_dto = self._with_birth_precision(
+                patient_dto,                                    # что записать
+                stored.birth_date_precision if stored else None,    # точность строки — если в DTO нет
+            )
+            return self._update_entity(patient_dto, patient_dto.id, sess)
 
         # with self._session_scope(session) as sess:
         #     # ВАЖНО: используем get_with_relations, чтобы подгрузить description_note и comment_note
@@ -4677,6 +4690,51 @@ class PatientService(
         return self.update_patient(
             dto,
             session=session,
+        )
+
+    def _with_birth_precision(
+        self,
+        dto              : PatientDTO,              # что записать
+        stored_precision : Optional[str] = None,    # точность строки в базе; None — нет
+    ) -> PatientDTO: # DTO с датой и точностью в виде для базы
+        """
+        Приводит дату рождения и её точность к виду для базы (``normalize_birth_date``).
+
+        Точности нет в DTO (форма о ней не знает) — берётся точность строки: сохранение формы
+        без правки даты не превращает «только год» в полную дату; дата, введённая точнее
+        прежней точности, становится полной.
+
+        Args:
+            dto              : (PatientDTO) Данные пациента.
+            stored_precision : (str/None) Точность строки в базе; None — новая строка.
+
+        Returns:
+            (PatientDTO) Копия DTO с точностью (тот же объект, если менять нечего).
+
+        Raises:
+            PatientValidationError: Неизвестная точность.
+
+        Example:
+            >>> service._with_birth_precision(
+            ...     PatientDTO(last_name='П', first_name='И', birth_date=date(1999, 1, 1)),   # данные
+            ...     'year',                                                                   # точность строки
+            ... ).birth_date_precision
+            'year'
+        """
+        try:
+            _, precision = normalize_birth_date(
+                dto.birth_date,                             # дата
+                dto.birth_date_precision or stored_precision,   # точность
+            )
+        except ValueError as err:
+            raise self._validation_error(
+                BIRTH_PRECISION_FIELD,   # поле
+                str(err),                # причина
+            ) from err
+        if precision == dto.birth_date_precision:
+            return dto
+        return dto.model_copy(
+            update = {BIRTH_PRECISION_FIELD: precision},   # только точность: дату не меняет
         )
 
     def reload_config(self) -> None:

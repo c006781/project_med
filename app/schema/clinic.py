@@ -111,6 +111,17 @@ PATIENTS = TableDef(
         # ↑ до 2026-10-31 (ТД-14): required=True — создание пустую дату пропускало, изменение
         #   нет: пациента без даты нельзя было ни поправить, ни объединить. Решение владельца
         #   2026-10-31: дата пока необязательна (позже — маска ввода); в ключе дублей остаётся.
+        # точность даты (Ф1.6.10е): «1999» хранится как 01.01.1999 + 'year'; скрыта на экранах —
+        # её задаёт маска ввода (Ф2.4.3), значения и проверка — app/utils/record_keys.py
+        column(
+            'birth_date_precision',                     # имя
+            sa.String(10),                              # 'day' / 'month' / 'year'
+            'Точность даты рождения',                   # подпись
+            comment     =   'Точность даты рождения: day, month, year',  # комментарий столбца
+            dto_desc    =   'Точность даты рождения: day, month, year (None — полная)',  # описание поля DTO
+            editable    =   False,                      # не правится как обычное поле
+            hidden      =   True,                       # не показывается в старых формах и таблицах
+        ),
         column('phone', sa.String(20), 'Телефон', comment='Номер телефона', dto_desc='Номер телефона',
                editable=True, order=5, input_mask='+7 (999) 999-99-99'),
         note('description', 'Описание', comment='ID заметки с описанием пациента', id_title='ID описания',
@@ -120,12 +131,13 @@ PATIENTS = TableDef(
         children('appointments', 'Appointment', 'patient', dto=False, config=False),
         timestamp('created_at', 'Дата создания'),
     ),
-    column_order=('id', 'first_name', 'middle_name', 'last_name', 'birth_date', 'phone',
-                  'description_id', 'comment_id', 'created_at'),
-    dto_order=('id', 'first_name', 'middle_name', 'last_name', 'birth_date', 'phone',
+    column_order=('id', 'first_name', 'middle_name', 'last_name', 'birth_date', 'birth_date_precision',
+                  'phone', 'description_id', 'comment_id', 'created_at'),
+    dto_order=('id', 'first_name', 'middle_name', 'last_name', 'birth_date', 'birth_date_precision', 'phone',
                'description_text', 'comment_text', 'description_id', 'comment_id'),
     config_order=('id', 'last_name', 'first_name', 'middle_name', 'birth_date', 'phone',
-                  'description_id', 'comment_id', 'description_text', 'comment_text'),
+                  'description_id', 'comment_id', 'description_text', 'comment_text',
+                  'birth_date_precision'),
     order=('last_name', 'first_name', 'id'),
     columns=('mark', 'last_name', 'first_name', 'middle_name', 'birth_date', 'phone', 'visits'),
     form=('last_name', 'first_name', 'middle_name', 'birth_date', 'phone',

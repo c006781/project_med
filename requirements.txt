@@ -1,5 +1,5 @@
 alembic==1.18.4
-altgraph==0.17.5
+altgraph==0.17.5; sys_platform == "win32"
 annotated-types==0.7.0
 certifi==2026.2.25
 cffi==2.0.0
@@ -15,8 +15,8 @@ msgpack==1.1.2
 pycparser==3.0
 pydantic==2.12.5
 pydantic_core==2.41.5
-pyinstaller==6.20.0
-pyinstaller-hooks-contrib==2026.4
+pyinstaller==6.20.0; sys_platform == "win32"
+pyinstaller-hooks-contrib==2026.4; sys_platform == "win32"
 PySide6==6.9.3
 PySide6_Addons==6.9.3
 PySide6_Essentials==6.9.3

@@ -619,8 +619,8 @@ class BaseService(
             Union[str, None]: Относительный путь от dest_dir до скопированного файла.
 
         Example:
-            >>> service._new_file_field('app_1', 'C:/scan.jpg', lambda p: 'a.jpg', session)
-            'app_1/a.jpg'
+            >>> service._new_file_field('C:/photos', 'C:/scan.jpg', lambda: 'a.jpg', session)
+            'a.jpg'
         """
 
         if source_path is None:
@@ -721,7 +721,7 @@ class BaseService(
             ...     'app_1/old.jpg',        # старый файл
             ...     'C:/scan.jpg',          # новый файл
             ...     'C:/photos',            # папка
-            ...     lambda p: 'new.jpg',    # имя
+            ...     lambda: 'new.jpg',      # имя
             ...     session,                # сессия
             ... )
             'new.jpg'
@@ -3235,15 +3235,15 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _get_extra_rels(self, relations: Optional[List[str]]) -> List:
+    def _get_extra_rels(self, relations: List[str]) -> List:
         """
         Возвращает список опций joinedload для одиночных запросов (get_by_id).
         Включает все отношения из _get_relations_for_eager_loading() плюс те,
         у которых в конфигурации установлен флаг eager_load_detail=True.
 
         Example:
-            >>> patient_service._get_extra_rels(None)
-            []
+            >>> appointment_service._get_extra_rels([])
+            ['photos']
         """
         # Добавляем отношения, помеченные как eager_load_detail
         extra_rels = []
@@ -4422,7 +4422,7 @@ class PatientService(
         with self._session_scope(session) as sess:
             stored = sess.get(self._model_class, patient_dto.id)
             patient_dto = self._with_birth_precision(
-                patient_dto,                                    # что записать
+                patient_dto,                                        # что записать
                 stored.birth_date_precision if stored else None,    # точность строки — если в DTO нет
             )
             return self._update_entity(patient_dto, patient_dto.id, sess)
@@ -4929,7 +4929,7 @@ class PatientService(
         """
         try:
             _, precision = normalize_birth_date(
-                dto.birth_date,                             # дата
+                dto.birth_date,                                 # дата
                 dto.birth_date_precision or stored_precision,   # точность
             )
         except ValueError as err:
@@ -7765,7 +7765,12 @@ class PhotoService(
             rel  : str,   # имя от папки фото ('/')
             path : str,   # полный путь
         ) -> None: # файл без строки — в кандидаты или свежие
-            """Раскладывает файл без строки: старше ``min_age`` — ``extra``, иначе ``fresh``."""
+            """
+            Раскладывает файл без строки: старше ``min_age`` — ``extra``, иначе ``fresh``.
+
+            Example:
+                >>> consider('20261101_101500.jpg', 'C:/photos/20261101_101500.jpg')   # файл — в extra или fresh
+            """
             if rel in known:
                 return
             age = now - os.path.getmtime(path)
@@ -8188,8 +8193,7 @@ class PhotoService(
         """Обновляет описание существующего фото.
 
         Example:
-            >>> photo_service.update_photo_description(3, 'снимок слева').description
-            'снимок слева'
+            >>> photo_service.update_photo_description(3, 'снимок слева')
         """
         # dto = PhotoDTO(id=photo_id, description=description)
         # self._update_entity(dto, photo_id, session)

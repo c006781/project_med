@@ -617,6 +617,10 @@ class BaseService(
 
         Returns:
             Union[str, None]: Относительный путь от dest_dir до скопированного файла.
+
+        Example:
+            >>> service._new_file_field('app_1', 'C:/scan.jpg', lambda p: 'a.jpg', session)
+            'app_1/a.jpg'
         """
 
         if source_path is None:
@@ -672,6 +676,9 @@ class BaseService(
     ) -> None:
         """
         Помечает файл на удаление при успешном коммите.
+
+        Example:
+            >>> service._delete_file_field('app_1/a.jpg', 'C:/photos', session)   # файл удалится после коммита
         """
         if file_path:
             ctx_commit = DeletionContext(session, DeletionType.COMMIT) 
@@ -708,6 +715,16 @@ class BaseService(
 
         Returns:
             Новый относительный путь или None, если файл удалён.
+
+        Example:
+            >>> service._update_file_field(
+            ...     'app_1/old.jpg',        # старый файл
+            ...     'C:/scan.jpg',          # новый файл
+            ...     'C:/photos',            # папка
+            ...     lambda p: 'new.jpg',    # имя
+            ...     session,                # сессия
+            ... )
+            'new.jpg'
         """
         # Удаляем старый файл при коммите
         self._delete_file_field(
@@ -746,6 +763,9 @@ class BaseService(
 
         Returns:
             None при успехе, иначе текст ошибки (если немедленное удаление не удалось).
+
+        Example:
+            >>> service._del_file_ctx('C:/photos/a.jpg', ctx, False)   # удаление по контексту ctx
         """
         
         # from app.utils.file_deletions import schedule_deletion
@@ -864,7 +884,12 @@ class BaseService(
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def _get_sql_compute_fields(self) -> Dict[str, Dict[str, Any]]:
-        """Возвращает поля, у которых в конфигурации есть ключ 'sql_compute'."""
+        """Возвращает поля, у которых в конфигурации есть ключ 'sql_compute'.
+
+        Example:
+            >>> list(appointment_service._get_sql_compute_fields())
+            ['has_photos']
+        """
         return {
             field_name: config['sql_compute']
             for field_name, config in self._field_configs.items()
@@ -1056,6 +1081,10 @@ class BaseService(
         Returns:
             Dict[str, Dict[str, Any]]: Словарь, где ключ – имя поля DTO (например, 'reason_text'),
                                     значение – метаданные для построения подзапроса.
+
+        Example:
+            >>> sorted(patient_service._get_note_field_mappings_dict())
+            ['comment_text', 'description_text']
         """
             
         # from app.database.database_shema.clinic import AppointmentNote
@@ -1095,6 +1124,15 @@ class BaseService(
 
         Returns:
             Tuple[Query, List[Tuple]]: Модифицированный запрос и список пост-фильтров.
+
+        Example:
+            >>> query, post = service._apply_filters_to_query(
+            ...     session.query(Patient),                                             # запрос
+            ...     [{'column': 'last_name', 'operator': 'like', 'value': 'Ив'}],       # фильтры
+            ...     60,                                                                 # порог нечёткого поиска
+            ... )
+            >>> post
+            []
         """
         
         if not filters:
@@ -1263,6 +1301,10 @@ class BaseService(
 
         Returns:
             int: Количество записей, удовлетворяющих фильтрам.
+
+        Example:
+            >>> patient_service.get_total_count([{'column': 'last_name', 'operator': 'eq', 'value': 'Иванов'}])
+            2
         """
         
         with self._session_scope(session) as sess:
@@ -1550,6 +1592,10 @@ class BaseService(
 
         Returns:
             List[Dict[str, Any]]: Список метаданных для всех полей, определённых в field_configs.
+
+        Example:
+            >>> patient_service.get_field_metadata()[0]['name']
+            'id'
         """
             
         metadata = []
@@ -1626,6 +1672,9 @@ class BaseService(
         """
         Добавляет временные атрибуты (attr_name) к каждому объекту в items
         с количеством дочерних записей по указанному отношению.
+
+        Example:
+            >>> service._add_counts_to_items(items, count_mappings, session)   # атрибуты счётчиков — на объектах items
         """
         if not items:
             return
@@ -1742,7 +1791,7 @@ class BaseService(
         self, 
         parent_id: int, 
         relation_name: str, 
-        session=None
+        session: Optional[Session] = None
     ) -> List[DTOType]:
         """
         Возвращает список дочерних DTO для указанного родителя и имени отношения.
@@ -1781,7 +1830,7 @@ class BaseService(
         parent_id: int, 
         relation_name: str, 
         child_dto: DTOType, 
-        session=None
+        session: Optional[Session] = None
     ) -> DTOType:
         """
         Добавляет дочернюю сущность к родителю.
@@ -1817,7 +1866,7 @@ class BaseService(
         self, 
         child_id: int, 
         relation_name: str, 
-        session=None
+        session: Optional[Session] = None
     ) -> None:
         """
         Удаляет дочернюю сущность по её ID.
@@ -1860,6 +1909,10 @@ class BaseService(
 
         Возвращает:
             Optional[BaseService]: Сервис для работы с дочерними сущностями или None.
+
+        Example:
+            >>> patient_service._get_child_service('appointments') is patient_service._appointment_service
+            True
         """
 
         return None
@@ -2029,6 +2082,10 @@ class BaseService(
             Поля, помеченные `virtual=True` или `is_note`, исключаются из обычных kwargs.
             Для полей-заметок текст сохраняется/обновляется в таблице `AppointmentNote`,
             а ID заметки присваивается соответствующему полю модели (например, `description_id`).
+
+        Example:
+            >>> patient_service._create_entity(PatientDTO(last_name='П', first_name='И'), session).id
+            1
         """
 
         with self._session_scope(session) as sess:
@@ -2094,6 +2151,10 @@ class BaseService(
 
         Исключения:
             self._not_found_exception: если запись с `entity_id` не найдена.
+
+        Example:
+            >>> patient_service._update_entity(dto, dto.id, session).id == dto.id
+            True
         """
 
         with self._session_scope(session) as sess:
@@ -2177,6 +2238,9 @@ class BaseService(
             :meth:`_delete_children` (DYN7, 2026-10-16): у приёмов пациента так удаляются и
             фото с файлами. Связи с каскадом без сервиса удаляет каскад ORM (без файлов и
             заметок детей). Было записано «дочерние не удаляются автоматически» — устарело.
+
+        Example:
+            >>> patient_service._delete_entity(12, session)
         """
 
         with self._session_scope(session) as sess:
@@ -2231,6 +2295,10 @@ class BaseService(
         Каждый элемент содержит:
             - 'name': имя поля в DTO и модели
             - 'editable': разрешено ли редактирование (по умолчанию True)
+
+        Example:
+            >>> [f['name'] for f in patient_service._get_simple_updatable_fields()][:2]
+            ['last_name', 'first_name']
         """
         updatable = []
 
@@ -2469,6 +2537,10 @@ class BaseService(
 
         Возвращает:
             List[str]: Список имён атрибутов модели, которые нужно подгружать.
+
+        Example:
+            >>> sorted(patient_service._get_relations_for_eager_loading())
+            ['comment_note', 'description_note']
         """
 
         relations = set()
@@ -2501,6 +2573,10 @@ class BaseService(
             - не являются виртуальными (virtual=False)
             - не являются заметками (is_none)
             - не являются ID самой модели (поле 'id' пропускаем)
+
+        Example:
+            >>> patient_service._get_creation_kwargs(PatientDTO(last_name='П', first_name='И'))
+            {'last_name': 'П', 'first_name': 'И'}
         """
 
         kwargs = {}
@@ -2579,6 +2655,9 @@ class BaseService(
         присутствуют в DTO и не пусты (для строк – не пустая строка).
         
         Исключения: поля с is_note и virtual пропускаются (они не хранятся в БД напрямую).
+
+        Example:
+            >>> patient_service._validate_required_fields(PatientDTO(last_name='П', first_name='И'))   # всё заполнено — без ошибки
         """
         missing = []
         dto_fields = self._dto_class.model_fields if hasattr(self._dto_class, 'model_fields') else {}
@@ -2631,6 +2710,10 @@ class BaseService(
             - поле должно иметь непустой строковый атрибут `is_note`.
             - поле должно быть виртуальным (`virtual=True`).
             - должна быть указана `source_attr`.
+
+        Example:
+            >>> patient_service._get_note_field_mappings()[0]['dto_field']
+            'description_text'
         """
 
         mappings = []
@@ -2853,7 +2936,7 @@ class BaseService(
         session.flush()
         return note.id
 
-    def _apply_note_updates(self, dto, session, note_repo, model_obj=None) -> Dict[str, Optional[int]]:
+    def _apply_note_updates(self, dto: DTOType, session: Session, note_repo: Any, model_obj: Any = None) -> Dict[str, Optional[int]]:
         """
         Общая логика создания/обновления заметок.
 
@@ -2870,6 +2953,10 @@ class BaseService(
         Примечание:
             - В режиме обновления старые заметки, которые больше не используются, удаляются через `NoteService`.
             - Пустой текст приводит к установке None в ID-поле (связь удаляется).
+
+        Example:
+            >>> patient_service._apply_note_updates(dto, session, note_repo, None)
+            {'description_id': 5, 'comment_id': None}
         """
 
         old_ids = {}
@@ -2962,7 +3049,7 @@ class BaseService(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _get_repo(self, session) -> RepoType:
+    def _get_repo(self, session: Session) -> RepoType:
         """
         Создаёт репозиторий с переданной сессией.
 
@@ -2971,6 +3058,10 @@ class BaseService(
 
         Returns:
             RepoType: репозиторий с переданной сессией.
+
+        Example:
+            >>> type(patient_service._get_repo(session)).__name__
+            'PatientRepository'
         """
 
         return self._repo_class(session)
@@ -2992,6 +3083,10 @@ class BaseService(
         Пост-обработка списка ORM-объектов перед конвертацией в DTO.
         По умолчанию добавляет временные атрибуты для полей с ключом 'counts'.
         Может быть переопределён в наследниках для дополнительной логики.
+
+        Example:
+            >>> service._post_process_items(items, session) is items   # по умолчанию — те же объекты
+            True
         """
         count_mappings = self._get_count_mappings()
         if count_mappings:
@@ -3012,6 +3107,10 @@ class BaseService(
         Подготавливает словарь extra_data для enrich_dto_with_computed_fields.
         Собирает все временные атрибуты, созданные в _post_process_items (counts),
         а также значения из sql_compute (подзапросы).
+
+        Example:
+            >>> appointment_service._prepare_extra_data(appointment)
+            {}
         """
         extra = {}
         # 1. Старые count-поля
@@ -3136,11 +3235,15 @@ class BaseService(
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _get_extra_rels(self, relations) -> List:
+    def _get_extra_rels(self, relations: Optional[List[str]]) -> List:
         """
         Возвращает список опций joinedload для одиночных запросов (get_by_id).
         Включает все отношения из _get_relations_for_eager_loading() плюс те,
         у которых в конфигурации установлен флаг eager_load_detail=True.
+
+        Example:
+            >>> patient_service._get_extra_rels(None)
+            []
         """
         # Добавляем отношения, помеченные как eager_load_detail
         extra_rels = []
@@ -3182,6 +3285,10 @@ class BaseService(
         :return: запись в виде DTO (если не найдено, то возвращаем исключение)
         :rtype: DTOType
         :raises: исключение, возвращаемое методом _not_found_exception(), если не найдено
+
+        Example:
+            >>> patient_service.get_by_id(12).id
+            12
         """
         # Логируем начинаение операции
         self.logger.debug(f"Запрос {self._model_class.__name__} с id={entity_id}")
@@ -3372,6 +3479,9 @@ class BaseService(
         **ВНИМАНИЕ:**
             Не переносите логику удаления файлов в `_delete_entity` – это нарушит
             работу других сервисов, где файлы не должны удаляться автоматически.
+
+        Example:
+            >>> service.delete(12)
         """
 
 
@@ -3543,6 +3653,10 @@ class BaseService(
         :type item_s: Union[List, Any]
         :return: список DTO или один DTO
         :rtype: Union[List, Any]
+
+        Example:
+            >>> [dto.id for dto in patient_service.get_dtos(patients)]
+            [12, 40]
         """
         # self.logger.debug(f"item_s: {item_s}")
         # ↑ до 2026-10-31 (S5): строки моделей в журнале — личные данные (ФИО, тексты).
@@ -3754,6 +3868,10 @@ class BaseService(
             - SQL-операторы применяются на уровне БД.
             - Оператор 'fuzzy' выполняет поиск в памяти после загрузки всех записей,
             поэтому может быть медленным на больших объёмах данных.
+
+        Example:
+            >>> [p.id for p in patient_service.get_filtered([{'column': 'last_name', 'operator': 'eq', 'value': 'Иванов'}])]
+            [12]
         """
 
 
@@ -3858,7 +3976,7 @@ class BaseService(
     )
     def get_page(
         self, offset: int, 
-        limit: int,
+        limit: Optional[int],
         filters: Optional[List[Dict[str, Any]]] = None,
         order_by: Optional[List] = None,
         session: Optional[Session] = None,
@@ -4142,17 +4260,21 @@ class PatientService(
         """
         Создаёт нового пациента (обёртка над `create` с дополнительной валидацией).
 
-        Параметры:
-            patient_dto (PatientDTO): DTO с данными пациента (без id).
-            session (Optional[Session]): Внешняя сессия.
+        Дата рождения и её точность приводятся к виду для базы (``_with_birth_precision``):
+        дата без точности — полная.
 
-        Возвращает:
-            PatientDTO: Созданный пациент с заполненным id.
+        Args:
+            patient_dto : (PatientDTO) DTO с данными пациента (без id).
+            session     : (Session/None) Внешняя сессия.
 
-        Исключения:
-            PatientValidationError: Если отсутствуют обязательные поля (first_name, last_name).
+        Returns:
+            (PatientDTO) Созданный пациент с заполненным id.
 
-        Пример:
+        Raises:
+            PatientValidationError: Нет обязательных полей (first_name, last_name), неизвестная
+                точность даты рождения.
+
+        Example:
             >>> new_patient = PatientDTO(first_name="Анна", last_name="Смирнова")
             >>> created = service.create_patient(new_patient)
             >>> print(created.id)
@@ -4257,16 +4379,23 @@ class PatientService(
         Обновляет существующего пациента, а также связанные заметки description/comment.
         Использует get_with_relations для подгрузки связей перед обновлением.
 
+        Дата рождения и её точность приводятся к виду для базы (``_with_birth_precision``): нет
+        точности в DTO — берётся точность строки; дата, введённая точнее неё, становится полной.
+
         Args:
-            patient_dto (PatientDTO): DTO с заполненным id и изменяемыми полями.
-            session (Optional[Session]): сессия БД, которая будет использоваться для работы с репозиторием.
+            patient_dto : (PatientDTO) DTO с заполненным id и изменяемыми полями.
+            session     : (Session/None) Сессия БД, которая будет использоваться для работы с репозиторием.
 
         Returns:
-            PatientDTO: обновленный объект PatientDTO.
+            (PatientDTO) Обновлённый объект PatientDTO.
 
         Raises:
-            PatientValidationError: если id не указан.
-            PatientNotFoundError: если пациент с указанным id не найден.
+            PatientValidationError: Не указан id, неизвестная точность даты рождения.
+            PatientNotFoundError: Пациент с указанным id не найден.
+
+        Example:
+            >>> patient_service.update_patient(dto.model_copy(update={'phone': '+7 (999) 000-00-00'})).phone
+            '+7 (999) 000-00-00'
         """
 
         # self.logger.debug(
@@ -4422,6 +4551,10 @@ class PatientService(
         :type entity_id: int
         :return: исключение PatientNotFoundError
         :rtype: PatientNotFoundError
+
+        Example:
+            >>> str(patient_service._not_found_exception(12))   # doctest: +ELLIPSIS
+            '...12...'
         """
         # self.logger.error(f"Пациент с идентификатором {entity_id} не найден.'")
         # ↑ до 2026-10-31: лишняя кавычка в конце текста.
@@ -4463,6 +4596,10 @@ class PatientService(
         :type session: Optional[Session]
         :return: список всех пациентов
         :rtype: List[PatientDTO]
+
+        Example:
+            >>> [p.id for p in patient_service.get_all_patients()]
+            [12, 40]
         """
         self.logger.debug("Запрос всех пациентов")
 
@@ -4491,6 +4628,10 @@ class PatientService(
 
         Raises:
             PatientNotFoundError: Если пациент с указанным идентификатором не найден в базе данных.
+
+        Example:
+            >>> patient_service.get_patient_by_id(12).id
+            12
         """
 
         self.logger.debug(f"Запрос пациента по id={patient_id}")
@@ -4550,6 +4691,9 @@ class PatientService(
 
         Исключения:
             PatientNotFoundError: Если пациент не найден.
+
+        Example:
+            >>> patient_service.delete_patient(12)
         """
 
         # Проверяем, что AppointmentService передан
@@ -4676,6 +4820,10 @@ class PatientService(
         2. Создаем экземпляр PatientService
         3. Вызываем метод get_patients_filtered у PatientService, передавая туда полученный список фильтров и порог схожести
         4. Выводим список пациентов, если он не пустой
+
+        Example:
+            >>> [p.id for p in patient_service.get_patients_filtered([{'column': 'last_name', 'operator': 'eq', 'value': 'Иванов'}])]
+            [12]
         """
 
         # self.logger.debug(
@@ -4713,6 +4861,10 @@ class PatientService(
         :type dto: PatientDTO
         :return: DTO, содержащий информацию о созданном пациенте
         :rtype: PatientDTO
+
+        Example:
+            >>> patient_service.create(PatientDTO(last_name='П', first_name='И')).id
+            1
         """
         return self.create_patient(
             dto,
@@ -4735,6 +4887,10 @@ class PatientService(
         """
         Универсальный метод обновления, вызывающий update_patient.
         Возвращает обновленный объект PatientDTO.
+
+        Example:
+            >>> patient_service.update(dto).id == dto.id
+            True
         """
 
         return self.update_patient(
@@ -4902,6 +5058,10 @@ class NoteService(
         :param entity_id: ID заметки
         :return: исключение, если заметка не найдена
         :rtype: Exception
+
+        Example:
+            >>> str(note_service._not_found_exception(5))   # doctest: +ELLIPSIS
+            '...5...'
         """
         return AppointmentNoteNotFoundError(entity_id)
 
@@ -4948,6 +5108,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: DTO заметки
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.get_by_id(5).id
+            5
         """
         self.logger.debug(f"Запрос заметки id={note_id}")
 
@@ -4969,6 +5133,9 @@ class NoteService(
         :type note_id: int
         :param session: сессия для объединения в одну транзакцию
         :type session: Optional[Session]
+
+        Example:
+            >>> note_service.delete(5)   # используемую заметку удалить нельзя — исключение
         """
         self.logger.debug(f"Удаление заметки id={note_id}")
 
@@ -5003,6 +5170,10 @@ class NoteService(
         :type dto: AppointmentNoteDTO
         :return: созданная заметка
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.create(AppointmentNoteDTO(text='боль')).text
+            'боль'
         """
         # return self.create_note(dto.text)
         return self._create_entity(
@@ -5030,6 +5201,10 @@ class NoteService(
         :type dto: AppointmentNoteDTO
         :return: обновленная заметка
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.update(note.model_copy(update={'text': 'осмотр'})).text
+            'осмотр'
         """
         # return self.update_note(dto.id, dto.text)
         if dto.id is None:
@@ -5066,6 +5241,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: заметка с указанным ID
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.get_note(5).id
+            5
         """
         return self.get_by_id(note_id, session=session)
 
@@ -5091,6 +5270,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: созданная заметка
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.create_note('боль').text
+            'боль'
         """
         self.logger.debug("Создание заметки")
 
@@ -5141,6 +5324,10 @@ class NoteService(
 
         Raises:
             AppointmentNoteNotFoundError: если заметка с указанным ID не найдена.
+
+        Example:
+            >>> note_service.update_note(5, 'осмотр').text
+            'осмотр'
         """
 
         # Логгируем начало обновления заметки
@@ -5190,6 +5377,9 @@ class NoteService(
         :type note_id: int
         :param session: сессия для объединения в одну транзакцию
         :type session: Optional[Session]
+
+        Example:
+            >>> note_service.delete_note(5)
         """
         
         self.logger.debug(f"Удаляет запись по ID ({note_id})")
@@ -5217,6 +5407,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: существующая или созданная заметка
         :rtype: Optional[AppointmentNoteDTO]
+
+        Example:
+            >>> note_service.get_or_create_note('боль').id == note_service.get_or_create_note('боль').id
+            True
         """
         if not text:
             return None
@@ -5262,6 +5456,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: созданная заметка
         :rtype: AppointmentNoteDTO
+
+        Example:
+            >>> note_service.create_note_from_file('заметка.txt').text
+            'текст файла'
         """
         self.logger.debug(f"Создание заметки из файла: {file_path}")
 
@@ -5459,6 +5657,10 @@ class NoteService(
         :type session: Optional[Session]
         :return: список текстов заметок
         :rtype: List[str]
+
+        Example:
+            >>> note_service.get_choices()
+            ['боль', 'осмотр']
         """
         notes = self.get_all(session=session)
 
@@ -5494,6 +5696,9 @@ class NoteService(
         """
         Перезагружает конфигурацию сервиса заметок.
         Вызывает базовый метод, который пересоздаёт Database.
+
+        Example:
+            >>> note_service.reload_config()
         """
         super().reload_config()
         self.logger.info("NoteService: конфигурация перезагружена")
@@ -5516,6 +5721,10 @@ class NoteService(
             пользователь может использовать любой текст, а сервис при сохранении
             либо создаст новую заметку, либо найдёт существующую по точному
             совпадению текста (см. get_or_create_note).
+
+        Example:
+            >>> note_service.get_unique_note_texts()
+            ['боль', 'осмотр']
         """
         with self._session_scope(session) as sess:
             # Получаем все уникальные тексты заметок
@@ -5804,6 +6013,9 @@ class AppointmentService(
         """
         Перезагружает конфигурацию AppointmentService.
         Обновляет Database, а также пересоздаёт сервисы заметок и фото.
+
+        Example:
+            >>> appointment_service.reload_config()
         """
         super().reload_config()
         # from app.dependencies import clear_services_cache # оставить тут, так как циклы
@@ -5836,6 +6048,10 @@ class AppointmentService(
         :type entity_id: int
         :return: исключение AppointmentNotFoundError
         :rtype: Exception
+
+        Example:
+            >>> str(appointment_service._not_found_exception(7))   # doctest: +ELLIPSIS
+            '...7...'
         """
         self.logger.error(f"Приём с идентификатором {entity_id} не найден.")
 
@@ -6046,6 +6262,10 @@ class AppointmentService(
         :type dto: AppointmentDTO
         :return: созданный приём
         :rtype: AppointmentDTO
+
+        Example:
+            >>> appointment_service.create(AppointmentDTO(patient_id=12, date=date(2026, 3, 14))).patient_id
+            12
         """
         # получаем текст заметки из dto
         note_text = getattr(
@@ -6088,6 +6308,10 @@ class AppointmentService(
         :rtype: AppointmentDTO
         :raises AppointmentNotFoundError: если приём с указанным ID не найден
         :raises ValueError: если ID приёма не указан
+
+        Example:
+            >>> appointment_service.update(dto).id == dto.id
+            True
         """
         
         # получаем текст заметки из поля dto, если он указан
@@ -6178,6 +6402,10 @@ class AppointmentService(
         :type session: Optional[Session]
         :return: список приёмов пациента с подгруженными связями
         :rtype: List[AppointmentDTO]
+
+        Example:
+            >>> [a.id for a in appointment_service.get_appointments_by_patient(12)]
+            [101, 102]
         """
         self.logger.debug(
             f"get_appointments_by_patient: "
@@ -6260,6 +6488,10 @@ class AppointmentService(
         :return: приём с подгруженными связями
         :rtype: AppointmentDTO
         :raises AppointmentNotFoundError: если приём с указанным ID не существует
+
+        Example:
+            >>> appointment_service.get_appointment(101).id
+            101
         """
         self.logger.debug(f"get_appointment: id={appointment_id}")
         # Используем get_by_id, который учитывает eager_load_detail
@@ -6414,6 +6646,10 @@ class AppointmentService(
                           и её ID автоматически подставлен (заменяет dto.note_id).
         :param session: опциональная сессия для работы в одной транзакции.
         :raises PatientNotFoundError: если пациент с указанным ID не найден.
+
+        Example:
+            >>> appointment_service.create_appointment(dto, note_text='первичный').note_text
+            'первичный'
         """
 
         # Проверка существования пациента (можно вынести в отдельный метод)
@@ -6564,6 +6800,10 @@ class AppointmentService(
         :return: обновленный DTO приёма
         :raises AppointmentNotFoundError: если приём с указанным ID не найден
         :raises ValueError: если ID приёма не указан
+
+        Example:
+            >>> appointment_service.update_appointment(dto, note_text='повторный').note_text
+            'повторный'
         """
         
         
@@ -6754,6 +6994,9 @@ class AppointmentService(
         3. Если приём имеет фото, удаляем их.
         4. Если приём имел заметку, и она больше не используется, удаляем ее.
         5. Удаляем сам приём.
+
+        Example:
+            >>> appointment_service.delete_appointment(101)
         """
         with self._session_scope(session) as sess:
             _, appointment = self._get_item(
@@ -6840,6 +7083,9 @@ class AppointmentService(
         :type session: Optional[Session]
         :return: None
         :raises AppointmentNotFoundError: если приём с указанным ID не существует
+
+        Example:
+            >>> appointment_service.delete(101)
         """
         self.delete_appointment(entity_id, session=session)
         
@@ -7939,7 +8185,12 @@ class PhotoService(
         description: str, 
         session: Optional[Session] = None
     ) -> None:
-        """Обновляет описание существующего фото."""
+        """Обновляет описание существующего фото.
+
+        Example:
+            >>> photo_service.update_photo_description(3, 'снимок слева').description
+            'снимок слева'
+        """
         # dto = PhotoDTO(id=photo_id, description=description)
         # self._update_entity(dto, photo_id, session)
         with self._session_scope(session) as sess:
@@ -7975,6 +8226,10 @@ class PhotoService(
         :type session: Optional[Session]
         :return: список уникальных значений для указанного столбца
         :rtype: List[Any]
+
+        Example:
+            >>> photo_service.get_unique_values('description')
+            ['снимок слева']
         """
         with self._session_scope(session) as sess:
             repo = self._get_repo(sess)
@@ -7996,6 +8251,10 @@ class PhotoService(
         :param entity_id: ID фото
         :return: исключение, если фото не найдено
         :rtype: Exception
+
+        Example:
+            >>> str(photo_service._not_found_exception(3))   # doctest: +ELLIPSIS
+            '...3...'
         """
         err_ = PhotoNotFoundError(entity_id)
 
@@ -8223,6 +8482,10 @@ class PhotoService(
         4. Создаём список DTO для фотографий.
         5. Если файл фотографии не существует на диске или имеет статус 'pending', то выводим предупреждение.
         6. Возвращаем список DTO для фотографий.
+
+        Example:
+            >>> [p.id for p in photo_service.get_photos_for_appointment(101)]
+            [3, 4]
         """
         self.logger.debug(f"Запрос фото для приёма id={appointment_id}")
 
@@ -8417,6 +8680,10 @@ class PhotoService(
         2. Генерируем уникальный идентификатор
         3. Создаем имя файла для хранения
         4. Создаем полный путь к файлу
+
+        Example:
+            >>> photo_service._generate_target_path('C:/scan.jpg', 101, 3)   # doctest: +ELLIPSIS
+            '...app_101...'
         """
         # 1. Получаем имя файла и его расширение
         base_name = os.path.basename(source_path)
@@ -8477,6 +8744,14 @@ class PhotoService(
         :param pending_photos: список кортежей (file_path, description) для добавления
         :param deleted_photo_ids: список ID фото для удаления
         :param session: опциональная сессия для работы в одной транзакции
+
+        Example:
+            >>> photo_service.update_photos_for_appointment(
+            ...     101,            # приём
+            ...     pending,        # новые и изменённые фото
+            ...     [3],            # удалённые id
+            ...     session,        # сессия
+            ... )
         """
         # Создаем сессию для работы в одной транзакции, если она не была передана
         with self._session_scope(session) as sess:
@@ -8499,7 +8774,11 @@ class PhotoService(
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def reload_config(self) -> None:
-        """Перезагружает путь к хранилищу фото и пересоздаёт Database."""
+        """Перезагружает путь к хранилищу фото и пересоздаёт Database.
+
+        Example:
+            >>> photo_service.reload_config()
+        """
         # from app.config.config_manager.manager import AppConfigManager
 
         super().reload_config()

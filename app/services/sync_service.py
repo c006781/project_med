@@ -364,6 +364,9 @@ class SyncService:
         Это метод возвращает настроенный, но не запущенный поток DownloadThread.
         Поток будет скачивать файл с Яндекс.Диска в локальную файловую систему.
         Он будет вызывать функцию _progress_callback для обновления прогресса.
+
+        Example:
+            >>> sync_service.prepare_download().start()   # поток запускает вызывающий
         """
         # Создаем настроенный, но не запущенный поток DownloadThread
         thread = DownloadThread(
@@ -391,6 +394,9 @@ class SyncService:
         Это метод возвращает настроенный, но не запущенный поток UploadThread.
         Поток будет загружать файл из локальной файловой системы на Яндекс.Диск.
         Он будет вызывать функцию _progress_callback для обновления прогресса.
+
+        Example:
+            >>> sync_service.prepare_upload().start()   # поток запускает вызывающий
         """
         thread = UploadThread(
             token=self.token, 
@@ -410,7 +416,11 @@ class SyncService:
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
     def reload_config(self) -> None:
-        """Перезагружает токен и пути из текущей конфигурации."""
+        """Перезагружает токен и пути из текущей конфигурации.
+
+        Example:
+            >>> sync_service.reload_config()
+        """
         # from app.config.config_manager.manager import AppConfigManager
         
         config = AppConfigManager.get_instance()

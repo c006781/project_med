@@ -60,6 +60,9 @@ DRAFT_MOVED_RULE_DELETE  : str = 'delete'
 DRAFT_MOVED_RULE_KEEP    : str = 'keep'
 DRAFT_MOVED_RULE_VALUES  : Tuple[str, ...] = (DRAFT_MOVED_RULE_DELETE, DRAFT_MOVED_RULE_KEEP)
 
+# Проверять ли обновления при запуске окна (bool); читает главное окно, поле — экран настроек
+UPDATE_CHECK_ON_START_KEY : str = 'UPDATE_CHECK_ON_START'
+
 
 # правило перенесённой записи из значения настройки
 def draft_moved_rule_value(
@@ -857,6 +860,9 @@ class AppConfigManager(BaseConfigManager):
         # Запись перенесли в новую запись, новую потом удалили (решение владельца 2026-11-07,
         # В-21; CM20): 'delete' — запись удаляется вместе с новой, 'keep' — остаётся у прежней
         DRAFT_MOVED_RULE_KEY: DRAFT_MOVED_RULE_DELETE,
+
+        # Проверка обновлений при запуске окна (обращение к api.github.com): можно выключить
+        UPDATE_CHECK_ON_START_KEY: True,
 
         # # === НАСТРОЙКИ РАБОТЫ С ГИТХАБОМ (разработка) ===
         # 'GITHUB_TOKEN': '',

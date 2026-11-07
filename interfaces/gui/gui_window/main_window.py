@@ -13,7 +13,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 # import sys
 
 from app.config import (
@@ -25,7 +25,9 @@ from app.utils.logger.logger import AppLogger
 
 from app.updater import AppUpdater
 
-from app.config.config_manager.manager import AppConfigManager
+from app.config.config_manager.manager import AppConfigManager, UPDATE_CHECK_ON_START_KEY
+
+from app.utils.logger.bool_strings import to_bool
 
 from app.network.thread_network import DownloadThread, UploadThread
 
@@ -75,6 +77,47 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Q_ARG, QThread, QUrl, Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QDesktopServices
+
+# Проверочные запуски: непустое истинное значение выключает проверку обновлений при старте,
+# какой бы ни была настройка (окно не ходит в сеть и не задаёт вопрос об обновлении)
+NO_UPDATE_CHECK_ENV : str = 'PROJECT_MED_NO_UPDATE_CHECK'
+
+
+# нужна ли проверка обновлений при запуске окна
+def startup_update_check_enabled(
+    config  : Any,                                  # настройки (метод get)
+    environ : Optional[Mapping[str, str]] = None,   # окружение; None — окружение процесса
+) -> bool:
+    """
+    Решает, проверять ли обновления при запуске окна.
+
+    Переменная окружения ``PROJECT_MED_NO_UPDATE_CHECK`` главнее настройки: так проверочный
+    запуск не зависит от файла настроек. Строки читаются общим правилом ``to_bool``; строка
+    настройки, которую правило не знает, считается выключенной: лучше без сети, чем с ней.
+
+    Args:
+        config  : (Any) Настройки: объект с методом ``get(ключ, умолчание)``.
+        environ : (Mapping/None) Окружение; None — ``os.environ``.
+
+    Returns:
+        (bool) True — проверять.
+
+    Example:
+        >>> startup_update_check_enabled(
+        ...     {'UPDATE_CHECK_ON_START': True},                        # настройка включена
+        ...     environ =   {'PROJECT_MED_NO_UPDATE_CHECK': '1'},           # проверочный запуск
+        ... )
+        False
+    """
+    env = os.environ if environ is None else environ
+    if to_bool(env.get(NO_UPDATE_CHECK_ENV, '')):  # проверочный запуск
+        return False
+    return to_bool(
+        config.get(
+            UPDATE_CHECK_ON_START_KEY,  # настройка
+            True,                       # нет ключа — как раньше, проверять
+        ),
+    )
 
 
 class PagesCreationMixin:
@@ -1281,7 +1324,26 @@ class UpdateMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_update_error(self, error_msg: str):
+    def _on_update_error(
+        self,
+        error_msg : str,    # текст ошибки проверки
+    ) -> None:
+        """
+        Показывает ошибку ручной проверки обновлений; ошибку проверки при старте — только в журнал.
+
+        Проверка при старте идёт без спроса, и окно с ошибкой при каждом запуске без сети только
+        мешало бы.
+
+        Args:
+            error_msg : (str) Текст ошибки.
+
+        Example:
+            >>> window._on_update_error('Нет соединения')   # doctest: +SKIP
+        """
+        if getattr(self, '_auto_check', False):  # проверка при старте — тихая
+            self._auto_check = False
+            self.logger.info(f"Автоматическая проверка обновлений не удалась: {error_msg}")
+            return
         QMessageBox.warning(self, "Ошибка", f"Не удалось проверить обновления:\n{error_msg}")
 
     # @AppLogger.get_instance(
@@ -1827,19 +1889,35 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _delayed_check_updates(self):
-        """Отложенный запуск проверки обновлений."""
+    def _delayed_check_updates(self) -> None:
+        """
+        Запускает проверку обновлений через 1,5 с после старта окна, если она не выключена.
+
+        Выключают настройка ``UPDATE_CHECK_ON_START`` и переменная ``PROJECT_MED_NO_UPDATE_CHECK``
+        (:func:`startup_update_check_enabled`). Сам запрос идёт в потоке ``UpdateChecker``, окно не
+        ждёт сеть. Проверка тихая: «обновлений нет» и ошибка не показываются, только найденное
+        обновление.
+
+        Example:
+            >>> window._delayed_check_updates()     # doctest: +SKIP
+        """
+        if not startup_update_check_enabled(AppConfigManager.get_instance()):
+            self.logger.info("Проверка обновлений при запуске выключена")
+            return
+        if getattr(self, 'updater', None) is None:  # модуль обновлений не создался — причина в журнале
+            return
         # Автоматическая проверка обновлений при старте (без показа сообщения "нет обновлений")
         self._auto_check = True
-        # self.updater.check_for_updates()
-
-        # Проверяем доступность GitHub перед автоматической проверкой
-        from app.updater import is_github_reachable
-        if is_github_reachable():
-            self.updater.check_for_updates()
-
-        else:
-            self.logger.info("GitHub недоступен, автоматическая проверка обновлений пропущена")
+        self.updater.check_for_updates()
+        # # Проверяем доступность GitHub перед автоматической проверкой
+        # from app.updater import is_github_reachable
+        # if is_github_reachable():
+        #     self.updater.check_for_updates()
+        #
+        # else:
+        #     self.logger.info("GitHub недоступен, автоматическая проверка обновлений пропущена")
+        # ↑ до 2026-11-07 (MW1): запрос к GitHub в потоке окна останавливал его на время ожидания
+        #   (до 3 с); нет связи теперь видно из самой проверки, ошибка идёт только в журнал.
 
     @AppLogger.get_instance(
         name='MainWindow',

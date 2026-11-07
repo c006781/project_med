@@ -25,11 +25,17 @@ from app.utils.logger.logger import AppLogger
 
 from app.updater import AppUpdater, current_system, pop_linux_update_failure
 
-from app.config.config_manager.manager import AppConfigManager, UPDATE_CHECK_ON_START_KEY
+from app.config.config_manager.manager import (
+    AppConfigManager,           # менеджер настроек
+    UPDATE_CHECK_ON_START_KEY,  # проверка обновлений при запуске
+    WORD_DOCUMENTS_PATH_KEY,    # папка документов Word
+)
 
 from app.utils.logger.bool_strings import to_bool
 
 from app.network.thread_network import DownloadThread, UploadThread
+
+from app.network.ya_dop import YaDiskResult, remote_db_file_path
 
 from app.dependencies import (
     get_patient_service, get_appointment_service,
@@ -892,25 +898,27 @@ class SyncMixin:
         self.action_combo.setCurrentIndex(0)
         self.action_combo.blockSignals(False)
     
-    def _correct_remote_path(
-        self,
-        remote: str,
-        local: str,
-    ):
-        # --- ДОБАВЛЕННАЯ ПРОВЕРКА И КОРРЕКЦИЯ REMOTE-ПУТИ ---
-        # Если remote не заканчивается на расширение файла БД, добавляем имя из local
-        # Расширения .db, .sqlite, .sqlite3
-        # import os
-        db_extensions = ('.db', '.sqlite', '.sqlite3')
-        if not remote.lower().endswith(db_extensions):
-            # Извлекаем имя файла из local пути
-            local_filename = os.path.basename(local)
-            # Нормализуем remote (убираем возможный завершающий слэш)
-            remote = remote.rstrip('/\\')
-            remote = f"{remote}/{local_filename}"
-            self.logger.info(f"Корректировка remote пути: добавлено имя файла -> {remote}")  
-
-        return remote
+    # def _correct_remote_path(
+    #     self,
+    #     remote: str,
+    #     local: str,
+    # ):
+    #     # --- ДОБАВЛЕННАЯ ПРОВЕРКА И КОРРЕКЦИЯ REMOTE-ПУТИ ---
+    #     # Если remote не заканчивается на расширение файла БД, добавляем имя из local
+    #     # Расширения .db, .sqlite, .sqlite3
+    #     # import os
+    #     db_extensions = ('.db', '.sqlite', '.sqlite3')
+    #     if not remote.lower().endswith(db_extensions):
+    #         # Извлекаем имя файла из local пути
+    #         local_filename = os.path.basename(local)
+    #         # Нормализуем remote (убираем возможный завершающий слэш)
+    #         remote = remote.rstrip('/\\')
+    #         remote = f"{remote}/{local_filename}"
+    #         self.logger.info(f"Корректировка remote пути: добавлено имя файла -> {remote}")
+    #
+    #     return remote
+    # ↑ до 2026-11-07 (Ф2.1.2): то же правило есть в app.network.remote_db_file_path; там же
+    #   пустой путь из настроек не роняет программу.
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -934,14 +942,14 @@ class SyncMixin:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
         
-        # --- ДОБАВЛЕННАЯ ПРОВЕРКА И КОРРЕКЦИЯ REMOTE-ПУТИ ---
-        remote = self._correct_remote_path(remote, local)
+        # Папка из настроек дополняется именем файла базы
+        remote = remote_db_file_path(remote, local)
 
         # Создаём и настраиваем поток загрузки
         self.download_thread = DownloadThread(token, remote, local)
         self.download_thread.progress.connect(self._update_progress)
-        self.download_thread.finished.connect(self._on_download_finished)
-        self.download_thread.error.connect(self._on_download_error)
+        self.download_thread.finished.connect(self._on_db_download_finished)
+        self.download_thread.error.connect(self._on_db_download_error)
 
         # Показываем прогресс-бар (бесконечный режим до получения размера)
         self.progress_bar.setVisible(True)
@@ -971,8 +979,8 @@ class SyncMixin:
             QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
             return
         
-        # Корректируем удалённый путь (добавляем имя файла, если указана только папка)
-        remote = self._correct_remote_path(remote, local)
+        # Папка из настроек дополняется именем файла базы
+        remote = remote_db_file_path(remote, local)
 
         self.upload_thread = UploadThread(token, local, remote, overwrite=True)
         self.upload_thread.progress.connect(self._update_progress)
@@ -1014,7 +1022,7 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
-    def _on_download_finished(self, code):
+    def _on_db_download_finished(self, code):
         """
         Обработчик завершения скачивания.
         Скрывает прогресс-бар и выводит сообщение об успехе или ошибке.
@@ -1027,7 +1035,9 @@ class SyncMixin:
             # Перезагружаем все данные через существующий механизм
             self.on_settings_changed(changed_blocks={'database'})
         else:
-            QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
+            # QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
+            # ↑ до 2026-11-07 (Ф2.1.3): пользователю показывался код («-3»), а не его смысл
+            QMessageBox.critical(self, "Ошибка", YaDiskResult.describe(code))
 
     # @AppLogger.get_instance(
     #     name='MainWindow',
@@ -1087,7 +1097,7 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_download_error(self, message):
+    def _on_db_download_error(self, message):
         """
         Обработчик ошибки в потоке скачивания.
         """
@@ -1112,7 +1122,9 @@ class SyncMixin:
         if code == 0:
             QMessageBox.information(self, "Успех", "База данных успешно загружена.")
         else:
-            QMessageBox.critical(self, "Ошибка", f"Загрузка завершилась с кодом {code}")
+            # QMessageBox.critical(self, "Ошибка", f"Загрузка завершилась с кодом {code}")
+            # ↑ до 2026-11-07 (Ф2.1.3): пользователю показывался код, а не его смысл
+            QMessageBox.critical(self, "Ошибка", YaDiskResult.describe(code))
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -1676,7 +1688,7 @@ class UpdateProgressDialog(QProgressDialog):
 # ========== Диалог прогресса ==========
 class ParsingProgressDialog(QDialog):
 
-    finished_closed = Signal()   # новый сигнал
+    finished_closed = Signal()   # итоги показаны, окно закрыто
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1693,12 +1705,14 @@ class ParsingProgressDialog(QDialog):
         # Область для итоговой информации (создаётся, но скрыта до завершения)
         self.summary_text = QTextEdit()
         self.summary_text.setReadOnly(True)
-        self.summary_text.setMaximumHeight(120)
+        self.summary_text.setMaximumHeight(200)
         self.summary_text.setVisible(False)
         layout.addWidget(self.summary_text)
 
         # Кнопка
-        self.close_btn = QPushButton("Отмена")
+        # self.close_btn = QPushButton("Отмена")
+        # ↑ до 2026-11-07 (MW6): отменить импорт нельзя, поток продолжает писать в базу
+        self.close_btn = QPushButton("Скрыть")
         self.close_btn.clicked.connect(self._on_close_clicked)
         layout.addWidget(self.close_btn)
 
@@ -1711,7 +1725,7 @@ class ParsingProgressDialog(QDialog):
         self._items.clear()
         for name in file_names:
             item = QListWidgetItem(name)
-            item.setData(Qt.UserRole, "pending")
+            item.setData(Qt.UserRole, name)  # имя файла: статус меняет только подпись рядом
             self._set_status(item, "⏳ Ожидание")
             self.list_widget.addItem(item)
             self._items[name] = item
@@ -1758,14 +1772,28 @@ class ParsingProgressDialog(QDialog):
             self._set_status(item, "⏳ Ожидание")
         self.list_widget.repaint()
 
-    def set_finished_results(self, total: int, success: int, failed: int, log_path: str):
-        """Вызывается после завершения парсинга – показывает итоговую информацию."""
+    # итоги импорта в окне прогресса
+    def set_finished_results(
+        self,
+        summary : str,  # итоги: счётчики, ошибки, предупреждения, журнал
+    ) -> None:
+        """
+        Показывает итоги рядом со списком файлов; кнопка закрывает окно и сообщает об этом.
+
+        Args:
+            summary : (str) Текст итогов (``parsers.word_importer.format_results``).
+
+        Example:
+            >>> dialog.set_finished_results('Обработано файлов: 1')     # doctest: +SKIP
+        """
         self._finished = True
-        self.summary_text.clear()
-        self.summary_text.append(f"<b>Обработано файлов:</b> {total}")
-        self.summary_text.append(f"<b>Успешно:</b> {success}")
-        self.summary_text.append(f"<b>Ошибок:</b> {failed}")
-        self.summary_text.append(f"<b>Лог сохранён:</b> {log_path}")
+        # self.summary_text.clear()
+        # self.summary_text.append(f"<b>Обработано файлов:</b> {total}")
+        # self.summary_text.append(f"<b>Успешно:</b> {success}")
+        # self.summary_text.append(f"<b>Ошибок:</b> {failed}")
+        # self.summary_text.append(f"<b>Лог сохранён:</b> {log_path}")
+        # ↑ до 2026-11-07 (MW5): без ошибок по файлам и предупреждений, которые есть в итогах парсера
+        self.summary_text.setPlainText(summary)
         self.summary_text.setVisible(True)
 
         self.close_btn.setText("Закрыть")
@@ -1787,7 +1815,9 @@ class ParsingProgressDialog(QDialog):
         if not self._finished:
             super().reject()
         else:
-            self.accept()
+            # self.accept()
+            # ↑ до 2026-11-07 (MW5): Esc закрывал окно без сигнала, страницы не обновлялись
+            self._on_close_finished()
 
     def closeEvent(self, event):
         if self._finished:
@@ -1795,7 +1825,9 @@ class ParsingProgressDialog(QDialog):
         event.accept()
 
     def _set_status(self, item: QListWidgetItem, text: str):
-        item.setText(f"{item.text()}   {text}")
+        # item.setText(f"{item.text()}   {text}")
+        # ↑ до 2026-11-07 (MW7): статусы копились в строке («⏳ Ожидание   🔄 Обработка...   ✅ Готово»)
+        item.setText(f"{item.data(Qt.UserRole)}   {text}")
 
 # ========== Поток парсинга ==========
 class ParsingThread(QThread):
@@ -2280,8 +2312,10 @@ class MainWindow(
     )
     def _start_parsing(self):
         # Диалог выбора папки
+        # Выбор открывается в папке документов из настроек (пусто — папка по умолчанию Qt)
         folder = QFileDialog.getExistingDirectory(
-            self, "Выберите папку с файлами .docx", "",
+            self, "Выберите папку с файлами .docx",
+            str(AppConfigManager.get_instance().get(WORD_DOCUMENTS_PATH_KEY, '') or ''),
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks
         )
         if not folder:
@@ -2362,9 +2396,11 @@ class MainWindow(
         results : dict,   # результаты batch_parse (+ log_path)
     ) -> None:
         """
-        Итоги импорта из Word: закрывает диалог прогресса и показывает итоги — счётчики,
-        ошибки, предупреждения (W2: нераспознанный телефон не записан), путь к журналу
-        (``parsers.word_importer.format_results``); затем обновляет страницы.
+        Показывает итоги импорта из Word: счётчики, ошибки, предупреждения (W2: нераспознанный
+        телефон не записан), путь к журналу (``parsers.word_importer.format_results``).
+
+        Окно прогресса открыто — итоги в нём, рядом со статусами файлов, страницы обновляются
+        при его закрытии. Пользователь его скрыл — отдельным сообщением, страницы сразу.
 
         Args:
             results (dict): Результаты ``batch_parse`` с ключом ``log_path``.
@@ -2375,24 +2411,32 @@ class MainWindow(
         Пример:
             >>> window._on_parsing_finished({'total': 1, 'success': 1, 'failed': 0, 'warnings': []})
         """
-        if hasattr(self, 'progress_dialog'):
-            self.progress_dialog.accept()
-            self.progress_dialog = None
+        # if hasattr(self, 'progress_dialog'):
+        #     self.progress_dialog.accept()
+        #     self.progress_dialog = None
+        #
+        # total = results.get('total', 0)
+        # success = results.get('success', 0)
+        # failed = results.get('failed', 0)
+        # log_path = results.get('log_path', 'не указан')
+        #
+        # if hasattr(self, 'progress_dialog') and self.progress_dialog:
+        #     self.progress_dialog.set_finished_results(total, success, failed, log_path)
+        #     if not hasattr(self, '_parsing_closed_connected'):
+        #         self.progress_dialog.finished_closed.connect(self._on_parsing_dialog_closed)
+        #         self._parsing_closed_connected = True
+        # else:
+        # ↑ до 2026-11-07 (MW5): окно закрывалось до показа итогов, ветка с итогами в окне не работала
 
-        total = results.get('total', 0)
-        success = results.get('success', 0)
-        failed = results.get('failed', 0)
-        log_path = results.get('log_path', 'не указан')
-
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.set_finished_results(total, success, failed, log_path)
-            if not hasattr(self, '_parsing_closed_connected'):
-                self.progress_dialog.finished_closed.connect(self._on_parsing_dialog_closed)
-                self._parsing_closed_connected = True
+        # W2 (2026-10-25): итоги с ошибками и предупреждениями — общим текстом парсера
+        # (парсер уже загружен потоком импорта, если дошли до итогов)
+        from parsers.word_importer import format_results
+        dialog = getattr(self, 'progress_dialog', None)
+        if dialog is not None and dialog.isVisible():
+            dialog.set_finished_results(format_results(results))
+            dialog.finished_closed.connect(self._on_parsing_dialog_closed)
         else:
-            # W2 (2026-10-25): итоги с ошибками и предупреждениями — общим текстом парсера
-            # (парсер уже загружен потоком импорта, если дошли до итогов)
-            from parsers.word_importer import format_results
+            self.progress_dialog = None
             QMessageBox.information(
                 self,                       # родитель
                 "Парсинг завершён",         # заголовок
@@ -2409,7 +2453,6 @@ class MainWindow(
         """Вызывается, когда пользователь закрыл диалог прогресса после завершения парсинга."""
         self._refresh_after_parsing()
         self.progress_dialog = None
-        self._parsing_closed_connected = False
 
     def _refresh_after_parsing(self):
         """Обновляет страницы, которые могут содержать новые данные."""
@@ -2426,20 +2469,43 @@ class MainWindow(
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_parsing_error(self, error_msg):
-        if hasattr(self, 'progress_dialog') and self.progress_dialog:
-            self.progress_dialog.summary_text.setVisible(True)
-            self.progress_dialog.summary_text.clear()
-            self.progress_dialog.summary_text.append(f"<b>Ошибка выполнения парсинга:</b>\n{error_msg}")
-            self.progress_dialog.close_btn.setText("Закрыть")
-            try:
-                self.progress_dialog.close_btn.clicked.disconnect()
-            except TypeError:
-                pass
-            self.progress_dialog.close_btn.clicked.connect(self._on_parsing_dialog_closed)
-            self.progress_dialog._finished = True
+    def _on_parsing_error(
+        self,
+        error_msg : str,    # причина сбоя импорта
+    ) -> None:
+        """
+        Показывает сбой импорта из Word: в окне прогресса, если оно открыто, иначе сообщением.
+
+        Часть файлов могла быть обработана, поэтому страницы обновляются при закрытии окна.
+
+        Args:
+            error_msg : (str) Причина.
+
+        Example:
+            >>> window._on_parsing_error('Нет доступа к папке')     # doctest: +SKIP
+        """
+        # if hasattr(self, 'progress_dialog') and self.progress_dialog:
+        #     self.progress_dialog.summary_text.setVisible(True)
+        #     self.progress_dialog.summary_text.clear()
+        #     self.progress_dialog.summary_text.append(f"<b>Ошибка выполнения парсинга:</b>\n{error_msg}")
+        #     self.progress_dialog.close_btn.setText("Закрыть")
+        #     try:
+        #         self.progress_dialog.close_btn.clicked.disconnect()
+        #     except TypeError:
+        #         pass
+        #     self.progress_dialog.close_btn.clicked.connect(self._on_parsing_dialog_closed)
+        #     self.progress_dialog._finished = True
+        # else:
+        #     QMessageBox.critical(self, "Ошибка", f"При выполнении парсинга произошла ошибка:\n{error_msg}")
+        # ↑ до 2026-11-07 (MW5): кнопка «Закрыть» не закрывала модальное окно, программа стояла
+        dialog = getattr(self, 'progress_dialog', None)
+        if dialog is not None and dialog.isVisible():
+            dialog.set_finished_results(f"Ошибка выполнения парсинга:\n{error_msg}")
+            dialog.finished_closed.connect(self._on_parsing_dialog_closed)
         else:
+            self.progress_dialog = None
             QMessageBox.critical(self, "Ошибка", f"При выполнении парсинга произошла ошибка:\n{error_msg}")
+            self._refresh_after_parsing()
 
     # ----------------------------------------------------------------------
     # Методы загрузки данных для страниц списков

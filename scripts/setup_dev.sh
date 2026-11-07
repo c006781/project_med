@@ -55,17 +55,19 @@ fi
 # (до 2026-10-26, ТД-11: в обеих ветках — python3 -m venv venv_project_med, первый python3
 #  в PATH без проверки версии; при python3 3.7 установка пакетов падала ошибкой pip)
 
-source "$ROOT_DIR/venv_project_med/bin/activate"
-pip install --upgrade pip
+# Интерпретатор окружения — напрямую: activate разворачивает путь папки как строку оболочки, и в папке
+# с $ в имени pip из PATH не находился (до 2026-11-07, SC7: source activate + pip)
+VENV_PYTHON="$ROOT_DIR/venv_project_med/bin/python"
+"$VENV_PYTHON" -m pip install --upgrade pip
 
 if [ -f "$ROOT_DIR/requirements.txt" ]; then
     echo "Установка production-зависимостей..."
-    pip install -r "$ROOT_DIR/requirements.txt"
+    "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/requirements.txt"
 fi
 
 if [ -f "$ROOT_DIR/requirements-dev.txt" ]; then
     echo "Установка dev-зависимостей..."
-    pip install -r "$ROOT_DIR/requirements-dev.txt"
+    "$VENV_PYTHON" -m pip install -r "$ROOT_DIR/requirements-dev.txt"
 fi
 
 echo "Готово. Активируйте окружение: source \"$ROOT_DIR/venv_project_med/bin/activate\""

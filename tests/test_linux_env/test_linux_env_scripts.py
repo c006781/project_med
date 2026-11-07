@@ -121,6 +121,8 @@ case "$1" in
   -m) mkdir -p "$3/bin"
       printf '#!/bin/bash\\necho "$*" >> "$(dirname "$BASH_SOURCE")/../pip.log"\\n' > "$3/bin/pip"
       chmod +x "$3/bin/pip"
+      printf '#!/bin/bash\\nshift 2\\necho "$*" >> "$(dirname "$BASH_SOURCE")/../pip.log"\\n' > "$3/bin/python"
+      chmod +x "$3/bin/python"
       printf 'export PATH="%s/bin:$PATH"\\n' "$3" > "$3/bin/activate" ;;
 esac
 ''')
@@ -161,6 +163,22 @@ def test_setup_prod_archive_layout(project, fake_python, tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert (archive / 'venv_project_med' / 'bin' / 'activate').exists()
+
+
+def test_setup_prod_folder_with_dollar_in_name(fake_python, tmp_path):
+    """Папка с $ в имени: пакеты ставит интерпретатор окружения, путь не разворачивается оболочкой."""
+    archive = tmp_path / 'Папка $HOME'
+    archive.mkdir()
+    for name in ('setup_prod.sh', 'find_python.sh'):
+        shutil.copy(SCRIPTS / name, archive / name)
+    (archive / 'requirements.txt').write_text('', encoding='utf-8')
+    result = subprocess.run(
+        ['bash', str(archive / 'setup_prod.sh'), '--python', str(fake_python)],
+        cwd=str(tmp_path), capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = (archive / 'venv_project_med' / 'pip.log').read_text(encoding='utf-8').splitlines()
+    assert log == ['install --upgrade pip', f'install -r {archive / "requirements.txt"}']
 
 
 def test_setup_prod_bad_python_fails_without_venv(project, tmp_path):

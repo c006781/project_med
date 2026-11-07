@@ -68,4 +68,4 @@ if [ -f "$ROOT_DIR/requirements-dev.txt" ]; then
     pip install -r "$ROOT_DIR/requirements-dev.txt"
 fi
 
-echo "Готово. Активируйте окружение: source "$ROOT_DIR/venv_project_med/bin/activate""
+echo "Готово. Активируйте окружение: source \"$ROOT_DIR/venv_project_med/bin/activate\""

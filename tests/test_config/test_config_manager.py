@@ -103,7 +103,7 @@ def test_config_manager_corrupted_file(tmp_path):
     # # Ожидаем, что при создании менеджера будет исключение
     # with pytest.raises((msgpack.exceptions.ExtraData, msgpack.exceptions.UnpackException)):
     #     AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
-    # ↑ до M1 (2026-10-14): битый файл ронял запуск. Теперь — значения по умолчанию,
+    # ↑ до CM1 (2026-10-14): битый файл ронял запуск. Теперь — значения по умолчанию,
     #   битый файл переименован (подробно — test_manager_behavior.py).
     manager = AppConfigManager.get_instance(config_path=str(config_path), force_new=True)
     assert manager.get('YANDEX_TOKEN') == '----'

@@ -91,7 +91,7 @@ def photo_file_path(
     if not root or not name:
         return None
     relative = name.replace('\\', '/')                # старые пути Windows (Р-29)
-    # ↑ до 2026-11-05 (M13): было `if os.path.isabs(relative) or relative.startswith('/')` —
+    # ↑ до 2026-11-05 (MG13): было `if os.path.isabs(relative) or relative.startswith('/')` —
     #   на Linux имя с буквой диска (`C:/x.jpg`, `C:x.jpg`) считалось относительным, а на Windows
     #   `C:x.jpg` ломало `commonpath`
     if os.path.isabs(relative) or relative.startswith('/') or ntpath.splitdrive(relative)[0]:

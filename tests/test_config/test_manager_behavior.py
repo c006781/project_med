@@ -48,8 +48,8 @@ def test_defaults_without_file(cfg_path):
     m = AppConfigManager.get_instance(config_path=cfg_path)
     assert m.config_exists is False
     assert m.get('LOG_LEVEL') == 'INFO'
-    # assert m.get('system_enabled') == 'False'           # умолчания — строки (M6)
-    # ↑ до 2026-10-25 (M6): умолчания были строками; теперь — bool / int
+    # assert m.get('system_enabled') == 'False'           # умолчания — строки (CM6)
+    # ↑ до 2026-10-25 (CM6): умолчания были строками; теперь — bool / int
     assert m.get('system_enabled') is False
     assert not os.path.exists(cfg_path)                 # файл не создаётся до save()
 
@@ -57,7 +57,7 @@ def test_defaults_without_file(cfg_path):
 def test_save_and_reload(cfg_path):
     m = AppConfigManager.get_instance(config_path=cfg_path)
     m.set('YANDEX_TOKEN', 'abc')
-    m.set('system_enabled', True)                       # экран настроек сохраняет bool (M6)
+    m.set('system_enabled', True)                       # экран настроек сохраняет bool (CM6)
     m.save()
     again = AppConfigManager.get_instance(config_path=cfg_path, force_new=True)
     assert again.get('YANDEX_TOKEN') == 'abc'
@@ -75,7 +75,7 @@ def test_file_values_override_defaults_unknown_kept(cfg_path):
 
 
 def test_non_dict_file_recovered(cfg_path):
-    """M1: файл-«не словарь» тоже считается повреждённым (раньше молча игнорировался)."""
+    """CM1: файл-«не словарь» тоже считается повреждённым (раньше молча игнорировался)."""
     with open(cfg_path, 'wb') as f:
         msgpack.pack([1, 2, 3], f)
     m = AppConfigManager.get_instance(config_path=cfg_path)
@@ -88,7 +88,7 @@ BROKEN = b'\xc1 not msgpack'
 
 
 def test_corrupted_file_recovered(cfg_path, manager_log):
-    """M1: раньше исключение — приложение не запускалось."""
+    """CM1: раньше исключение — приложение не запускалось."""
     with open(cfg_path, 'wb') as f:
         f.write(BROKEN)
     m = AppConfigManager.get_instance(config_path=cfg_path)
@@ -131,7 +131,7 @@ def test_healthy_file_no_message(cfg_path):
 
 
 def test_failed_save_keeps_previous_file(cfg_path, monkeypatch):
-    """M2: раньше файл обнулялся до записи — сбой посередине портил конфиг."""
+    """CM2: раньше файл обнулялся до записи — сбой посередине портил конфиг."""
     m = AppConfigManager.get_instance(config_path=cfg_path)
     m.set('YANDEX_TOKEN', 'первый')
     m.save()
@@ -241,7 +241,7 @@ def test_listener_add_twice_and_remove(cfg_path):
 
 
 def test_failing_listener_logged_others_run(cfg_path, capsys, manager_log):
-    """M5: ошибка слушателя — в лог с traceback (раньше print в stdout); остальные вызываются."""
+    """CM5: ошибка слушателя — в лог с traceback (раньше print в stdout); остальные вызываются."""
     calls = []
 
     def bad():
@@ -257,7 +257,7 @@ def test_failing_listener_logged_others_run(cfg_path, capsys, manager_log):
 
 
 def test_listeners_shared_by_all_managers(cfg_path, config_sandbox):
-    """M3: список слушателей общий для всех менеджеров и путей."""
+    """CM3: список слушателей общий для всех менеджеров и путей."""
     calls = []
     AppConfigManager.add_change_listener(lambda: calls.append(1))
     AppConfigManager.get_instance(config_path=str(config_sandbox / 'x.msgpack')).save()
@@ -266,7 +266,7 @@ def test_listeners_shared_by_all_managers(cfg_path, config_sandbox):
 
 
 def test_listeners_of_dropped_objects_removed(cfg_path):
-    """M3: раньше слушатели-методы держали объекты вечно (6 → 11 в приложении)."""
+    """CM3: раньше слушатели-методы держали объекты вечно (6 → 11 в приложении)."""
     import gc
 
     class Service:
@@ -465,7 +465,7 @@ def test_apply_full_config_with_snapshot_uses_apply_changes(applier, monkeypatch
 
 
 def test_services_do_not_subscribe_to_save():
-    """M4: сервисы больше не подписаны на save() — применяет только ConfigApplier."""
+    """CM4: сервисы больше не подписаны на save() — применяет только ConfigApplier."""
     import ast
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     for rel in ('app/services/services_all.py', 'app/services/sync_service.py'):

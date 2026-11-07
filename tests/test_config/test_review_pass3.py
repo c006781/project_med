@@ -3,7 +3,7 @@
 """
 Тесты исправлений проверки модуля конфигурации, проход 3 (2026-10-15).
 
-Номера (M15, AP3a) — журнал проверок в ``app/config/IMPLEMENTATION.md`` §6.
+Номера (CM15, AP3a) — журнал проверок в ``app/config/IMPLEMENTATION.md`` §6.
 """
 
 import builtins
@@ -36,8 +36,8 @@ def _deny_open(monkeypatch, path):
     monkeypatch.setattr(builtins, 'open', fake_open)
 
 
-def test_m15_unreadable_file_not_renamed(cfg_path, monkeypatch):
-    """M15: файл не читается (заблокирован) — НЕ переименовывается и не перезаписывается."""
+def test_cm15_unreadable_file_not_renamed(cfg_path, monkeypatch):
+    """CM15: файл не читается (заблокирован) — НЕ переименовывается и не перезаписывается."""
     with open(cfg_path, 'wb') as f:
         msgpack.pack({'LOG_LEVEL': 'DEBUG'}, f)
     _deny_open(monkeypatch, cfg_path)
@@ -53,8 +53,8 @@ def test_m15_unreadable_file_not_renamed(cfg_path, monkeypatch):
         assert msgpack.unpack(f) == {'LOG_LEVEL': 'DEBUG'}  # файл цел
 
 
-def test_m15_message_logged(cfg_path, monkeypatch):
-    """M15: о нечитаемом файле сообщается в лог (ERROR) с путём."""
+def test_cm15_message_logged(cfg_path, monkeypatch):
+    """CM15: о нечитаемом файле сообщается в лог (ERROR) с путём."""
     got = []
     handler = manager_module._log.add_output(got.append, formatter='%(levelname)s|%(plain_message)s')
     try:
@@ -69,8 +69,8 @@ def test_m15_message_logged(cfg_path, monkeypatch):
                for line in got)
 
 
-def test_m1_garbage_still_recovered(cfg_path):
-    """M1 не сломан: мусор в файле — по-прежнему восстановление с копией."""
+def test_cm1_garbage_still_recovered(cfg_path):
+    """CM1 не сломан: мусор в файле — по-прежнему восстановление с копией."""
     with open(cfg_path, 'wb') as f:
         f.write(b'\xc1\xc1')
     m = AppConfigManager.get_instance(config_path=cfg_path)
@@ -109,7 +109,7 @@ def test_m10a_main_window_captures_message_before_settings_load():
     """
     M10a: отложенное окно не читает broken_config_message в момент показа.
 
-    Экран настроек при входе вызывает load(), который сбрасывает сообщение (M10);
+    Экран настроек при входе вызывает load(), который сбрасывает сообщение (CM10);
     раньше окно «Конфигурация восстановлена» выходило с пустым текстом.
     """
     import ast

@@ -1,7 +1,7 @@
 # tests/test_config/test_rework_w1.py
 
 """
-Тесты захода М6 переработки (2026-10-25): К6, M6, M16, E5, M17.
+Тесты захода М6 переработки (2026-10-25): К6, CM6, CM16, E5, CM17.
 
 Номера — журнал ``app/config/IMPLEMENTATION.md`` §6 («Заход М6»). Каждый тест исправления
 проверен на старом коде (падал).
@@ -145,11 +145,11 @@ def test_k6_callers_use_dependencies_factory(rel):
 
 
 # ---------------------------------------------------------------------------
-# M16: один экземпляр менеджера на файл, как бы ни был записан путь
+# CM16: один экземпляр менеджера на файл, как бы ни был записан путь
 # ---------------------------------------------------------------------------
 
-def test_m16_same_file_different_spelling_one_instance(config_sandbox):
-    """M16: ``config.msgpack``, ``./config.msgpack`` и абсолютный путь — один экземпляр.
+def test_cm16_same_file_different_spelling_one_instance(config_sandbox):
+    """CM16: ``config.msgpack``, ``./config.msgpack`` и абсолютный путь — один экземпляр.
 
     До 2026-10-25 ключ реестра — путь как передан: разные написания одного файла давали
     разные менеджеры, правки одного не видны другому.
@@ -163,16 +163,16 @@ def test_m16_same_file_different_spelling_one_instance(config_sandbox):
 
 
 @pytest.mark.skipif(os.name != 'nt', reason='регистр имён не важен только на Windows')
-def test_m16_case_insensitive_on_windows(config_sandbox):
-    """M16: на Windows ``CONFIG.msgpack`` — тот же файл, что ``config.msgpack``."""
+def test_cm16_case_insensitive_on_windows(config_sandbox):
+    """CM16: на Windows ``CONFIG.msgpack`` — тот же файл, что ``config.msgpack``."""
     from app.config.config_manager.manager import AppConfigManager
 
     a = AppConfigManager.get_instance(config_path='config.msgpack')
     assert AppConfigManager.get_instance(config_path='CONFIG.MSGPACK') is a
 
 
-def test_m16_force_new_replaces_registered_instance(config_sandbox):
-    """M16: ``force_new`` с другим написанием пути заменяет тот же экземпляр в реестре."""
+def test_cm16_force_new_replaces_registered_instance(config_sandbox):
+    """CM16: ``force_new`` с другим написанием пути заменяет тот же экземпляр в реестре."""
     from app.config.config_manager.manager import AppConfigManager
 
     a = AppConfigManager.get_instance(config_path='config.msgpack')
@@ -250,7 +250,7 @@ def test_e5_unreadable_env_does_not_crash(env_file, monkeypatch, capsys):
 
 
 # ---------------------------------------------------------------------------
-# M6: умолчания правильных типов; старые строковые значения читаются без потерь
+# CM6: умолчания правильных типов; старые строковые значения читаются без потерь
 # ---------------------------------------------------------------------------
 
 # Ключи с типами (bool / int) и их строковые значения из старых config.msgpack
@@ -294,8 +294,8 @@ def _write_msgpack(
         msgpack.pack(data, f)
 
 
-def test_m6_defaults_have_proper_types(config_sandbox):
-    """M6: умолчания флагов — bool, чисел — int (до 2026-10-25 — строки 'False', '10485760')."""
+def test_cm6_defaults_have_proper_types(config_sandbox):
+    """CM6: умолчания флагов — bool, чисел — int (до 2026-10-25 — строки 'False', '10485760')."""
     from app.config.config_manager.manager import AppConfigManager
 
     m = AppConfigManager.get_instance(config_path=str(config_sandbox / 'config.msgpack'))
@@ -306,8 +306,8 @@ def test_m6_defaults_have_proper_types(config_sandbox):
     assert m.get('enabled') is True and m.get('system_enabled') is False
 
 
-def test_m6_old_string_values_read_without_loss(config_sandbox):
-    """M6: старый ``config.msgpack`` со строковыми значениями читается: строки → bool / int."""
+def test_cm6_old_string_values_read_without_loss(config_sandbox):
+    """CM6: старый ``config.msgpack`` со строковыми значениями читается: строки → bool / int."""
     from app.config.config_manager.manager import AppConfigManager
 
     path = str(config_sandbox / 'config.msgpack')
@@ -324,8 +324,8 @@ def test_m6_old_string_values_read_without_loss(config_sandbox):
     assert m.broken_config_message is None
 
 
-def test_m6_unparseable_string_kept_as_is(config_sandbox):
-    """M6: строка, которую не перевести в тип умолчания, остаётся как есть (без потерь)."""
+def test_cm6_unparseable_string_kept_as_is(config_sandbox):
+    """CM6: строка, которую не перевести в тип умолчания, остаётся как есть (без потерь)."""
     from app.config.config_manager.manager import AppConfigManager
 
     path = str(config_sandbox / 'config.msgpack')
@@ -336,8 +336,8 @@ def test_m6_unparseable_string_kept_as_is(config_sandbox):
     assert m.get('use_timestamp') == 'on'
 
 
-def test_m6_old_file_not_rewritten_on_read(config_sandbox):
-    """M6: чтение старого файла его не переписывает (типы — в памяти; в файл — при save())."""
+def test_cm6_old_file_not_rewritten_on_read(config_sandbox):
+    """CM6: чтение старого файла его не переписывает (типы — в памяти; в файл — при save())."""
     import msgpack
     from app.config.config_manager.manager import AppConfigManager
 
@@ -348,8 +348,8 @@ def test_m6_old_file_not_rewritten_on_read(config_sandbox):
         assert msgpack.unpack(f) == {'LOG_ARGS': 'False'}
 
 
-def test_m6_typed_values_after_save_reload(config_sandbox):
-    """M6: после save() и повторного чтения значения — тех же типов."""
+def test_cm6_typed_values_after_save_reload(config_sandbox):
+    """CM6: после save() и повторного чтения значения — тех же типов."""
     from app.config.config_manager.manager import AppConfigManager
 
     path = str(config_sandbox / 'config.msgpack')
@@ -363,8 +363,8 @@ def test_m6_typed_values_after_save_reload(config_sandbox):
     assert again.get('LOG_ARGS') is True
 
 
-def test_m6_settings_snapshot_no_false_logging_change(config_sandbox):
-    """M6: старый файл со строками + экран сохраняет те же значения bool/int — блоки не «меняются».
+def test_cm6_settings_snapshot_no_false_logging_change(config_sandbox):
+    """CM6: старый файл со строками + экран сохраняет те же значения bool/int — блоки не «меняются».
 
     До 2026-10-25 'False' (файл) и False (экран) считались разными — логирование
     перенастраивалось при каждом первом сохранении настроек.
@@ -381,13 +381,13 @@ def test_m6_settings_snapshot_no_false_logging_change(config_sandbox):
     assert ConfigApplier.get_changed_blocks(old, m.get_all()) == set()
 
 
-def test_m6_logger_config_same_for_strings_and_types():
-    """M6: логгер понимает и строки, и типы — настройки логгера одинаковые."""
+def test_cm6_logger_config_same_for_strings_and_types():
+    """CM6: логгер понимает и строки, и типы — настройки логгера одинаковые."""
     from app.utils.logger.logger import AppLogger
 
     strings = {key: text for key, (text, _) in OLD_STRING_VALUES.items()}
     typed = {key: value for key, (_, value) in OLD_STRING_VALUES.items()}
-    log = AppLogger.get_instance('test.m6.types')
+    log = AppLogger.get_instance('test.cm6.types')
     from_strings = log._get_config_with_inheritance(
         AppLogger.build_logger_config(strings),   # старый файл
         None,

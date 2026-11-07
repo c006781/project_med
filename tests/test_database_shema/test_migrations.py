@@ -297,12 +297,12 @@ def test_database_on_legacy_file_keeps_data(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Проверочный проход 1 (M3, M4)
+# Проверочный проход 1 (MG3, MG4)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize('legacy', [True, False])
-def test_m3_concurrent_upgrades(tmp_path, legacy):
-    """M3: две копии программы одновременно открывают одну базу — обе успешно, одна отметка."""
+def test_mg3_concurrent_upgrades(tmp_path, legacy):
+    """MG3: две копии программы одновременно открывают одну базу — обе успешно, одна отметка."""
     import threading
     if legacy:
         path, engine = legacy_db(tmp_path)
@@ -333,7 +333,7 @@ def test_m3_concurrent_upgrades(tmp_path, legacy):
         assert len(backups(tmp_path)) == 1                 # копия — одна, у той копии, что приводила
 
 
-def test_m4_head_cached():
+def test_mg4_head_cached():
     from app.database import migrate
     migrate.head_revision.cache_clear()
     calls = []
@@ -419,7 +419,7 @@ def test_next_migration_on_legacy_db(tmp_path, with_0002):
     assert upgrade_database(engine) == NEXT_REVISION
     assert counts(engine)['patients'] == 1
     assert 'email' in {c['name'] for c in inspect(engine).get_columns('patients')}
-    # M6: одна копия (-legacy); до исправления — две одинаковые (-legacy и -0001_baseline)
+    # MG6: одна копия (-legacy); до исправления — две одинаковые (-legacy и -0001_baseline)
     assert len(backups(tmp_path)) == 1 and backups(tmp_path)[0].endswith('-legacy')
 
 
@@ -458,7 +458,7 @@ def test_next_migration_downgrade(tmp_path, with_0002):
 
 
 # ---------------------------------------------------------------------------
-# Проверочный проход 3: понятные сообщения об ошибках при запуске (M7)
+# Проверочный проход 3: понятные сообщения об ошибках при запуске (MG7)
 # ---------------------------------------------------------------------------
 
 def test_startup_error_text_for_refused_migration(tmp_path):
@@ -504,7 +504,7 @@ def test_startup_error_text_wrapped_and_unrelated():
 
 
 # ---------------------------------------------------------------------------
-# Проверочный проход 4: резервная копия базы в режиме WAL (M8)
+# Проверочный проход 4: резервная копия базы в режиме WAL (MG8)
 # ---------------------------------------------------------------------------
 
 def test_backup_includes_wal_changes(tmp_path):
@@ -536,7 +536,7 @@ def test_backup_includes_wal_changes(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Проверочный проход 5: база новее программы (M9), внешние ключи при пересборке (M10)
+# Проверочный проход 5: база новее программы (MG9), внешние ключи при пересборке (MG10)
 # ---------------------------------------------------------------------------
 
 def test_db_newer_than_program_refused_untouched(tmp_path, with_0002):
@@ -733,7 +733,7 @@ def downgrade():
 
 
 def test_drift_adds_column_before_its_index(tmp_path, with_0002):
-    """M12: недостающий столбец С ИНДЕКСОМ — сначала столбец, потом индекс (раньше — наоборот, сбой)."""
+    """MG12: недостающий столбец С ИНДЕКСОМ — сначала столбец, потом индекс (раньше — наоборот, сбой)."""
     with_0002(code=INDEXED_COLUMN_0002)
     path, engine = head_db(tmp_path)
     with engine.begin() as conn:

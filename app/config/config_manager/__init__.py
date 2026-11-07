@@ -4,7 +4,7 @@
 Пакет для управления конфигурацией приложения с использованием MessagePack.
 Предоставляет базовый класс BaseConfigManager и наследника AppConfigManager
 с конкретными полями и значениями по умолчанию; ``WORD_DOCUMENTS_PATH_KEY`` — ключ
-настройки «Папка документов Word» (M17, 2026-10-25).
+настройки «Папка документов Word» (CM17, 2026-10-25).
 
 Пример:
     >>> from app.config.config_manager import AppConfigManager, WORD_DOCUMENTS_PATH_KEY
@@ -16,7 +16,7 @@
 # import sys
 # tt = sys.modules['app.config.config_manager.manager'] 
 from .manager import BaseConfigManager, AppConfigManager, get_config_env
-from .manager import WORD_DOCUMENTS_PATH_KEY   # ключ «Папка документов Word» (M17)
+from .manager import WORD_DOCUMENTS_PATH_KEY   # ключ «Папка документов Word» (CM17)
 
 __all__ = [
     'BaseConfigManager',

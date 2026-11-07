@@ -30,6 +30,11 @@
 удаления, перед коммитом, после коммита / отката». Исполняет их слой базы
 (``app/database/table_events.py``) — модель знает своё описание (``__table_def__``).
 
+Встроенные триггеры SQLite (Ф1.6.7д, 2026-11-07): ``triggers=(trigger('имя', 'место', 'SQL'), ...)``
+— правила только внутри данных: срабатывают и при сыром SQL, и при правке сторонней программой;
+вне базы ничего не умеют. Создаёт их миграция; модель несёт их текст в ``Table.info`` — так их
+видят сравнение с базой и генератор миграций (``app/database/sqlite_triggers.py``).
+
 Пример:
     >>> PRESCRIPTIONS = TableDef('prescriptions', 'Prescription', 'PrescriptionDTO', fields=(
     ...     key('ID назначения'),
@@ -45,8 +50,9 @@
 from __future__ import annotations
 
 import datetime
+import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Type
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -77,6 +83,11 @@ TRANSACTION_EVENTS : Tuple[str, ...] = (
     'after_rollback',                    # после отката
 )
 TABLE_EVENTS : Tuple[str, ...] = ROW_EVENTS + TRANSACTION_EVENTS
+
+# Встроенные триггеры SQLite (Ф1.6.7д): ключ Table.info — «имя триггера → текст CREATE TRIGGER».
+# Через Table.info текст доходит и до копий схемы (to_metadata), и до схемы, собранной из базы.
+TRIGGERS_INFO : str = 'sqlite_triggers'
+_TRIGGER_NAME_RE = re.compile(r'[A-Za-z_][A-Za-z0-9_]*')   # имя триггера и столбца UPDATE OF
 
 
 def note_text(note: Any) -> Optional[str]:
@@ -252,6 +263,153 @@ def on(
     return EventSpec(
         event,              # место
         tuple(actions),     # действия по порядку
+    )
+
+
+@dataclass(frozen=True)
+class TriggerSpec:
+    """
+    Встроенный триггер SQLite в описании таблицы (создаётся функцией :func:`trigger`).
+
+    Attributes:
+        name  : (str) Имя триггера (единое пространство имён на всю базу).
+        event : (str) Место (одно из ``ROW_EVENTS``).
+        body  : (str) Команды между ``BEGIN`` и ``END``.
+        when  : (str/None) Условие ``WHEN``; None — без условия.
+        of    : (Tuple[str, ...]) Столбцы ``UPDATE OF``; пусто — любое изменение строки.
+
+    Example:
+        >>> trigger(
+        ...     'trg_no_delete',                            # имя
+        ...     'before_delete',                            # перед удалением
+        ...     "SELECT RAISE(ABORT, 'удалять нельзя');",   # команды
+        ... ).event
+        'before_delete'
+    """
+
+    name  : str
+    event : str
+    body  : str
+    when  : Optional[str] = None
+    of    : Tuple[str, ...] = ()
+
+    def create_sql(
+        self,
+        table : str,   # таблица триггера
+    ) -> str: # текст CREATE TRIGGER
+        """
+        Возвращает текст ``CREATE TRIGGER`` для таблицы — его выполняет миграция и с ним
+        сравнивается текст в базе.
+
+        Args:
+            table : (str) Имя таблицы.
+
+        Returns:
+            (str) Команда SQL без завершающей точки с запятой.
+
+        Example:
+            >>> trigger(
+            ...     'trg_a',                # имя
+            ...     'after_update',         # после изменения
+            ...     'SELECT 1',             # команды
+            ...     of  =   ('phone',),     # столбец
+            ... ).create_sql(
+            ...     'patients',             # таблица
+            ... ).splitlines()[0]
+            'CREATE TRIGGER "trg_a" AFTER UPDATE OF "phone" ON "patients"'
+        """
+        timing, operation = self.event.split('_')
+        columns = ''
+        if self.of: # только изменения названных столбцов
+            columns = ' OF ' + ', '.join(f'"{name}"' for name in self.of)
+        when = f"\nWHEN {self.when.strip()}" if self.when else ''
+        body = self.body.strip().rstrip(';').rstrip()
+        return (
+            f'CREATE TRIGGER "{self.name}" {timing.upper()} {operation.upper()}{columns} ON "{table}"'
+            f"{when}\nBEGIN\n{body};\nEND"
+        )
+
+
+def trigger(
+    name  : str,                                  # имя триггера
+    event : str,                                  # место (ROW_EVENTS)
+    body  : str,                                  # команды между BEGIN и END
+    *,
+    when  : Optional[str] = None,                 # условие WHEN
+    of    : Union[str, Sequence[str]] = (),       # столбцы UPDATE OF
+) -> TriggerSpec: # встроенный триггер SQLite для TableDef(triggers=(...))
+    """
+    Описывает встроенный триггер SQLite — для ``TableDef(triggers=(...))``.
+
+    Для правил только внутри данных: срабатывает на любое изменение строки — и через ORM, и
+    сырым SQL, и из сторонней программы. Вне базы ничего не умеет (файлы, журнал программы —
+    это события таблиц, :func:`on`). Создаёт триггер миграция; появление, изменение и удаление
+    триггера в описании видит генератор миграций. Место — как у событий таблицы:
+    ``before_insert``, ``after_insert``, ``before_update``, ``after_update``, ``before_delete``,
+    ``after_delete``.
+
+    Здесь проверяется только форма; существование таблиц и столбцов в ``body`` и ``when``,
+    повтор имени на другой таблице — при открытии базы (``migrate.check_trigger_definitions``):
+    SQLite принимает ``CREATE TRIGGER`` с опечаткой и упал бы только при срабатывании.
+
+    Note:
+        ORM о работе триггера не знает. Объекты, уже загруженные в сессию, после срабатывания
+        устаревают до ``session.refresh(объект)`` / ``session.expire(объект)`` или до конца
+        транзакции; события таблиц и сборщик мусора изменённых триггером строк не видят —
+        ссылку, снятую триггером, сборщик не заметит (её найдёт полная проверка ``find_unused``).
+        Триггер ``BEFORE`` не должен менять обрабатываемую строку (в SQLite поведение не определено).
+
+    Args:
+        name  : (str) Имя: латиница, цифры, ``_``; не с ``sqlite_`` (зарезервировано SQLite).
+            Единое на всю базу, а не на таблицу.
+        event : (str) Место срабатывания (``ROW_EVENTS``).
+        body  : (str) Команды между ``BEGIN`` и ``END``; в них доступны ``NEW.`` / ``OLD.``.
+            Запрет — ``SELECT RAISE(ABORT, 'текст')``: текст дойдёт до ``DbIntegrityError``.
+        when  : (str/None) Условие ``WHEN``; None — без условия.
+        of    : (str/Sequence[str]) Столбцы ``UPDATE OF`` (только для ``*_update``); пусто —
+            любое изменение строки. Что столбцы есть в таблице, проверяет ``TableDef``.
+
+    Returns:
+        (TriggerSpec) Описание триггера.
+
+    Raises:
+        ValueError: Плохое имя триггера или столбца, неизвестное место, пустые команды или
+            условие, ``of`` не у изменения, столбец в ``of`` повторяется.
+
+    Example:
+        >>> trigger(
+        ...     'trg_photo_no_empty_path',                  # имя
+        ...     'before_update',                            # перед изменением
+        ...     "SELECT RAISE(ABORT, 'пустой путь');",      # команды
+        ...     when    =   "NEW.file_path = ''",           # условие
+        ...     of      =   ('file_path',),                 # столбец
+        ... ).of
+        ('file_path',)
+    """
+    if not isinstance(name, str) or not _TRIGGER_NAME_RE.fullmatch(name) or name.lower().startswith('sqlite_'):
+        raise ValueError(
+            f"имя триггера {name!r}: нужны латиница, цифры и _, не с цифры и не с sqlite_"
+        )
+    if event not in ROW_EVENTS:
+        raise ValueError(f"триггер {name}: неизвестное место {event!r}; есть: {', '.join(ROW_EVENTS)}")
+    if not isinstance(body, str) or not body.strip().rstrip(';').strip():
+        raise ValueError(f"триггер {name}: нет команд")
+    if when is not None and (not isinstance(when, str) or not when.strip()):
+        raise ValueError(f"триггер {name}: условие when пустое — уберите его или задайте")
+    columns = (of,) if isinstance(of, str) else tuple(of)
+    if columns and not event.endswith('_update'): # UPDATE OF есть только у изменения
+        raise ValueError(f"триггер {name}: of — только для изменения, а место {event!r}")
+    for column_name in columns:
+        if not isinstance(column_name, str) or not _TRIGGER_NAME_RE.fullmatch(column_name):
+            raise ValueError(f"триггер {name}: плохое имя столбца {column_name!r}")
+    if len(set(columns)) != len(columns):
+        raise ValueError(f"триггер {name}: столбец в of повторяется ({', '.join(columns)})")
+    return TriggerSpec(
+        name,                   # имя
+        event,                  # место
+        body,                   # команды
+        when    =   when,       # условие
+        of      =   columns,    # столбцы
     )
 
 
@@ -609,6 +767,8 @@ class TableDef:
             ``KEEP_USED`` — только используемые (строку без ссылок, ставшую такой в
             транзакции, удаляет сборщик мусора слоя базы перед коммитом).
         events: Действия, подключённые к местам событий таблицы (``on(...)``), по порядку.
+        triggers: Встроенные триггеры SQLite (``trigger(...)``, Ф1.6.7д): правила внутри
+            данных, создаются миграцией. Модель несёт их текст в ``Table.info``.
 
     Пример:
         >>> PATIENTS.build_config()['last_name']['title']
@@ -640,18 +800,20 @@ class TableDef:
     sqlite_autoincrement: bool = True
     keep                : str = KEEP_ALWAYS                 # хранение строк (Ф1.6.7г)
     events              : Tuple[EventSpec, ...] = ()        # действия событий таблицы (Ф1.6.7г)
+    triggers            : Tuple[TriggerSpec, ...] = ()      # встроенные триггеры SQLite (Ф1.6.7д)
 
     def __post_init__(self) -> None:
         """
-        Поля и события — кортежем; тип записи по умолчанию; проверка повторов имён, режима
-        хранения и подключений событий.
+        Поля, события и триггеры — кортежем; тип записи по умолчанию; проверка повторов имён,
+        режима хранения, подключений событий и триггеров.
 
         Returns:
             None
 
         Raises:
             ValueError: Имя поля/столбца повторяется; неизвестный режим ``keep``; в
-                ``events`` не ``EventSpec`` (подключение — только через ``on``).
+                ``events`` не ``EventSpec`` (подключение — только через ``on``); в ``triggers``
+                не ``TriggerSpec``, имя триггера повторяется, в ``of`` неизвестный столбец.
 
         Пример:
             >>> TableDef('t', 'T', 'TDTO', (key(), key()))
@@ -660,6 +822,7 @@ class TableDef:
         """
         object.__setattr__(self, 'fields', tuple(self.fields))
         object.__setattr__(self, 'events', tuple(self.events))
+        object.__setattr__(self, 'triggers', tuple(self.triggers))
         if self.keep not in KEEP_MODES: # опечатка в режиме хранения — сразу, не при работе
             raise ValueError(
                 f"таблица {self.name}: неизвестный режим хранения keep={self.keep!r}; "
@@ -687,6 +850,44 @@ class TableDef:
                 if name in seen:
                     raise ValueError(f"таблица {self.name}: имя {name!r} повторяется")
                 seen.add(name)
+        self._check_triggers()
+
+    def _check_triggers(self) -> None: # сверяет триггеры с полями описания
+        """
+        Проверяет триггеры по описанию таблицы: вид записи, повтор имени, столбцы ``UPDATE OF``.
+        Текст команд и повтор имени на другой таблице проверяются при открытии базы.
+
+        Raises:
+            ValueError: В ``triggers`` не ``TriggerSpec``, имя повторяется, в ``of`` столбец,
+                которого в таблице нет.
+
+        Example:
+            >>> TableDef(
+            ...     't', 'T', 'TDTO', (key(),),
+            ...     triggers    =   (trigger('a', 'before_update', 'SELECT 1', of='nope'),),
+            ... )
+            Traceback (most recent call last):
+            ValueError: таблица t: триггер a — в of нет столбца 'nope'
+        """
+        names  : set = set()
+        stored = {
+            spec.id_name if spec.kind == 'note' else spec.name   # столбец заметки — её ссылка
+            for spec in self.fields
+            if spec.kind in ('key', 'column', 'fk', 'note', 'timestamp')
+        }
+        for spec in self.triggers:
+            if not isinstance(spec, TriggerSpec):
+                raise ValueError(
+                    f"таблица {self.name}: в triggers — {spec!r}; описывайте через trigger(...)"
+                )
+            if spec.name in names:
+                raise ValueError(f"таблица {self.name}: имя триггера {spec.name!r} повторяется")
+            names.add(spec.name)
+            for column_name in spec.of:
+                if column_name not in stored:
+                    raise ValueError(
+                        f"таблица {self.name}: триггер {spec.name} — в of нет столбца {column_name!r}"
+                    )
 
     def actions_for(
         self,
@@ -820,7 +1021,8 @@ class TableDef:
         ``children`` — к подчинённым (каскад и явный внешний ключ — если заданы). Атрибуты
         ``namespace`` ставятся последними и перекрывают построенные (``__repr__``). Модель
         получает атрибут ``__table_def__`` — это описание (хранение и события таблицы для
-        слоя базы, Ф1.6.7г).
+        слоя базы, Ф1.6.7г). Триггеры описания — текстом в ``Table.info[TRIGGERS_INFO]``
+        (Ф1.6.7д); таблица без триггеров ``info`` не получает.
 
         Args:
             base      : (Any) Декларативная база (``Base`` приложения или своя — для проверок).
@@ -881,6 +1083,13 @@ class TableDef:
         options: Dict[str, Any] = {'sqlite_autoincrement': self.sqlite_autoincrement}
         if self.comment:
             options['comment'] = self.comment
+        if self.triggers: # текст триггеров — для сравнения с базой и генератора миграций
+            options['info'] = {
+                TRIGGERS_INFO: {
+                    spec.name: spec.create_sql(self.name)   # имя → CREATE TRIGGER
+                    for spec in self.triggers
+                },
+            }
         attrs['__table_args__'] = (*indexes, options)
         attrs.update(dict(namespace or {}))
         return type(self.model_name, (base,), attrs)
@@ -1030,4 +1239,5 @@ def rebuild_dtos(*dtos: Type[BaseModel]) -> None:
 __all__ = ['FieldSpec', 'TableDef', 'children', 'column', 'computed', 'fk', 'key', 'note', 'note_text',
            'rebuild_dtos', 'timestamp', 'NOTES_TABLE', 'NOTES_MODEL',
            'EventSpec', 'on', 'KEEP_ALWAYS', 'KEEP_USED', 'KEEP_MODES',
-           'ROW_EVENTS', 'TRANSACTION_EVENTS', 'TABLE_EVENTS']
+           'ROW_EVENTS', 'TRANSACTION_EVENTS', 'TABLE_EVENTS',
+           'TriggerSpec', 'trigger', 'TRIGGERS_INFO']

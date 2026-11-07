@@ -27,7 +27,10 @@ create_all умеет только СОЗДАТЬ недостающие таб�
     * база новее программы — отказ до любых изменений (MG9);
     * внешние ключи на время миграции выключены, после — проверка новых «висячих»
       ссылок (MG10);
-    * понятный текст ошибки для окна запуска — ``startup_error_text`` (MG7).
+    * понятный текст ошибки для окна запуска — ``startup_error_text`` (MG7);
+    * встроенные триггеры SQLite (Ф1.6.7д, ``sqlite_triggers``): Alembic их не видит — сравнение
+      добавлено к его отличиям; недостающий или изменённый дописывается автодостройкой, после
+      миграции проверяется, что триггеры компилируются (MG14).
 
 Автоматизация (2026-10-18, «автомиграции»):
     * **автодостройка** при каждом запуске: база сравнивается со схемой ПОСЛЕДНЕЙ миграции;
@@ -71,6 +74,7 @@ import sqlalchemy as sa
 from sqlalchemy import create_engine, event, inspect
 from sqlalchemy.engine import Engine
 
+from app.database import sqlite_triggers   # заодно подключает сравнение триггеров к Alembic
 from app.utils.logger.logger import AppLogger
 
 _log = AppLogger.get_instance('database.migrate', enable_file_logging='system')
@@ -491,6 +495,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
             return head                       # обновила другая копия программы
         start = current
         fk_before = _foreign_key_violations(conn)
+        triggers_before = set(sqlite_triggers.trigger_errors(conn))
         backup_path = None
         if current is None and tables:
             current, backup_path = _repair_legacy(engine, conn, backup)
@@ -507,6 +512,10 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
         _repair_drift(engine, conn, head, may_backup=backup and bool(tables) and backup_path is None
                       and current == start)
         _check_foreign_keys(conn, fk_before)  # MG10: новые нарушения связей — откат всего
+        _check_triggers(
+            conn,               # соединение миграции
+            triggers_before,    # ошибки триггеров до миграции
+        )
     if start != head:
         _log.info(f"Схема базы обновлена: {start or 'пусто'} → {head}")
     return head
@@ -586,6 +595,61 @@ def _check_foreign_keys(connection, before: set) -> None:
     if new:
         sample = ', '.join(f"{t}#{rowid}→{parent}" for t, rowid, parent, _ in sorted(new, key=str)[:5])
         raise MigrationError(f"после миграции нарушены связи ({len(new)}): {sample} — изменения отменены")
+
+
+def _check_triggers(
+    connection : sa.engine.Connection,   # соединение миграции (в транзакции)
+    before     : set,                    # ошибки компиляции триггеров до миграции
+) -> None: # после миграции не появилось сломанных триггеров
+    """
+    Проверяет, что после миграции не появилось НОВЫХ ошибок компиляции триггеров (MG14,
+    2026-11-07): миграция могла удалить столбец или таблицу, нужные триггеру, а SQLite узнал бы
+    об этом только при срабатывании — запись в таблицу падала бы уже у пользователя. Старые
+    ошибки (триггер сторонней программы) обновлению не мешают — как и в ``_check_foreign_keys``.
+
+    Args:
+        connection : (Connection) Соединение миграции.
+        before     : (set) Результат ``trigger_errors`` до миграции.
+
+    Raises:
+        MigrationError: Есть новые ошибки — транзакция откатится.
+
+    Example:
+        >>> _check_triggers(
+        ...     conn,    # соединение
+        ...     set(),   # ошибок не было
+        ... )
+    """
+    new = set(sqlite_triggers.trigger_errors(connection)) - before
+    if new:
+        raise MigrationError(
+            f"после миграции сломаны триггеры: {'; '.join(sorted(new))} — изменения отменены"
+        )
+
+
+def check_trigger_definitions(
+    metadata : Optional[sa.MetaData] = None,   # модели; None — модели приложения
+) -> None: # описание триггеров верно
+    """
+    Проверяет описание триггеров до открытия базы (MG14, 2026-11-07; по образцу Р-9): SQLite
+    принимает ``CREATE TRIGGER`` с опечаткой в таблице или столбце и падает только при
+    срабатывании, а имена триггеров едины на базу. Настоящая база не нужна и не трогается;
+    таблица без триггеров ни на что не влияет.
+
+    Args:
+        metadata : (MetaData/None) Модели; None — ``Base.metadata`` приложения.
+
+    Raises:
+        MigrationError: Описание неверно — перечислены все ошибки (таблица, триггер, текст).
+
+    Example:
+        >>> check_trigger_definitions()   # триггеры верны — без ошибки
+    """
+    if metadata is None:
+        metadata = _default_metadata()
+    errors = sqlite_triggers.definition_errors(metadata)
+    if errors:
+        raise MigrationError(f"в описании таблиц неверные триггеры: {'; '.join(errors)}")
 
 
 def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[str]]:
@@ -692,6 +756,11 @@ def _schema_at(
         meta = MetaData()
         meta.reflect(reference)
         meta.remove(meta.tables['alembic_version'])
+        with reference.connect() as conn: # reflect триггеры не читает (Ф1.6.7д)
+            sqlite_triggers.attach_stored_triggers(
+                conn,   # база, из которой собрана схема
+                meta,   # схема
+            )
         return meta
     finally:
         reference.dispose()
@@ -701,7 +770,11 @@ def _schema_at(
 # таблицы → столбцы → индексы (MG12, 2026-10-18: раньше индексы шли до столбцов — индекс
 # на недостающем столбце создавался раньше самого столбца, и приведение падало)
 # _ADDABLE = ('add_table', 'add_index', 'add_column')
-_ADDABLE = ('add_table', 'add_column', 'add_index')
+# _ADDABLE = ('add_table', 'add_column', 'add_index')
+# ↑ до 2026-11-07 (MG14): без триггеров. Они — последними: триггеру нужны таблица и столбцы.
+#   Лишний триггер (remove_trigger) не трогается, как и всё лишнее; изменённый заменяется
+#   текстом последней миграции: данные при этом не меняются, а правило программы — на месте.
+_ADDABLE = ('add_table', 'add_column', 'add_index', sqlite_triggers.ADD_TRIGGER, sqlite_triggers.MODIFY_TRIGGER)
 
 
 def _plan_legacy_repair(engine) -> Tuple[list, List[str]]:
@@ -846,7 +919,8 @@ def _repair_drift(engine: Engine, conn, head: str, may_backup: bool) -> List[str
 
 def _apply_legacy_repair(connection, added, where: str = 'Старая база') -> None:
     """
-    Дописывает в базу недостающие таблицы, столбцы (необязательные), индексы.
+    Дописывает в базу недостающие таблицы, столбцы (необязательные), индексы, триггеры
+    (изменённый триггер заменяется текстом образца).
 
     Args:
         connection: Соединение (внутри транзакции).
@@ -872,7 +946,15 @@ def _apply_legacy_repair(connection, added, where: str = 'Старая база'
             fresh = sa.Column(column.name, column.type, nullable=column.nullable,
                               server_default=column.server_default)
             ops.add_column(item[2], fresh)
-        _log.info(f"{where}: дописано {describe_differences([item])[0]}")
+        elif kind in sqlite_triggers.TRIGGER_KINDS: # снять прежний текст, если есть, и создать
+            sqlite_triggers.apply_trigger_diff(
+                connection,   # соединение
+                item,         # отличие
+            )
+        if kind == sqlite_triggers.MODIFY_TRIGGER: # правило меняли мимо программы — заметить
+            _log.warning(f"{where}: текст триггера заменён: {describe_differences([item])[0]}")
+        else:
+            _log.info(f"{where}: дописано {describe_differences([item])[0]}")
 
 
 def describe_differences(diffs: List) -> List[str]:
@@ -881,7 +963,8 @@ def describe_differences(diffs: List) -> List[str]:
 
     Формы записей autogenerate: ``('add_table', Table)``, ``('add_index', Index)``,
     ``('add_column', схема, таблица, Column)``, ``('modify_type', схема, таблица, столбец,
-    …)`` и т. п. (MG2, 2026-10-16: раньше имя столбца терялось).
+    …)`` и т. п. (MG2, 2026-10-16: раньше имя столбца терялось); триггеры —
+    ``('add_trigger', таблица, имя, текст)`` и т. п. (``sqlite_triggers``).
 
     Args:
         diffs: Результат ``schema_differences`` (элементы или списки элементов).
@@ -897,7 +980,9 @@ def describe_differences(diffs: List) -> List[str]:
     for diff in diffs:
         for item in (diff if isinstance(diff, list) else [diff]):
             kind = item[0]
-            if kind.endswith('_column'):
+            if kind in sqlite_triggers.TRIGGER_KINDS:
+                result.append(f"{kind} {item[1]}.{item[2]}")
+            elif kind.endswith('_column'):
                 column = item[3]
                 result.append(f"{kind} {item[2]}.{getattr(column, 'name', column)}")
             elif kind.startswith('modify_'):
@@ -1040,6 +1125,10 @@ def is_safe_addition(item) -> bool:
     связи в существующей таблице) — только вручную: например, переименование
     автоматика видит как «удалить + добавить» и потеряла бы данные.
 
+    Триггер (появление, изменение, удаление) безопасен: данные не меняются, в файле миграции
+    есть оба текста; что миграция не потеряла триггеры при пересборке, проверяет
+    ``generate_migration``.
+
     Args:
         item: Элемент отличий autogenerate.
 
@@ -1053,7 +1142,7 @@ def is_safe_addition(item) -> bool:
         False
     """
     kind = item[0]
-    if kind in ('add_table', 'add_index'):
+    if kind in ('add_table', 'add_index') or kind in sqlite_triggers.TRIGGER_KINDS:
         return True
     if kind == 'add_column':
         column = item[3]
@@ -1165,7 +1254,9 @@ def generate_migration(metadata=None, message: Optional[str] = None) -> Optional
 
     Raises:
         MigrationError: Есть небезопасные изменения (переименование, смена типа, удаление…) —
-            файл не создаётся, миграцию нужно написать вручную (§4 заметок).
+            файл не создаётся, миграцию нужно написать вручную (§4 заметок); описание триггеров
+            неверно; созданная миграция теряет триггеры при пересборке таблицы (MG14) — файл
+            удаляется.
 
     Пример:
         >>> generate_migration()        # добавили модель — появится versions/0002_auto_….py
@@ -1173,6 +1264,9 @@ def generate_migration(metadata=None, message: Optional[str] = None) -> Optional
     """
     if metadata is None:
         metadata = _default_metadata()
+    check_trigger_definitions(
+        metadata,   # опечатка в триггере не должна попасть в файл миграции
+    )
     changes = pending_model_changes(metadata)
     if not changes:
         return None
@@ -1206,9 +1300,58 @@ def generate_migration(metadata=None, message: Optional[str] = None) -> Optional
     with open(path, 'w', encoding='utf-8') as f:
         f.write(text)
     head_revision.cache_clear()
+    _refuse_lost_triggers(
+        path,       # созданный файл
+        metadata,   # модели
+    )
     _log.warning(f"Создана автомиграция {rev_id}: {', '.join(describe_differences(changes))} — "
                  f"проверьте и добавьте в git: {path}")
     return path
+
+
+def _refuse_lost_triggers(
+    path     : str,           # созданный файл миграции
+    metadata : sa.MetaData,   # модели
+) -> None: # созданная автомиграция сохраняет триггеры
+    """
+    Проверяет применением в памяти, что автомиграция не потеряла триггеры (MG14, 2026-11-07).
+
+    Автомиграция может пересобрать таблицу (новая связь — ``batch_alter_table``): её триггеры
+    пропадут молча, а триггер другой таблицы, упоминающий её, уронит переименование. Такой файл
+    удаляется — нужна миграция вручную с ``keep_triggers``. В описании нет триггеров — терять
+    нечего, проверка не выполняется.
+
+    Args:
+        path     : (str) Созданный файл миграции.
+        metadata : (MetaData) Модели.
+
+    Raises:
+        MigrationError: Триггеры потеряны или миграция на них падает; файл удалён.
+
+    Example:
+        >>> _refuse_lost_triggers(
+        ...     'versions/0003_auto.py',   # файл
+        ...     Base.metadata,             # модели
+        ... )
+    """
+    if not sqlite_triggers.described_triggers(metadata.tables.values()):
+        return
+    try:
+        lost = [
+            item
+            for item in pending_model_changes(metadata)
+            if item[0] in sqlite_triggers.TRIGGER_KINDS
+        ]
+        reason = ', '.join(describe_differences(lost))
+    except sa.exc.DBAPIError as exc:
+        reason = str(exc.orig)
+    if reason:
+        os.remove(path)
+        head_revision.cache_clear()
+        raise MigrationError(
+            f"автоматическая миграция теряет триггеры при пересборке таблицы ({reason}) — "
+            "напишите миграцию вручную с keep_triggers (app/database/IMPLEMENTATION.md §12)"
+        )
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -1248,6 +1391,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pass
     try:
         head = head_revision()
+        check_trigger_definitions()
         changes = pending_model_changes()
     except MigrationError as exc:
         print(f"ОШИБКА миграций: {exc}")

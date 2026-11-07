@@ -21,6 +21,7 @@
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.database import sqlite_triggers  # noqa: F401  подключает сравнение триггеров к Alembic
 from app.database.database_shema.clinic import Base
 
 config = context.config

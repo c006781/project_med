@@ -99,6 +99,34 @@ def test_release_runs_from_other_folder_without_exec_bit(project, stub_bin, tmp_
     assert (project / 'VERSION').read_text().strip() == '1.0.1'
 
 
+def test_release_commits_both_requirement_files(project, stub_bin, tmp_path):
+    """Коммит зависимостей содержит оба файла, рабочая копия после выпуска чистая."""
+    freeze = tmp_path / 'freeze.txt'
+    freeze.write_text('alembic==1.18.4\ncertifi==2099.1.1\n', encoding='utf-8')
+    env = dict(
+        os.environ,
+        PATH=f'{stub_bin}{os.pathsep}{os.environ["PATH"]}',
+        STUB_PIP_FREEZE=str(freeze),
+        PROJECT_MED_PYTHON=sys.executable,
+    )
+    env.pop('VIRTUAL_ENV', None)
+    result = subprocess.run(
+        ['bash', str(project / 'scripts' / 'release.sh'), 'patch'],
+        cwd=str(project), env=env, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    files = subprocess.run(
+        ['git', 'show', '--name-only', '--format=', 'HEAD~1'],
+        cwd=str(project), capture_output=True, text=True,
+    ).stdout.split()
+    assert files == ['requirements-dev.txt', 'requirements.txt']
+    status = subprocess.run(
+        ['git', 'status', '--porcelain'],
+        cwd=str(project), capture_output=True, text=True,
+    ).stdout
+    assert status == ''
+
+
 def test_release_rejects_unknown_part_before_any_commit(project, stub_bin, tmp_path):
     """Неверная часть версии — отказ до коммита зависимостей."""
     result = subprocess.run(

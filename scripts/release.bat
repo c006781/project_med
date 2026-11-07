@@ -5,7 +5,7 @@ if "%1"=="" (
 )
 echo Обновление requirements.txt...
 call scripts\pip_freeze.bat
-git add requirements.txt
+git add requirements.txt requirements-dev.txt
 git diff --quiet --cached || git commit -m "Обновление зависимостей"
 python scripts\version.py %1
 set /p NEW_VERSION=<VERSION

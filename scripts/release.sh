@@ -39,8 +39,10 @@ bash scripts/pip_freeze.sh
 # ./scripts/pip_freeze.sh
 
 # 2. Коммитим обновлённые зависимости, если они изменились
-if ! git diff --quiet requirements.txt; then
-    git add requirements.txt
+# Оба файла вместе (до 2026-11-07, SC8: коммитился только requirements.txt, requirements-dev.txt
+# оставался изменённым)
+if ! git diff --quiet requirements.txt requirements-dev.txt; then
+    git add requirements.txt requirements-dev.txt
     git commit -m "Обновление зависимостей"
 fi
 

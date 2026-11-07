@@ -710,6 +710,12 @@ class AppConfigManager(BaseConfigManager):
     _defaults = {
         'YANDEX_TOKEN': '----',
         'database_local_path': os.path.join('.', 'clinic.db'),
+
+        # Копии кода при автообновлении Linux (backup_<версия>): как чистить старые —
+        # 'count' (оставить KEEP_COUNT новых) или 'days' (удалить старше KEEP_DAYS дней)
+        'UPDATE_BACKUP_KEEP_MODE': 'count',
+        'UPDATE_BACKUP_KEEP_COUNT': 3,
+        'UPDATE_BACKUP_KEEP_DAYS': 30,
         'database_remote_path': 'Проекты/test/bd/clinic.db',
 
         # === НАСТРОЙКИ ЛОГИРОВАНИЯ ===

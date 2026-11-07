@@ -25,6 +25,7 @@ import pytest
 
 import app.updater as updater
 from app.updater import (
+    LINUX_FAILURE_FILE,
     LINUX_MANIFEST_FILE,
     LINUX_MANIFEST_HEADER,
     LINUX_MARKER_FILE,
@@ -66,6 +67,12 @@ if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then
 fi
 # запуск программы: версия и окружение на момент запуска
 echo "$(cat VERSION)|$(pwd)|${DISPLAY:-}" >> "$RECORD_DIR/started"
+# новая версия ведёт себя, как задано тестом: падает с кодом или работает заданное время
+if [ "$(cat VERSION)" = "1.1.0" ]; then
+    [ -f "$RECORD_DIR/start_sleep" ] && sleep "$(cat "$RECORD_DIR/start_sleep")"
+    [ -f "$RECORD_DIR/start_exit" ] && exit "$(cat "$RECORD_DIR/start_exit")"
+fi
+exit 0
 '''
 
 
@@ -1097,3 +1104,170 @@ def test_u27_build_produces_valid_update(tmp_path):
     )
     assert os.access(dest / top / 'run.sh', os.X_OK)
     assert list(paths) == sorted(paths, key=lambda rel: rel.encode('utf-8')) # порядок без локали
+
+
+# ---------------------------------------------------------------------------
+# U29 — откат, если новая версия не запустилась
+# ---------------------------------------------------------------------------
+
+# запуск update.sh: новая версия ведёт себя, как задано
+def _run_start_check(
+    install    : Install,              # установка
+    start_exit : Optional[int] = None, # код выхода новой версии; None — без ошибки
+    **kwargs,                          # другие параметры prepare_linux_update
+) -> int: # код выхода скрипта
+    if start_exit is not None:
+        (install.record / 'start_exit').write_text(str(start_exit), encoding='utf-8')
+    install.prepare(**kwargs)
+    return install.run_script()
+
+
+@only_linux
+@pytest.mark.parametrize('code', [1, 134, 139])
+def test_u29_new_version_crash_rolls_back(tmp_path, code):
+    """Новая версия упала при запуске: код прежний, данные на месте, запущена прежняя версия, причина записана."""
+    install = Install(tmp_path)
+    assert _run_start_check(install, start_exit=code) == 1
+    assert install.code('VERSION').strip() == '1.0.0'
+    assert install.code('app/__init__.py') == OLD_FILES['app/__init__.py']
+    assert not (install.root / 'app/new_only.py').exists()
+    assert install.snapshot_data() == install.data_before
+    lines = install.started_versions(expected=2)
+    assert [line.split('|')[0] for line in lines] == ['1.1.0', '1.0.0']
+    reason = (install.root / LINUX_FAILURE_FILE).read_text(encoding='utf-8')
+    assert f'код {code}' in reason and '*.bak-*' in reason
+    assert not (install.root / '.update_in_progress').exists()
+    assert not (install.root / 'update.sh').exists()
+    assert not list(install.root.glob('backup_*'))
+
+
+@only_linux
+@pytest.mark.parametrize('code', [0, 129, 130, 143])
+def test_u29_normal_exit_or_signal_is_not_failure(tmp_path, code):
+    """Закрыта штатно или остановлена сигналом извне: это не сбой, новая версия остаётся."""
+    install = Install(tmp_path)
+    assert _run_start_check(install, start_exit=code) == 0
+    assert install.code('VERSION').strip() == '1.1.0'
+    assert not (install.root / LINUX_FAILURE_FILE).exists()
+    assert not (install.root / 'update.sh').exists()
+
+
+@only_linux
+def test_u29_crash_after_check_period_is_not_rolled_back(tmp_path):
+    """Прошло время проверки, программа ещё работает: успех; скрипт не ждёт её закрытия."""
+    install = Install(tmp_path)
+    (install.record / 'start_sleep').write_text('5', encoding='utf-8')
+    started = time.time()
+    assert _run_start_check(install, start_exit=1, start_check_sec=1) == 0
+    assert time.time() - started < 4
+    assert install.code('VERSION').strip() == '1.1.0'
+
+
+@only_linux
+def test_u29_pip_restored_after_start_failure(tmp_path):
+    """Новая версия с другими пакетами упала: pip ставит пакеты прежней версии."""
+    new_files = dict(NEW_FILES, **{'requirements.txt': 'a==2\n'})
+    install = Install(tmp_path, new_files=new_files)
+    assert _run_start_check(install, start_exit=1) == 1
+    assert install.code('requirements.txt') == 'a==1\n'
+    assert len(install.pip_calls()) == 2
+
+
+@only_linux
+def test_u29_failure_during_rollback_is_recovered_by_run_sh(tmp_path):
+    """Скрипт убит посреди отката после неудачного запуска: откат завершает run.sh."""
+    new_files = dict(NEW_FILES, **{'requirements.txt': 'a==2\n'})
+    install = Install(tmp_path, new_files=new_files)
+    (install.record / 'pip_kill_at_call').write_text('2', encoding='utf-8')   # pip отката
+    assert _run_start_check(install, start_exit=1) != 0
+    assert (install.root / '.update_in_progress').exists()
+    subprocess.run(['bash', str(install.root / 'run.sh')], check=True, timeout=30)
+    assert not (install.root / '.update_in_progress').exists()
+    assert install.code('VERSION').strip() == '1.0.0'
+    assert install.snapshot_data() == install.data_before
+
+
+# ---------------------------------------------------------------------------
+# U30 — сколько хранить старые копии кода
+# ---------------------------------------------------------------------------
+
+# папка старой копии с заданным возрастом
+def _old_backup(
+    install : Install,  # установка
+    name    : str,      # имя папки
+    days    : float,    # возраст, дней
+) -> Path:
+    folder = install.root / name
+    folder.mkdir()
+    (folder / 'a.py').write_text('old', encoding='utf-8')
+    moment = time.time() - days * 86400
+    os.utime(folder, (moment, moment))
+    return folder
+
+
+def _backups(
+    install : Install,  # установка
+) -> List[str]: # имена копий
+    return sorted(path.name for path in install.root.glob('backup_*'))
+
+
+@only_linux
+def test_u30_keep_by_count(tmp_path):
+    """По количеству: остаются три новых вместе с только что созданной."""
+    install = Install(tmp_path)
+    for index, name in enumerate(['backup_0.7', 'backup_0.8', 'backup_0.9', 'backup_0.9.1']):
+        _old_backup(install, name, days=10 - index)
+    assert _run_start_check(install, keep_mode='count', keep_count=3) == 0
+    assert _backups(install) == ['backup_0.9', 'backup_0.9.1', 'backup_1.0.0']
+
+
+@only_linux
+def test_u30_keep_by_days(tmp_path):
+    """По времени: старше срока удаляются, сколько бы их ни было; только что созданная остаётся."""
+    install = Install(tmp_path)
+    _old_backup(install, 'backup_0.7', days=40)
+    _old_backup(install, 'backup_0.8', days=10)
+    _old_backup(install, 'backup_0.9', days=9)
+    assert _run_start_check(install, keep_mode='days', keep_days=30) == 0
+    assert _backups(install) == ['backup_0.8', 'backup_0.9', 'backup_1.0.0']
+
+
+@only_linux
+def test_u30_foreign_folders_not_removed(tmp_path):
+    """Папки с похожим именем, но не созданные обновлением, не трогаются и копиями не считаются."""
+    install = Install(tmp_path)
+    _old_backup(install, 'backup_photos', days=500)
+    _old_backup(install, 'backup_1.0_старые фото', days=500)
+    _old_backup(install, 'backup_0.5', days=500)
+    assert _run_start_check(install, keep_mode='count', keep_count=1) == 0
+    assert _backups(install) == ['backup_1.0.0', 'backup_1.0_старые фото', 'backup_photos']
+
+
+@only_linux
+def test_u30_nothing_removed_when_new_version_failed(tmp_path):
+    """Новая версия не запустилась: старые копии остаются, чистка — только после успеха."""
+    install = Install(tmp_path)
+    _old_backup(install, 'backup_0.5', days=500)
+    assert _run_start_check(install, start_exit=1, keep_mode='count', keep_count=1) == 1
+    assert _backups(install) == ['backup_0.5']
+
+
+@pytest.mark.parametrize('config,expected', [
+    ({}, ('count', 3, 30)),
+    ({'UPDATE_BACKUP_KEEP_MODE': 'days', 'UPDATE_BACKUP_KEEP_DAYS': 7}, ('days', 3, 7)),
+    ({'UPDATE_BACKUP_KEEP_MODE': 'count', 'UPDATE_BACKUP_KEEP_COUNT': '5'}, ('count', 5, 30)),
+    ({'UPDATE_BACKUP_KEEP_MODE': 'всегда', 'UPDATE_BACKUP_KEEP_COUNT': 'abc', 'UPDATE_BACKUP_KEEP_DAYS': -1}, ('count', 3, 30)),
+    ({'UPDATE_BACKUP_KEEP_COUNT': 0, 'UPDATE_BACKUP_KEEP_DAYS': None}, ('count', 3, 30)),
+])
+def test_u30_keep_settings_validated(config, expected):
+    """Неверные настройки заменяются умолчанием, обновление не ломается."""
+    assert updater.linux_backup_keep_settings(config) == expected
+
+
+def test_u30_defaults_in_app_config():
+    """Умолчания настроек совпадают с решением: по количеству, 3 копии."""
+    from app.config.config_manager.manager import AppConfigManager
+    defaults = AppConfigManager._defaults
+    assert defaults['UPDATE_BACKUP_KEEP_MODE'] == 'count'
+    assert defaults['UPDATE_BACKUP_KEEP_COUNT'] == 3
+    assert updater.linux_backup_keep_settings(defaults)[:2] == ('count', 3)

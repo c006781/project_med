@@ -333,6 +333,30 @@ class SettingsPage(BasePage):
 
         form_layout.addRow("Количество бекапов:", self.backup_count_spin)
 
+        # Старые копии кода при автообновлении: есть только у Linux-версии
+        self.update_keep_mode_combo = QComboBox()
+        self.update_keep_mode_combo.addItem("по количеству", 'count')
+        self.update_keep_mode_combo.addItem("по времени", 'days')
+        self.update_keep_count_spin = QSpinBox()
+        self.update_keep_count_spin.setRange(1, 100)
+        self.update_keep_count_spin.setSuffix(" шт.")
+        self.update_keep_days_spin = QSpinBox()
+        self.update_keep_days_spin.setRange(1, 3650)
+        self.update_keep_days_spin.setSuffix(" дн.")
+        self.update_keep_mode_combo.currentIndexChanged.connect(self._on_update_keep_mode_changed)
+
+        update_keep_layout = QHBoxLayout()
+        update_keep_layout.setContentsMargins(0, 0, 0, 0)
+        update_keep_layout.addWidget(self.update_keep_mode_combo)
+        update_keep_layout.addWidget(self.update_keep_count_spin)
+        update_keep_layout.addWidget(self.update_keep_days_spin)
+        self.update_keep_row = QWidget()
+        self.update_keep_row.setLayout(update_keep_layout)
+        self.update_keep_label = QLabel("Хранить копии кода при обновлении:")
+        form_layout.addRow(self.update_keep_label, self.update_keep_row)
+        for widget in (self.update_keep_label, self.update_keep_row):
+            widget.setVisible(sys.platform.startswith('linux'))
+
         # ----- Группа настроек логирования -----
         self.log_group = QGroupBox("Настройки логирования")
         log_layout = QFormLayout(self.log_group)
@@ -691,6 +715,28 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    # доступно только поле выбранного способа хранения копий кода
+    def _on_update_keep_mode_changed(
+        self,
+        index : int = -1,  # номер выбранного способа (передаёт сигнал); не нужен: способ берётся из поля
+    ) -> None:
+        """
+        Включает поле количества или дней по выбранному способу хранения копий кода.
+
+        Значение второго поля сохраняется: к нему можно вернуться, сменив способ.
+
+        Args:
+            index : (int) Номер выбранного способа; не используется.
+
+        Example:
+            >>> page.update_keep_mode_combo.setCurrentIndex(1)  # doctest: +SKIP
+            >>> page.update_keep_days_spin.isEnabled()          # doctest: +SKIP
+            True
+        """
+        by_days = self.update_keep_mode_combo.currentData() == 'days'
+        self.update_keep_count_spin.setEnabled(not by_days)
+        self.update_keep_days_spin.setEnabled(by_days)
+
     def _browse_dir(self, line_edit, title):
         """
         Открывает нажатие на кнопку "Обзреть" для поля ввода и открывает диалоговое окно выбора папки.
@@ -724,6 +770,13 @@ class SettingsPage(BasePage):
         self.remote_path_edit.setText(self.config_manager.get('database_remote_path', ''))
         self.backup_path_edit.setText(self.config_manager.get('BACKUP_PATH', ''))
         self.backup_count_spin.setValue(int(self.config_manager.get('BACKUP_COUNT', 5)))
+        keep_index = self.update_keep_mode_combo.findData(
+            self.config_manager.get('UPDATE_BACKUP_KEEP_MODE', 'count'),
+        )
+        self.update_keep_mode_combo.setCurrentIndex(max(keep_index, 0))
+        self.update_keep_count_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_COUNT', 3)))
+        self.update_keep_days_spin.setValue(int(self.config_manager.get('UPDATE_BACKUP_KEEP_DAYS', 30)))
+        self._on_update_keep_mode_changed()
 
         # Настройки логирования
         self.log_dir_edit.setText(self.config_manager.get('LOG_DIR', ''))
@@ -943,6 +996,9 @@ class SettingsPage(BasePage):
         self.config_manager.set('database_remote_path', self.remote_path_edit.text())
         self.config_manager.set('BACKUP_PATH', self.backup_path_edit.text())
         self.config_manager.set('BACKUP_COUNT', self.backup_count_spin.value())
+        self.config_manager.set('UPDATE_BACKUP_KEEP_MODE', self.update_keep_mode_combo.currentData())
+        self.config_manager.set('UPDATE_BACKUP_KEEP_COUNT', self.update_keep_count_spin.value())
+        self.config_manager.set('UPDATE_BACKUP_KEEP_DAYS', self.update_keep_days_spin.value())
 
         # Сохраняем настройки логирования
         self.config_manager.set('LOG_DIR', self.log_dir_edit.text())

@@ -115,6 +115,11 @@ LINUX_IN_PROGRESS_FILE = '.update_in_progress'  # замена идёт или �
 LINUX_FAILURE_FILE = '.update_failed'           # причина неудачи для окна
 LINUX_WAIT_TIMEOUT_SEC = 120                    # сколько скрипт ждёт выхода программы
 LINUX_MAX_UNPACKED_BYTES = 1024 ** 3            # предел распаковки (1 ГБ)
+LINUX_START_CHECK_SEC = 60                      # сколько скрипт следит за запуском новой версии
+LINUX_KEEP_MODES = ('count', 'days')            # как чистить старые backup_<версия>
+LINUX_KEEP_MODE_DEFAULT = 'count'               # умолчание: по количеству
+LINUX_KEEP_COUNT_DEFAULT = 3                    # сколько копий оставить
+LINUX_KEEP_DAYS_DEFAULT = 30                    # сколько дней хранить
 
 # Служебное обновления должно быть в любом дистрибутиве: без него скрипт не сработает
 _LINUX_REQUIRED_FILES = (
@@ -152,6 +157,7 @@ _LINUX_WORK_DIR_RE = re.compile(r'^\.update_\d+$')      # остаток пре�
 _LINUX_UPDATE_SCRIPT_BODY = r"""
 RECOVER=0
 PIP_STARTED=0
+PROGRAM_PID=0
 ALL_PATHS=("${NEW_PATHS[@]}" ${REMOVED_PATHS[@]+"${REMOVED_PATHS[@]}"})
 
 log() {
@@ -202,6 +208,49 @@ restart_program() {
     else
         nohup bash "./$RUN_SCRIPT" >> "$LOG_FILE" 2>&1 < /dev/null &
     fi
+    PROGRAM_PID=$!
+}
+
+# Запустилась ли новая версия: 0 — работает или закрыта штатно, иначе код её выхода.
+# Остановка сигналом извне (закрыт сеанс, Ctrl+C, выключение) сбоем не считается
+check_started() {
+    local waited=0 status=0
+    while [ "$waited" -lt "$((START_CHECK_SEC * 5))" ]; do
+        if ! process_alive "$PROGRAM_PID"; then
+            wait "$PROGRAM_PID" 2>/dev/null
+            status=$?
+            case "$status" in
+                129|130|143) return 0 ;;
+            esac
+            return "$status"
+        fi
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    return 0
+}
+
+# Старые копии кода: только папки вида backup_<версия>[_<метка>] (чужие папки с похожим именем не
+# трогаются), текущая остаётся всегда. Ошибка удаления обновлению не мешает
+prune_old_backups() {
+    local entry name stamp index=0 now remove
+    now=$(date +%s)
+    while IFS= read -r -d '' entry; do
+        stamp=${entry%% *}
+        name=${entry#* }
+        [[ "$name" =~ ^backup_[0-9]+(\.[0-9]+)*(_[0-9]+)?$ ]] || continue
+        [ "$name" != "$BACKUP_DIR" ] || { index=$((index + 1)); continue; }
+        index=$((index + 1))
+        remove=0
+        if [ "$KEEP_MODE" = "days" ]; then
+            [ "$(( (now - ${stamp%%.*}) / 86400 ))" -lt "$KEEP_DAYS" ] || remove=1
+        else
+            [ "$index" -le "$KEEP_COUNT" ] || remove=1
+        fi
+        if [ "$remove" = 1 ]; then
+            rm -rf -- "$name" 2>> "$LOG_FILE" && log "Удалена старая копия кода: $name"
+        fi
+    done < <(find . -maxdepth 1 -type d -name 'backup_*' -printf '%T@ %f\0' | sort -z -rn)
 }
 
 # Возврат прежней версии; повторный вызов безопасен (остановка на середине не портит результат)
@@ -329,6 +378,17 @@ rm -rf -- "$WORK_DIR"
 rm -f -- "$IN_PROGRESS_FILE"
 log "Установлена версия $NEW_VERSION; прежний код: $BACKUP_DIR"
 restart_program
+
+check_started
+START_STATUS=$?
+if [ "$START_STATUS" != 0 ]; then
+    # Метка снова на диске: откат, прерванный сбоем, повторит run.sh
+    printf '%s\n' "$$" > "$IN_PROGRESS_FILE" 2>> "$LOG_FILE"
+    fail_and_rollback "новая версия не запустилась (код $START_STATUS). Если она успела обновить базу, прежняя версия откажется её открывать: копия базы до обновления лежит рядом с файлом базы (*.bak-*)"
+fi
+
+log "Новая версия запустилась"
+prune_old_backups
 rm -f -- "$SCRIPT_FILE"
 exit 0
 """
@@ -1041,6 +1101,49 @@ def read_linux_manifest(
     return parse_linux_manifest(text)
 
 
+# как чистить старые копии кода: значения из настроек с проверкой
+def linux_backup_keep_settings(
+    config : Any,  # объект с методом get(ключ, умолчание): настройки программы
+) -> Tuple[str, int, int]: # способ, сколько копий, сколько дней
+    """
+    Читает из настроек, как чистить старые ``backup_<версия>``.
+
+    Неверное значение (испорченный файл настроек) заменяется умолчанием, а не ломает обновление:
+    запись обновления важнее, чем очистка старых копий. Меньше одной копии или одного дня быть не
+    может: только что созданную копию скрипт оставляет всегда.
+
+    Args:
+        config : (Any) Настройки: ``UPDATE_BACKUP_KEEP_MODE``, ``UPDATE_BACKUP_KEEP_COUNT``,
+            ``UPDATE_BACKUP_KEEP_DAYS``.
+
+    Returns:
+        (Tuple[str, int, int]) Способ (``count`` / ``days``), количество копий, дней.
+
+    Example:
+        >>> linux_backup_keep_settings({'UPDATE_BACKUP_KEEP_MODE': 'days', 'UPDATE_BACKUP_KEEP_DAYS': 7})
+        ('days', 3, 7)
+        >>> linux_backup_keep_settings({'UPDATE_BACKUP_KEEP_MODE': '?', 'UPDATE_BACKUP_KEEP_COUNT': 0})
+        ('count', 3, 30)
+    """
+    # целое не меньше 1; иначе умолчание
+    def positive(
+        key     : str,  # ключ настройки
+        default : int,  # умолчание
+    ) -> int:
+        try:
+            value = int(config.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return value if value >= 1 else default
+
+    mode = config.get('UPDATE_BACKUP_KEEP_MODE', LINUX_KEEP_MODE_DEFAULT)
+    return (
+        mode if mode in LINUX_KEEP_MODES else LINUX_KEEP_MODE_DEFAULT,
+        positive('UPDATE_BACKUP_KEEP_COUNT', LINUX_KEEP_COUNT_DEFAULT),
+        positive('UPDATE_BACKUP_KEEP_DAYS', LINUX_KEEP_DAYS_DEFAULT),
+    )
+
+
 # корень установки: от запущенной программы, путь нигде не зашит
 def get_install_root() -> str:
     """
@@ -1350,6 +1453,10 @@ def build_linux_update_script(
     added_paths          : Iterable[str],  # файлы новой версии, которых не было на диске
     requirements_changed : bool,           # requirements.txt изменился — нужен pip
     wait_timeout         : int = LINUX_WAIT_TIMEOUT_SEC,  # сколько ждать выхода, секунд
+    keep_mode            : str = LINUX_KEEP_MODE_DEFAULT,   # как чистить старые копии кода
+    keep_count           : int = LINUX_KEEP_COUNT_DEFAULT,  # сколько копий оставить (count)
+    keep_days            : int = LINUX_KEEP_DAYS_DEFAULT,   # сколько дней хранить (days)
+    start_check_sec      : int = LINUX_START_CHECK_SEC,     # сколько следить за запуском, секунд
 ) -> str: # текст скрипта
     """
     Формирует ``update.sh``: замена кода после выхода программы, откат, перезапуск.
@@ -1367,11 +1474,19 @@ def build_linux_update_script(
            пустой; папка с данными остаётся) и кладёт новые файлы (``mv -T``);
         6. при ``requirements_changed`` — ``venv_project_med/bin/python -m pip install -r``;
         7. убирает временное, запускает ``run.sh`` (``setsid`` / ``nohup``; ``DISPLAY`` и
-           ``WAYLAND_DISPLAY`` наследуются), удаляет себя.
-    Ошибка на шагах 4–6 — откат: файлы из ``backup_`` возвращаются, добавленные удаляются,
+           ``WAYLAND_DISPLAY`` наследуются);
+        8. следит за процессом ``start_check_sec`` секунд: новая версия сама завершилась с ошибкой
+           (не сигналом извне) — откат; работает или закрыта штатно — успех;
+        9. при успехе чистит старые копии кода (:func:`linux_backup_keep_settings`), удаляет себя.
+    Ошибка на шагах 4–6 и 8 — откат: файлы из ``backup_`` возвращаются, добавленные удаляются,
     пустой ``backup_`` убирается, причина пишется в ``.update_failed``, запускается прежняя
     версия. Откат можно повторять (``--recover`` после сбоя питания посреди шага 4–6). Если
     откат не удался, скрипт, ``.update_in_progress`` и ``backup_`` остаются: ``run.sh`` повторит.
+
+    Note:
+        Откат на шаге 8 возвращает только код. База, которую новая версия успела обновить, остаётся
+        новой: прежняя версия откажется её открывать с понятным сообщением (``migrate``,
+        ``_ensure_known_revision``), а копия базы до обновления лежит рядом с файлом базы.
 
     ``pip`` вызывается как ``python -m pip``, а не ``bin/pip``: у скрипта ``bin/pip`` в первой
     строке зашит путь, и после переименования папки установки он перестаёт запускаться.
@@ -1390,6 +1505,10 @@ def build_linux_update_script(
         added_paths          : (Iterable[str]) Файлы, которых раньше не было на диске.
         requirements_changed : (bool) Запускать ли pip.
         wait_timeout         : (int) Сколько ждать выхода программы, секунд.
+        keep_mode            : (str) Как чистить старые копии: ``count`` или ``days``.
+        keep_count           : (int) Сколько копий оставить при ``count``.
+        keep_days            : (int) Сколько дней хранить при ``days``.
+        start_check_sec      : (int) Сколько следить за запуском новой версии, секунд.
 
     Returns:
         (str) Текст скрипта bash.
@@ -1420,6 +1539,10 @@ def build_linux_update_script(
         '',
         f'WAIT_PID={int(wait_pid)}',
         f'WAIT_TIMEOUT={int(wait_timeout)}',
+        f'START_CHECK_SEC={int(start_check_sec)}',
+        f'KEEP_MODE={shlex.quote(keep_mode)}',
+        f'KEEP_COUNT={int(keep_count)}',
+        f'KEEP_DAYS={int(keep_days)}',
         f'OLD_VERSION={shlex.quote(old_version)}',
         f'NEW_VERSION={shlex.quote(new_version)}',
         f'WORK_DIR={shlex.quote(work_dir)}',
@@ -1526,6 +1649,10 @@ def prepare_linux_update(
     wait_pid        : int,                         # PID программы, выхода которой ждать
     stamp           : Optional[int] = None,        # метка папки; None — текущее время
     wait_timeout    : int = LINUX_WAIT_TIMEOUT_SEC,  # сколько скрипту ждать выхода, секунд
+    keep_mode       : str = LINUX_KEEP_MODE_DEFAULT,   # как чистить старые копии кода
+    keep_count      : int = LINUX_KEEP_COUNT_DEFAULT,  # сколько копий оставить (count)
+    keep_days       : int = LINUX_KEEP_DAYS_DEFAULT,   # сколько дней хранить (days)
+    start_check_sec : int = LINUX_START_CHECK_SEC,     # сколько следить за запуском, секунд
 ) -> LinuxUpdatePlan: # что подготовлено
     """
     Распаковывает обновление, проверяет состав и пишет ``update.sh``; код ещё не меняется.
@@ -1550,6 +1677,10 @@ def prepare_linux_update(
         wait_pid        : (int) PID программы.
         stamp           : (int/None) Метка временной папки; None — текущее время.
         wait_timeout    : (int) Сколько скрипту ждать выхода программы, секунд.
+        keep_mode       : (str) Как чистить старые копии: ``count`` или ``days``.
+        keep_count      : (int) Сколько копий оставить при ``count``.
+        keep_days       : (int) Сколько дней хранить при ``days``.
+        start_check_sec : (int) Сколько следить за запуском новой версии, секунд.
 
     Returns:
         (LinuxUpdatePlan) Подготовленное обновление.
@@ -1642,6 +1773,10 @@ def prepare_linux_update(
             added_paths             =   added_paths,                    # добавленные
             requirements_changed    =   requirements_changed,           # pip
             wait_timeout            =   wait_timeout,                   # ожидание выхода
+            keep_mode               =   keep_mode,                      # как чистить копии
+            keep_count              =   keep_count,                     # сколько копий
+            keep_days               =   keep_days,                      # сколько дней
+            start_check_sec         =   start_check_sec,                # проверка запуска
         )
         script_path = os.path.join(install_root, LINUX_UPDATE_SCRIPT)
         temporary_path = f'{script_path}.tmp'
@@ -2596,12 +2731,18 @@ class UpdateApplier(QObject):
         после выхода программы.
         """
         install_root = get_install_root()
+        keep_mode, keep_count, keep_days = linux_backup_keep_settings(
+            AppConfigManager.get_instance(),
+        )
         try:
             plan = prepare_linux_update(
                 archive_path    =   self._downloaded_file,  # скачанный архив
                 install_root    =   install_root,           # папка установки
                 current_version =   APP_VERSION,            # текущая версия
                 wait_pid        =   os.getpid(),            # этот процесс
+                keep_mode       =   keep_mode,              # как чистить старые копии
+                keep_count      =   keep_count,             # сколько копий
+                keep_days       =   keep_days,              # сколько дней
             )
         except UpdateError as e:
             self.error.emit(str(e))

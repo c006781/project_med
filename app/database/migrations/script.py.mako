@@ -11,7 +11,9 @@ ${message}
 
 Правила (app/database/IMPLEMENTATION.md §4): модели приложения НЕ импортировать (они
 меняются, миграция — нет): для данных — op.execute / sa.table(); применённую миграцию
-не менять и не удалять; downgrade — обратное действие или явный отказ (raise).
+не менять и не удалять; downgrade — обратное действие или явный отказ (raise);
+пересборка таблицы (batch_alter_table) удаляет её триггеры — оборачивать в
+sqlite_triggers.keep_triggers() (§12).
 """
 
 from alembic import op

@@ -5,7 +5,8 @@
 набор данных экрана.
 
 * ``define`` — ``TableDef`` и поля-построители (``key``, ``column``, ``note``, ``fk``,
-  ``children``, ``computed``, ``timestamp``);
+  ``children``, ``computed``, ``timestamp``), события (``on``) и встроенные триггеры SQLite
+  (``trigger``);
 * ``extras`` — свои столбцы набора (``mark``, ``calc``, ``total``) и связи (``ref``);
 * ``clinic`` — таблицы клиники (``PATIENTS``, ``APPOINTMENTS``, ``PHOTOS``, ``CLINIC_DEFS``;
   заметки — ``NOTES``).

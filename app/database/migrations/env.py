@@ -20,7 +20,9 @@
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
+from sqlalchemy.engine import Connection
 
+from app.database import sqlite_triggers  # noqa: F401  подключает сравнение триггеров к Alembic
 from app.database.database_shema.clinic import Base
 
 config = context.config
@@ -30,24 +32,25 @@ config = context.config
 target_metadata = config.attributes.get('target_metadata', Base.metadata)
 
 
-def _configure(connection) -> None:
+def _configure(
+    connection : Connection,   # соединение SQLAlchemy
+) -> None: # настраивает контекст миграций на соединение
     """
     Настраивает контекст миграций на соединение.
 
     Args:
-        connection: Соединение SQLAlchemy.
+        connection : (Connection) Соединение SQLAlchemy.
 
-    Returns:
-        None
-
-    Пример:
-        >>> _configure(connection)
+    Example:
+        >>> _configure(
+        ...     connection,   # соединение
+        ... )
     """
     context.configure(
-        connection=connection,
-        target_metadata=target_metadata,
-        render_as_batch=True,
-        compare_type=True,
+        connection      =   connection,         # соединение
+        target_metadata =   target_metadata,    # образец сравнения
+        render_as_batch =   True,               # SQLite: изменения пересборкой
+        compare_type    =   True,               # смена типа — тоже отличие
     )
 
 

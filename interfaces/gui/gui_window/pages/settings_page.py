@@ -6,6 +6,9 @@
 * ``SettingsPage`` — страница главного окна. Поля заполняются из менеджера настроек при входе
   (``on_enter``); кнопка «Сохранить настройки» пишет поля в менеджер и файл, затем применяет
   изменившиеся блоки (``create_config_applier``) и сообщает окну (``on_settings_changed``);
+* ``TokenCheckThread``, ``PathCheckThread`` — проверка токена и папки Яндекс.Диска в отдельном
+  потоке; ``remote_folder_of`` — какую папку проверять;
+* ``confirm_cleanup``, ``storage_report_notes`` — список и подтверждение кнопок уборки;
 * ``open_folder_detached`` — открытие папки в файловом менеджере.
 
 Подробно — ``interfaces/gui/gui_window/IMPLEMENTATION.md``.
@@ -19,11 +22,13 @@ import os
 import posixpath
 import shutil
 import sys
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
 from app.dependencies import create_config_applier  # применитель с сервисами (К6)
+from app.dependencies import get_db, get_photo_service  # уборка без ссылок
+from app.database.table_events import table_def_of  # заголовки таблиц в списке уборки
 from app.utils.logger.bool_strings import to_bool  # одно правило для строк-флагов
 from app.utils.logger.logger import AppLogger
 
@@ -40,7 +45,8 @@ from interfaces.gui.gui_window.pages.base_page import BasePage
 
 from PySide6.QtWidgets import (
     # QWidget, 
-    QApplication, QComboBox, QFrame, QLabel, QMenu, QScrollArea, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFrame, QLabel, QMenu, QPlainTextEdit, QScrollArea,
+    QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox, QWidget
 )
@@ -133,6 +139,94 @@ def remote_folder_of(
     if normalized.lower().endswith(DB_EXTENSIONS): # файл базы
         return posixpath.dirname(normalized) or '/'
     return normalized
+
+
+# окно подтверждения уборки со списком того, что будет удалено
+def confirm_cleanup(
+    parent : QWidget,     # родитель окна
+    title  : str,         # заголовок окна
+    intro  : str,         # что и откуда будет удалено
+    lines  : List[str],   # что будет удалено, по строке на запись
+) -> bool:
+    """
+    Показывает весь список того, что будет удалено, и спрашивает подтверждение.
+
+    Список — в прокручиваемом поле, а не в окне сообщения: файлов может быть много, а скрытые
+    подробности можно не открыть. По умолчанию выбрана отмена.
+
+    Args:
+        parent : (QWidget) Родитель окна.
+        title  : (str) Заголовок окна.
+        intro  : (str) Что и откуда будет удалено.
+        lines  : (List[str]) Что будет удалено, по строке на запись.
+
+    Returns:
+        (bool) ``True`` — пользователь подтвердил удаление.
+
+    Example:
+        >>> confirm_cleanup(
+        ...     page,                           # родитель
+        ...     "Очистка фото",                 # заголовок
+        ...     "Будет удалено файлов: 1",      # пояснение
+        ...     ["20261001_101500.jpg"],        # список
+        ... )    # doctest: +SKIP
+        True
+    """
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.resize(560, 420)
+    layout = QVBoxLayout(dialog)
+
+    intro_label = QLabel(intro)
+    intro_label.setWordWrap(True)
+    layout.addWidget(intro_label)
+
+    list_view = QPlainTextEdit()
+    list_view.setReadOnly(True)
+    list_view.setPlainText(
+        '\n'.join(lines),
+    )
+    layout.addWidget(list_view)
+
+    buttons = QDialogButtonBox()
+    delete_button = buttons.addButton(
+        "Удалить",                                  # надпись
+        QDialogButtonBox.ButtonRole.AcceptRole,     # подтверждает
+    )
+    cancel_button = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+    delete_button.setAutoDefault(False)
+    cancel_button.setDefault(True)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    return dialog.exec() == QDialog.DialogCode.Accepted
+
+
+# пояснения к сверке файлов: что не будет удалено
+def storage_report_notes(
+    report : Dict[str, List[str]],  # результат PhotoService.check_storage
+) -> List[str]:
+    """
+    Составляет пояснения к сверке папки фото: что сверка нашла, но удалять не будет.
+
+    Args:
+        report : (Dict[str, List[str]]) Результат ``PhotoService.check_storage``.
+
+    Returns:
+        (List[str]) Строки пояснений; нечего пояснять — пустой список.
+
+    Example:
+        >>> storage_report_notes(
+        ...     {'extra': [], 'fresh': ['a.jpg'], 'empty_dirs': [], 'missing': ['b.jpg', 'c.jpg']},
+        ... )
+        ['Не трогаются файлы моложе 10 минут: 1.', 'В базе есть фото без файла на диске: 2 (удалять нечего).']
+    """
+    notes : List[str] = []
+    if report.get('fresh'):
+        notes.append(f"Не трогаются файлы моложе 10 минут: {len(report['fresh'])}.")
+    if report.get('missing'):
+        notes.append(f"В базе есть фото без файла на диске: {len(report['missing'])} (удалять нечего).")
+    return notes
 
 
 class TokenCheckThread(QThread):
@@ -268,6 +362,8 @@ class SettingsPage(BasePage):
         config_manager : (AppConfigManager) Менеджер настроек.
         first_start    : (bool) Страницу открыли при первом запуске: после сохранения — список
             пациентов.
+        token_thread   : (TokenCheckThread/None) Идущая или последняя проверка токена.
+        path_thread    : (PathCheckThread/None) Идущая или последняя проверка папки.
 
     Example:
         >>> page = SettingsPage(page_title = "Настройки")    # doctest: +SKIP
@@ -447,10 +543,11 @@ class SettingsPage(BasePage):
         layout.setSpacing(15)
 
         # Создаём виджеты (без layout – они будут добавлены сюда)
-        self._create_settings_widgets()  # создаёт basic_group, log_group, save_btn
+        self._create_settings_widgets()  # создаёт basic_group, maintenance_group, log_group, save_btn
 
         # Добавляем в layout
         layout.addWidget(self.basic_group)
+        layout.addWidget(self.maintenance_group)
         layout.addWidget(self.log_group)
         layout.addWidget(self.save_btn)
         layout.addStretch()
@@ -559,7 +656,7 @@ class SettingsPage(BasePage):
 
         # Папка документов Word: откуда импорт берёт .docx без указания папки
         self.word_path_edit = QLineEdit()
-        self.word_path_edit.setToolTip("Папка с документами Word для импорта; пусто — папку спросит импорт")
+        self.word_path_edit.setToolTip("Папка с документами Word для импорта; пусто — папку нужно указать при импорте")
         self.word_path_btn = QPushButton("Обзор...")
         self.word_path_btn.setMaximumWidth(80)
 
@@ -649,6 +746,27 @@ class SettingsPage(BasePage):
 
         form_layout.addRow("Перенесённая запись при удалении новой:", self.draft_moved_rule_combo)
         form_layout.addRow(self.draft_moved_rule_hint)
+
+        # ----- Группа уборки: файлы и строки, на которые никто не ссылается -----
+        self.maintenance_group = QGroupBox("Уборка данных")
+        maintenance_layout = QVBoxLayout(self.maintenance_group)
+
+        self.maintenance_hint = QLabel(
+            "Сначала будет показан список того, что удалится; без подтверждения ничего не удаляется."
+        )
+        self.maintenance_hint.setWordWrap(True)
+        maintenance_layout.addWidget(self.maintenance_hint)
+
+        self.clean_photos_btn = QPushButton("Очистить фото без ссылок")
+        self.clean_photos_btn.setToolTip("Файлы в папке фото, на которые нет ссылок в базе")
+        self.clean_rows_btn = QPushButton("Очистить записи без ссылок")
+        self.clean_rows_btn.setToolTip("Заметки и строки файлов фото, на которые больше никто не ссылается")
+
+        maintenance_buttons = QHBoxLayout()
+        maintenance_buttons.addWidget(self.clean_photos_btn)
+        maintenance_buttons.addWidget(self.clean_rows_btn)
+        maintenance_buttons.addStretch()
+        maintenance_layout.addLayout(maintenance_buttons)
 
         # ----- Группа настроек логирования -----
         self.log_group = QGroupBox("Настройки логирования")
@@ -855,6 +973,8 @@ class SettingsPage(BasePage):
         self.create_db_btn.clicked.connect(self._on_create_test_db_clicked)
         self.check_token_btn.clicked.connect(self._check_token)
         self.check_path_btn.clicked.connect(self._check_remote_path)
+        self.clean_photos_btn.clicked.connect(self._on_clean_photos_clicked)
+        self.clean_rows_btn.clicked.connect(self._on_clean_rows_clicked)
 
         # self.log_dir_edit.textChanged.connect(self._update_log_folder_button)
         self.log_dir_edit.textChanged.connect(lambda: self._update_log_folder_button())
@@ -1344,7 +1464,7 @@ class SettingsPage(BasePage):
         raw = self._setting(key)
         try:
             value = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError): # не число, бесконечность из файла
             value = int(
                 AppConfigManager.default_of(
                     key,                    # ключ
@@ -1383,7 +1503,9 @@ class SettingsPage(BasePage):
         )
         if index < 0: # неизвестный уровень
             index = combo.findText(
-                str(AppConfigManager.default_of(key, 'DEBUG')),
+                str(
+                    AppConfigManager.default_of(key, 'DEBUG'),
+                ),
             )
         combo.setCurrentIndex(
             max(index, 0),
@@ -1652,6 +1774,230 @@ class SettingsPage(BasePage):
             QMessageBox.information(self, "Результат", message)
         else:
             QMessageBox.warning(self, "Результат", message)
+
+    # ----------------------------------------------------------------------
+    # Уборка: файлы и строки без ссылок
+    # ----------------------------------------------------------------------
+
+    # почему уборку сейчас нельзя запускать
+    def _cleanup_blocked_reason(self) -> Optional[str]:
+        """
+        Возвращает причину, по которой уборку запускать нельзя.
+
+        Сверяются база и папка фото, которые открыты в программе. Без этих проверок уборка могла бы
+        удалить нужное:
+
+        * файла базы нет — открылась бы новая пустая база, и все фото оказались бы «без ссылок»;
+        * поля формы не сохранены — пользователь видит одни пути, а сверка идёт по другим;
+        * есть несохранённые черновики — их ссылки ещё не в базе.
+
+        Returns:
+            (str/None) Текст для пользователя; None — можно.
+
+        Example:
+            >>> page._cleanup_blocked_reason()    # doctest: +SKIP
+        """
+        db_path = self.db_path_edit.text().strip()
+        if not os.path.isfile(db_path):
+            return "Сначала укажите существующий файл БД и сохраните настройки."
+        unsaved = (
+            db_path != self._text_setting('database_local_path').strip()
+            or self.photos_path_edit.text().strip() != self._text_setting('PHOTOS_STORAGE_PATH').strip()
+        )
+        if unsaved:
+            return "Путь к БД или папка для фото изменены: сначала сохраните настройки."
+        drafts = getattr(self.main_window, 'drafts', None)
+        if drafts is not None and not drafts.store.is_empty:
+            return "Есть несохранённые черновики: сначала сохраните или отмените их."
+        return None
+
+    # очистка папки фото: список, подтверждение, удаление
+    def _on_clean_photos_clicked(self) -> None:
+        """
+        Удаляет файлы в папке фото, на которые нет ссылок в базе, после показа списка.
+
+        Порядок: проверки (``_cleanup_blocked_reason``) → ``PhotoService.check_storage`` (только
+        чтение) → список и подтверждение → ``clean_storage`` (удаляет только то, что и сейчас без
+        ссылок). Нечего удалять — только сообщение; любая ошибка — в журнал и сообщением.
+
+        Example:
+            >>> page._on_clean_photos_clicked()    # doctest: +SKIP
+        """
+        reason = self._cleanup_blocked_reason()
+        if reason:
+            QMessageBox.warning(self, "Очистка фото", reason)
+            return
+        try:
+            service = get_photo_service()
+            report = service.check_storage()
+        except Exception as exc:
+            self.logger.exception(f"Ошибка сверки папки фото: {exc}")
+            QMessageBox.critical(self, "Очистка фото", f"Не удалось проверить папку фото: {exc}")
+            return
+
+        notes = storage_report_notes(report)
+        files = list(report['extra'])
+        folders = list(report['empty_dirs'])
+        if not files and not folders:
+            QMessageBox.information(
+                self,                                                   # родитель
+                "Очистка фото",                                         # заголовок
+                '\n'.join(["Файлов без ссылок нет.", *notes]),          # текст
+            )
+            return
+
+        intro = '\n'.join([
+            f"Будет удалено файлов без ссылок: {len(files)}, пустых папок: {len(folders)}. Отменить это нельзя.",
+            f"База: {self._text_setting('database_local_path')}",
+            f"Папка фото: {self._text_setting('PHOTOS_STORAGE_PATH')}",
+            *notes,
+        ])
+        lines = [*files, *(f"{name} (пустая папка)" for name in folders)]
+        confirmed = confirm_cleanup(
+            self,               # родитель
+            "Очистка фото",     # заголовок
+            intro,              # пояснение
+            lines,              # список
+        )
+        if not confirmed:
+            return
+
+        try:
+            result = service.clean_storage(report)
+        except Exception as exc:
+            self.logger.exception(f"Ошибка очистки папки фото: {exc}")
+            QMessageBox.critical(self, "Очистка фото", f"Не удалось очистить папку фото: {exc}")
+            return
+        self._show_cleanup_result(
+            "Очистка фото",         # заголовок
+            len(result['deleted']), # удалено
+            result['kept'],         # не удалено
+        )
+
+    # итог уборки пользователю
+    def _show_cleanup_result(
+        self,
+        title   : str,        # заголовок окна
+        deleted : int,        # сколько удалено
+        kept    : List[str],  # что не удалено
+    ) -> None:
+        """
+        Показывает итог уборки; что-то не удалилось — предупреждением со списком.
+
+        Args:
+            title   : (str) Заголовок окна.
+            deleted : (int) Сколько удалено.
+            kept    : (List[str]) Что не удалено (уже привязано, свежее, ошибка удаления).
+
+        Example:
+            >>> page._show_cleanup_result("Очистка фото", 2, [])    # doctest: +SKIP
+        """
+        text = f"Удалено: {deleted}."
+        if kept:
+            shown = '\n'.join(kept[:20])
+            more = f"\n… и ещё {len(kept) - 20}" if len(kept) > 20 else ''
+            QMessageBox.warning(
+                self,                                                                       # родитель
+                title,                                                                      # заголовок
+                f"{text}\nНе удалено (уже используется или ошибка, см. журнал):\n{shown}{more}",  # текст
+            )
+        else:
+            QMessageBox.information(self, title, text)
+
+    # заголовки таблиц «только используемые»
+    @staticmethod
+    def _unused_table_titles(
+        db : Any,  # общая база
+    ) -> Dict[str, str]:
+        """
+        Возвращает заголовки таблиц «только используемые» для списка уборки.
+
+        Args:
+            db : (Database) Общая база.
+
+        Returns:
+            (Dict[str, str]) Имя таблицы → заголовок; нет описания — имя таблицы.
+
+        Example:
+            >>> SettingsPage._unused_table_titles(get_db())    # doctest: +SKIP
+            {'photo_files': 'Файлы фото', 'appointments_notes': 'Заметки'}
+        """
+        titles : Dict[str, str] = {}
+        for table, mapper in db.table_events.plan.used.items():
+            table_def = table_def_of(mapper)
+            titles[table.name] = getattr(table_def, 'title', None) or table.name
+        return titles
+
+    # очистка строк без ссылок: список, подтверждение, удаление
+    def _on_clean_rows_clicked(self) -> None:
+        """
+        Удаляет строки таблиц «только используемые», на которые никто не ссылается, после показа списка.
+
+        Порядок: проверки (``_cleanup_blocked_reason``) → ``find_unused`` (только чтение) → список и
+        подтверждение → ``delete_unused`` (удаляет только то, что и сейчас без ссылок). Строка файла
+        фото после коммита забирает с собой файл: для этого сервис фото кладёт папку фото в ресурсы
+        базы. Нечего удалять — только сообщение; любая ошибка — в журнал и сообщением.
+
+        Example:
+            >>> page._on_clean_rows_clicked()    # doctest: +SKIP
+        """
+        reason = self._cleanup_blocked_reason()
+        if reason:
+            QMessageBox.warning(self, "Очистка записей", reason)
+            return
+        try:
+            get_photo_service() # папка фото — в ресурсах базы (удаление файла после коммита)
+            db = get_db()
+            with db.session_scope() as session:
+                found = db.table_events.find_unused(session)
+            titles = self._unused_table_titles(db)
+        except Exception as exc:
+            self.logger.exception(f"Ошибка поиска записей без ссылок: {exc}")
+            QMessageBox.critical(self, "Очистка записей", f"Не удалось найти записи без ссылок: {exc}")
+            return
+
+        if not found:
+            QMessageBox.information(self, "Очистка записей", "Записей без ссылок нет.")
+            return
+
+        total = sum(len(ids) for ids in found.values())
+        intro = '\n'.join([
+            f"Будет удалено записей без ссылок: {total}. Отменить это нельзя.",
+            "Вместе со строкой файла фото удаляется и сам файл.",
+            f"База: {self._text_setting('database_local_path')}",
+        ])
+        lines = [
+            f"{titles.get(name, name)}: {row_id}"
+            for name, ids in found.items()
+            for row_id in ids
+        ]
+        confirmed = confirm_cleanup(
+            self,                   # родитель
+            "Очистка записей",      # заголовок
+            intro,                  # пояснение
+            lines,                  # список
+        )
+        if not confirmed:
+            return
+
+        try:
+            with db.session_scope() as session:
+                deleted = db.table_events.delete_unused(session, found)
+        except Exception as exc:
+            self.logger.exception(f"Ошибка очистки записей без ссылок: {exc}")
+            QMessageBox.critical(self, "Очистка записей", f"Не удалось удалить записи: {exc}")
+            return
+        kept = [
+            f"{titles.get(name, name)}: {row_id}"
+            for name, ids in found.items()
+            for row_id in ids
+            if row_id not in deleted.get(name, [])
+        ]
+        self._show_cleanup_result(
+            "Очистка записей",                              # заголовок
+            sum(len(ids) for ids in deleted.values()),      # удалено
+            kept,                                           # не удалено
+        )
 
     # ожидание потоков проверки перед выходом
     def wait_check_threads(

@@ -412,12 +412,12 @@ class BaseConfigManager:
         памяти, в файл попадут при следующем ``save()``.
 
         Args:
-            data: Значения из файла.
+            data : (Dict[str, Any]) Значения из файла.
 
         Returns:
-            Новый словарь.
+            (Dict[str, Any]) Новый словарь.
 
-        Пример:
+        Example:
             >>> m._coerce_types({'LOG_ARGS': 'False', 'LOG_MAX_BYTES': '10485760', 'X': 'False'})
             {'LOG_ARGS': False, 'LOG_MAX_BYTES': 10485760, 'X': 'False'}
         """

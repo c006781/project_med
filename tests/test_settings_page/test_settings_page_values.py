@@ -60,6 +60,7 @@ def test_saved_values_from_old_strings_become_typed(page):
     ('LOG_MAX_BYTES', 'log_max_bytes_spin', '10 МБ'),
     ('LOG_BACKUP_COUNT', 'log_backup_count_spin', None),
     ('UPDATE_BACKUP_KEEP_DAYS', 'update_keep_days_spin', ''),
+    ('LOG_BACKUP_COUNT', 'log_backup_count_spin', float('inf')),
 ])
 def test_bad_number_shows_default(page, key, spin, bad):
     """Не число в настройках: экран открывается, в поле — умолчание; файл не меняется до сохранения."""

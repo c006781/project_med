@@ -5,11 +5,13 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Версия тега (например, v1.0.0)'
-        required: true
+  # ↑ до 2026-11-07 (В-15): ручной запуск был сломан — ввод version нигде не использовался, VERSION
+  #   получал имя ветки, у релиза не было тега. Выпуск только по тегу v*. Вернуть с рабочим вводом:
+  # workflow_dispatch:
+  #   inputs:
+  #     version:
+  #       description: 'Версия тега (например, v1.0.0)'
+  #       required: true
 
 jobs:
   build-windows:

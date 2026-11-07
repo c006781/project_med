@@ -8,11 +8,13 @@
       └─ UpdateChecker (поток): GET /repos/<slug>/releases/latest
            └─ is_newer_version(текущая, из тега) → update_available(tag, url) | no_update()
     AppUpdater.apply_update_from_release(release)
-      └─ UpdateApplier.start(): ОС поддерживается? exe собран? → select_release_asset
+      └─ UpdateApplier.start(): ОС поддерживается? exe собран (Linux — установленный
+         дистрибутив, есть права на запись)? → select_release_asset
            → release_asset_sha256 (хеш из описания релиза; нет — warning, без сверки)
            └─ UpdateDownloader (поток): скачивание в файл рядом с exe (с проверкой размера
               и SHA-256 до переименования .part)
-                └─ UpdateApplier._apply_update(): скрипт замены (Windows) → выход
+                └─ UpdateApplier._apply_update(): скрипт замены (Windows — update.ps1,
+                   Linux — распаковка, проверка состава, update.sh) → выход
 
 Логика без Qt вынесена в функции (версии, выбор файла релиза, хеши, заголовки, скрипт
 замены) — их легко проверять и дополнять. Подробности и журнал проверок — ``app/UPDATER.md``.
@@ -37,13 +39,17 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import shutil
+import tarfile
 import tempfile
 import time
 import urllib.request
 import platform
+import zlib
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 import certifi
@@ -80,7 +86,9 @@ UPDATE_FILE_EXTENSIONS: Mapping[str, str] = {
 }
 
 # ОС, для которых реализована автоматическая замена программы
-AUTO_UPDATE_SYSTEMS = frozenset({'windows'})
+AUTO_UPDATE_SYSTEMS = frozenset({'windows', 'linux'})
+# AUTO_UPDATE_SYSTEMS = frozenset({'windows'})
+# ↑ до 2026-11-07 (U20): на Linux автообновление только сообщало об отказе
 
 # Размер блока при скачивании (256 КБ)
 DOWNLOAD_CHUNK_SIZE = 262144
@@ -90,6 +98,240 @@ _VERSION_RE = re.compile(r'^\d+(\.\d+)*$')
 
 # Строка хеша в описании релиза — как вывод sha256sum: '<64 hex>  <имя>' или '<64 hex> *<имя>'
 _SHA256_LINE_RE = re.compile(r'^\s*([0-9a-fA-F]{64})\s+\*?(\S.*?)\s*$')
+
+# Linux: файлы дистрибутива и самого обновления (метку и манифест пишет scripts/build_linux.sh)
+LINUX_MARKER_FILE = '.medicalapp_dist'          # метка «установленный дистрибутив»
+LINUX_MANIFEST_FILE = '.medicalapp_manifest'    # список файлов кода
+LINUX_MANIFEST_HEADER = '# medicalapp manifest v1'  # первая строка манифеста (формат)
+LINUX_VENV_DIR = 'venv_project_med'             # окружение (setup_prod.sh)
+LINUX_RUN_SCRIPT = 'run.sh'                     # запуск программы
+LINUX_VERSION_FILE = 'VERSION'                  # версия в дистрибутиве
+LINUX_REQUIREMENTS_FILE = 'requirements.txt'    # пакеты
+LINUX_UPDATE_SCRIPT = 'update.sh'               # скрипт замены
+LINUX_UPDATE_LOG = 'update.log'                 # журнал скрипта
+LINUX_WORK_PREFIX = '.update_'                  # .update_<метка> — распакованное обновление
+LINUX_BACKUP_PREFIX = 'backup_'                 # backup_<версия> — прежний код
+LINUX_IN_PROGRESS_FILE = '.update_in_progress'  # замена идёт или прервана
+LINUX_FAILURE_FILE = '.update_failed'           # причина неудачи для окна
+LINUX_WAIT_TIMEOUT_SEC = 120                    # сколько скрипт ждёт выхода программы
+LINUX_MAX_UNPACKED_BYTES = 1024 ** 3            # предел распаковки (1 ГБ)
+
+# Служебное обновления должно быть в любом дистрибутиве: без него скрипт не сработает
+_LINUX_REQUIRED_FILES = (
+    LINUX_MARKER_FILE,
+    LINUX_MANIFEST_FILE,
+    LINUX_RUN_SCRIPT,
+    LINUX_VERSION_FILE,
+)
+
+# Что манифесту запрещено: данные и служебное. Это не список кода — код перечисляет сам манифест.
+_LINUX_RESERVED_PARTS = frozenset({
+    LINUX_VENV_DIR,
+    '.git',
+    '__pycache__',
+    'photos',
+    'logs',
+    'logs_parser',
+    'MedicalAppUpdates',
+})
+_LINUX_RESERVED_TOP_NAMES = frozenset({LINUX_UPDATE_SCRIPT, LINUX_UPDATE_LOG})
+_LINUX_RESERVED_TOP_PREFIXES = (LINUX_WORK_PREFIX, LINUX_BACKUP_PREFIX)
+_LINUX_RESERVED_SUFFIXES = (
+    '.env',
+    '.db', '.db-wal', '.db-shm', '.db-journal',
+    '.sqlite', '.sqlite3',
+    '.msgpack',
+    '.log',
+    '.part',
+)
+_LINUX_LOG_ROTATION_RE = re.compile(r'\.log\.\d+$')     # журнал после ротации: app.log.1
+_LINUX_WORK_DIR_RE = re.compile(r'^\.update_\d+$')      # остаток прерванной попытки
+
+# Тело update.sh; значения и списки путей подставляет build_linux_update_script (в начале файла).
+# Все пути относительные: скрипт переходит в свою папку, путь установки в текст не попадает.
+_LINUX_UPDATE_SCRIPT_BODY = r"""
+RECOVER=0
+PIP_STARTED=0
+ALL_PATHS=("${NEW_PATHS[@]}" ${REMOVED_PATHS[@]+"${REMOVED_PATHS[@]}"})
+
+log() {
+    printf '%s [update.sh] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null
+}
+
+# Жив ли процесс: зомби уже завершился (ждёт, пока его заберёт родитель)
+process_alive() {
+    kill -0 "$1" 2>/dev/null || return 1
+    if grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null; then
+        return 1
+    fi
+    return 0
+}
+
+parent_dir() {
+    case "$1" in
+        */*) printf '%s' "${1%/*}" ;;
+        *)   printf '.' ;;
+    esac
+}
+
+# Перенос одного пути: папка назначения создаётся, файл не попадает внутрь папки (-T)
+move_path() {
+    mkdir -p -- "$(parent_dir "$2")" 2>> "$LOG_FILE" \
+        && mv -f -T -- "$1" "$2" 2>> "$LOG_FILE"
+}
+
+# Опустевшие папки вверх от файла: кэш байт-кода не считается, папка с данными остаётся
+prune_empty_dirs() {
+    local dir
+    dir=$(parent_dir "$1")
+    while [ "$dir" != "." ]; do
+        if [ -d "$dir" ]; then
+            if [ -n "$(ls -A -- "$dir" 2>/dev/null | grep -v -x '__pycache__')" ]; then
+                return 0
+            fi
+            rm -rf -- "$dir/__pycache__"
+            rmdir -- "$dir" 2>/dev/null || return 0
+        fi
+        dir=$(parent_dir "$dir")
+    done
+}
+
+restart_program() {
+    if command -v setsid > /dev/null 2>&1; then
+        setsid nohup bash "./$RUN_SCRIPT" >> "$LOG_FILE" 2>&1 < /dev/null &
+    else
+        nohup bash "./$RUN_SCRIPT" >> "$LOG_FILE" 2>&1 < /dev/null &
+    fi
+}
+
+# Возврат прежней версии; повторный вызов безопасен (остановка на середине не портит результат)
+rollback() {
+    local rel status=0
+    for rel in ${ADDED_PATHS[@]+"${ADDED_PATHS[@]}"}; do
+        # Файл уже перенесён из обновления и прежнего такого не было — убрать (папка — не наша)
+        if [ ! -e "$PAYLOAD_DIR/$rel" ] && [ ! -f "$BACKUP_DIR/$rel" ] && [ ! -L "$BACKUP_DIR/$rel" ] \
+            && [ ! -d "$rel" ]; then
+            rm -f -- "$rel" 2>> "$LOG_FILE" || status=1
+            prune_empty_dirs "$rel"
+        fi
+    done
+    for rel in "${ALL_PATHS[@]}"; do
+        # Только файлы: путь может быть и папкой в backup_, если новый файл пришёл на место пакета
+        if [ -f "$BACKUP_DIR/$rel" ] || [ -L "$BACKUP_DIR/$rel" ]; then
+            move_path "$BACKUP_DIR/$rel" "$rel" || { log "Не возвращён файл: $rel"; status=1; }
+        fi
+    done
+    if [ -d "$BACKUP_DIR" ]; then
+        find "$BACKUP_DIR" -depth -type d -empty -delete 2>> "$LOG_FILE"
+        [ ! -e "$BACKUP_DIR" ] || status=1
+    fi
+    if [ "$REQUIREMENTS_CHANGED" = 1 ] && { [ "$PIP_STARTED" = 1 ] || [ "$RECOVER" = 1 ]; } \
+        && [ -x "$VENV_PYTHON" ] && [ -f "$REQUIREMENTS_FILE" ]; then
+        # pip мог успеть заменить часть пакетов; всё на месте — сеть не нужна. Ошибка не мешает откату
+        "$VENV_PYTHON" -m pip install --disable-pip-version-check --no-input --retries 1 --timeout 15 \
+            -r "$REQUIREMENTS_FILE" >> "$LOG_FILE" 2>&1 \
+            || log "Пакеты прежней версии не восстановлены; при ошибках запуска выполните ./install.sh"
+    fi
+    return "$status"
+}
+
+# Ошибка замены: откат, сообщение для окна, запуск прежней версии
+fail_and_rollback() {
+    log "Ошибка: $1"
+    if rollback; then
+        printf 'Обновление до версии %s не установлено: %s. Возвращена версия %s. Подробности: %s\n' \
+            "$NEW_VERSION" "$1" "$OLD_VERSION" "$LOG_FILE" > "$FAILURE_FILE"
+        rm -rf -- "$WORK_DIR"
+        rm -f -- "$IN_PROGRESS_FILE"
+        log "Откат выполнен, версия $OLD_VERSION"
+        if [ "$RECOVER" = 1 ]; then
+            # run.sh сам продолжит запуск восстановленной версии
+            rm -f -- "$SCRIPT_FILE"
+            exit 0
+        fi
+        restart_program
+        rm -f -- "$SCRIPT_FILE"
+        exit 1
+    fi
+    log "ОТКАТ НЕ ВЫПОЛНЕН: прежний код остался в $BACKUP_DIR; повтор — при запуске $RUN_SCRIPT"
+    printf 'Обновление до версии %s не установлено, и прежняя версия возвращена не полностью: прежний код в %s. Подробности: %s\n' \
+        "$NEW_VERSION" "$BACKUP_DIR" "$LOG_FILE" > "$FAILURE_FILE"
+    exit 2
+}
+
+# Запуск из run.sh после сбоя: откат; скрипт ещё работает — не мешать ему
+if [ "${1:-}" = "--recover" ]; then
+    RECOVER=1
+    OWNER=$(head -n 1 "$IN_PROGRESS_FILE" 2>/dev/null)
+    case "$OWNER" in
+        ''|*[!0-9]*) ;;
+        *)
+            if [ "$OWNER" != "$$" ] && process_alive "$OWNER" \
+                && tr '\0' ' ' < "/proc/$OWNER/cmdline" 2>/dev/null | grep -q "$SCRIPT_FILE"; then
+                echo "Идёт обновление программы: дождитесь его окончания." >&2
+                exit 3
+            fi
+            ;;
+    esac
+    fail_and_rollback "прервано сбоем или выключением"
+fi
+
+log "Обновление $OLD_VERSION -> $NEW_VERSION: ожидание выхода программы (PID $WAIT_PID)"
+WAITED=0
+while process_alive "$WAIT_PID"; do
+    if [ "$WAITED" -ge "$((WAIT_TIMEOUT * 5))" ]; then
+        # Программа работает: ничего не менялось, повторить можно с первого шага
+        log "Программа не завершилась за $WAIT_TIMEOUT с: обновление отменено"
+        printf 'Обновление до версии %s отменено: программа не завершилась.\n' "$NEW_VERSION" > "$FAILURE_FILE"
+        rm -rf -- "$WORK_DIR"
+        rm -f -- "$SCRIPT_FILE"
+        exit 1
+    fi
+    sleep 0.2
+    WAITED=$((WAITED + 1))
+done
+
+# С этого места сбой обнаружит run.sh: метка пишется на диск раньше первого переноса
+if ! printf '%s\n' "$$" > "$IN_PROGRESS_FILE"; then
+    log "Нельзя создать $IN_PROGRESS_FILE: обновление отменено"
+    rm -rf -- "$WORK_DIR"
+    restart_program
+    rm -f -- "$SCRIPT_FILE"
+    exit 1
+fi
+sync
+
+mkdir -p -- "$BACKUP_DIR" 2>> "$LOG_FILE" || fail_and_rollback "не создана папка $BACKUP_DIR"
+for rel in "${ALL_PATHS[@]}"; do
+    # Только файлы и ссылки: папка на месте файла не переносится (внутри могут быть данные)
+    if [ -f "$rel" ] || [ -L "$rel" ]; then
+        move_path "$rel" "$BACKUP_DIR/$rel" || fail_and_rollback "не перенесён файл $rel"
+    fi
+done
+for rel in ${REMOVED_PATHS[@]+"${REMOVED_PATHS[@]}"}; do
+    prune_empty_dirs "$rel"
+done
+for rel in "${NEW_PATHS[@]}"; do
+    move_path "$PAYLOAD_DIR/$rel" "$rel" || fail_and_rollback "не установлен файл $rel"
+done
+sync
+
+if [ "$REQUIREMENTS_CHANGED" = 1 ]; then
+    log "Изменился $REQUIREMENTS_FILE: установка пакетов"
+    PIP_STARTED=1
+    "$VENV_PYTHON" -m pip install --disable-pip-version-check --no-input --retries 2 --timeout 20 \
+        -r "$REQUIREMENTS_FILE" >> "$LOG_FILE" 2>&1 \
+        || fail_and_rollback "не удалось установить пакеты (нет сети или ошибка pip)"
+fi
+sync
+
+rm -rf -- "$WORK_DIR"
+rm -f -- "$IN_PROGRESS_FILE"
+log "Установлена версия $NEW_VERSION; прежний код: $BACKUP_DIR"
+restart_program
+rm -f -- "$SCRIPT_FILE"
+exit 0
+"""
 
 
 # ----------------------------------------------------------------------------------------
@@ -568,15 +810,928 @@ def auto_update_unavailable_reason(
         True
         >>> auto_update_unavailable_reason('windows', False)
         'Автообновление работает только в собранном приложении'
+        >>> 'собранной Linux-версии' in auto_update_unavailable_reason('linux', True)
+        True
     """
+    if system == 'linux' and system in AUTO_UPDATE_SYSTEMS: # код заменяется из архива, а не exe
+        return linux_install_unavailable_reason(
+            install_root    =   get_install_root(),     # папка установки
+            frozen          =   frozen,                 # собранная программа
+        )
     if not frozen:
         return 'Автообновление работает только в собранном приложении'
     if system not in AUTO_UPDATE_SYSTEMS:
         return (
-            f'Автообновление пока доступно только для Windows (у вас {system or "неизвестная ОС"}). '
+            f'Автообновление пока доступно только для Windows и Linux (у вас {system or "неизвестная ОС"}). '
             'Скачайте новую версию со страницы релиза.'
         )
+    # if not frozen:
+    #     return 'Автообновление работает только в собранном приложении'
+    # if system not in AUTO_UPDATE_SYSTEMS:
+    #     return (
+    #         f'Автообновление пока доступно только для Windows (у вас {system or "неизвестная ОС"}). '
+    #         'Скачайте новую версию со страницы релиза.'
+    #     )
+    # ↑ до 2026-11-07 (U20): Linux-версия работает из исходников (нет frozen) — обновление всегда
+    #   останавливалось на «только в собранном приложении»
     return None
+
+
+# ----------------------------------------------------------------------------------------
+# Linux: замена кода из архива .tar.gz скриптом после выхода (app/UPDATER.md, раздел 1.3)
+# ----------------------------------------------------------------------------------------
+
+class UpdateError(Exception):
+    """
+    Обновление нельзя установить; текст исключения показывается пользователю.
+
+    Example:
+        >>> str(UpdateError('Нет прав на запись'))
+        'Нет прав на запись'
+    """
+
+
+# разбор пути файла из архива или манифеста на части
+def _relative_path_parts(
+    path : str,  # путь внутри архива или манифеста
+) -> Tuple[str, ...]: # части пути без '.'
+    """
+    Разбирает относительный путь на части и отклоняет всё, что может выйти за папку.
+
+    Отклоняются: пустой путь, абсолютный, ``..`` в любом месте, обратная косая черта,
+    управляющие символы (манифест построчный) и имена не в UTF-8. Части ``.`` отбрасываются.
+    Чтение диска и проверка «данные или код» — не здесь (:func:`validate_manifest_path`).
+
+    Args:
+        path : (str) Путь с разделителем ``/``.
+
+    Returns:
+        (Tuple[str, ...]) Части пути.
+
+    Raises:
+        UpdateError: Путь небезопасен.
+
+    Example:
+        >>> _relative_path_parts('app/./a.py')
+        ('app', 'a.py')
+        >>> _relative_path_parts('../a.py')
+        Traceback (most recent call last):
+        ...
+        app.updater.UpdateError: Недопустимый путь в обновлении: '../a.py'
+    """
+    error = UpdateError(f'Недопустимый путь в обновлении: {path!r}')
+    if not path or path.startswith('/') or '\\' in path:
+        raise error
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        raise error
+    try:
+        path.encode('utf-8')
+    except UnicodeEncodeError:
+        raise error from None # имя не в UTF-8 (суррогаты tarfile)
+    parts = tuple(part for part in path.split('/') if part not in ('', '.'))
+    if not parts or '..' in parts:
+        raise error
+    return parts
+
+
+# проверка одного пути манифеста: только код, не данные
+def validate_manifest_path(
+    path : str,  # строка манифеста
+) -> str: # тот же путь, если он допустим
+    """
+    Проверяет путь манифеста: относительный, внутри установки и не указывает на данные.
+
+    Запрещены части ``venv_project_med``, ``.git``, ``photos``, ``logs``, ``logs_parser``,
+    ``__pycache__``, ``MedicalAppUpdates``, папки ``photos*``, на верхнем уровне — служебное
+    самого обновления (``.update_*``, ``backup_*``, ``update.sh``, ``update.log``), файлы баз,
+    настроек и журналов по окончанию (``.db``, ``.env``, ``.msgpack``, ``.log`` и др.). Путь
+    должен быть уже приведён: ``a//b`` и ``./a`` отклоняются, потому что их строит только
+    чужой манифест, а не ``build_linux.sh``.
+
+    Здесь перечислены данные, а не код: список файлов кода задаёт сам манифест.
+
+    Args:
+        path : (str) Путь файла относительно папки установки.
+
+    Returns:
+        (str) ``path`` без изменений.
+
+    Raises:
+        UpdateError: Путь небезопасен или указывает на данные.
+
+    Example:
+        >>> validate_manifest_path('parsers/word_importer.py')
+        'parsers/word_importer.py'
+        >>> validate_manifest_path('parsers/logs/a.txt')
+        Traceback (most recent call last):
+        ...
+        app.updater.UpdateError: Манифест обновления указывает на данные: 'parsers/logs/a.txt'
+    """
+    parts = _relative_path_parts(path)
+    if '/'.join(parts) != path:
+        raise UpdateError(f'Недопустимый путь в обновлении: {path!r}')
+
+    name = parts[-1]
+    reserved = (
+        any(part in _LINUX_RESERVED_PARTS for part in parts)
+        or any(part.startswith('photos') for part in parts[:-1]) # как photos*/ в .gitignore
+        or name.endswith(_LINUX_RESERVED_SUFFIXES)
+        or _LINUX_LOG_ROTATION_RE.search(name) is not None
+        or parts[0] in _LINUX_RESERVED_TOP_NAMES
+        or parts[0].startswith(_LINUX_RESERVED_TOP_PREFIXES)
+    )
+    if reserved:
+        raise UpdateError(f'Манифест обновления указывает на данные: {path!r}')
+    return path
+
+
+# разбор текста манифеста
+def parse_linux_manifest(
+    text : str,  # содержимое файла манифеста
+) -> Tuple[str, ...]: # пути файлов кода
+    """
+    Разбирает манифест путей кода, который пишет ``scripts/build_linux.sh``.
+
+    Формат: первая строка — :data:`LINUX_MANIFEST_HEADER` (другой формат — отказ), дальше по
+    одному пути файла на строку, ``/`` как разделитель. Перечислены только файлы, а не папки:
+    в папках кода рядом с модулями лежат данные (``parsers/logs``, ``parsers/photos``), и
+    заменяется только то, что перечислено.
+
+    Обязательны служебные файлы обновления (:data:`_LINUX_REQUIRED_FILES`). Запрещены повторы
+    и путь, который одновременно файл и папка другого пути.
+
+    Args:
+        text : (str) Текст манифеста.
+
+    Returns:
+        (Tuple[str, ...]) Пути в порядке манифеста.
+
+    Raises:
+        UpdateError: Формат неверен, путь недопустим, нет обязательного файла.
+
+    Example:
+        >>> parse_linux_manifest('\\n'.join([
+        ...     LINUX_MANIFEST_HEADER,
+        ...     LINUX_MANIFEST_FILE,
+        ...     LINUX_MARKER_FILE,
+        ...     'VERSION',
+        ...     'run.sh',
+        ...     'app/a.py',
+        ... ]))[-1]
+        'app/a.py'
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != LINUX_MANIFEST_HEADER:
+        raise UpdateError('Манифест обновления имеет неизвестный формат')
+
+    paths = []
+    seen = set()
+    for line in lines[1:]:
+        if not line: # пустая строка в конце файла
+            continue
+        validate_manifest_path(line)
+        if line in seen:
+            raise UpdateError(f'Манифест обновления содержит путь дважды: {line!r}')
+        seen.add(line)
+        paths.append(line)
+
+    for path in paths:
+        parts = path.split('/')
+        for depth in range(1, len(parts)):
+            if '/'.join(parts[:depth]) in seen: # файл и одновременно папка
+                raise UpdateError(f'Манифест обновления противоречив: {path!r}')
+
+    missing = [name for name in _LINUX_REQUIRED_FILES if name not in seen]
+    if missing:
+        raise UpdateError(f'В манифесте обновления нет обязательных файлов: {", ".join(missing)}')
+    return tuple(paths)
+
+
+# чтение манифеста из папки
+def read_linux_manifest(
+    folder : str,  # папка установки или распакованного обновления
+) -> Tuple[str, ...]: # пути файлов кода
+    """
+    Читает и проверяет манифест из папки (:func:`parse_linux_manifest`).
+
+    Args:
+        folder : (str) Папка, в которой лежит :data:`LINUX_MANIFEST_FILE`.
+
+    Returns:
+        (Tuple[str, ...]) Пути файлов кода.
+
+    Raises:
+        UpdateError: Файла нет, это ссылка, он не читается или неверен.
+
+    Example:
+        >>> read_linux_manifest('/нет/такой/папки')
+        Traceback (most recent call last):
+        ...
+        app.updater.UpdateError: Не удалось прочитать манифест обновления: /нет/такой/папки/.medicalapp_manifest
+    """
+    path = os.path.join(folder, LINUX_MANIFEST_FILE)
+    try:
+        if os.path.islink(path):
+            raise OSError('ссылка вместо файла')
+        with open(path, 'r', encoding='utf-8', newline='\n') as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError) as e:
+        raise UpdateError(f'Не удалось прочитать манифест обновления: {path}') from e
+    return parse_linux_manifest(text)
+
+
+# корень установки: от запущенной программы, путь нигде не зашит
+def get_install_root() -> str:
+    """
+    Возвращает папку установки: родитель ``app/`` (из исходников) или папку exe (собранная).
+
+    Определяется по расположению этого модуля, поэтому не зависит ни от текущей папки, ни от
+    того, какой файл запущен, и работает в любой папке, куда разархивировали программу.
+
+    Returns:
+        (str) Абсолютный путь папки.
+
+    Example:
+        >>> os.path.basename(get_app_dir()) == 'app' and get_install_root() == os.path.dirname(get_app_dir())
+        True
+    """
+    app_dir = get_app_dir()
+    if getattr(sys, 'frozen', False):
+        return app_dir
+    return os.path.dirname(app_dir)
+
+
+# первая папка кода или сама установка, куда нельзя писать
+def _first_unwritable_dir(
+    install_root : str,               # папка установки
+    paths        : Iterable[str],     # пути файлов кода относительно неё
+) -> Optional[str]: # папка без права записи; None — все доступны
+    """
+    Находит папку, в которой нельзя переносить файлы кода.
+
+    Для папки установки дополнительно создаётся и удаляется пробный файл: ``os.access`` не
+    всегда видит файловую систему только для чтения или ограничения доступа.
+
+    Args:
+        install_root : (str) Папка установки.
+        paths        : (Iterable[str]) Пути файлов кода.
+
+    Returns:
+        (str/None) Первая недоступная папка; None — все доступны.
+
+    Example:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as folder:
+        ...     _first_unwritable_dir(
+        ...         install_root    =   folder,         # папка установки
+        ...         paths           =   ['app/a.py'],   # папки app ещё нет
+        ...     ) is None
+        True
+    """
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir     =   install_root,       # проверяемая папка
+            prefix  =   '.update_probe_',   # не совпадает с остатками .update_<число>
+        ):
+            pass
+    except OSError:
+        return install_root
+
+    folders = set()
+    for path in paths:
+        parts = path.split('/')
+        for depth in range(1, len(parts)):
+            folders.add(os.path.join(install_root, *parts[:depth]))
+    for folder in sorted(folders):
+        if os.path.isdir(folder) and not os.access(folder, os.W_OK | os.X_OK):
+            return folder
+    return None
+
+
+# проверка возможности автообновления Linux-версии до скачивания
+def linux_install_unavailable_reason(
+    install_root : str,   # папка установки
+    frozen       : bool,  # программа собрана в бинарник
+) -> Optional[str]: # текст для пользователя; None — можно обновлять
+    """
+    Объясняет, почему Linux-версию нельзя обновить автоматически (проверка ДО скачивания).
+
+    Порядок: собранный бинарник (такой сборки нет, заменяется код из архива) → рабочая копия
+    разработчика (``.git`` — папка или файл, как в копии ``git worktree``) → нет метки или
+    манифеста дистрибутива → незавершённое обновление → нет прав на запись.
+
+    Args:
+        install_root : (str) Папка установки.
+        frozen       : (bool) Программа собрана в бинарник.
+
+    Returns:
+        (str/None) Причина; None — обновление возможно.
+
+    Example:
+        >>> import tempfile
+        >>> with tempfile.TemporaryDirectory() as folder:
+        ...     os.mkdir(os.path.join(folder, '.git'))
+        ...     linux_install_unavailable_reason(
+        ...         install_root    =   folder,     # папка с .git
+        ...         frozen          =   False,      # из исходников
+        ...     ).startswith('Это рабочая копия')
+        True
+    """
+    manual = 'Скачайте новую версию со страницы релиза и обновите вручную.'
+    if frozen:
+        return f'Автообновление собранной Linux-версии не поддерживается. {manual}'
+    if os.path.lexists(os.path.join(install_root, '.git')):
+        return (
+            'Это рабочая копия разработчика (есть .git): автообновление отключено, '
+            'обновляйте её через git.'
+        )
+    marker = os.path.join(install_root, LINUX_MARKER_FILE)
+    if os.path.islink(marker) or not os.path.isfile(marker):
+        return f'Программа запущена не из установленного дистрибутива. {manual}'
+    try:
+        paths = read_linux_manifest(install_root)
+    except UpdateError as e:
+        return f'{e}. {manual}'
+    if os.path.lexists(os.path.join(install_root, LINUX_IN_PROGRESS_FILE)):
+        return 'Предыдущее обновление не завершено: перезапустите программу через run.sh.'
+    unwritable = _first_unwritable_dir(
+        install_root    =   install_root,   # папка установки
+        paths           =   paths,          # файлы кода
+    )
+    if unwritable:
+        return (
+            f'Нет прав на запись в папку программы ({unwritable}): автоматически обновить '
+            f'нельзя. {manual}'
+        )
+    return None
+
+
+# безопасная распаковка архива обновления
+def safe_extract_tar(
+    archive_path    : str,                              # файл .tar.gz
+    dest_dir        : str,                              # существующая пустая папка
+    max_total_bytes : int = LINUX_MAX_UNPACKED_BYTES,   # предел суммарного размера файлов
+) -> str: # имя единственной папки верхнего уровня
+    """
+    Распаковывает архив обновления со своей проверкой (``filter='data'`` есть не во всех 3.10).
+
+    Сначала проверяются ВСЕ записи (ничего не пишется), затем пишутся файлы. Допускаются только
+    обычные файлы и папки внутри одной папки верхнего уровня: отклоняются абсолютные пути,
+    ``..``, ссылки (символьные и жёсткие — в дистрибутиве их нет, поэтому и наружу они указать
+    не могут), устройства, каналы, разреженные файлы, повторы. Запись — с ``O_EXCL`` и
+    нормализованными правами (без setuid), время изменения сохраняется.
+
+    Args:
+        archive_path    : (str) Файл архива.
+        dest_dir        : (str) Папка распаковки.
+        max_total_bytes : (int) Предел суммы размеров файлов, байт (защита от распаковки на
+            весь диск, если релиз без хеша).
+
+    Returns:
+        (str) Имя папки верхнего уровня.
+
+    Raises:
+        UpdateError: Архив повреждён или содержит недопустимую запись.
+
+    Example:
+        >>> import io, tarfile, tempfile
+        >>> with tempfile.TemporaryDirectory() as folder:
+        ...     archive = os.path.join(folder, 'a.tar.gz')
+        ...     with tarfile.open(archive, 'w:gz') as tar:
+        ...         info = tarfile.TarInfo('top/a.txt')
+        ...         info.size = 1
+        ...         tar.addfile(info, io.BytesIO(b'x'))
+        ...     os.mkdir(os.path.join(folder, 'dest'))
+        ...     safe_extract_tar(
+        ...         archive_path    =   archive,                        # архив
+        ...         dest_dir        =   os.path.join(folder, 'dest'),   # куда
+        ...     )
+        'top'
+    """
+    try:
+        with tarfile.open(
+            archive_path,           # архив
+            mode    =   'r:gz',     # только сжатый tar
+        ) as tar:
+            members = tar.getmembers()
+            top_names = set()
+            seen = set()
+            total = 0
+            checked = []
+            for member in members:
+                parts = _relative_path_parts(member.name)
+                if not (member.isreg() or member.isdir()) or member.issparse():
+                    raise UpdateError(f'Недопустимый тип файла в обновлении: {member.name!r}')
+                if member.isreg() and len(parts) < 2:
+                    raise UpdateError(f'Файл вне папки дистрибутива: {member.name!r}')
+                relative = '/'.join(parts)
+                if relative in seen and not member.isdir():
+                    raise UpdateError(f'Файл повторяется в обновлении: {member.name!r}')
+                seen.add(relative)
+                top_names.add(parts[0])
+                total += member.size if member.isreg() else 0
+                checked.append((member, parts))
+
+            if len(top_names) != 1:
+                raise UpdateError('В архиве обновления должна быть одна папка верхнего уровня')
+            if total > max_total_bytes:
+                raise UpdateError('Архив обновления слишком большой')
+
+            for member, parts in checked:
+                target = os.path.join(dest_dir, *parts)
+                if member.isdir():
+                    os.makedirs(target, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                source = tar.extractfile(member)
+                if source is None:
+                    raise UpdateError(f'Не удалось прочитать файл обновления: {member.name!r}')
+                descriptor = os.open(
+                    target,                                     # файл
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,       # только новый файл
+                    (member.mode & 0o755) | 0o600,              # без setuid, владелец читает и пишет
+                )
+                with source, os.fdopen(descriptor, 'wb') as out:
+                    shutil.copyfileobj(source, out, DOWNLOAD_CHUNK_SIZE)
+                os.utime(target, (member.mtime, member.mtime)) # кэш байт-кода сверяет время файла
+    except UpdateError:
+        raise
+    except (tarfile.TarError, EOFError, OSError, zlib.error) as e:
+        raise UpdateError(f'Архив обновления повреждён или не распаковывается: {e}') from e
+    return top_names.pop()
+
+
+# сверка распакованного обновления с его манифестом
+def check_unpacked_update(
+    payload_dir : str,  # распакованная папка дистрибутива
+) -> Tuple[str, ...]: # пути файлов кода из манифеста
+    """
+    Проверяет состав распакованного обновления: файлы на диске ровно те, что в манифесте.
+
+    Отсутствующий файл сломал бы программу; лишний молча потерялся бы при замене, поэтому оба
+    случая — отказ. Метка — обычный файл. Ссылок быть не должно (их не пропускает и
+    :func:`safe_extract_tar`; проверка на случай другого способа распаковки).
+
+    Args:
+        payload_dir : (str) Папка дистрибутива.
+
+    Returns:
+        (Tuple[str, ...]) Пути манифеста.
+
+    Raises:
+        UpdateError: Состав не совпал.
+
+    Example:
+        >>> check_unpacked_update('/нет/такой/папки')
+        Traceback (most recent call last):
+        ...
+        app.updater.UpdateError: Не удалось прочитать манифест обновления: /нет/такой/папки/.medicalapp_manifest
+    """
+    paths = read_linux_manifest(payload_dir)
+    on_disk = set()
+    for folder, dir_names, file_names in os.walk(payload_dir):
+        for name in dir_names + file_names:
+            full = os.path.join(folder, name)
+            if os.path.islink(full):
+                raise UpdateError(f'В обновлении есть ссылка: {name!r}')
+        for name in file_names:
+            relative = os.path.relpath(os.path.join(folder, name), payload_dir)
+            on_disk.add(relative.replace(os.sep, '/'))
+    wanted = set(paths)
+    missing = sorted(wanted - on_disk)
+    extra = sorted(on_disk - wanted)
+    if missing:
+        raise UpdateError(f'В обновлении нет файлов из манифеста: {", ".join(missing[:5])}')
+    if extra:
+        raise UpdateError(f'В обновлении есть файлы вне манифеста: {", ".join(extra[:5])}')
+    return paths
+
+
+# строка оболочки: присваивание массива с экранированием каждого значения
+def _shell_array(
+    name   : str,            # имя массива
+    values : Iterable[str],  # значения
+) -> str: # строки присваивания
+    """
+    Строит присваивание массива bash; каждое значение экранируется ``shlex.quote``.
+
+    Args:
+        name   : (str) Имя массива.
+        values : (Iterable[str]) Значения.
+
+    Returns:
+        (str) Текст присваивания.
+
+    Example:
+        >>> print(_shell_array('A', ["x y", "o'k"]))
+        A=(
+            'x y'
+            'o'"'"'k'
+        )
+    """
+    lines = [f'{name}=(']
+    lines.extend(f'    {shlex.quote(value)}' for value in values)
+    lines.append(')')
+    return '\n'.join(lines)
+
+
+# текст скрипта update.sh
+def build_linux_update_script(
+    wait_pid             : int,            # PID программы, выхода которой ждать
+    old_version          : str,            # текущая версия
+    new_version          : str,            # устанавливаемая версия
+    work_dir             : str,            # .update_<метка> относительно установки
+    payload_dir          : str,            # распакованный дистрибутив относительно установки
+    backup_dir           : str,            # backup_<версия> относительно установки
+    new_paths            : Iterable[str],  # файлы кода новой версии
+    removed_paths        : Iterable[str],  # файлы прежней версии, которых нет в новой
+    added_paths          : Iterable[str],  # файлы новой версии, которых не было на диске
+    requirements_changed : bool,           # requirements.txt изменился — нужен pip
+    wait_timeout         : int = LINUX_WAIT_TIMEOUT_SEC,  # сколько ждать выхода, секунд
+) -> str: # текст скрипта
+    """
+    Формирует ``update.sh``: замена кода после выхода программы, откат, перезапуск.
+
+    Порядок работы скрипта:
+        1. переходит в свою папку (``${0%/*}``): полный путь установки в текст не попадает,
+           поэтому пробел, кириллица, кавычка и ``$`` в нём ничего не ломают, а все дальнейшие
+           пути — относительные;
+        2. ждёт выхода процесса (зомби считается вышедшим); не дождался за ``wait_timeout`` —
+           ничего не меняет, убирает ``.update_<метка>`` и завершается;
+        3. создаёт ``.update_in_progress`` (с ним ``run.sh`` после сбоя запускает ``--recover``);
+        4. переносит файлы прежней версии в ``backup_<версия>/`` — только файлы из манифестов;
+           данные в папках кода остаются на месте;
+        5. убирает опустевшие папки удалённых модулей (в папке только ``__pycache__`` — считается
+           пустой; папка с данными остаётся) и кладёт новые файлы (``mv -T``);
+        6. при ``requirements_changed`` — ``venv_project_med/bin/python -m pip install -r``;
+        7. убирает временное, запускает ``run.sh`` (``setsid`` / ``nohup``; ``DISPLAY`` и
+           ``WAYLAND_DISPLAY`` наследуются), удаляет себя.
+    Ошибка на шагах 4–6 — откат: файлы из ``backup_`` возвращаются, добавленные удаляются,
+    пустой ``backup_`` убирается, причина пишется в ``.update_failed``, запускается прежняя
+    версия. Откат можно повторять (``--recover`` после сбоя питания посреди шага 4–6). Если
+    откат не удался, скрипт, ``.update_in_progress`` и ``backup_`` остаются: ``run.sh`` повторит.
+
+    ``pip`` вызывается как ``python -m pip``, а не ``bin/pip``: у скрипта ``bin/pip`` в первой
+    строке зашит путь, и после переименования папки установки он перестаёт запускаться.
+
+    Функция только строит текст: файлы не трогает, значения экранирует.
+
+    Args:
+        wait_pid             : (int) PID программы.
+        old_version          : (str) Текущая версия.
+        new_version          : (str) Новая версия.
+        work_dir             : (str) Временная папка относительно установки.
+        payload_dir          : (str) Папка дистрибутива относительно установки.
+        backup_dir           : (str) Папка прежней версии относительно установки.
+        new_paths            : (Iterable[str]) Файлы новой версии.
+        removed_paths        : (Iterable[str]) Файлы, которых в новой версии нет.
+        added_paths          : (Iterable[str]) Файлы, которых раньше не было на диске.
+        requirements_changed : (bool) Запускать ли pip.
+        wait_timeout         : (int) Сколько ждать выхода программы, секунд.
+
+    Returns:
+        (str) Текст скрипта bash.
+
+    Example:
+        >>> text = build_linux_update_script(
+        ...     wait_pid                =   123,                    # PID
+        ...     old_version             =   '1.0.0',                # было
+        ...     new_version             =   '1.1.0',                # стало
+        ...     work_dir                =   '.update_1',            # временная папка
+        ...     payload_dir             =   '.update_1/top',        # дистрибутив
+        ...     backup_dir              =   'backup_1.0.0',         # прежняя версия
+        ...     new_paths               =   ['run.sh', 'a b.py'],   # новые файлы
+        ...     removed_paths           =   [],                     # удалённых нет
+        ...     added_paths             =   [],                     # добавленных нет
+        ...     requirements_changed    =   False,                  # pip не нужен
+        ... )
+        >>> "'a b.py'" in text and 'WAIT_PID=123' in text
+        True
+    """
+    new_paths = list(new_paths)
+    header = [
+        '#!/bin/bash',
+        '# Замена кода Linux-версии после выхода программы. Сформирован app/updater.py',
+        '# (build_linux_update_script); пути относительно папки этого файла.',
+        'set -u',
+        'case "$0" in */*) cd -- "${0%/*}" || exit 1 ;; esac',
+        '',
+        f'WAIT_PID={int(wait_pid)}',
+        f'WAIT_TIMEOUT={int(wait_timeout)}',
+        f'OLD_VERSION={shlex.quote(old_version)}',
+        f'NEW_VERSION={shlex.quote(new_version)}',
+        f'WORK_DIR={shlex.quote(work_dir)}',
+        f'PAYLOAD_DIR={shlex.quote(payload_dir)}',
+        f'BACKUP_DIR={shlex.quote(backup_dir)}',
+        f'REQUIREMENTS_CHANGED={1 if requirements_changed else 0}',
+        f'LOG_FILE={shlex.quote(LINUX_UPDATE_LOG)}',
+        f'IN_PROGRESS_FILE={shlex.quote(LINUX_IN_PROGRESS_FILE)}',
+        f'FAILURE_FILE={shlex.quote(LINUX_FAILURE_FILE)}',
+        f'SCRIPT_FILE={shlex.quote(LINUX_UPDATE_SCRIPT)}',
+        f'RUN_SCRIPT={shlex.quote(LINUX_RUN_SCRIPT)}',
+        f'REQUIREMENTS_FILE={shlex.quote(LINUX_REQUIREMENTS_FILE)}',
+        f'VENV_PYTHON={shlex.quote(LINUX_VENV_DIR + "/bin/python")}',
+        _shell_array('NEW_PATHS', new_paths),
+        _shell_array('REMOVED_PATHS', removed_paths),
+        _shell_array('ADDED_PATHS', added_paths),
+        '',
+    ]
+    return '\n'.join(header) + _LINUX_UPDATE_SCRIPT_BODY
+
+
+# итог подготовки обновления
+@dataclass(frozen=True)
+class LinuxUpdatePlan:
+    """
+    Подготовленное обновление Linux-версии (результат :func:`prepare_linux_update`).
+
+    Attributes:
+        script_path          : (str) Полный путь ``update.sh``.
+        work_dir             : (str) Полный путь ``.update_<метка>``.
+        backup_dir           : (str) Полный путь ``backup_<версия>`` (ещё не создан).
+        new_version          : (str) Устанавливаемая версия.
+        new_paths            : (Tuple[str, ...]) Файлы кода новой версии.
+        removed_paths        : (Tuple[str, ...]) Файлы прежней версии, которых нет в новой.
+        added_paths          : (Tuple[str, ...]) Файлы, которых на диске не было.
+        requirements_changed : (bool) Изменился ``requirements.txt``.
+
+    Example:
+        >>> LinuxUpdatePlan('s', 'w', 'b', '1.1', ('a',), (), (), False).new_version
+        '1.1'
+    """
+    script_path          : str               # update.sh
+    work_dir             : str               # .update_<метка>
+    backup_dir           : str               # backup_<версия>
+    new_version          : str               # устанавливаемая версия
+    new_paths            : Tuple[str, ...]   # файлы новой версии
+    removed_paths        : Tuple[str, ...]   # удалённые файлы
+    added_paths          : Tuple[str, ...]   # добавленные файлы
+    requirements_changed : bool              # нужен pip
+
+
+# удаление следа файла или папки: ошибки не мешают сообщить исходную
+def _remove_tree_quietly(
+    path : str,  # файл, ссылка или папка
+) -> None:
+    """
+    Удаляет файл, ссылку или папку, если они есть; ошибки удаления пропускаются.
+
+    Args:
+        path : (str) Что удалить.
+
+    Example:
+        >>> _remove_tree_quietly('/нет/такого/файла') is None
+        True
+    """
+    try:
+        if os.path.islink(path) or os.path.isfile(path):
+            os.remove(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+    except OSError:
+        pass
+
+
+# содержимое файла как байты; нет файла — None
+def _read_bytes_or_none(
+    path : str,  # файл
+) -> Optional[bytes]: # содержимое; None — файла нет
+    """
+    Читает файл целиком; файла нет — ``None``.
+
+    Args:
+        path : (str) Файл.
+
+    Returns:
+        (bytes/None) Содержимое; None — файла нет.
+
+    Example:
+        >>> _read_bytes_or_none('/нет/такого/файла') is None
+        True
+    """
+    try:
+        with open(path, 'rb') as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+# подготовка обновления: распаковка, проверка, скрипт
+def prepare_linux_update(
+    archive_path    : str,                         # скачанный .tar.gz
+    install_root    : str,                         # папка установки
+    current_version : str,                         # текущая версия
+    wait_pid        : int,                         # PID программы, выхода которой ждать
+    stamp           : Optional[int] = None,        # метка папки; None — текущее время
+    wait_timeout    : int = LINUX_WAIT_TIMEOUT_SEC,  # сколько скрипту ждать выхода, секунд
+) -> LinuxUpdatePlan: # что подготовлено
+    """
+    Распаковывает обновление, проверяет состав и пишет ``update.sh``; код ещё не меняется.
+
+    Порядок: остатки прошлых попыток ``.update_<число>`` убираются → распаковка в новую
+    ``.update_<метка>`` (:func:`safe_extract_tar`) → сверка с манифестом
+    (:func:`check_unpacked_update`) → версия в архиве новее текущей (иначе обновление
+    предлагалось бы снова после каждого запуска) → манифест установленной версии → в пути кода
+    нет ссылок на папки → сравнение ``requirements.txt`` → запись ``update.sh``.
+
+    Ошибка — :class:`UpdateError`, временная папка удалена, код не менялся. Скачанный архив
+    удаляется в любом случае: после распаковки он не нужен, а битый повторно не пригодится.
+
+    Note:
+        ``backup_<версия>`` здесь не создаётся. Папка с таким именем уже есть (та же версия
+        обновлялась раньше) — берётся ``backup_<версия>_<метка>``, старый бэкап не трогается.
+
+    Args:
+        archive_path    : (str) Скачанный архив.
+        install_root    : (str) Папка установки.
+        current_version : (str) Текущая версия программы.
+        wait_pid        : (int) PID программы.
+        stamp           : (int/None) Метка временной папки; None — текущее время.
+        wait_timeout    : (int) Сколько скрипту ждать выхода программы, секунд.
+
+    Returns:
+        (LinuxUpdatePlan) Подготовленное обновление.
+
+    Raises:
+        UpdateError: Обновление нельзя установить (текст — для пользователя).
+
+    Example:
+        >>> try:
+        ...     prepare_linux_update(
+        ...         archive_path    =   '/нет/архива.tar.gz',   # архива нет
+        ...         install_root    =   '/нет/папки',           # установки нет
+        ...         current_version =   '1.0.0',                # версия
+        ...         wait_pid        =   1,                      # PID
+        ...     )
+        ... except UpdateError as e:
+        ...     str(e).startswith('Не удалось подготовить обновление')
+        True
+    """
+    stamp = int(time.time()) if stamp is None else int(stamp)
+    work_name = f'{LINUX_WORK_PREFIX}{stamp}'
+    work_dir = os.path.join(install_root, work_name)
+    try:
+        for name in os.listdir(install_root) if os.path.isdir(install_root) else ():
+            if _LINUX_WORK_DIR_RE.match(name): # остаток прерванной попытки
+                _remove_tree_quietly(os.path.join(install_root, name))
+        os.mkdir(work_dir)
+
+        top_name = safe_extract_tar(
+            archive_path    =   archive_path,   # архив
+            dest_dir        =   work_dir,       # временная папка
+        )
+        payload_dir = os.path.join(work_dir, top_name)
+        new_paths = check_unpacked_update(payload_dir)
+
+        version_bytes = _read_bytes_or_none(
+            os.path.join(payload_dir, LINUX_VERSION_FILE),  # версия в архиве
+        )
+        new_version = (version_bytes or b'').decode('utf-8-sig', errors='replace').strip()
+        if not is_newer_version(current_version, new_version):
+            raise UpdateError(
+                f'Версия в архиве ({new_version or "нет"}) не новее установленной ({current_version})'
+            )
+
+        old_paths = read_linux_manifest(install_root)
+        new_set = set(new_paths)
+        all_paths = new_set | set(old_paths)
+        for path in sorted(all_paths):
+            parts = path.split('/')
+            for depth in range(1, len(parts)):
+                folder = os.path.join(install_root, *parts[:depth])
+                if os.path.islink(folder):
+                    raise UpdateError(f'Папка кода — ссылка, обновите вручную: {folder}')
+
+        removed_paths = tuple(sorted(set(old_paths) - new_set))
+        # Папка на месте нового файла тоже «файла не было»: при откате файл убирается, пакет возвращается
+        added_paths = tuple(
+            path for path in new_paths
+            if not os.path.lexists(os.path.join(install_root, path))
+            or (os.path.isdir(os.path.join(install_root, path))
+                and not os.path.islink(os.path.join(install_root, path)))
+        )
+
+        new_requirements = _read_bytes_or_none(
+            os.path.join(payload_dir, LINUX_REQUIREMENTS_FILE),  # пакеты новой версии
+        )
+        old_requirements = _read_bytes_or_none(
+            os.path.join(install_root, LINUX_REQUIREMENTS_FILE),  # пакеты прежней версии
+        )
+        requirements_changed = new_requirements is not None and new_requirements != old_requirements
+        venv_python = os.path.join(install_root, LINUX_VENV_DIR, 'bin', 'python')
+        if requirements_changed and not os.path.exists(venv_python):
+            raise UpdateError(
+                f'Нужно обновить пакеты, но нет окружения {LINUX_VENV_DIR}: обновите вручную (./install.sh)'
+            )
+
+        backup_name = LINUX_BACKUP_PREFIX + re.sub(r'[^0-9A-Za-z._-]', '_', current_version)
+        if os.path.lexists(os.path.join(install_root, backup_name)):
+            backup_name = f'{backup_name}_{stamp}'
+
+        script = build_linux_update_script(
+            wait_pid                =   wait_pid,                       # PID программы
+            old_version             =   current_version,                # было
+            new_version             =   new_version,                    # стало
+            work_dir                =   work_name,                      # временная папка
+            payload_dir             =   f'{work_name}/{top_name}',      # дистрибутив
+            backup_dir              =   backup_name,                    # прежняя версия
+            new_paths               =   new_paths,                      # новые файлы
+            removed_paths           =   removed_paths,                  # удалённые
+            added_paths             =   added_paths,                    # добавленные
+            requirements_changed    =   requirements_changed,           # pip
+            wait_timeout            =   wait_timeout,                   # ожидание выхода
+        )
+        script_path = os.path.join(install_root, LINUX_UPDATE_SCRIPT)
+        temporary_path = f'{script_path}.tmp'
+        with open(temporary_path, 'w', encoding='utf-8', newline='\n') as f:
+            f.write(script)
+        os.chmod(temporary_path, 0o700)
+        os.replace(temporary_path, script_path)
+    except UpdateError:
+        _remove_tree_quietly(work_dir)
+        raise
+    except OSError as e:
+        _remove_tree_quietly(work_dir)
+        raise UpdateError(f'Не удалось подготовить обновление: {e}') from e
+    finally:
+        _remove_tree_quietly(archive_path)
+
+    return LinuxUpdatePlan(
+        script_path             =   script_path,                                # update.sh
+        work_dir                =   work_dir,                                   # временная папка
+        backup_dir              =   os.path.join(install_root, backup_name),    # прежняя версия
+        new_version             =   new_version,                                # стало
+        new_paths               =   new_paths,                                  # новые файлы
+        removed_paths           =   removed_paths,                              # удалённые
+        added_paths             =   added_paths,                                # добавленные
+        requirements_changed    =   requirements_changed,                       # pip
+    )
+
+
+# запуск update.sh отдельно от программы
+def launch_linux_update_script(
+    script_path  : str,  # полный путь update.sh
+    install_root : str,  # папка установки
+) -> None:
+    """
+    Запускает ``update.sh`` в отдельном сеансе: он переживает выход программы.
+
+    Окружение наследуется — в нём ``DISPLAY`` и ``WAYLAND_DISPLAY`` для перезапуска окна. Вывод
+    скрипта не нужен: он сам пишет ``update.log``.
+
+    Args:
+        script_path  : (str) Скрипт.
+        install_root : (str) Папка установки (текущая папка процесса).
+
+    Raises:
+        OSError: Скрипт не запустился (нет bash).
+
+    Example:
+        >>> launch_linux_update_script('/нет/такого.sh', '/нет/такой/папки')
+        Traceback (most recent call last):
+        ...
+        FileNotFoundError: [Errno 2] No such file or directory: '/нет/такой/папки'
+    """
+    subprocess.Popen(
+        ['bash', script_path],                      # без оболочки: пробелы в пути не мешают
+        cwd                 =   install_root,       # папка установки
+        stdin               =   subprocess.DEVNULL, # без терминала
+        stdout              =   subprocess.DEVNULL, # журнал ведёт сам скрипт
+        stderr              =   subprocess.DEVNULL, # журнал ведёт сам скрипт
+        start_new_session   =   True,               # не закроется вместе с программой
+    )
+
+
+# текст о неудачном обновлении: прочитать один раз
+def pop_linux_update_failure(
+    install_root : Optional[str] = None,  # папка установки; None — текущая программа
+) -> Optional[str]: # причина для показа пользователю; None — сбоя не было
+    """
+    Возвращает и убирает сообщение скрипта о неудачном обновлении (``.update_failed``).
+
+    После отката ``update.sh`` снова запускает прежнюю версию; без этого сообщения окно просто
+    открылось бы с той же версией и пользователь не понял бы, что случилось. Окно вызывает
+    функцию при старте и показывает текст. Ошибки чтения — как «сообщения нет».
+
+    Args:
+        install_root : (str/None) Папка установки; None — :func:`get_install_root`.
+
+    Returns:
+        (str/None) Текст; None — сообщения нет.
+
+    Example:
+        >>> pop_linux_update_failure('/нет/такой/папки') is None
+        True
+    """
+    root = install_root if install_root is not None else get_install_root()
+    path = os.path.join(root, LINUX_FAILURE_FILE)
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            text = f.read().strip()
+        os.remove(path)
+    except OSError:
+        return None
+    return text or None
 
 
 # ----------------------------------------------------------------------------------------
@@ -1308,8 +2463,10 @@ class UpdateApplier(QObject):
             self.error.emit("Не найден подходящий файл обновления для вашей ОС")
             return
 
-        # Новый файл — рядом с exe, уникальное имя (метка времени)
-        exe_dir = get_app_dir()
+        # Новый файл — рядом с exe, уникальное имя (метка времени); Linux — в корне установки
+        exe_dir = get_install_root() if system == 'linux' else get_app_dir()
+        # exe_dir = get_app_dir()
+        # ↑ до 2026-11-07 (U20): из исходников это <установка>/app — папка кода, а не папка программы
         new_exe_name = update_file_name(system, int(time.time()))
         new_exe_path = os.path.join(exe_dir, new_exe_name)
 
@@ -1370,12 +2527,14 @@ class UpdateApplier(QObject):
     )
     def _apply_update(self) -> None:
         """
-        Замена программы: скрипт PowerShell (Windows) в папке программы и выход.
+        Замена программы: скрипт в папке программы (PowerShell — Windows, bash — Linux) и выход.
 
-        Ошибки (ОС, не собранная программа, нет скачанного файла) — в ``error``.
+        Ошибки (ОС, не собранная программа, нет скачанного файла, обновление не прошло
+        проверку) — в ``error``, программа продолжает работать.
         """
+        system = current_system()
         reason = auto_update_unavailable_reason(
-            system=current_system(), # ОС
+            system=system, # ОС
             frozen=bool(getattr(sys, 'frozen', False)), # собранная программа
         )
         if reason:
@@ -1384,6 +2543,10 @@ class UpdateApplier(QObject):
 
         if not self._downloaded_file or not os.path.exists(self._downloaded_file):
             self.error.emit("Новый файл не найден")
+            return
+
+        if system == 'linux':
+            self._apply_update_linux()
             return
 
         app_dir = get_app_dir()
@@ -1410,6 +2573,48 @@ class UpdateApplier(QObject):
             startupinfo=startupinfo,
             creationflags=subprocess.CREATE_NO_WINDOW
         )
+        QApplication.quit()
+        sys.exit(0)
+
+    @AppLogger.get_instance(
+        name='UpdateApplier',
+        # share_file_with = 'system',
+        enable_file_logging = 'system',
+        use_name_in_filename = False, # 'system'
+    ).log_execution_time(
+        level=AppLogger._parse_log_level('DEBUG')
+    )
+    def _apply_update_linux(self) -> None:
+        """
+        Linux: распаковывает архив, проверяет состав, запускает ``update.sh`` и выходит.
+
+        Распаковка идёт в потоке окна (архив — несколько МБ исходников, доли секунды). Ошибка —
+        в ``error``, код не менялся, программа продолжает работать. Заменяет код уже сам скрипт,
+        после выхода программы.
+        """
+        install_root = get_install_root()
+        try:
+            plan = prepare_linux_update(
+                archive_path    =   self._downloaded_file,  # скачанный архив
+                install_root    =   install_root,           # папка установки
+                current_version =   APP_VERSION,            # текущая версия
+                wait_pid        =   os.getpid(),            # этот процесс
+            )
+        except UpdateError as e:
+            self.error.emit(str(e))
+            return
+
+        try:
+            launch_linux_update_script(
+                script_path     =   plan.script_path,   # update.sh
+                install_root    =   install_root,       # папка установки
+            )
+        except OSError as e:
+            _remove_tree_quietly(plan.work_dir)
+            _remove_tree_quietly(plan.script_path)
+            self.error.emit(f'Не удалось запустить скрипт обновления: {e}')
+            return
+
         QApplication.quit()
         sys.exit(0)
 

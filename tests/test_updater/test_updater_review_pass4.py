@@ -217,7 +217,7 @@ def _start_applier(
     with patch.object(updater, 'UpdateDownloader') as downloader_cls, \
          patch.object(updater.sys, 'frozen', True, create=True), \
          patch.object(updater, 'current_system', return_value=system), \
-         patch.object(updater, 'AUTO_UPDATE_SYSTEMS', frozenset({'windows', 'linux'})), \
+         patch.object(updater, 'auto_update_unavailable_reason', return_value=None), \
          patch.object(updater, 'get_app_dir', return_value=str(tmp_path)), \
          patch('app.config.conf.getenv.get_getenv', return_value=''):
         applier.start()

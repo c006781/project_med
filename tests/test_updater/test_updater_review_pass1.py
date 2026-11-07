@@ -242,21 +242,22 @@ def test_u5_not_frozen_error_before_download():
     """Из исходников — ошибка сразу, скачивание не начинается (раньше — после скачивания)."""
     applier, errors = _applier()
     with patch.object(updater, 'UpdateDownloader') as downloader_cls, \
-         patch.object(updater.sys, 'frozen', False, create=True):
+         patch.object(updater.sys, 'frozen', False, create=True), \
+         patch.object(updater, 'current_system', return_value='windows'):
         applier.start()
     downloader_cls.assert_not_called()
     assert errors == ['Автообновление работает только в собранном приложении']
 
 
 def test_u1_linux_error_before_download():
-    """Собранная программа на Linux — ошибка до скачивания (раньше — AttributeError после)."""
+    """Собранной Linux-версии нет: ошибка до скачивания (раньше — AttributeError после)."""
     applier, errors = _applier()
     with patch.object(updater, 'UpdateDownloader') as downloader_cls, \
          patch.object(updater.sys, 'frozen', True, create=True), \
          patch.object(updater, 'current_system', return_value='linux'):
         applier.start()
     downloader_cls.assert_not_called()
-    assert len(errors) == 1 and 'только для Windows' in errors[0]
+    assert len(errors) == 1 and 'собранной Linux-версии' in errors[0]
 
 
 def test_u1_windows_no_asset_error():

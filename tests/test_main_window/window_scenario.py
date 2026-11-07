@@ -221,8 +221,16 @@ def db_replace(work: str) -> Dict[str, Any]:
     message_after_break = MESSAGES[-1][1]
     backups_after_break = len(os.listdir(os.path.join(work, 'копии')))
 
+    # Экран наборов данных открыт, на нём несохранённая правка; вопрос о потере — ответ «да»
+    pilot = window.dataset_pilot_page
+    pilot.open_data()
+    pilot.clinic.patients.set_value('phone', '+7 000')
+    pilot.clinic.patients.post()
+    drafts_before = window.drafts.store.is_empty
+
     _run_download(window, _disk_client(remote))
     after_replace = _patient_names()
+    pilot_name = pilot.clinic.patients.value('last_name')
     model = window.patient_list_page.table.model
     table_text = [
         str(model.index(row, column).data())
@@ -239,6 +247,11 @@ def db_replace(work: str) -> Dict[str, Any]:
         'break_title'   : message_after_break,          # сообщение
         'break_backups' : backups_after_break,          # копия до передачи
         'after_replace' : after_replace,                # база после замены
+        'drafts_before' : drafts_before,                # черновики до замены пусты
+        'drafts_after'  : window.drafts.store.is_empty, # черновики после замены пусты
+        'can_undo'      : window.drafts.store.can_undo, # отмена после замены
+        'pilot_name'    : pilot_name,                   # экран наборов данных
+        'questions'     : [m[1] for m in MESSAGES if m[0] == 'question'],   # вопросы
         'in_copy'       : in_copy,                      # пациенты в копии
         'backups'       : len(backups),                 # всего копий
         'table_text'    : table_text,                   # ячейки страницы пациентов

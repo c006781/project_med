@@ -133,6 +133,11 @@ def test_broken_download_then_replace_on_real_window(tmp_path):
     assert result['backups'] == 2
     assert 'СДиска' in result['table_text']
     assert 'Локальный' not in result['table_text']
+    assert result['drafts_before'] is False
+    assert result['drafts_after'] is True
+    assert not result['can_undo']
+    assert result['pilot_name'] == 'СДиска'
+    assert result['questions'] == ['Несохранённые изменения']
     assert 'clinic.db' in result['files']
     assert not [name for name in result['files'] if name.endswith('.part')]
     assert result['closed'] is True

@@ -1412,6 +1412,7 @@ class SyncMixin:
             QMessageBox.critical(self, "База не заменена", f"{exc}\n\n{self._backup_note()}")
             return
         self.logger.info(f"Рабочая база заменена скачанной; копия прежней: {self._db_backup_path}")
+        self._forget_drafts_of_replaced_db()
         self._reload_after_db_change()
         self._show_download_outcome(f"База данных заменена скачанной.\n{self._backup_note()}", notes)
 
@@ -1431,10 +1432,10 @@ class SyncMixin:
     # несохранённое перед заменой базы
     def _confirm_db_replace(self) -> bool:
         """
-        Спрашивает о несохранённом перед заменой рабочей базы; согласие очищает черновики.
+        Спрашивает о несохранённом перед заменой рабочей базы.
 
         Сохранять здесь бессмысленно: изменения записались бы в базу, которая сейчас будет заменена.
-        Черновики ссылаются на записи прежней базы, поэтому при согласии они удаляются. Незавершённая
+        После удачной замены черновики убирает :meth:`_forget_drafts_of_replaced_db`. Незавершённая
         правка экрана наборов данных, не прошедшая проверку, отменяет замену.
 
         Returns:
@@ -1467,11 +1468,23 @@ class SyncMixin:
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return False
-        if not self._confirm_old_pages_loss("Заменить базу"):
-            return False
+        return self._confirm_old_pages_loss("Заменить базу")
+
+    # черновики прежней базы после её замены
+    def _forget_drafts_of_replaced_db(self) -> None:
+        """
+        Убирает черновики и историю отмены: они относятся к записям заменённой базы.
+
+        Вызывается только после удачной замены: при сбое база прежняя и черновики нужны. Без очистки
+        истории отмена вернула бы правки к записям, которых в новой базе может не быть.
+
+        Example:
+            >>> window._forget_drafts_of_replaced_db()      # doctest: +SKIP
+        """
+        drafts = getattr(self, 'drafts', None)
         if drafts is not None:
             drafts.store.clear()
-        return True
+            drafts.store.clear_history()
 
     # строка о резервной копии для сообщений
     def _backup_note(self) -> str:
@@ -3365,6 +3378,10 @@ class MainWindow(
             self.patient_list_page.refresh_data()
         if hasattr(self, 'appointment_list_page'):
             self.appointment_list_page.refresh_data()
+        # Экран наборов данных открыт: иначе показывал бы список без новых записей
+        pilot = getattr(self, 'dataset_pilot_page', None)
+        if pilot is not None and pilot._opened:
+            pilot.open_data()
 
     @AppLogger.get_instance(
         name='MainWindow',

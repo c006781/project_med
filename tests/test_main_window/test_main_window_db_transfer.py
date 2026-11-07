@@ -166,6 +166,17 @@ def test_drafts_accepted_are_cleared(window, work_db, disk, messages, drafts):
     window._start_download()
     assert read_sqlite_value(work_db) == 'remote'
     drafts.store.clear.assert_called_once_with()
+    drafts.store.clear_history.assert_called_once_with()
+
+
+def test_failed_replace_keeps_drafts(window, work_db, disk, messages, drafts, monkeypatch):
+    """Замена не удалась: база прежняя, значит и черновики нужны."""
+    def replace(src, dst):
+        raise PermissionError('файл занят')
+    monkeypatch.setattr(ss.os, 'replace', replace)
+    window._start_download()
+    assert read_sqlite_value(work_db) == 'local'
+    drafts.store.clear.assert_not_called()
 
 
 def test_pilot_invalid_edit_cancels(window, work_db, disk, messages):

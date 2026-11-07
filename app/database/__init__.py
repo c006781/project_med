@@ -4,7 +4,8 @@
 ``Patient``, ``Appointment``, ``AppointmentNote``, ``Photo``, ``PhotoFile`` и ``generate_test_data``.
 
 Миграции — ``app.database.migrate`` (не импортируется пакетом; ``Database`` зовёт его
-сам). Устройство — ``app/database/IMPLEMENTATION.md``.
+сам), встроенные триггеры SQLite — ``app.database.sqlite_triggers``. Устройство —
+``app/database/IMPLEMENTATION.md``.
 
 Example:
     >>> from app.database import Database, Patient

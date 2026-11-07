@@ -874,6 +874,26 @@ def test_trigger_dangling_reference_refused_by_foreign_keys(tmp_path, migrations
         db.close()
 
 
+def test_raise_ignore_breaks_orm_as_documented(tmp_path, migrations):
+    """RAISE(IGNORE): ORM ждёт изменённую строку — ошибка и откат, а не тихая потеря правки."""
+    from sqlalchemy.orm.exc import StaleDataError
+    ignore = trigger(
+        'trg_ignore',               # имя
+        'before_update',            # перед изменением
+        'SELECT RAISE(IGNORE);',    # молча пропустить строку
+    ).create_sql('patients')
+    migrations(create_op(ignore))
+    db = Database(f"sqlite:///{tmp_path / 'db.db'}")
+    try:
+        with db.session_scope() as session:
+            session.add(Patient(id=1, first_name='И', last_name='П'))
+        with pytest.raises(StaleDataError):
+            with db.session_scope() as session:
+                session.get(Patient, 1).first_name = 'Новое'
+    finally:
+        db.close()
+
+
 def test_create_tables_recreate_restores_trigger(tmp_path, migrations):
     migrations(create_op(GUARD_SQL))
     db = Database(f"sqlite:///{tmp_path / 'db.db'}")

@@ -520,6 +520,24 @@ class TriggerChangeOp(ops.MigrateOperation):
         old   : Optional[str],   # текст до; None — не было
         new   : Optional[str],   # текст после; None — не будет
     ) -> None: # запоминает изменение
+        """
+        Запоминает изменение триггера.
+
+        Args:
+            table : (str) Таблица.
+            name  : (str) Имя триггера.
+            old   : (str/None) Текст до; None — триггера не было.
+            new   : (str/None) Текст после; None — триггера не будет.
+
+        Example:
+            >>> TriggerChangeOp(
+            ...     't',    # таблица
+            ...     'a',    # имя
+            ...     None,   # не было
+            ...     'x',    # стало
+            ... ).new
+            'x'
+        """
         self.table = table
         self.name  = name
         self.old   = old
@@ -564,7 +582,7 @@ class TriggerChangeOp(ops.MigrateOperation):
 
 
 @comparators.dispatch_for(
-    'schema',                           # уровень схемы
+    'schema',                                # уровень схемы
     priority    =   DispatchPriority.LAST,   # после таблиц: триггер новой таблицы — после неё
 )
 def _compare_triggers(

@@ -145,7 +145,7 @@ def main():
     
     from interfaces.gui.gui_window.main_window import MainWindow # тут, так как должно быть после создания QApplication
     # window = MainWindow()
-    # ↑ до 2026-10-18 (M7): ошибка открытия базы (отказ миграции, база занята, нет прав)
+    # ↑ до 2026-10-18 (MG7): ошибка открытия базы (отказ миграции, база занята, нет прав)
     #   вылетала необработанной — exe без консоли молча закрывался.
     try:
         window = MainWindow()

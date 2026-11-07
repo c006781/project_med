@@ -3,7 +3,7 @@
 """
 Тесты исправлений проверки модуля конфигурации, проход 1 (2026-10-15).
 
-Номера (G1, M7, AP2 …) — журнал проверок в ``app/config/IMPLEMENTATION.md`` §6.
+Номера (G1, CM7, AP2 …) — журнал проверок в ``app/config/IMPLEMENTATION.md`` §6.
 """
 
 import logging
@@ -69,8 +69,8 @@ def test_g2_set_key_failure_does_not_crash(env_file, monkeypatch, capsys):
 # config.msgpack
 # ---------------------------------------------------------------------------
 
-def test_m7_explicit_empty_defaults_respected(cfg_path):
-    """M7: defaults={} — пустые умолчания, а не умолчания класса."""
+def test_cm7_explicit_empty_defaults_respected(cfg_path):
+    """CM7: defaults={} — пустые умолчания, а не умолчания класса."""
     class WithDefaults(BaseConfigManager):
         _defaults = {'a': 1}
 
@@ -78,8 +78,8 @@ def test_m7_explicit_empty_defaults_respected(cfg_path):
     assert WithDefaults(cfg_path, defaults={}).get_all() == {}
 
 
-def test_m9_load_drops_keys_removed_from_file(cfg_path):
-    """M9: load() строит значения заново — ключ, удалённый из файла, возвращается к умолчанию."""
+def test_cm9_load_drops_keys_removed_from_file(cfg_path):
+    """CM9: load() строит значения заново — ключ, удалённый из файла, возвращается к умолчанию."""
     with open(cfg_path, 'wb') as f:
         msgpack.pack({'LOG_LEVEL': 'DEBUG', 'custom_key': 1}, f)
     m = AppConfigManager.get_instance(config_path=cfg_path)
@@ -94,8 +94,8 @@ def test_m9_load_drops_keys_removed_from_file(cfg_path):
     assert m.get('YANDEX_TOKEN') == '----'
 
 
-def test_m10_broken_file_on_load_recovers_with_defaults(cfg_path):
-    """M10: битый файл при load() — новый файл со значениями ПО УМОЛЧАНИЮ, не из памяти."""
+def test_cm10_broken_file_on_load_recovers_with_defaults(cfg_path):
+    """CM10: битый файл при load() — новый файл со значениями ПО УМОЛЧАНИЮ, не из памяти."""
     m = AppConfigManager.get_instance(config_path=cfg_path)
     m.set('YANDEX_TOKEN', 'in_memory')
     with open(cfg_path, 'wb') as f:
@@ -106,8 +106,8 @@ def test_m10_broken_file_on_load_recovers_with_defaults(cfg_path):
         assert msgpack.unpack(f)['YANDEX_TOKEN'] == '----'
 
 
-def test_m10_flags_reset_after_good_load(cfg_path):
-    """M10: после успешной перезагрузки флаги битого файла сбрасываются."""
+def test_cm10_flags_reset_after_good_load(cfg_path):
+    """CM10: после успешной перезагрузки флаги битого файла сбрасываются."""
     with open(cfg_path, 'wb') as f:
         f.write(b'\xc1')
     m = AppConfigManager.get_instance(config_path=cfg_path)
@@ -117,8 +117,8 @@ def test_m10_flags_reset_after_good_load(cfg_path):
     assert m.broken_config_message is None
 
 
-def test_m11_two_breaks_same_second_both_kept(cfg_path, monkeypatch):
-    """M11: две поломки в одну секунду — две разные копии."""
+def test_cm11_two_breaks_same_second_both_kept(cfg_path, monkeypatch):
+    """CM11: две поломки в одну секунду — две разные копии."""
     monkeypatch.setattr(manager_module.time, 'strftime', lambda fmt: '20261015_120000')
     backups = []
     for content in (b'\xc1first', b'\xc1second'):
@@ -130,8 +130,8 @@ def test_m11_two_breaks_same_second_both_kept(cfg_path, monkeypatch):
     assert [open(b, 'rb').read() for b in backups] == [b'\xc1first', b'\xc1second']
 
 
-def test_m12_unique_temp_files_and_no_leftovers(cfg_path, monkeypatch):
-    """M12: временный файл уникальный (не общий '<путь>.tmp') и не остаётся после save()."""
+def test_cm12_unique_temp_files_and_no_leftovers(cfg_path, monkeypatch):
+    """CM12: временный файл уникальный (не общий '<путь>.tmp') и не остаётся после save()."""
     # (до M12a spy стоял на tempfile.mkstemp; теперь имя строится в save() — смотрим,
     #  ЧТО подменяет конфиг через os.replace)
     names = []
@@ -151,8 +151,8 @@ def test_m12_unique_temp_files_and_no_leftovers(cfg_path, monkeypatch):
     assert sorted(os.listdir(os.path.dirname(cfg_path))) == ['config.msgpack']
 
 
-def test_m13_get_instance_thread_safe(cfg_path, monkeypatch):
-    """M13: параллельные get_instance для одного пути — один экземпляр."""
+def test_cm13_get_instance_thread_safe(cfg_path, monkeypatch):
+    """CM13: параллельные get_instance для одного пути — один экземпляр."""
     real_load = BaseConfigManager._load
 
     def slow_load(self):

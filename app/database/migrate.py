@@ -19,15 +19,15 @@ create_all умеет только СОЗДАТЬ недостающие таб�
     * **база с отметкой** — применяются недостающие миграции.
 
 Перед применением миграций к существующей базе-файлу делается резервная копия
-(``<файл>.bak-<ГГГГММДД_ЧЧММСС>-<версия>``, backup-API SQLite — M8): данные клиники дороже.
+(``<файл>.bak-<ГГГГММДД_ЧЧММСС>-<версия>``, backup-API SQLite — MG8): данные клиники дороже.
 
 Защиты (подробно — ``IMPLEMENTATION.md`` рядом):
-    * всё — одна транзакция, откатывается и изменение схемы (M1);
-    * блокировка записи сразу и решение под ней — две копии программы не мешают (M3);
-    * база новее программы — отказ до любых изменений (M9);
+    * всё — одна транзакция, откатывается и изменение схемы (MG1);
+    * блокировка записи сразу и решение под ней — две копии программы не мешают (MG3);
+    * база новее программы — отказ до любых изменений (MG9);
     * внешние ключи на время миграции выключены, после — проверка новых «висячих»
-      ссылок (M10);
-    * понятный текст ошибки для окна запуска — ``startup_error_text`` (M7).
+      ссылок (MG10);
+    * понятный текст ошибки для окна запуска — ``startup_error_text`` (MG7).
 
 Автоматизация (2026-10-18, «автомиграции»):
     * **автодостройка** при каждом запуске: база сравнивается со схемой ПОСЛЕДНЕЙ миграции;
@@ -54,7 +54,7 @@ import dataclasses
 import datetime
 import functools
 import os
-# import shutil  # до M8 (2026-10-18): копия файла — теперь backup-API SQLite
+# import shutil  # до MG8 (2026-10-18): копия файла — теперь backup-API SQLite
 import sqlite3
 import sys
 # import time
@@ -182,7 +182,7 @@ def head_revision() -> str:
     Returns:
         Идентификатор ревизии.
 
-    Результат запоминается (M4, 2026-10-16): миграции за время работы не меняются, а
+    Результат запоминается (MG4, 2026-10-16): миграции за время работы не меняются, а
     Database открывается многократно (тесты, пересоздание сервисов). Сбросить —
     ``head_revision.cache_clear()``.
 
@@ -305,7 +305,7 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
     """
     Резервная копия файла базы перед миграцией (только SQLite-файл; память — нет).
 
-    Копия — через backup-API SQLite (M8, 2026-10-18), а не копированием файла: в режиме
+    Копия — через backup-API SQLite (MG8, 2026-10-18), а не копированием файла: в режиме
     WAL свежие изменения лежат в отдельном файле ``-wal`` и, пока базу держит открытой
     другая программа, в основной файл не сливаются — копия файла их теряла. Backup-API
     читает базу как обычный читатель (под нашей блокировкой записи это разрешено) и
@@ -339,7 +339,7 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
     #     n += 1
     # engine.dispose()            # закрыть соединения приложения
     # # shutil.copy2(path, backup)
-    # # ↑ до M8 (2026-10-18): копия файла теряла изменения из -wal (режим WAL, база открыта другой программой)
+    # # ↑ до MG8 (2026-10-18): копия файла теряла изменения из -wal (режим WAL, база открыта другой программой)
     # source = sqlite3.connect(path)
     # target = sqlite3.connect(backup)
     # try:
@@ -353,7 +353,7 @@ def _backup(engine: Engine, revision: Optional[str]) -> Optional[str]:
 
 def _migration_engine(engine: Engine) -> Engine:
     """
-    Отдельный движок для миграций с НАСТОЯЩИМИ транзакциями (M1, 2026-10-16).
+    Отдельный движок для миграций с НАСТОЯЩИМИ транзакциями (MG1, 2026-10-16).
 
     Стандартный драйвер SQLite (pysqlite) сам фиксирует команды изменения схемы
     (CREATE/ALTER/DROP) мимо транзакции — сбой посреди миграции оставлял базу
@@ -383,7 +383,7 @@ def _migration_engine(engine: Engine) -> Engine:
         Отключает у драйвера собственное управление транзакциями: он не начинает и не
         фиксирует их сам.
 
-        Внешние ключи — явно ВЫКЛ (M10, 2026-10-18): SQLite пересобирает таблицу при
+        Внешние ключи — явно ВЫКЛ (MG10, 2026-10-18): SQLite пересобирает таблицу при
         ALTER (создать новую → скопировать → удалить старую). С включёнными ключами
         удаление старой таблицы каскадом стёрло бы дочерние строки (или упало бы).
         Включать/выключать ключи можно только вне транзакции — поэтому здесь, при
@@ -409,7 +409,7 @@ def _migration_engine(engine: Engine) -> Engine:
         """
         Начинает транзакцию явно — DDL откатывается вместе с остальным.
 
-        IMMEDIATE (M3, 2026-10-16): блокировка записи берётся СРАЗУ — вторая копия
+        IMMEDIATE (MG3, 2026-10-16): блокировка записи берётся СРАЗУ — вторая копия
         программы, открывающая ту же базу одновременно, ждёт, а не меняет её параллельно.
 
         Args:
@@ -452,7 +452,7 @@ def upgrade_database(engine: Engine, backup: bool = True) -> str:
     head = head_revision()
     if current_revision(engine) == head and not _drift_plan(engine, head)[0]:
         return head                           # обычный случай — без блокировки и копий
-    target = _migration_engine(engine)        # M1: транзакции, в которых откатывается и DDL
+    target = _migration_engine(engine)        # MG1: транзакции, в которых откатывается и DDL
     try:
         return _upgrade(engine, target, head, backup)
     finally:
@@ -464,7 +464,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
     """
     Тело ``upgrade_database``: изменения — через ``target`` (движок миграций).
 
-    Всё — в ОДНОЙ транзакции движка миграций с блокировкой записи (M3): версия и таблицы
+    Всё — в ОДНОЙ транзакции движка миграций с блокировкой записи (MG3): версия и таблицы
     базы читаются уже под блокировкой — если другая копия программы только что обновила
     базу, здесь это видно, и повторно ничего не делается.
 
@@ -486,7 +486,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
         current = MigrationContext.configure(conn).get_current_revision()
         tables = [n for n in inspect(conn).get_table_names()
                   if n != 'alembic_version' and not n.startswith('sqlite_')]
-        _ensure_known_revision(current)       # M9: база новее программы — отказ до любых изменений
+        _ensure_known_revision(current)       # MG9: база новее программы — отказ до любых изменений
         if current == head and not _drift_plan(conn, head)[0]:
             return head                       # обновила другая копия программы
         start = current
@@ -495,7 +495,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
         if current is None and tables:
             current, backup_path = _repair_legacy(engine, conn, backup)
         if current != head:
-            # M6 (2026-10-17): копия старой базы уже сделана в этой же транзакции — до фиксации
+            # MG6 (2026-10-17): копия старой базы уже сделана в этой же транзакции — до фиксации
             # файл тот же, вторая копия была бы дублем с неверной меткой версии.
             if backup and tables and backup_path is None:
                 backup_path = _backup(engine, current)
@@ -506,7 +506,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
         # (иначе копия уже есть, а сделать её после записи — читать заблокированный файл)
         _repair_drift(engine, conn, head, may_backup=backup and bool(tables) and backup_path is None
                       and current == start)
-        _check_foreign_keys(conn, fk_before)  # M10: новые нарушения связей — откат всего
+        _check_foreign_keys(conn, fk_before)  # MG10: новые нарушения связей — откат всего
     if start != head:
         _log.info(f"Схема базы обновлена: {start or 'пусто'} → {head}")
     return head
@@ -514,7 +514,7 @@ def _upgrade(engine: Engine, target: Engine, head: str, backup: bool) -> str:
 
 def _ensure_known_revision(current: Optional[str]) -> None:
     """
-    Версия базы известна этой программе (M9, 2026-10-18).
+    Версия базы известна этой программе (MG9, 2026-10-18).
 
     Сценарий: новая версия программы обновила базу (например, до 0003), затем запустили
     старую (знает до 0002). Раньше Alembic падал невнятным «Can't locate revision», а
@@ -565,7 +565,7 @@ def _foreign_key_violations(connection) -> set:
 
 def _check_foreign_keys(connection, before: set) -> None:
     """
-    После миграции не появилось НОВЫХ нарушений связей (M10, 2026-10-18).
+    После миграции не появилось НОВЫХ нарушений связей (MG10, 2026-10-18).
 
     На время миграции ключи выключены (пересборка таблиц SQLite); ошибочная миграция
     могла оставить «висячие» ссылки. Сравнение — с нарушениями ДО миграции: в старых
@@ -600,7 +600,7 @@ def _repair_legacy(engine: Engine, conn, backup: bool) -> Tuple[str, Optional[st
 
     Returns:
         ``(BASELINE, путь копии или None)`` — путь нужен ``_upgrade``, чтобы не делать
-        вторую копию того же файла (M6).
+        вторую копию того же файла (MG6).
 
     Raises:
         MigrationError: Небезопасное отличие (см. ``_plan_legacy_repair``).
@@ -698,7 +698,7 @@ def _schema_at(
 
 
 # Отличия, которые можно ДОПИСАТЬ (недостающее), — в порядке применения:
-# таблицы → столбцы → индексы (M12, 2026-10-18: раньше индексы шли до столбцов — индекс
+# таблицы → столбцы → индексы (MG12, 2026-10-18: раньше индексы шли до столбцов — индекс
 # на недостающем столбце создавался раньше самого столбца, и приведение падало)
 # _ADDABLE = ('add_table', 'add_index', 'add_column')
 _ADDABLE = ('add_table', 'add_column', 'add_index')
@@ -861,7 +861,7 @@ def _apply_legacy_repair(connection, added, where: str = 'Старая база'
     """
     from alembic.operations import Operations
     ops = Operations(MigrationContext.configure(connection))
-    for item in sorted(added, key=lambda i: _ADDABLE.index(i[0])):   # таблицы → столбцы → индексы (M12)
+    for item in sorted(added, key=lambda i: _ADDABLE.index(i[0])):   # таблицы → столбцы → индексы (MG12)
         kind = item[0]
         if kind == 'add_table':
             item[1].create(bind=connection)
@@ -881,7 +881,7 @@ def describe_differences(diffs: List) -> List[str]:
 
     Формы записей autogenerate: ``('add_table', Table)``, ``('add_index', Index)``,
     ``('add_column', схема, таблица, Column)``, ``('modify_type', схема, таблица, столбец,
-    …)`` и т. п. (M2, 2026-10-16: раньше имя столбца терялось).
+    …)`` и т. п. (MG2, 2026-10-16: раньше имя столбца терялось).
 
     Args:
         diffs: Результат ``schema_differences`` (элементы или списки элементов).
@@ -954,7 +954,7 @@ def startup_error_text(
     exc : BaseException,   # ошибка, поднятая при открытии базы
 ) -> Optional[str]: # понятный пользователю текст или None — ошибка не про базу
     """
-    Возвращает понятный пользователю текст ошибки открытия базы при запуске (проход 3, M7,
+    Возвращает понятный пользователю текст ошибки открытия базы при запуске (проход 3, MG7,
     2026-10-18).
 
     Раньше отказ миграции или заблокированная база вылетали из ``Database.__init__``

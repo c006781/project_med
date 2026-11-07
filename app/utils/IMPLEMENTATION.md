@@ -140,3 +140,5 @@ FD7 — 1, FD8 — 2), FD9 (2; были xfail strict, с 2026-10-30 — прох
 ## record_keys.py (2026-10-31, Ф1.6.10а)
 
 Ключи сравнения записей: `normalize_text`, `normalize_match`, `APPOINTMENT_KEY_FIELDS`, `appointment_key` — перенесены из `parsers/word_importer.py` без изменения поведения (нужны объединению пациентов в `app/services`, а `app` не зависит от `parsers`); новое — `record_key` (ключ по списку полей: строки через `normalize_match`, даты — целиком). Тесты — `tests/test_utils/test_record_keys.py`.
+
+**Ф1.6.10е (2026-11-07):** дата рождения с точностью — `BIRTH_PRECISION_*`, `normalize_birth_date` (что записывать), `effective_birth_precision` (чтение, не падает), `coarser_precision`, `birth_date_key`, `format_birth_date` («1999», «06.1999», «14.06.1999» — единственное место формата); `match_patients` → `PatientMatch` (пустое не противоречит, дата по наименее точной из двух, метка). Сравнение не транзитивно, поэтому попарно; `record_key` остался точным ключом. Здесь, а не в сервисах: импорт (`parsers`) зависит от этого модуля, а не от сервисов. Правила — `app/services/IMPLEMENTATION.md` §3.6; тесты — `tests/test_utils/test_birth_precision.py`.

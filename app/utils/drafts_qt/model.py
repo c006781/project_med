@@ -459,21 +459,30 @@ class DraftTableModel(QAbstractTableModel):
             flags |= Qt.ItemIsEditable
         return flags
 
-    def setData(self, index: QModelIndex, value: Any, role: int = Qt.EditRole) -> bool:
+    def setData(
+        self,
+        index : QModelIndex,            # ячейка
+        value : Any,                    # значение из редактора
+        role  : int = Qt.EditRole,      # только EditRole
+    ) -> bool:
         """
-        Правка ячейки → черновик. Исходное значение (из БД) передаётся хранилищу:
-        вернули как было — поле убирается из черновика.
+        Записывает правку ячейки в черновик. Исходное значение (из БД) передаётся хранилищу:
+        вернули как было — поле убирается из черновика. Правка таблицы — всегда правка
+        пользователя (``by_user=True``): от этого зависит судьба перенесённой записи.
 
         Args:
-            index: Ячейка.
-            value: Значение из редактора.
-            role: Только ``EditRole``.
+            index : (QModelIndex) Ячейка.
+            value : (Any) Значение из редактора.
+            role  : (int) Только ``EditRole``.
 
         Returns:
-            ``True``, если принято.
+            (bool) ``True``, если принято.
 
-        Пример:
-            >>> model.setData(model.index(0, 1), 'Пётр')
+        Example:
+            >>> model.setData(
+            ...     model.index(0, 1),  # ячейка
+            ...     'Пётр',             # новое значение
+            ... )
             True
         """
         if role != Qt.EditRole or not index.isValid() or not (self.flags(index) & Qt.ItemIsEditable):
@@ -493,12 +502,12 @@ class DraftTableModel(QAbstractTableModel):
         # ↑ до 2026-11-07 (DR10): хранилище не знало, что правку сделал пользователь; от этого
         #   зависит судьба записи, перенесённой в новую запись, которую потом удалили
         self.store.modify(
-            self.entity,                                    # тип
-            base[self.id_field],                            # id
-            {column.field: value},                          # новое значение
-            original    =   {column.field: base.get(column.field)},   # значение из БД
-            parent_id   =   parent_id,                      # родитель из строки
-            by_user     =   True,                           # правка из таблицы — всегда пользователь
+            self.entity,                                            # тип
+            base[self.id_field],                                    # id
+            {column.field: value},                                  # новое значение
+            original    =   {column.field: base.get(column.field)}, # значение из БД
+            parent_id   =   parent_id,                              # родитель из строки
+            by_user     =   True,                                   # правка из таблицы
         )
         return True
 

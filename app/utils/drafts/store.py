@@ -1116,29 +1116,36 @@ class DraftStore:
         self._emit('cleared', None)
 
     @_undoable
-    def revert_field(self, entity: str, entity_id: Hashable, *fields: str) -> None:
+    def revert_field(
+        self,
+        entity    : str,        # тип
+        entity_id : Hashable,   # id
+        *fields   : str,        # имена полей
+    ) -> None:
         """
         Отменяет изменение отдельных полей записи (остальные правки остаются).
 
         Существующая запись: поле убирается из черновика; поле внешнего ключа — запись
         возвращается к исходному родителю (нужно известное исходное значение). Новая
         запись: поле убирается из данных (родителя новой записи так не отменить —
-        отмените запись). Черновик без изменений удаляется.
+        отмените запись). Черновик без изменений удаляется. Отменённый перенос снимает и
+        признак переноса пользователем.
 
         Args:
-            entity: Тип.
-            entity_id: Id.
-            *fields: Имена полей.
-
-        Returns:
-            None
+            entity    : (str) Тип.
+            entity_id : (Hashable) Id.
+            *fields   : (str) Имена полей.
 
         Raises:
             ValueError: Отмена поля внешнего ключа без известного исходного значения
                 или у новой записи.
 
-        Пример:
-            >>> store.revert_field('appointment', 12, 'cost')
+        Example:
+            >>> store.revert_field(
+            ...     'appointment',  # тип
+            ...     12,             # id
+            ...     'cost',         # поле
+            ... )
         """
         node = (entity, entity_id)
         record = self._records.get(node)

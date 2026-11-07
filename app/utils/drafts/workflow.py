@@ -49,7 +49,9 @@ def save_with_confirmation(
 
     Вопрос не задаётся, если функция не передана: без ``confirm_new_ancestors`` новые
     предки вне объёма — отмена (``None``); без ``confirm_deletes`` удаление считается
-    подтверждённым (вызывающий сам отвечает за вопрос).
+    подтверждённым (вызывающий сам отвечает за вопрос). Исключение — перенесённые записи
+    (``plan.moved_deletes``): их пользователь на удаление не помечал, поэтому без вопроса
+    сохранение отменяется (``None``), записи не удаляются молча.
 
     Args:
         store                 : (DraftStore) Хранилище черновиков.
@@ -92,6 +94,8 @@ def save_with_confirmation(
     # ↑ до 2026-11-07 (DR10): без удаляемых веток вопроса не было, а перенесённая запись теперь
     #   удаляется и тогда, когда удалённая новая запись не входит в объём
     if plan.needs_delete_confirmation and confirm_deletes is not None and not confirm_deletes(plan):
+        return None
+    if plan.moved_deletes and confirm_deletes is None:
         return None
     if plan.is_empty:
         return SaveResult()

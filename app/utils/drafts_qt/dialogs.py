@@ -57,7 +57,7 @@ def describe_nodes(schema: 'TreeSchema', nodes: Iterable[NodeKey], limit: int = 
     return "\n".join(lines)
 
 
-# прежний родитель перенесённой записи в сообщении
+# список перенесённых записей с прежним родителем
 def _moved_lines(
     schema : 'TreeSchema',      # схема (названия типов)
     drafts : Iterable['Draft'], # перенесённые записи

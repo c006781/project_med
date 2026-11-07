@@ -405,6 +405,23 @@ def test_question_asked_without_deleted_branches(delete_store, adapter):
     assert asked[0].deleted_branches == () and result.moved_deleted == (('photo', 7),)
 
 
+def test_no_question_function_cancels_instead_of_silent_delete(delete_store, adapter):
+    """Вызывающий не умеет спрашивать: сохранение отменяется, запись не удаляется молча."""
+    adapter.rows[('photo', 7)] = {FK: 12}
+    _move_and_delete(delete_store)
+    assert save_with_confirmation(delete_store, adapter) is None
+    assert adapter.rows[('photo', 7)] == {FK: 12} and delete_store.has_draft('photo', 7)
+
+
+def test_no_question_function_keep_rule_saves(schema, adapter):
+    """KEEP без функции вопроса: ничего не удаляется, сохранение идёт, как раньше."""
+    store = DraftStore(schema)
+    adapter.rows[('photo', 7)] = {FK: 12}
+    _move_and_delete(store)
+    assert save_with_confirmation(store, adapter) is not None
+    assert adapter.rows[('photo', 7)] == {FK: 12} and store.is_empty
+
+
 def test_answer_changed_rule_asks_again(delete_store, adapter):
     """Значение сменили, пока открыт вопрос: спросить заново, по новому плану."""
     adapter.rows[('photo', 7)] = {FK: 12}
@@ -468,6 +485,12 @@ def test_dialog_shows_text_and_returns_answer(qapp, monkeypatch, delete_store):
     _, ask_delete = make_confirmations(None, delete_store.schema)
     assert ask_delete(build_plan(delete_store)) is False
     assert 'Фото №7' in shown[0] and shown[0].endswith('Продолжить?')
+
+
+def test_old_import_path_has_describe_deletes():
+    """Переходник интерфейса отдаёт ту же функцию текста."""
+    from interfaces.gui.gui_window import drafts_qt
+    assert drafts_qt.describe_deletes is describe_deletes
 
 
 def test_table_edit_is_user_move(qapp, delete_store):

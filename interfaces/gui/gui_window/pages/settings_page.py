@@ -1,9 +1,24 @@
 # interfaces/gui/gui_window/pages/settings_page.py
 
+"""
+Экран настроек: форма значений ``config.msgpack`` и вкладка «О программе».
+
+* ``SettingsPage`` — страница главного окна. Поля заполняются из менеджера настроек при входе
+  (``on_enter``); кнопка «Сохранить настройки» пишет поля в менеджер и файл, затем применяет
+  изменившиеся блоки (``create_config_applier``) и сообщает окну (``on_settings_changed``);
+* ``open_folder_detached`` — открытие папки в файловом менеджере.
+
+Подробно — ``interfaces/gui/gui_window/IMPLEMENTATION.md``.
+
+Example:
+    >>> page = SettingsPage(page_title = "Настройки")    # doctest: +SKIP
+    >>> page.on_enter({'first_start': True})             # doctest: +SKIP
+"""
+
 import os
 import shutil
 import sys
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 from app.config import APP_VERSION, GITHUB_REPO_SLUG
 from app.dependencies import create_database
@@ -24,7 +39,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpinBox, QCheckBox,
     QFileDialog, QMessageBox, QGroupBox, QWidget
 )
-from PySide6.QtCore import QProcess, QThread, QUrl, Signal, Slot, Qt
+from PySide6.QtCore import QPoint, QProcess, QThread, QUrl, Signal, Slot, Qt
 from PySide6.QtGui import QDesktopServices
 
 # запуск файлового менеджера для папки отдельным процессом
@@ -78,7 +93,23 @@ def open_folder_detached(
 
 class SettingsPage(BasePage):
     """
-    Страница настроек.
+    Страница настроек: две вкладки, «Основные» и «О программе».
+
+    Значения читает и пишет менеджер настроек; применение сохранённого — ``ConfigApplier``, страницы
+    главного окна обновляет само окно. Путь к базе обязателен: без существующего файла базы со
+    страницы нельзя уйти (``can_leave``).
+
+    Attributes:
+        logger         : (AppLogger) Журнал страницы.
+        page_title     : (str) Заголовок страницы.
+        config_manager : (AppConfigManager) Менеджер настроек.
+        first_start    : (bool) Страницу открыли при первом запуске: после сохранения — список
+            пациентов.
+
+    Example:
+        >>> page = SettingsPage(page_title = "Настройки")    # doctest: +SKIP
+        >>> page.can_leave()                                 # doctest: +SKIP
+        True
     """
 
     # @AppLogger.get_instance(
@@ -128,16 +159,21 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
+    # страница с полями, заполненными из настроек
     def __init__(
-        self, 
-        parent=None, 
-        page_title="Настройки"
-    ):
+        self,
+        parent     : Optional[QWidget] = None,   # родительский виджет
+        page_title : str = "Настройки",          # заголовок страницы
+    ) -> None:
         """
-        Инициализирует страницу настроек.
-        
-        :param parent: родительский виджет
-        :type parent: Optional[QWidget]
+        Создаёт страницу настроек и заполняет поля из менеджера настроек.
+
+        Args:
+            parent     : (QWidget/None) Родительский виджет; None — без родителя.
+            page_title : (str) Заголовок страницы.
+
+        Example:
+            >>> page = SettingsPage(page_title = "Настройки")    # doctest: +SKIP
         """
         super().__init__(parent)
 
@@ -170,8 +206,14 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_ui(self):
-        """Создаёт вкладки и единую область прокрутки."""
+    # вкладки страницы и подключение сигналов
+    def _setup_ui(self) -> None:
+        """
+        Создаёт вкладки «Основные» и «О программе» и подключает сигналы виджетов.
+
+        Example:
+            >>> page._setup_ui()    # doctest: +SKIP
+        """
         main_layout = QVBoxLayout(self)
 
         # Создаём виджет вкладок
@@ -207,8 +249,20 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_settings_scroll_area(self, parent_widget):
-        """Добавляет QScrollArea с виджетами настроек в parent_widget."""
+    # вкладка «Основные» с прокруткой
+    def _setup_settings_scroll_area(
+        self,
+        parent_widget : QWidget,  # виджет вкладки
+    ) -> None:
+        """
+        Добавляет в виджет вкладки область прокрутки с виджетами настроек.
+
+        Args:
+            parent_widget : (QWidget) Виджет вкладки «Основные».
+
+        Example:
+            >>> page._setup_settings_scroll_area(page.settings_tab)    # doctest: +SKIP
+        """
         scroll = QScrollArea(parent_widget)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -243,8 +297,20 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _setup_about_scroll_area(self, parent_widget):
-        """Добавляет QScrollArea с виджетами о программе в parent_widget."""
+    # вкладка «О программе» с прокруткой
+    def _setup_about_scroll_area(
+        self,
+        parent_widget : QWidget,  # виджет вкладки
+    ) -> None:
+        """
+        Добавляет в виджет вкладки область прокрутки со сведениями о программе.
+
+        Args:
+            parent_widget : (QWidget) Виджет вкладки «О программе».
+
+        Example:
+            >>> page._setup_about_scroll_area(page.about_tab)    # doctest: +SKIP
+        """
         scroll = QScrollArea(parent_widget)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -275,8 +341,17 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _create_settings_widgets(self):
-        """Создаёт все виджеты для вкладки «Основные настройки» (без layout)."""
+    # виджеты вкладки «Основные»
+    def _create_settings_widgets(self) -> None:
+        """
+        Создаёт группы и поля вкладки «Основные»; в раскладку их добавляет вызывающий.
+
+        Значения не заполняет: это ``_load_settings``. Поля способа хранения копий кода видны
+        только на Linux: на других системах таких копий нет.
+
+        Example:
+            >>> page._create_settings_widgets()    # doctest: +SKIP
+        """
 
         # ----- Группа основных настроек -----
 
@@ -488,8 +563,14 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _create_about_widgets(self):
-        """Создаёт виджеты для вкладки «О программе»."""
+    # виджеты вкладки «О программе»
+    def _create_about_widgets(self) -> None:
+        """
+        Создаёт версию, кнопку проверки обновлений и ссылку на страницу проекта.
+
+        Example:
+            >>> page._create_about_widgets()    # doctest: +SKIP
+        """
         # self.about_title = QLabel("<h2>Медицинское приложение</h2>")
         # self.about_title.setAlignment(Qt.AlignCenter)
 
@@ -547,8 +628,14 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _connect_signals(self):
-        """Подключает сигналы виджетов (общие для всех вкладок)."""
+    # сигналы кнопок и полей
+    def _connect_signals(self) -> None:
+        """
+        Подключает сигналы виджетов (общие для всех вкладок).
+
+        Example:
+            >>> page._connect_signals()    # doctest: +SKIP
+        """
         self.db_path_btn.clicked.connect(lambda: self._browse_file(self.db_path_edit, "Выберите файл БД", "*.db"))
         self.photos_path_btn.clicked.connect(lambda: self._browse_dir(self.photos_path_edit, "Выберите папку для фото"))
         self.backup_path_btn.clicked.connect(lambda: self._browse_dir(self.backup_path_edit, "Выберите папку для бекапов"))
@@ -570,8 +657,24 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _on_tab_changed(self, index):
-        """При переключении вкладки заменяет содержимое scroll_content."""
+    # старая замена содержимого при смене вкладки (не подключена)
+    def _on_tab_changed(
+        self,
+        index : int,  # номер вкладки
+    ) -> None:
+        """
+        Заменяет содержимое ``content_layout`` при переключении вкладки.
+
+        Note:
+            Не подключён ни к какому сигналу и не работает: ``content_layout`` и ``about_title``
+            остались от прежней раскладки, вкладки теперь наполняются один раз в ``_setup_ui``.
+
+        Args:
+            index : (int) Номер вкладки.
+
+        Example:
+            >>> page._on_tab_changed(0)    # doctest: +SKIP
+        """
         # Очищаем текущий layout
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
@@ -635,8 +738,14 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _on_check_updates_clicked(self):
-        """Запускает ручную проверку обновлений через главное окно."""
+    # ручная проверка обновлений
+    def _on_check_updates_clicked(self) -> None:
+        """
+        Запускает ручную проверку обновлений через главное окно.
+
+        Example:
+            >>> page._on_check_updates_clicked()    # doctest: +SKIP
+        """
         if self.main_window and hasattr(self.main_window, 'check_for_updates'):
             self.main_window.check_for_updates()
         else:
@@ -647,8 +756,18 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
+    # можно ли уйти со страницы
     def can_leave(self) -> bool:
-        """Проверяет, можно ли покинуть страницу (существует ли БД)."""
+        """
+        Проверяет, что в поле указан существующий файл базы; иначе предупреждает пользователя.
+
+        Returns:
+            (bool) ``True`` — можно покинуть страницу.
+
+        Example:
+            >>> page.can_leave()    # doctest: +SKIP
+            True
+        """
         db_path = self.db_path_edit.text().strip()
         if not db_path or not os.path.isfile(db_path):
             QMessageBox.warning(self, "Ошибка", "Сначала укажите существующий файл БД или создайте его.")
@@ -661,8 +780,20 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _update_create_db_button_visibility(self, text: str = None):
-        """Показывает кнопку 'Создать тестовую БД', если путь пуст или указывает на несуществующий файл."""
+    # видимость кнопки создания базы
+    def _update_create_db_button_visibility(
+        self,
+        text : Optional[str] = None,  # текст поля (передаёт сигнал); не нужен: берётся из поля
+    ) -> None:
+        """
+        Показывает кнопку «Создать тестовую БД», если путь пуст или такого файла нет.
+
+        Args:
+            text : (str/None) Текст поля; не используется.
+
+        Example:
+            >>> page._update_create_db_button_visibility()    # doctest: +SKIP
+        """
         path = self.db_path_edit.text().strip()
         if not path:
             self.create_db_btn.setVisible(True)
@@ -678,8 +809,16 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _on_create_test_db_clicked(self):
-        """Обработчик кнопки 'Создать тестовую БД'."""
+    # создание базы по кнопке
+    def _on_create_test_db_clicked(self) -> None:
+        """
+        Создаёт базу по пути из поля (пусто — ``./clinic.db``), спросив про тестовые данные.
+
+        Ошибка создания — в журнал и сообщением пользователю.
+
+        Example:
+            >>> page._on_create_test_db_clicked()    # doctest: +SKIP
+        """
         db_path = self.db_path_edit.text().strip()
         if not db_path:
             default_path = os.path.join('.', 'clinic.db')
@@ -714,16 +853,23 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _browse_file(self, line_edit, title, filter_str):
+    # выбор файла в поле ввода
+    def _browse_file(
+        self,
+        line_edit  : QLineEdit,  # поле, куда записать путь
+        title      : str,        # заголовок окна выбора
+        filter_str : str,        # фильтр файлов
+    ) -> None:
         """
-        Открывает нажатие на кнопку "Обзреть" для поля ввода и открывает диалоговое окно выбора файла.
-        
-        :param line_edit: Поле ввода для ввода пути к файлу.
-        :type line_edit: QLineEdit
-        :param title: Заголовок диалогового окна.
-        :type title: str
-        :param filter_str: Строка фильтрации для файлов.
-        :type filter_str: str
+        Открывает окно выбора файла и записывает выбранный путь в поле; отмена поле не меняет.
+
+        Args:
+            line_edit  : (QLineEdit) Поле, куда записать путь.
+            title      : (str) Заголовок окна выбора.
+            filter_str : (str) Фильтр файлов.
+
+        Example:
+            >>> page._browse_file(page.db_path_edit, "Выберите файл БД", "*.db")    # doctest: +SKIP
         """
         file_path, _ = QFileDialog.getOpenFileName(self, title, "", filter_str)
         if file_path:
@@ -759,14 +905,21 @@ class SettingsPage(BasePage):
         self.update_keep_count_spin.setEnabled(not by_days)
         self.update_keep_days_spin.setEnabled(by_days)
 
-    def _browse_dir(self, line_edit, title):
+    # выбор папки в поле ввода
+    def _browse_dir(
+        self,
+        line_edit : QLineEdit,  # поле, куда записать путь
+        title     : str,        # заголовок окна выбора
+    ) -> None:
         """
-        Открывает нажатие на кнопку "Обзреть" для поля ввода и открывает диалоговое окно выбора папки.
-        
-        :param line_edit: Поле ввода для ввода пути к папке.
-        :type line_edit: QLineEdit
-        :param title: Заголовок диалогового окна.
-        :type title: str
+        Открывает окно выбора папки и записывает выбранный путь в поле; отмена поле не меняет.
+
+        Args:
+            line_edit : (QLineEdit) Поле, куда записать путь.
+            title     : (str) Заголовок окна выбора.
+
+        Example:
+            >>> page._browse_dir(page.log_dir_edit, "Выберите папку для логов")    # doctest: +SKIP
         """
         dir_path = QFileDialog.getExistingDirectory(self, title)
         if dir_path:
@@ -827,8 +980,20 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _update_log_folder_button(self, text: str = None):
-        """Обновляет текст кнопки с путём к папке логов."""
+    # текст кнопки папки логов
+    def _update_log_folder_button(
+        self,
+        text : Optional[str] = None,  # текст поля; не нужен: берётся из поля
+    ) -> None:
+        """
+        Обновляет текст кнопки с путём к папке логов.
+
+        Args:
+            text : (str/None) Текст поля; не используется.
+
+        Example:
+            >>> page._update_log_folder_button()    # doctest: +SKIP
+        """
         log_dir = self.log_dir_edit.text().strip()
         if not log_dir:
             log_dir = "не указана"
@@ -840,8 +1005,14 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _open_log_folder(self):
-        """Открывает папку логов в системном файловом менеджере."""
+    # открытие папки логов
+    def _open_log_folder(self) -> None:
+        """
+        Открывает папку логов в файловом менеджере; нет папки или программы — сообщение.
+
+        Example:
+            >>> page._open_log_folder()    # doctest: +SKIP
+        """
         log_dir = self.log_dir_edit.text().strip()
         еее = os.path.exists(log_dir)
         if (not log_dir) or (not os.path.exists(log_dir)):
@@ -880,8 +1051,20 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _show_log_folder_context_menu(self, pos):
-        """Показывает контекстное меню для кнопки пути логов."""
+    # меню кнопки папки логов
+    def _show_log_folder_context_menu(
+        self,
+        pos : QPoint,  # место щелчка на кнопке
+    ) -> None:
+        """
+        Показывает контекстное меню кнопки папки логов; папка не указана — меню нет.
+
+        Args:
+            pos : (QPoint) Место щелчка на кнопке.
+
+        Example:
+            >>> page._show_log_folder_context_menu(QPoint(0, 0))    # doctest: +SKIP
+        """
         log_dir = self.log_dir_edit.text().strip()
         if not log_dir:
             return
@@ -896,8 +1079,20 @@ class SettingsPage(BasePage):
         enable_file_logging='system',
         use_name_in_filename=False,
     ).log_execution_time(level=AppLogger._parse_log_level('DEBUG'))
-    def _copy_log_path(self, path: str):
-        """Копирует переданный путь в буфер обмена."""
+    # путь в буфер обмена
+    def _copy_log_path(
+        self,
+        path : str,  # путь к папке логов
+    ) -> None:
+        """
+        Копирует путь в буфер обмена и сообщает об этом.
+
+        Args:
+            path : (str) Путь к папке логов.
+
+        Example:
+            >>> page._copy_log_path("./logs")    # doctest: +SKIP
+        """
         # from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(path)
         QMessageBox.information(self, "Копирование", "Путь к папке логов скопирован.")
@@ -1048,28 +1243,23 @@ class SettingsPage(BasePage):
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot()
-    def _save_settings(self):
+    # сохранение полей и применение изменившихся настроек
+    def _save_settings(self) -> None:
         """
-        Сохраняет настройки из формы в конфигурационный файл и применяет их.
+        Сохраняет настройки из формы в файл и применяет их.
 
-        Последовательность действий:
-            1. Копирует старую конфигурацию (`old_config`).
-            2. Сохраняет все поля формы в `AppConfigManager`.
-            3. Вызывает `self.config_manager.save()`.
-            4. Получает новую конфигурацию и вычисляет список изменившихся блоков
-               с помощью `ConfigApplier.get_changed_blocks()`.
-            5. Для каждого изменённого блока вызывает соответствующий метод `ConfigApplier`.
-            6. Уведомляет главное окно (`main_window.on_settings_changed`) с указанием
-               изменённых блоков.
-            7. Если это первый запуск (`self.first_start`), переключает страницу на
-               список пациентов.
+        Порядок:
+            1. Путь к базе обязателен; файла нет — предложить создать, отказ прерывает сохранение.
+            2. Снимок прежней конфигурации, поля формы — в менеджер, ``save()``.
+            3. ``applier.apply_changes``: только изменившиеся блоки, сбой одного не мешает другим.
+            4. Главное окно получает изменившиеся блоки (``on_settings_changed``).
+            5. Сообщение пользователю: сбои применения — предупреждением со списком блоков.
+            6. При первом запуске (``first_start``) — переход на список пациентов.
 
-        Исключения:
-            Любое исключение при сохранении перехватывается, выводится сообщение
-            через QMessageBox.critical, и ошибка логируется.
+        Любая ошибка сохранения перехватывается: сообщение пользователю и запись в журнал.
 
-        Returns:
-            None
+        Example:
+            >>> page._save_settings()    # doctest: +SKIP
         """
 
         db_path = self.db_path_edit.text().strip()
@@ -1189,10 +1379,20 @@ class SettingsPage(BasePage):
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def on_enter(self, extra_data=None):
+    # вход на страницу: свежие значения полей
+    def on_enter(
+        self,
+        extra_data : Optional[Dict[str, Any]] = None,  # данные перехода
+    ) -> None:
         """
-        Вызывается при переходе на страницу настроек.
-        extra_data может содержать 'first_start' (True/False).
+        Перечитывает настройки из файла и заполняет поля; несохранённые правки в полях теряются.
+
+        Args:
+            extra_data : (dict/None) Данные перехода: ``first_start`` (bool) — первый запуск;
+                None — обычный вход.
+
+        Example:
+            >>> page.on_enter({'first_start': True})    # doctest: +SKIP
         """
 
         # """При входе на страницу обновляем настройки и запоминаем флаг первого запуска."""

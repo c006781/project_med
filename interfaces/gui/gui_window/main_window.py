@@ -13,7 +13,7 @@ import platform
 import subprocess
 import sys
 import tempfile
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional, Tuple
 # import sys
 
 from app.config import (
@@ -33,9 +33,22 @@ from app.config.config_manager.manager import (
 
 from app.utils.logger.bool_strings import to_bool
 
-from app.network.thread_network import DownloadThread, UploadThread
+from app.exceptions.exceptions_all import YandexDiskError
+
+from app.network.db_download import CheckedDownload
+
+from app.network.thread_network import CheckedDownloadThread, UploadThread
+# from app.network.thread_network import DownloadThread, UploadThread
+# ↑ до 2026-11-07 (ТД-1): DownloadThread писал прямо в рабочий файл базы
 
 from app.network.ya_dop import YaDiskResult, remote_db_file_path
+
+from app.services.sync_service import (
+    backup_db_before_transfer,  # резервная копия перед передачей
+    discard_download,           # отказ от скачанного файла
+    install_checked_download,   # замена рабочей базы скачанной
+    remove_stale_downloads,     # временные файлы после аварийного выхода
+)
 
 from app.dependencies import (
     get_patient_service, get_appointment_service,
@@ -928,70 +941,389 @@ class SyncMixin:
     ).log_execution_time(
         level=AppLogger._parse_log_level('DEBUG')
     )
-    def _start_download(self):
+    # def _start_download(self):
+    #     """
+    #     Запускает поток скачивания файла БД с Яндекс.Диска.
+    #     Перед запуском проверяет наличие токена.
+    #     """
+    #     config = AppConfigManager.get_instance()
+    #     token = config.get('YANDEX_TOKEN')
+    #     remote = config.get('database_remote_path')
+    #     local = config.get('database_local_path')
+    #
+    #     if not token:
+    #         QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+    #         return
+    #
+    #     # Папка из настроек дополняется именем файла базы
+    #     remote = remote_db_file_path(remote, local)
+    #
+    #     # Создаём и настраиваем поток загрузки
+    #     self.download_thread = DownloadThread(token, remote, local)
+    #     self.download_thread.progress.connect(self._update_progress)
+    #     self.download_thread.finished.connect(self._on_db_download_finished)
+    #     self.download_thread.error.connect(self._on_db_download_error)
+    #
+    #     # Показываем прогресс-бар (бесконечный режим до получения размера)
+    #     self.progress_bar.setVisible(True)
+    #     self.progress_bar.setRange(0, 0)
+    #
+    #     self.download_thread.start()
+    #     self.logger.info("Запущен поток скачивания БД")
+    #
+    # @AppLogger.get_instance(
+    #     name='SyncMixin',
+    #     # share_file_with = 'system',
+    #     enable_file_logging = 'system',
+    #     use_name_in_filename = False, # 'system'
+    # ).log_execution_time(
+    #     level=AppLogger._parse_log_level('DEBUG')
+    # )
+    # def _start_upload(self):
+    #     """
+    #     Запускает поток загрузки локального файла БД на Яндекс.Диск.
+    #     """
+    #     config = AppConfigManager.get_instance()
+    #     token = config.get('YANDEX_TOKEN')
+    #     remote = config.get('database_remote_path')
+    #     local = config.get('database_local_path')
+    #
+    #     if not token:
+    #         QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+    #         return
+    #
+    #     # Папка из настроек дополняется именем файла базы
+    #     remote = remote_db_file_path(remote, local)
+    #
+    #     self.upload_thread = UploadThread(token, local, remote, overwrite=True)
+    #     self.upload_thread.progress.connect(self._update_progress)
+    #     self.upload_thread.finished.connect(self._on_upload_finished)
+    #     self.upload_thread.error.connect(self._on_upload_error)
+    #
+    #     self.progress_bar.setVisible(True)
+    #     self.progress_bar.setRange(0, 0)
+    #
+    #     self.upload_thread.start()
+    #     self.logger.info("Запущен поток загрузки БД")
+    # ↑ до 2026-11-07 (ТД-1): скачивание шло поверх рабочей базы, обрыв её портил; копии перед
+    #   передачей не было, правки в окне и второй запуск во время передачи не запрещались.
+    def _start_download(self) -> None:
         """
-        Запускает поток скачивания файла БД с Яндекс.Диска.
-        Перед запуском проверяет наличие токена.
-        """
-        config = AppConfigManager.get_instance()
-        token = config.get('YANDEX_TOKEN')
-        remote = config.get('database_remote_path')
-        local = config.get('database_local_path')
+        Начинает безопасное скачивание базы: копия рабочей → поток скачивания и проверки.
 
-        if not token:
-            QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+        Рабочая база до конца проверки не меняется. Окно на время передачи не даёт править
+        (:meth:`_set_transfer_running`). Замена — :meth:`_on_db_downloaded`.
+
+        Example:
+            >>> window._start_download()    # doctest: +SKIP
+        """
+        settings = self._prepare_transfer("Загрузка с Диска")
+        if settings is None:
             return
-        
-        # Папка из настроек дополняется именем файла базы
-        remote = remote_db_file_path(remote, local)
-
-        # Создаём и настраиваем поток загрузки
-        self.download_thread = DownloadThread(token, remote, local)
+        token, remote, local = settings
+        self.download_thread = CheckedDownloadThread(
+            token       =   token,      # токен
+            remote_path =   remote,     # база на Диске
+            local_path  =   local,      # рабочая база
+            parent      =   self,       # окно
+        )
         self.download_thread.progress.connect(self._update_progress)
+        self.download_thread.downloaded.connect(self._on_db_downloaded)
         self.download_thread.finished.connect(self._on_db_download_finished)
+        self.download_thread.failed.connect(self._log_transfer_failure)
         self.download_thread.error.connect(self._on_db_download_error)
-
-        # Показываем прогресс-бар (бесконечный режим до получения размера)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-
+        self._set_transfer_running(True)
         self.download_thread.start()
         self.logger.info("Запущен поток скачивания БД")
 
-    @AppLogger.get_instance(
-        name='SyncMixin',
-        # share_file_with = 'system',
-        enable_file_logging = 'system',
-        use_name_in_filename = False, # 'system'
-    ).log_execution_time(
-        level=AppLogger._parse_log_level('DEBUG')
-    )
-    def _start_upload(self):
+    def _start_upload(self) -> None:
         """
-        Запускает поток загрузки локального файла БД на Яндекс.Диск.
-        """
-        config = AppConfigManager.get_instance()
-        token = config.get('YANDEX_TOKEN')
-        remote = config.get('database_remote_path')
-        local = config.get('database_local_path')
+        Начинает выгрузку рабочей базы на Диск: копия рабочей → поток выгрузки.
 
-        if not token:
-            QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+        Example:
+            >>> window._start_upload()      # doctest: +SKIP
+        """
+        settings = self._prepare_transfer("Выгрузка")
+        if settings is None:
             return
-        
-        # Папка из настроек дополняется именем файла базы
-        remote = remote_db_file_path(remote, local)
-
-        self.upload_thread = UploadThread(token, local, remote, overwrite=True)
+        token, remote, local = settings
+        self.upload_thread = UploadThread(
+            token       =   token,      # токен
+            local_path  =   local,      # рабочая база
+            remote_path =   remote,     # база на Диске
+            overwrite   =   True,       # файл на Диске заменяется
+            parent      =   self,       # окно
+        )
         self.upload_thread.progress.connect(self._update_progress)
         self.upload_thread.finished.connect(self._on_upload_finished)
         self.upload_thread.error.connect(self._on_upload_error)
-
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
-
+        self._set_transfer_running(True)
         self.upload_thread.start()
         self.logger.info("Запущен поток загрузки БД")
+
+    # проверки и резервная копия перед передачей
+    def _prepare_transfer(
+        self,
+        action : str,   # название действия для сообщений
+    ) -> Optional[Tuple[str, str, str]]:
+        """
+        Проверяет, можно ли начать обмен с Диском, и делает резервную копию рабочей базы.
+
+        Передача не начинается, если идёт другая работа, не задан токен или не удалась копия.
+
+        Args:
+            action : (str) Название действия: «Загрузка с Диска», «Выгрузка».
+
+        Returns:
+            (Tuple[str, str, str]/None) Токен, путь к базе на Диске, рабочая база; None — начинать
+                нельзя (сообщение уже показано).
+
+        Example:
+            >>> window._prepare_transfer('Выгрузка')    # doctest: +SKIP
+            ('y0_…', 'Папка/clinic.db', './clinic.db')
+        """
+        running = self._running_task()
+        if running:
+            QMessageBox.warning(self, action, f"Сейчас идёт {running}. Дождитесь окончания.")
+            return None
+        config = AppConfigManager.get_instance()
+        token = config.get('YANDEX_TOKEN')
+        local = config.get('database_local_path')
+        if not token:
+            QMessageBox.warning(self, "Ошибка", "Не задан токен Яндекс.Диска.")
+            return None
+        try:
+            self._db_backup_path = backup_db_before_transfer(local)
+        except YandexDiskError as exc:
+            self._log_transfer_failure(exc)
+            QMessageBox.critical(
+                self,                                                           # родитель
+                "Резервная копия не сделана",                                   # заголовок
+                f"{action} не начата: рабочая база не менялась.\n{exc}",        # текст
+            )
+            return None
+        return token, remote_db_file_path(config.get('database_remote_path'), local), local
+
+    # что сейчас нельзя прерывать
+    def _running_task(self) -> Optional[str]:
+        """
+        Называет идущую работу, из-за которой нельзя выйти или начать новую передачу.
+
+        Returns:
+            (str/None) Название работы для сообщения; None — ничего не идёт.
+
+        Example:
+            >>> window._running_task() is None
+            True
+        """
+        if getattr(self, '_transfer_running', False):
+            return "обмен базой с Яндекс.Диском"
+        parsing = getattr(self, 'parsing_thread', None)
+        if parsing is not None and parsing.isRunning():
+            return "импорт из Word"
+        return None
+
+    # начало и конец передачи: полоса и запрет правок
+    def _set_transfer_running(
+        self,
+        running : bool,     # идёт ли передача
+    ) -> None:
+        """
+        Отмечает начало или конец передачи: показывает полосу и запрещает работу с данными.
+
+        Пока файл базы передаётся, правка записала бы в него изменения: выгрузка взяла бы
+        несогласованный файл, а скачивание затёрло бы правку. Поэтому экраны и список действий
+        на это время выключены.
+
+        Args:
+            running : (bool) Идёт ли передача.
+
+        Example:
+            >>> window._set_transfer_running(False)     # doctest: +SKIP
+        """
+        self._transfer_running = running
+        self.stacked_widget.setEnabled(not running)
+        self.action_combo.setEnabled(not running)
+        self.progress_bar.setVisible(running)
+        if running:  # бегущая полоса до получения размера
+            self.progress_bar.setRange(0, 0)
+
+    # подробности сбоя передачи — в журнал
+    def _log_transfer_failure(
+        self,
+        exc : BaseException,    # исключение передачи
+    ) -> None:
+        """
+        Пишет подробности сбоя передачи в журнал; пользователю показывается короткий текст.
+
+        Args:
+            exc : (BaseException) Исключение; ``YandexDiskError`` — с ``log_text()``.
+
+        Example:
+            >>> window._log_transfer_failure(RuntimeError('сбой'))  # doctest: +SKIP
+        """
+        log_text = getattr(exc, 'log_text', None)
+        self.logger.error(log_text() if callable(log_text) else f"Сбой передачи базы: {exc}")
+
+    # итог скачивания: вопросы и замена рабочей базы
+    @Slot(object)
+    def _on_db_downloaded(
+        self,
+        result : CheckedDownload,   # проверенный временный файл и сведения
+    ) -> None:
+        """
+        Решает судьбу скачанной и проверенной базы и заменяет ею рабочую.
+
+        Порядок:
+            1. содержимое совпало — замена не нужна;
+            2. локальная база новее — вопрос, по умолчанию отказ;
+            3. несохранённое пропадёт вместе с прежней базой — вопрос (:meth:`_confirm_db_replace`);
+            4. замена и открытие (``install_checked_download``), обновление экранов.
+        Отказ на любом шаге удаляет временный файл, рабочая база не меняется.
+
+        Args:
+            result : (CheckedDownload) Итог скачивания.
+
+        Example:
+            >>> window._on_db_downloaded(result)    # doctest: +SKIP
+        """
+        self._set_transfer_running(False)
+        notes = list(result.warnings)
+        if not result.needs_replace:
+            discard_download(result)
+            self._show_download_outcome("База на Яндекс.Диске совпадает с рабочей, замена не нужна.", notes)
+            return
+        if result.local_newer:
+            reply = QMessageBox.question(
+                self,                                                           # родитель
+                "Локальная база новее",                                         # заголовок
+                f"{notes.pop(0)}.\n\nЗаменить рабочую базу скачанной?",         # текст
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, # кнопки
+                QMessageBox.StandardButton.No,                                  # по умолчанию отказ
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                discard_download(result)
+                self.logger.info("Скачанная база не установлена: локальная новее, отказ пользователя")
+                return
+        if not self._confirm_db_replace():
+            discard_download(result)
+            self.logger.info("Скачанная база не установлена: отказ из-за несохранённых изменений")
+            return
+        try:
+            install_checked_download(result)
+        except Exception as exc:
+            self._log_transfer_failure(exc)
+            self._reload_after_db_change()
+            QMessageBox.critical(self, "База не заменена", f"{exc}\n\n{self._backup_note()}")
+            return
+        self.logger.info(f"Рабочая база заменена скачанной; копия прежней: {self._db_backup_path}")
+        self._reload_after_db_change()
+        self._show_download_outcome(f"База данных заменена скачанной.\n{self._backup_note()}", notes)
+
+    # экраны после замены файла базы
+    def _reload_after_db_change(self) -> None:
+        """
+        Обновляет экраны после замены файла базы; сбой экрана не мешает сообщить пользователю итог.
+
+        Example:
+            >>> window._reload_after_db_change()    # doctest: +SKIP
+        """
+        try:
+            self.on_settings_changed(changed_blocks={'database'})
+        except Exception as exc:
+            self.logger.exception(f"Экраны не обновлены после замены базы: {exc}")
+
+    # несохранённое перед заменой базы
+    def _confirm_db_replace(self) -> bool:
+        """
+        Спрашивает о несохранённом перед заменой рабочей базы; согласие очищает черновики.
+
+        Сохранять здесь бессмысленно: изменения записались бы в базу, которая сейчас будет заменена.
+        Черновики ссылаются на записи прежней базы, поэтому при согласии они удаляются. Незавершённая
+        правка экрана наборов данных, не прошедшая проверку, отменяет замену.
+
+        Returns:
+            (bool) True — можно заменять.
+
+        Example:
+            >>> window._confirm_db_replace()     # нет изменений — без вопросов
+            True
+        """
+        pilot = getattr(self, 'dataset_pilot_page', None)
+        if pilot is not None:
+            problem = pilot.finish_pending_edits()
+            if problem:
+                QMessageBox.warning(
+                    self,                                                                       # родитель
+                    "Незавершённая правка",                                                     # заголовок
+                    f"На экране «Наборы данных» правка не прошла проверку:\n{problem}\n\n"
+                    "База не заменена. Исправьте или отмените правку и скачайте базу снова.",   # текст
+                )
+                return False
+        drafts = getattr(self, 'drafts', None)
+        if drafts is not None and not drafts.store.is_empty:
+            reply = QMessageBox.question(
+                self,                                                           # родитель
+                "Несохранённые изменения",                                      # заголовок
+                "Есть несохранённые изменения. После замены базы они будут потеряны: "
+                "они относятся к прежней базе.\n\nЗаменить базу?",              # текст
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, # кнопки
+                QMessageBox.StandardButton.No,                                  # по умолчанию отказ
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
+        if not self._confirm_old_pages_loss("Заменить базу"):
+            return False
+        if drafts is not None:
+            drafts.store.clear()
+        return True
+
+    # строка о резервной копии для сообщений
+    def _backup_note(self) -> str:
+        """
+        Возвращает строку о резервной копии рабочей базы для сообщений.
+
+        Returns:
+            (str) Где копия, или что рабочей базы не было.
+
+        Example:
+            >>> window._backup_note()   # doctest: +SKIP
+            'Резервная копия прежней базы: ./backups/clinic - 2026-11-07_12-00-00.db'
+        """
+        path = getattr(self, '_db_backup_path', None)
+        return f"Резервная копия прежней базы: {path}" if path else "Прежней рабочей базы не было."
+
+    # сообщение об итоге скачивания
+    def _show_download_outcome(
+        self,
+        text  : str,        # итог
+        notes : List[str],  # предупреждения
+    ) -> None:
+        """
+        Показывает итог скачивания и предупреждения проверки.
+
+        Args:
+            text  : (str) Итог.
+            notes : (List[str]) Предупреждения (Диск не сообщил MD5 и т. п.).
+
+        Example:
+            >>> window._show_download_outcome('База заменена', [])      # doctest: +SKIP
+        """
+        lines = [text, *notes]
+        QMessageBox.information(self, "Скачивание базы", "\n\n".join(lines))
+
+    # временные файлы прошлого аварийного выхода
+    def _remove_stale_db_downloads(self) -> None:
+        """
+        Убирает при старте недокачанные временные файлы базы.
+
+        Example:
+            >>> window._remove_stale_db_downloads()     # doctest: +SKIP
+        """
+        local = AppConfigManager.get_instance().get('database_local_path')
+        removed = remove_stale_downloads(local) if local else []
+        if removed:
+            self.logger.info(f"Удалены временные файлы прерванного скачивания: {removed}")
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -1022,19 +1354,31 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(int)
-    def _on_db_download_finished(self, code):
+    def _on_db_download_finished(
+        self,
+        code : int,     # код потока: 0 — успех
+    ) -> None:
         """
-        Обработчик завершения скачивания.
-        Скрывает прогресс-бар и выводит сообщение об успехе или ошибке.
+        Завершение потока скачивания; итог при успехе уже разобран в :meth:`_on_db_downloaded`.
+
+        Args:
+            code : (int) Код потока.
+
+        Example:
+            >>> window._on_db_download_finished(0)  # doctest: +SKIP
         """
         self.progress_bar.setVisible(False)
         if code == 0:
-            QMessageBox.information(self, "Успех", "База данных успешно скачана.")
-            # # Перезагружаем данные на всех страницах-списках
-            # self._reload_all_list_pages()
-            # Перезагружаем все данные через существующий механизм
-            self.on_settings_changed(changed_blocks={'database'})
+            # QMessageBox.information(self, "Успех", "База данных успешно скачана.")
+            # # # Перезагружаем данные на всех страницах-списках
+            # # self._reload_all_list_pages()
+            # # Перезагружаем все данные через существующий механизм
+            # self.on_settings_changed(changed_blocks={'database'})
+            # ↑ до 2026-11-07 (ТД-1): файл только скачан; вопросы, замена и сообщения — в
+            #   _on_db_downloaded (его сигнал приходит первым)
+            return
         else:
+            self._set_transfer_running(False)
             # QMessageBox.critical(self, "Ошибка", f"Скачивание завершилось с кодом {code}")
             # ↑ до 2026-11-07 (Ф2.1.3): пользователю показывался код («-3»), а не его смысл
             QMessageBox.critical(self, "Ошибка", YaDiskResult.describe(code))
@@ -1097,13 +1441,24 @@ class SyncMixin:
         level=AppLogger._parse_log_level('DEBUG')
     )
     @Slot(str)
-    def _on_db_download_error(self, message):
+    def _on_db_download_error(
+        self,
+        message : str,  # причина
+    ) -> None:
         """
-        Обработчик ошибки в потоке скачивания.
+        Показывает ошибку скачивания: рабочая база не менялась, временный файл уже удалён.
+
+        Args:
+            message : (str) Причина.
+
+        Example:
+            >>> window._on_db_download_error('Нет связи')   # doctest: +SKIP
         """
         self.logger.error(f"Download error: {message}")
-        self.progress_bar.setVisible(False)
-        QMessageBox.critical(self, "Ошибка", message)
+        self._set_transfer_running(False)
+        # QMessageBox.critical(self, "Ошибка", message)
+        # ↑ до 2026-11-07 (ТД-1): пользователь не знал, что с рабочей базой
+        QMessageBox.critical(self, "База не скачана", f"{message}\n\nРабочая база не менялась.")
 
     @AppLogger.get_instance(
         name='SyncMixin',
@@ -1118,7 +1473,7 @@ class SyncMixin:
         """
         Обработчик завершения загрузки на диск.
         """
-        self.progress_bar.setVisible(False)
+        self._set_transfer_running(False)
         if code == 0:
             QMessageBox.information(self, "Успех", "База данных успешно загружена.")
         else:
@@ -1139,7 +1494,7 @@ class SyncMixin:
         """
         Обработчик ошибки в потоке загрузки.
         """
-        self.progress_bar.setVisible(False)
+        self._set_transfer_running(False)
         QMessageBox.critical(self, "Ошибка", message)
 
     @AppLogger.get_instance(
@@ -1998,6 +2353,10 @@ class MainWindow(
         if not self._resolve_unsaved_before_exit():
             event.ignore()
             return
+        # Поток уже сообщил об итоге, но мог ещё не выйти из run: уничтоженный на ходу он роняет процесс
+        for thread in (self.download_thread, self.upload_thread):
+            if thread is not None:
+                thread.wait(2000)
         if getattr(self, 'drafts_bridge', None) is not None:
             self.drafts_bridge.detach()
         super().closeEvent(event)
@@ -2008,6 +2367,7 @@ class MainWindow(
         Решает с пользователем судьбу несохранённого перед выходом из программы.
 
         Порядок:
+            0. идёт обмен с Диском или импорт — выйти нельзя, сообщение;
             1. незавершённая правка экрана наборов данных переводится в черновики;
             2. черновики: вопрос «сохранить / не сохранять / отмена» (требование 8);
             3. старые экраны со своими правками: вопрос, потерять ли их.
@@ -2024,6 +2384,10 @@ class MainWindow(
             True
         """
         from interfaces.gui.gui_window.drafts_qt import ask_on_close
+        running = self._running_task()
+        if running:  # поток нельзя прервать, а уничтоженный на ходу он роняет процесс
+            QMessageBox.warning(self, "Идёт работа", f"Сейчас идёт {running}. Дождитесь окончания.")
+            return False
         # F7 (2026-10-18): незавершённая правка на экране наборов данных — ещё не в черновиках
         # (и не в БД); без этого вопрос «сохранить?» её не видел, и она пропадала молча
         pilot = getattr(self, 'dataset_pilot_page', None)
@@ -2153,6 +2517,13 @@ class MainWindow(
 
         # Окно ожидания установки обновления (создаётся на время установки)
         self.update_progress_dialog = None
+
+        # Идёт ли обмен с Диском и где копия рабочей базы последней передачи
+        self._transfer_running = False
+        self._db_backup_path = None
+
+        # Недокачанные файлы базы от прошлого аварийного выхода
+        self._remove_stale_db_downloads()
 
         # Построение интерфейса
         self._setup_ui()
@@ -2311,6 +2682,11 @@ class MainWindow(
         level=AppLogger._parse_log_level('DEBUG')
     )
     def _start_parsing(self):
+        running = self._running_task()
+        if running:  # второй поток импорта или импорт во время замены базы
+            QMessageBox.warning(self, "Импорт из Word", f"Сейчас идёт {running}. Дождитесь окончания.")
+            return
+
         # Диалог выбора папки
         # Выбор открывается в папке документов из настроек (пусто — папка по умолчанию Qt)
         folder = QFileDialog.getExistingDirectory(
@@ -2805,6 +3181,11 @@ class MainWindow(
                     # Передаём те же extra_data, что были при входе, чтобы не сбросить id
                     extra = self.page_manager.get_current_extra_data()
                     current_page.on_enter(extra)
+
+            # Экран наборов данных не входит в списки выше: держал бы строки прежней базы
+            pilot = getattr(self, 'dataset_pilot_page', None)
+            if pilot is not None and pilot._opened:
+                pilot.open_data()
         
         self.logger.info("Применение настроек завершено")
 

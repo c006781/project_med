@@ -29,6 +29,7 @@ class ImportHost(QWidget):
     _on_parsing_error = mw.MainWindow._on_parsing_error
     _on_parsing_dialog_closed = mw.MainWindow._on_parsing_dialog_closed
     _start_parsing = mw.MainWindow._start_parsing
+    _running_task = mw.SyncMixin._running_task
 
     def __init__(self) -> None:
         super().__init__()
@@ -146,3 +147,16 @@ def test_folder_dialog_opens_in_setting(qapp, monkeypatch):
     )
     ImportHost()._start_parsing()
     assert seen['start'] == '/документы/word'
+
+
+def test_second_import_is_refused_while_running(qapp, messages, monkeypatch):
+    """Импорт уже идёт: второй поток не запускается, поток не уничтожается на ходу."""
+    host = ImportHost()
+    host.parsing_thread = MagicMock()
+    host.parsing_thread.isRunning.return_value = True
+    choose = MagicMock()
+    monkeypatch.setattr(QFileDialog, 'getExistingDirectory', staticmethod(choose))
+    host._start_parsing()
+    choose.assert_not_called()
+    [(_title, text)] = messages.texts('warning')
+    assert 'импорт из Word' in text

@@ -63,27 +63,37 @@ class Conflict:
         return self.field is None
 
 
-def find_conflicts(plan: SavePlan, read: Reader) -> List[Conflict]:
+def find_conflicts(
+    plan : SavePlan,    # план сохранения
+    read : Reader,      # чтение текущей записи; None — записи нет
+) -> List[Conflict]:
     """
-    Конфликты для изменяемых и удаляемых существующих записей плана.
+    Находит конфликты для изменяемых и удаляемых существующих записей плана (удаляемые —
+    и помеченные, и перенесённые в удалённую новую запись).
 
     Сравниваются только поля с известным исходным значением (``Draft.original``); новые
     записи не проверяются (их ещё нет в хранилище). Ошибка чтения — исключение
     вызывающему (проверка не должна молча пропускать конфликты).
 
     Args:
-        plan: План сохранения.
-        read: Чтение текущей записи; ``None`` — записи нет.
+        plan : (SavePlan) План сохранения.
+        read : (Reader) Чтение текущей записи; ``None`` — записи нет.
 
     Returns:
-        Список конфликтов (пустой — можно сохранять).
+        (List[Conflict]) Конфликты; пусто — можно сохранять.
 
-    Пример:
-        >>> find_conflicts(plan, lambda t, i: {'cost': 450})
+    Example:
+        >>> find_conflicts(
+        ...     plan,                           # черновик: cost 400 → 500
+        ...     lambda t, i: {'cost': 450},     # в БД уже 450
+        ... )
         [Conflict(node=('appointment', 12), field='cost', original=400, current=450, draft=500)]
     """
     conflicts: List[Conflict] = []
-    for draft in (*plan.updates, *plan.deletes):
+    # for draft in (*plan.updates, *plan.deletes):
+    # ↑ до 2026-11-07 (DR10): перенесённые записи тоже удаляются — их перенос мимо черновика
+    #   так же показывается заранее
+    for draft in (*plan.updates, *plan.deletes, *plan.moved_deletes):
         current = read(draft.entity, draft.id)
         if current is None:
             conflicts.append(Conflict(draft.key, None))

@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
 from typing import Any, Hashable, List, Mapping, Optional, Tuple
 
@@ -77,6 +78,27 @@ class _Missing:
 MISSING: Any = _Missing()
 
 
+class MovedRule(enum.Enum):
+    """
+    Что делать при сохранении с существующей записью, которую ПОЛЬЗОВАТЕЛЬ перенёс в новую
+    запись, а новую потом удалил.
+
+    * ``DELETE`` — запись удаляется вместе с новой, если сохраняется ветка прежнего родителя
+      (или сама запись); сохранение только новой записи — по-прежнему поглощение;
+    * ``KEEP`` — запись всегда остаётся у прежнего родителя, перенос и её правки не пишутся.
+
+    Значение задаётся одним параметром ``DraftStore(moved_rule=...)``; читает его только
+    построитель плана. Строковые значения — для настроек: ``MovedRule('keep')``.
+
+    Example:
+        >>> MovedRule('delete') is MovedRule.DELETE
+        True
+    """
+
+    DELETE = 'delete'
+    KEEP = 'keep'
+
+
 @dataclass(frozen=True)
 class Draft:
     """
@@ -98,6 +120,9 @@ class Draft:
         data: Поля (см. выше).
         original: Исходные значения изменённых полей.
         order: Порядковый номер создания черновика (стабильный порядок сохранения).
+        moved_by_user: Перенос к другому родителю (поле внешнего ключа в ``data``) сделал
+            пользователь (``DraftStore.modify(by_user=True)``). Только такой перенос может
+            привести к удалению записи (``MovedRule.DELETE``).
 
     Пример:
         >>> d = Draft('photo', -1, parent_id=12, is_new=True, data={'path': 'a.jpg'})
@@ -113,6 +138,7 @@ class Draft:
     data: Mapping[str, Any] = field(default_factory=dict)
     original: Mapping[str, Any] = field(default_factory=dict)
     order: int = 0
+    moved_by_user: bool = False
 
     @property
     def key(self) -> NodeKey:

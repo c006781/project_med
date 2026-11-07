@@ -34,7 +34,7 @@ from typing import (
 )
 
 from app.exceptions import EntityNotFoundError
-from app.utils.drafts import NodeKey, TreeSchema
+from app.utils.drafts import MovedRule, NodeKey, TreeSchema
 # from app.utils.drafts import EntityType, NodeKey, TreeSchema
 # ↑ до 2026-10-31 (М16, DB1): EntityType — только в закомментированном ручном дереве
 
@@ -49,6 +49,10 @@ _log = logging.getLogger(__name__)
 
 # Тип записи -> (функция, возвращающая сервис; класс DTO)
 ServiceSpec = Tuple[Callable[[], Any], Type[Any]]
+
+# Что сделать с записью, которую пользователь перенёс в новую запись и новую удалил:
+# единственное место значения для приложения; MovedRule.KEEP — запись остаётся у прежнего родителя.
+DEFAULT_MOVED_RULE : MovedRule = MovedRule.DELETE
 
 
 def build_app_schema() -> TreeSchema: # дерево таблиц приложения для черновиков
@@ -543,7 +547,9 @@ class AppDrafts:
         )
 
 
-def create_app_drafts() -> AppDrafts: # черновики главного окна
+def create_app_drafts(
+    moved_rule : MovedRule = DEFAULT_MOVED_RULE,    # запись, перенесённая в удалённую новую запись
+) -> AppDrafts: # черновики главного окна
     """
     Собирает черновики приложения: схема и адаптер — из описаний таблиц
     (``app.tables.CLINIC``), транзакция — общая база ``app.dependencies.get_db()``
@@ -553,6 +559,11 @@ def create_app_drafts() -> AppDrafts: # черновики главного ок
     Note:
         Импорты внутри функции: ``app.tables`` и ``app.dependencies`` импортируют этот
         модуль (циклы импортов).
+
+    Args:
+        moved_rule : (MovedRule) Судьба записи, которую пользователь перенёс в новую запись, а
+            новую удалил; значение из настроек можно передать здесь или позже —
+            ``drafts.store.moved_rule``.
 
     Returns:
         (AppDrafts) Схема, адаптер, хранилище.
@@ -584,6 +595,7 @@ def create_app_drafts() -> AppDrafts: # черновики главного ок
     store = DraftStore(
         schema,                                                     # дерево таблиц
         parent_resolver   =   make_parent_resolver(schema, adapter),  # родитель из БД
+        moved_rule        =   moved_rule,                             # перенесённая в удалённую новую
     )
     return AppDrafts(
         schema    =   schema,     # дерево таблиц

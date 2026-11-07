@@ -39,6 +39,7 @@ import threading                        # общий Database: get_db из ра�
 # import inspect
 
 from app.utils.logger import AppLogger
+from app.utils.logger.bool_strings import to_bool  # одно правило для строк-флагов
 
 # from app.database.database import Database
 from app.database import Database
@@ -183,7 +184,15 @@ def _db_settings() -> Tuple[str, str, bool]: # путь, URL и флаг зна�
     """
     config = get_config_env()
     db_path = config['database_local_path']
-    log_sql_params = bool(
+    # log_sql_params = bool(
+    #     config.get(
+    #         'LOG_SQL_PARAMS',   # значения запросов в журнал
+    #         False,              # нет ключа — скрыты
+    #     ),
+    # )
+    # ↑ до 2026-11-07 (ОСТ п. 5.22): нераспознанная строка из файла включала запись личных данных в
+    #   журнал, а экран настроек показывал флажок выключенным
+    log_sql_params = to_bool(
         config.get(
             'LOG_SQL_PARAMS',   # значения запросов в журнал
             False,              # нет ключа — скрыты

@@ -27,9 +27,13 @@ from app.updater import AppUpdater, current_system, pop_linux_update_failure
 
 from app.config.config_manager.manager import (
     AppConfigManager,           # менеджер настроек
+    DRAFT_MOVED_RULE_KEY,       # правило перенесённой записи
     UPDATE_CHECK_ON_START_KEY,  # проверка обновлений при запуске
     WORD_DOCUMENTS_PATH_KEY,    # папка документов Word
+    draft_moved_rule_value,     # значение правила: неизвестное — умолчание
 )
+
+from app.utils.drafts import MovedRule
 
 from app.utils.logger.bool_strings import to_bool
 
@@ -2281,12 +2285,32 @@ class MainWindow(
         from app.draft.integration import create_app_drafts
         from interfaces.gui.gui_window.drafts_qt import DraftsQtBridge
         try:
-            self.drafts = create_app_drafts()
+            # self.drafts = create_app_drafts()
+            # ↑ до 2026-11-07 (MW8): настройка DRAFT_MOVED_RULE не доходила до хранилища
+            self.drafts = create_app_drafts(self._moved_rule_from_settings())
             self.drafts_bridge = DraftsQtBridge(self.drafts.store, parent=self)
         except Exception as e:
             self.logger.exception(f"Не удалось создать черновики: {e}")
             self.drafts = None
             self.drafts_bridge = None
+
+    # правило перенесённой записи из настроек
+    def _moved_rule_from_settings(self) -> MovedRule:
+        """
+        Читает правило «запись перенесли в новую, новую удалили» из настроек (В-21).
+
+        Returns:
+            (MovedRule) Правило; неизвестное значение в файле настроек — умолчание.
+
+        Example:
+            >>> window._moved_rule_from_settings()      # doctest: +SKIP
+            <MovedRule.DELETE: 'delete'>
+        """
+        return MovedRule(
+            draft_moved_rule_value(
+                AppConfigManager.get_instance().get(DRAFT_MOVED_RULE_KEY),
+            ),
+        )
 
     def _save_from_draft_page(self, page) -> bool:
         """
@@ -3141,6 +3165,11 @@ class MainWindow(
         """
 
         self.logger.info("Применение новых настроек...")
+
+        # Правило перенесённой записи: построенный план устаревает сам
+        if changed_blocks is None or 'drafts' in changed_blocks:
+            if getattr(self, 'drafts', None) is not None:
+                self.drafts.store.moved_rule = self._moved_rule_from_settings()
 
         #  Обновляем пути к фото во всех PhotoUploaderWidget
         config = AppConfigManager.get_instance()
